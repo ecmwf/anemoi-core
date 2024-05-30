@@ -25,7 +25,7 @@ class TrainableTensor(nn.Module):
                 torch.empty(
                     tensor_size,
                     trainable_size,
-                )
+                ),
             )
             nn.init.constant_(trainable, 0)
         else:

@@ -5,19 +5,21 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import torch
-from aifs.layers.attention import MultiHeadSelfAttention
-from aifs.layers.block import MLP
-from aifs.layers.block import GraphConvProcessorBlock
-from aifs.layers.block import TransformerProcessorBlock
-from aifs.layers.conv import GraphConv
-from aifs.utils.logger import get_code_logger
 from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
 from torch import nn
 
-LOGGER = get_code_logger(__name__)
+from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.layers.block import MLP
+from anemoi.models.layers.block import GraphConvProcessorBlock
+from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.conv import GraphConv
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TestTransformerProcessorBlock:

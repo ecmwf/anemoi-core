@@ -63,7 +63,6 @@ class MLP(nn.Module):
         RuntimeError
             If activation function is not supported
         """
-
         super().__init__()
         try:
             act_func = getattr(nn, activation)

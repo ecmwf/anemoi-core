@@ -9,11 +9,10 @@
 
 import math
 from typing import Optional
-from typing import Tuple
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
+from torch.nn.functional import dropout
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj
 from torch_geometric.typing import OptPairTensor
@@ -60,10 +59,7 @@ class GraphConv(MessagePassing):
         )
 
     def forward(self, x: OptPairTensor, edge_attr: Tensor, edge_index: Adj, size: Optional[Size] = None):
-        if isinstance(x, Tensor):
-            dim_size = x.shape[0]
-        else:
-            dim_size = x[1].shape[0]
+        dim_size = x.shape[0] if isinstance(x, Tensor) else x[1].shape[0]
 
         out, edges_new = self.propagate(edge_index, x=x, edge_attr=edge_attr, size=size, dim_size=dim_size)
 
@@ -74,7 +70,7 @@ class GraphConv(MessagePassing):
 
         return edges_new
 
-    def aggregate(self, edges_new: Tensor, edge_index: Adj, dim_size: Optional[int] = None) -> Tuple[Tensor, Tensor]:
+    def aggregate(self, edges_new: Tensor, edge_index: Adj, dim_size: Optional[int] = None) -> tuple[Tensor, Tensor]:
         out = scatter(edges_new, edge_index[1], dim=0, dim_size=dim_size, reduce="sum")
 
         return out, edges_new
@@ -137,6 +133,6 @@ class GraphTransformerConv(MessagePassing):
         alpha = (query_i * key_j).sum(dim=-1) / math.sqrt(self.out_channels)
 
         alpha = softmax(alpha, index, ptr, size_i)
-        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+        alpha = dropout(alpha, p=self.dropout, training=self.training)
 
         return (value_j + edge_attr) * alpha.view(-1, heads, 1)

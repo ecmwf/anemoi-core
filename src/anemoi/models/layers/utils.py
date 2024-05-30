@@ -26,7 +26,7 @@ class CheckpointWrapper(nn.Module):
 class AutocastLayerNorm(nn.LayerNorm):
     """LayerNorm that casts the output back to the input type."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
     def forward(self, x: Tensor) -> Tensor:

@@ -6,9 +6,10 @@
 # nor does it submit to any jurisdiction.
 
 import pytest
-from aifs.layers.block import GraphConvProcessorBlock
-from aifs.layers.chunk import GNNProcessorChunk
-from aifs.layers.mlp import MLP
+
+from anemoi.models.layers.block import GraphConvProcessorBlock
+from anemoi.models.layers.chunk import GNNProcessorChunk
+from anemoi.models.layers.mlp import MLP
 
 
 class TestGNNProcessorChunk:

@@ -6,7 +6,8 @@
 # nor does it submit to any jurisdiction.
 
 import pytest
-from aifs.layers.processor import BaseProcessor
+
+from anemoi.models.layers.processor import BaseProcessor
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def processor_init():
     return num_layers, num_channels, num_chunks, activation, cpu_offload
 
 
-@pytest.fixture
+@pytest.fixture()
 def base_processor(processor_init):
     num_layers, num_channels, num_chunks, activation, cpu_offload = processor_init
     return BaseProcessor(
@@ -32,14 +33,14 @@ def base_processor(processor_init):
 
 
 def test_base_processor_init(processor_init, base_processor):
-    num_layers, num_channels, num_chunks, _activation, _cpu_offload = processor_init
+    num_layers, num_channels, num_chunks, *_ = processor_init
 
-    assert isinstance(base_processor.num_layers, int), "num_layers should be an integer"
+    assert isinstance(base_processor.num_chunks, int), "num_layers should be an integer"
     assert isinstance(base_processor.num_channels, int), "num_channels should be an integer"
 
     assert (
-        base_processor.num_layers == num_layers
-    ), f"num_layers ({base_processor.num_layers}) should be equal to the input num_layers ({num_layers})"
+        base_processor.num_chunks == num_chunks
+    ), f"num_chunks ({base_processor.num_chunks}) should be equal to the input num_chunks ({num_chunks})"
     assert (
         base_processor.num_channels == num_channels
     ), f"num_channels ({base_processor.num_channels}) should be equal to the input num_channels ({num_channels})"

@@ -11,7 +11,6 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
-from typing import Tuple
 
 import einops
 import torch
@@ -22,10 +21,10 @@ from torch_geometric.typing import Adj
 from torch_geometric.typing import OptPairTensor
 from torch_geometric.typing import Size
 
-from anemoi.models.distributed.helpers import shard_heads
-from anemoi.models.distributed.helpers import shard_sequence
-from anemoi.models.distributed.helpers import shard_tensor
-from anemoi.models.distributed.helpers import sync_tensor
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.transformer import shard_heads
+from anemoi.models.distributed.transformer import shard_sequence
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
@@ -46,11 +45,11 @@ class BaseBlock(nn.Module, ABC):
         x: OptPairTensor,
         edge_attr: torch.Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         batch_size: int,
         size: Optional[Size] = None,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]: ...
+    ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
 
 class TransformerProcessorBlock(BaseBlock):
@@ -148,10 +147,10 @@ class GraphConvBaseBlock(BaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
-    ) -> Tuple[Tensor, Tensor]: ...
+    ) -> tuple[Tensor, Tensor]: ...
 
 
 class GraphConvProcessorBlock(GraphConvBaseBlock):
@@ -182,10 +181,10 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
 
         x_in = sync_tensor(x, 0, shapes[1], model_comm_group)
 
@@ -197,9 +196,8 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
                 out1, edges_out1 = self.conv(x_in, edge_attr_list[i], edge_index_list[i], size=size)
                 edges_out.append(edges_out1)
                 if i == 0:
-                    out = out1
-                else:
-                    out = out + out1
+                    out = torch.zeros_like(out1)
+                out = out + out1
             edges_new = torch.cat(edges_out, dim=0)
         else:
             out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
@@ -239,10 +237,10 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
 
         x_src = sync_tensor(x[0], 0, shapes[0], model_comm_group)
         x_dst = sync_tensor(x[1], 0, shapes[1], model_comm_group)
@@ -256,9 +254,8 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
                 out1, edges_out1 = self.conv(x_in, edge_attr_list[i], edge_index_list[i], size=size)
                 edges_out.append(edges_out1)
                 if i == 0:
-                    out = out1
-                else:
-                    out = out + out1
+                    out = torch.zeros_like(out1)
+                out = out + out1
             edges_new = torch.cat(edges_out, dim=0)
         else:
             out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
@@ -267,10 +264,8 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
 
         nodes_new_dst = self.node_mlp(torch.cat([x[1], out], dim=1)) + x[1]
 
-        if self.update_src_nodes:  # update only needed in forward mapper
-            nodes_new_src = self.node_mlp(torch.cat([x[0], x[0]], dim=1)) + x[0]
-        else:
-            nodes_new_src = x[0]
+        # update only needed in forward mapper
+        nodes_new_src = x[0] if not self.update_src_nodes else self.node_mlp(torch.cat([x[0], x[0]], dim=1)) + x[0]
 
         nodes_new = (nodes_new_src, nodes_new_dst)
 
@@ -360,41 +355,42 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         key: Tensor,
         value: Tensor,
         edges: Tensor,
-        shapes: Tuple,
+        shapes: tuple,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Shards qkv and edges along head dimension."""
-
         shape_src_nodes, shape_dst_nodes, shape_edges = shapes
 
-        query, key, value, edges = map(
-            lambda t: einops.rearrange(
+        query, key, value, edges = (
+            einops.rearrange(
                 t,
                 "(batch grid) (heads vars) -> batch heads grid vars",
                 heads=self.num_heads,
                 vars=self.out_channels_conv,
                 batch=batch_size,
-            ),
-            (query, key, value, edges),
+            )
+            for t in (query, key, value, edges)
         )
         query = shard_heads(query, shapes=shape_dst_nodes, mgroup=model_comm_group)
         key = shard_heads(key, shapes=shape_src_nodes, mgroup=model_comm_group)
         value = shard_heads(value, shapes=shape_src_nodes, mgroup=model_comm_group)
         edges = shard_heads(edges, shapes=shape_edges, mgroup=model_comm_group)
 
-        query, key, value, edges = map(
-            lambda t: einops.rearrange(t, "batch heads grid vars -> (batch grid) heads vars"),
-            (query, key, value, edges),
+        query, key, value, edges = (
+            einops.rearrange(t, "batch heads grid vars -> (batch grid) heads vars") for t in (query, key, value, edges)
         )
 
         return query, key, value, edges
 
     def shard_output_seq(
-        self, out: Tensor, shapes: Tuple, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        out: Tensor,
+        shapes: tuple,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         """Shards Tensor sequence dimension."""
-
         shape_dst_nodes = shapes[1]
 
         out = einops.rearrange(out, "(batch grid) heads vars -> batch heads grid vars", batch=batch_size)
@@ -409,7 +405,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
@@ -471,7 +467,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
@@ -495,11 +491,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
-        # TODO: Is this alright?
-        if self.training:
-            num_chunks = self.num_chunks
-        else:
-            num_chunks = 4  # reduce memory for inference
+        # TODO: remove magic number
+        num_chunks = self.num_chunks if self.training else 4  # reduce memory for inference
 
         if num_chunks > 1:
             edge_index_list = torch.tensor_split(edge_index, num_chunks, dim=1)
@@ -514,9 +507,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
                     size=size,
                 )
                 if i == 0:
-                    out = out1
-                else:
-                    out = out + out1
+                    out = torch.zeros_like(out1)
+                out = out + out1
         else:
             out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
 
@@ -526,10 +518,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         out = out + x_skip[1]
         nodes_new_dst = self.node_dst_mlp(out) + out
 
-        if self.update_src_nodes:
-            nodes_new_src = self.node_src_mlp(x_skip[0]) + x_skip[0]
-        else:
-            nodes_new_src = x_skip[0]
+        nodes_new_src = self.node_src_mlp(x_skip[0]) + x_skip[0] if self.update_src_nodes else x_skip[0]
 
         nodes_new = (nodes_new_src, nodes_new_dst)
 
@@ -590,7 +579,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
@@ -613,10 +602,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
         # TODO: Is this alright?
-        if self.training:
-            num_chunks = self.num_chunks
-        else:
-            num_chunks = 4  # reduce memory for inference
+        num_chunks = self.num_chunks if self.training else 4  # reduce memory for inference
 
         if num_chunks > 1:
             edge_index_list = torch.tensor_split(edge_index, num_chunks, dim=1)
@@ -631,9 +617,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
                     size=size,
                 )
                 if i == 0:
-                    out = out1
-                else:
-                    out = out + out1
+                    out = torch.zeros_like(out1)
+                out = out + out1
         else:
             out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
 

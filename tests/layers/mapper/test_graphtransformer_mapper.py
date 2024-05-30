@@ -7,11 +7,12 @@
 
 import pytest
 import torch
-from aifs.layers.mapper import GraphTransformerBackwardMapper
-from aifs.layers.mapper import GraphTransformerBaseMapper
-from aifs.layers.mapper import GraphTransformerForwardMapper
 from torch import nn
 from torch_geometric.data import HeteroData
+
+from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
+from anemoi.models.layers.mapper import GraphTransformerBaseMapper
+from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 
 
 class TestGraphTransformerBaseMapper:

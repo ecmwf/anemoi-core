@@ -6,8 +6,9 @@
 # nor does it submit to any jurisdiction.
 
 import pytest
-from aifs.layers.block import GraphTransformerProcessorBlock
-from aifs.layers.chunk import GraphTransformerProcessorChunk
+
+from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
 
 
 class TestGraphTransformerProcessorChunk:

@@ -7,11 +7,12 @@
 
 import pytest
 import torch
-from aifs.layers.mapper import GNNBackwardMapper
-from aifs.layers.mapper import GNNBaseMapper
-from aifs.layers.mapper import GNNForwardMapper
 from torch import nn
 from torch_geometric.data import HeteroData
+
+from anemoi.models.layers.mapper import GNNBackwardMapper
+from anemoi.models.layers.mapper import GNNBaseMapper
+from anemoi.models.layers.mapper import GNNForwardMapper
 
 
 class TestGNNBaseMapper:

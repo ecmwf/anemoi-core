@@ -7,10 +7,10 @@
 # nor does it submit to any jurisdiction.
 #
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
-from typing import Tuple
 
 from torch import Tensor
 from torch import nn
@@ -23,6 +23,8 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLP
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseProcessorChunk(nn.Module, ABC):
@@ -42,17 +44,16 @@ class BaseProcessorChunk(nn.Module, ABC):
         self.num_channels = num_channels
         self.num_layers = num_layers
 
-    def build_blocks(self, Block: nn.Module, *args, **kwargs) -> None:
+    def build_blocks(self, block: nn.Module, *args, **kwargs) -> None:
         """Build Layers."""
-
         self.blocks = nn.ModuleList(
             [
-                Block(
+                block(
                     *args,
                     **kwargs,
                 )
                 for _ in range(self.num_layers)
-            ]
+            ],
         )
 
     @abstractmethod
@@ -161,7 +162,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
     ) -> OptPairTensor:
@@ -185,7 +186,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
-        edge_dim: int = None,
+        edge_dim: Optional[int] = None,
     ) -> None:
         """Initialize GraphTransformerProcessorChunk.
 
@@ -221,7 +222,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: Tuple,
+        shapes: tuple,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,

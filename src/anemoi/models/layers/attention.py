@@ -24,8 +24,8 @@ except ImportError:
 else:
     _FLASH_ATTENTION_AVAILABLE = True
 
-from anemoi.models.distributed.helpers import shard_heads
-from anemoi.models.distributed.helpers import shard_sequence
+from anemoi.models.distributed.transformer import shard_heads
+from anemoi.models.distributed.transformer import shard_sequence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,11 +73,14 @@ class MultiHeadSelfAttention(nn.Module):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        query, key, value = map(
-            lambda t: einops.rearrange(
-                t, "(batch grid) (heads vars) -> batch heads grid vars", batch=batch_size, heads=self.num_heads
-            ),
-            (query, key, value),
+        query, key, value = (
+            einops.rearrange(
+                t,
+                "(batch grid) (heads vars) -> batch heads grid vars",
+                batch=batch_size,
+                heads=self.num_heads,
+            )
+            for t in (query, key, value)
         )
 
         query = shard_heads(query, shapes=shapes, mgroup=model_comm_group)
@@ -85,9 +88,8 @@ class MultiHeadSelfAttention(nn.Module):
         value = shard_heads(value, shapes=shapes, mgroup=model_comm_group)
 
         if _FLASH_ATTENTION_AVAILABLE:
-            query, key, value = map(
-                lambda t: einops.rearrange(t, "batch heads grid vars -> batch grid heads vars"),
-                (query, key, value),
+            query, key, value = (
+                einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
             )
             out = self.attention(query, key, value, causal=False, window_size=self.window_size)
             out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")

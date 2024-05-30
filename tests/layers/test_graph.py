@@ -7,8 +7,9 @@
 
 import pytest
 import torch
-from aifs.layers.graph import TrainableTensor
 from torch import nn
+
+from anemoi.models.layers.graph import TrainableTensor
 
 
 class TestTrainableTensor:

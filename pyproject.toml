@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # (C) Copyright 2024 ECMWF.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -10,12 +9,13 @@
 # https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
 
 [build-system]
-requires = ["setuptools>=60", "setuptools-scm>=8.0"]
+requires = ["setuptools>=61", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 description = "A package to hold various functions to support training of ML models."
 name = "anemoi-models"
-
+readme = "README.md"
 dynamic = ["version"]
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
@@ -39,19 +39,34 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-dependencies = []
+dependencies = [
+    "torch==2.3",
+    "torch-geometric==2.4",
+    "einops==0.6.1",
+    "hydra-core==1.3",
+    "anemoi-datasets==0.2.1",
+    "anemoi-utils==0.1.9",
+]
 
 [project.optional-dependencies]
 
 
 docs = [
     # For building the documentation
-    "sphinx", "sphinx_rtd_theme", "nbsphinx", "pandoc", "sphinx_argparse"
 ]
 
 all = []
 
-dev = []
+tests = ["pytest", "hypothesis"]
+
+dev = [
+    "sphinx",
+    "sphinx_rtd_theme",
+    "nbsphinx",
+    "pandoc",
+    "pytest",
+    "hypothesis",
+]
 
 [project.urls]
 Homepage = "https://github.com/ecmwf/anemoi-models/"

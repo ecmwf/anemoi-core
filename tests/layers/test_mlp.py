@@ -7,7 +7,8 @@
 
 import pytest
 import torch
-from aifs.layers.mlp import MLP
+
+from anemoi.models.layers.mlp import MLP
 
 
 @pytest.fixture

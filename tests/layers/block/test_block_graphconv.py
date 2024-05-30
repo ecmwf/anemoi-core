@@ -5,13 +5,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from aifs.layers.block import MLP
-from aifs.layers.block import GraphConvMapperBlock
-from aifs.layers.block import GraphConvProcessorBlock
-from aifs.layers.conv import GraphConv
 from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
+
+from anemoi.models.layers.block import MLP
+from anemoi.models.layers.block import GraphConvMapperBlock
+from anemoi.models.layers.block import GraphConvProcessorBlock
+from anemoi.models.layers.conv import GraphConv
 
 
 class TestGraphConvProcessorBlock:

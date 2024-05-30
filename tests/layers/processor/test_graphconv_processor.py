@@ -7,9 +7,10 @@
 
 import pytest
 import torch
-from aifs.layers.graph import TrainableTensor
-from aifs.layers.processor import GNNProcessor
 from torch_geometric.data import HeteroData
+
+from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.processor import GNNProcessor
 
 
 @pytest.fixture
@@ -87,7 +88,7 @@ def test_graphconv_processor_init(graphconv_processor, graphconv_init):
         _dst_grid_size,
         _trainable_size,
     ) = graphconv_init
-    assert graphconv_processor.num_layers == num_layers
+    assert graphconv_processor.num_chunks == num_chunks
     assert graphconv_processor.num_channels == num_channels
     assert graphconv_processor.chunk_size == num_layers // num_chunks
     assert isinstance(graphconv_processor.trainable, TrainableTensor)

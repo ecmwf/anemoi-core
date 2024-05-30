@@ -8,9 +8,10 @@
 import pytest
 import torch
 import torch.nn as nn
-from aifs.layers.block import GraphTransformerMapperBlock
-from aifs.layers.block import GraphTransformerProcessorBlock
-from aifs.layers.conv import GraphTransformerConv
+
+from anemoi.models.layers.block import GraphTransformerMapperBlock
+from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.conv import GraphTransformerConv
 
 
 @pytest.fixture

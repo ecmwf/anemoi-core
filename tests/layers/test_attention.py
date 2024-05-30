@@ -9,9 +9,10 @@ import hypothesis.strategies as st
 import pytest
 import torch
 import torch.nn as nn
-from aifs.layers.attention import MultiHeadSelfAttention
 from hypothesis import given
 from hypothesis import settings
+
+from anemoi.models.layers.attention import MultiHeadSelfAttention
 
 
 @given(
