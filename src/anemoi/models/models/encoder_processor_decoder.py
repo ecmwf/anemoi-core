@@ -40,7 +40,7 @@ class AnemoiModelEncProcDec(nn.Module):
 
         Parameters
         ----------
-        config : DictConfig
+        config : DotDict
             Job configuration
         graph_data : HeteroData
             Graph definition

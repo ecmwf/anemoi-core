@@ -19,16 +19,29 @@ framework it seeks to handle many of the complexities that
 meteorological organisations will share, allowing them to easily train
 models from existing recipes but with their own data.
 
-This package provides a series of utility functions for used by the rest
-of the *Anemoi* packages.
+*Anemoi models* provides the core model components for used by the rest
+of the *Anemoi* packages to train graph neural networks for data-driven
+weather forecasting.
 
+-  :doc:`overview`
 -  :doc:`installing`
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
+   overview
    installing
+
+*********
+ Modules
+*********
+
+.. toctree::
+   :maxdepth: 1
+   :glob:
+
+   modules/*
 
 *****************
  Anemoi packages

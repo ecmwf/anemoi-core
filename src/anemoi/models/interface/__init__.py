@@ -19,7 +19,34 @@ from anemoi.models.preprocessing import Processors
 
 
 class AnemoiModelInterface(torch.nn.Module):
-    """Anemoi model on torch level."""
+    """An interface for Anemoi models.
+
+    This class is a wrapper around the Anemoi model that includes pre-processing and post-processing steps.
+    It inherits from the PyTorch Module class.
+
+    Attributes
+    ----------
+    config : DotDict
+        Configuration settings for the model.
+    id : str
+        A unique identifier for the model instance.
+    multi_step : bool
+        Whether the model uses multi-step input.
+    graph_data : HeteroData
+        Graph data for the model.
+    statistics : dict
+        Statistics for the data.
+    metadata : dict
+        Metadata for the model.
+    data_indices : dict
+        Indices for the data.
+    pre_processors : Processors
+        Pre-processing steps to apply to the data before passing it to the model.
+    post_processors : Processors
+        Post-processing steps to apply to the model's output.
+    model : AnemoiModelEncProcDec
+        The underlying Anemoi model.
+    """
 
     def __init__(
         self, *, config: DotDict, graph_data: HeteroData, statistics: dict, data_indices: dict, metadata: dict
@@ -35,7 +62,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self._build_model()
 
     def _build_model(self) -> None:
-        """Build the model and pre- and post-processors."""
+        """Builds the model and pre- and post-processors."""
         # Instantiate processors
         processors = [
             [name, instantiate(processor, statistics=self.statistics, data_indices=self.data_indices)]

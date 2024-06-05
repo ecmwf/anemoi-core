@@ -33,7 +33,7 @@ class InputNormalizer(BasePreprocessor):
 
         Parameters
         ----------
-        config : Dotconfig
+        config : DotDict
             configuration object
         statistics : dict
             Data statistics dictionary
