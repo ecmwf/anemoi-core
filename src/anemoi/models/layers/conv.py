@@ -7,7 +7,6 @@
 # nor does it submit to any jurisdiction.
 #
 
-import math
 from typing import Optional
 
 import torch
@@ -77,7 +76,11 @@ class GraphConv(MessagePassing):
 
 
 class GraphTransformerConv(MessagePassing):
-    """Message passing part of graph transformer operator."""
+    """Message passing part of graph transformer operator.
+    
+    Adapted from 'Masked Label Prediction: Unified Message Passing Model for Semi-Supervised Classification'
+    (https://arxiv.org/abs/2009.03509)
+    """
 
     def __init__(
         self,
@@ -130,7 +133,7 @@ class GraphTransformerConv(MessagePassing):
         if edge_attr is not None:
             key_j = key_j + edge_attr
 
-        alpha = (query_i * key_j).sum(dim=-1) / math.sqrt(self.out_channels)
+        alpha = (query_i * key_j).sum(dim=-1) / self.out_channels**0.5
 
         alpha = softmax(alpha, index, ptr, size_i)
         alpha = dropout(alpha, p=self.dropout, training=self.training)
