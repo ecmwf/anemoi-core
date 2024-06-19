@@ -77,7 +77,7 @@ class GraphConv(MessagePassing):
 
 class GraphTransformerConv(MessagePassing):
     """Message passing part of graph transformer operator.
-    
+
     Adapted from 'Masked Label Prediction: Unified Message Passing Model for Semi-Supervised Classification'
     (https://arxiv.org/abs/2009.03509)
     """
