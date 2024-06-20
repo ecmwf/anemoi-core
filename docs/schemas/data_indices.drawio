@@ -1,0 +1,307 @@
+<mxfile host="Electron" modified="2024-05-29T16:00:02.221Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.1.0 Chrome/120.0.6099.109 Electron/28.1.0 Safari/537.36" etag="ytOqYD7F3-T1dy6Dr4Qt" version="24.1.0" type="device">
+  <diagram id="R2lEEEUBdFMjLlhIrx00" name="Page-1">
+    <mxGraphModel dx="954" dy="598" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0" extFonts="Permanent Marker^https://fonts.googleapis.com/css?family=Permanent+Marker">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="pUHZdNjlp3whxigCHF0F-2" value="Full Training Loop [IndexCollection]" style="swimlane;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="280" y="220" width="1560" height="980" as="geometry">
+            <mxRectangle x="300" y="220" width="250" height="30" as="alternateBounds" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-66" value="Inference Model Level [ModelIndex]" style="swimlane;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-2" vertex="1">
+          <mxGeometry x="15" y="530" width="1535" height="430" as="geometry">
+            <mxRectangle x="15" y="500" width="240" height="30" as="alternateBounds" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-77" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="pUHZdNjlp3whxigCHF0F-66" source="pUHZdNjlp3whxigCHF0F-4" target="pUHZdNjlp3whxigCHF0F-71" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-4" value="Model Input Index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-66" vertex="1">
+          <mxGeometry x="10" y="30" width="610" height="380" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-29" value="Indices [InputTensorIndex&lt;span style=&quot;font-weight: normal;&quot;&gt;]&lt;br&gt;&lt;/span&gt;" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" parent="pUHZdNjlp3whxigCHF0F-4" vertex="1">
+          <mxGeometry x="35" y="110" width="565" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-134" value="name_to_index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-29" vertex="1">
+          <mxGeometry x="10" y="40" width="100" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-32" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-134" vertex="1">
+          <mxGeometry x="30" y="90" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-34" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-134" vertex="1">
+          <mxGeometry x="30" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-35" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-134" vertex="1">
+          <mxGeometry x="30" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-135" value="model.input.full" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-29" vertex="1">
+          <mxGeometry x="120" y="40" width="100" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-136" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-135" vertex="1">
+          <mxGeometry x="30" y="90" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-137" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-135" vertex="1">
+          <mxGeometry x="30" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-138" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-135" vertex="1">
+          <mxGeometry x="30" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-139" value="model.input.diagnostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="pUHZdNjlp3whxigCHF0F-29" vertex="1">
+          <mxGeometry x="230" y="40" width="100" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-143" value="model.input.prognostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=23;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-29" vertex="1">
+          <mxGeometry x="340" y="40" width="100" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-144" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-143" vertex="1">
+          <mxGeometry x="30" y="90" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-146" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-143" vertex="1">
+          <mxGeometry x="30" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-147" value="model.input.forcing" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=23;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-29" vertex="1">
+          <mxGeometry x="450" y="40" width="100" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-149" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-147" vertex="1">
+          <mxGeometry x="30" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-179" value="&lt;h1&gt;Model Input Index&lt;/h1&gt;&lt;p&gt;This Index represents the reduced data the &quot;model sees&quot;. This can be seen as a &quot;squeezed&quot; input, where all indices are shifted by the hole diagnostic data leaves. This is also the shape of inference data.&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="pUHZdNjlp3whxigCHF0F-4" vertex="1">
+          <mxGeometry x="35" y="10" width="565" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-5" value="Model Output Index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-66" vertex="1">
+          <mxGeometry x="825" y="30" width="695" height="380" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-36" value="Indices [OutputTensorIndex]" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" parent="pUHZdNjlp3whxigCHF0F-5" vertex="1">
+          <mxGeometry x="35" y="100" width="645" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-151" value="name_to_index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-36" vertex="1">
+          <mxGeometry x="5" y="40" width="115" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-38" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-151" vertex="1">
+          <mxGeometry x="40" y="140" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-39" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-151" vertex="1">
+          <mxGeometry x="40" y="90" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-40" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-151" vertex="1">
+          <mxGeometry x="40" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-42" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-151" vertex="1">
+          <mxGeometry x="40" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-152" value="model.output.full" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-36" vertex="1">
+          <mxGeometry x="130" y="40" width="115" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-153" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-152" vertex="1">
+          <mxGeometry x="40" y="140" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-154" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-152" vertex="1">
+          <mxGeometry x="40" y="90" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-155" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-152" vertex="1">
+          <mxGeometry x="40" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-156" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-152" vertex="1">
+          <mxGeometry x="40" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-157" value="model.output.diagnostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="pUHZdNjlp3whxigCHF0F-36" vertex="1">
+          <mxGeometry x="255" y="40" width="115" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-158" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-157" vertex="1">
+          <mxGeometry x="40" y="140" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-160" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-157" vertex="1">
+          <mxGeometry x="40" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-162" value="model.output.prognostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-36" vertex="1">
+          <mxGeometry x="385" y="40" width="115" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-164" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-162" vertex="1">
+          <mxGeometry x="40" y="90" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-166" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-162" vertex="1">
+          <mxGeometry x="40" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-167" value="model.output.forcing" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-36" vertex="1">
+          <mxGeometry x="515" y="40" width="115" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-180" value="&lt;h1&gt;Model Output Index&lt;/h1&gt;&lt;p&gt;This Index represents the reduced data the model produces. This can be seen as a &quot;squeezed&quot; output, where all indices are shifted by the hole forcing data leaves but including diagnostics. This is also the shape of inference output data.&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="pUHZdNjlp3whxigCHF0F-5" vertex="1">
+          <mxGeometry x="40" y="10" width="650" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-74" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="pUHZdNjlp3whxigCHF0F-66" source="pUHZdNjlp3whxigCHF0F-71" target="pUHZdNjlp3whxigCHF0F-5" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-71" value="Model" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#f5f5f5;fontColor=#333333;strokeColor=#666666;" parent="pUHZdNjlp3whxigCHF0F-66" vertex="1">
+          <mxGeometry x="665" y="190" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-175" value="Training Data Level [DataIndex]" style="swimlane;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-2" vertex="1">
+          <mxGeometry x="20" y="40" width="1530" height="450" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-182" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="pUHZdNjlp3whxigCHF0F-175" source="pUHZdNjlp3whxigCHF0F-3" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="322.49999999999955" y="520" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-3" value="Data Input Index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-175" vertex="1">
+          <mxGeometry x="20" y="30" width="605" height="410" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-25" value="Indices [InputTensorIndex]" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" parent="pUHZdNjlp3whxigCHF0F-3" vertex="1">
+          <mxGeometry x="30" y="110" width="560" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-108" value="name_to_index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-25" vertex="1">
+          <mxGeometry x="5" y="40" width="105" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-26" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;gradientColor=#FFFFFF;shadow=0;noLabel=0;opacity=50;" parent="pUHZdNjlp3whxigCHF0F-108" vertex="1">
+          <mxGeometry x="30" y="170" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-27" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-108" vertex="1">
+          <mxGeometry x="30" y="130" width="60" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-14" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;gradientColor=#FFFFFF;shadow=0;noLabel=0;opacity=50;" parent="pUHZdNjlp3whxigCHF0F-108" vertex="1">
+          <mxGeometry x="30" y="90" width="60" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-13" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-108" vertex="1">
+          <mxGeometry x="30" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-12" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-108" vertex="1">
+          <mxGeometry x="30" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-109" value="data.input.full" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-25" vertex="1">
+          <mxGeometry x="115" y="40" width="105" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-110" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-109" vertex="1">
+          <mxGeometry x="30" y="130" width="60" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-113" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-109" vertex="1">
+          <mxGeometry x="30" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-114" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-109" vertex="1">
+          <mxGeometry x="30" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-115" value="data.input.diagnostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="pUHZdNjlp3whxigCHF0F-25" vertex="1">
+          <mxGeometry x="225" y="40" width="105" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-117" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;gradientColor=none;shadow=0;noLabel=0;opacity=50;sketch=1;curveFitting=1;jiggle=2;" parent="pUHZdNjlp3whxigCHF0F-115" vertex="1">
+          <mxGeometry x="30" y="170" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-118" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;gradientColor=none;shadow=0;noLabel=0;opacity=50;sketch=1;curveFitting=1;jiggle=2;" parent="pUHZdNjlp3whxigCHF0F-115" vertex="1">
+          <mxGeometry x="30" y="90" width="60" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-121" value="data.input.prognostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-25" vertex="1">
+          <mxGeometry x="335" y="40" width="105" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-122" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-121" vertex="1">
+          <mxGeometry x="30" y="130" width="60" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-126" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-121" vertex="1">
+          <mxGeometry x="30" y="10" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-127" value="data.input.forcing" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-25" vertex="1">
+          <mxGeometry x="445" y="40" width="105" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-131" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-127" vertex="1">
+          <mxGeometry x="30" y="60" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-178" value="&lt;h1&gt;Data Input Index&lt;/h1&gt;&lt;p&gt;This Index represents the merged Zarrs provided by Anemoi-Datasets. The Index has information, where each part of the data is, while only prognostic and forcing are actually passed to the model level.&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="pUHZdNjlp3whxigCHF0F-3" vertex="1">
+          <mxGeometry x="40" y="10" width="550" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-10" value="Data Output Index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-175" vertex="1">
+          <mxGeometry x="812.5" y="30" width="710" height="410" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-43" value="Indices [OutputTensorIndex]" style="swimlane;whiteSpace=wrap;html=1;startSize=30;" parent="pUHZdNjlp3whxigCHF0F-10" vertex="1">
+          <mxGeometry x="35" y="110" width="670" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-78" value="name_to_index" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-43" vertex="1">
+          <mxGeometry x="5" y="40" width="115" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-45" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-78" vertex="1">
+          <mxGeometry x="40" y="165" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-46" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-78" vertex="1">
+          <mxGeometry x="40" y="115" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-47" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-78" vertex="1">
+          <mxGeometry x="40" y="85" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-48" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;fillStyle=auto;shadow=0;opacity=50;" parent="pUHZdNjlp3whxigCHF0F-78" vertex="1">
+          <mxGeometry x="40" y="55" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-49" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-78" vertex="1">
+          <mxGeometry x="40" y="5" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-79" value="data.output.full" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-43" vertex="1">
+          <mxGeometry x="135" y="40" width="115" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-80" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-79" vertex="1">
+          <mxGeometry x="40" y="165" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-81" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-79" vertex="1">
+          <mxGeometry x="40" y="115" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-82" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-79" vertex="1">
+          <mxGeometry x="40" y="85" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-84" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-79" vertex="1">
+          <mxGeometry x="40" y="5" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-90" value="data.output.forcing" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-43" vertex="1">
+          <mxGeometry x="525" y="40" width="115" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-94" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;fillStyle=auto;shadow=0;opacity=50;sketch=1;curveFitting=1;jiggle=2;" parent="pUHZdNjlp3whxigCHF0F-90" vertex="1">
+          <mxGeometry x="40" y="55" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-96" value="data.output.diagnostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="pUHZdNjlp3whxigCHF0F-43" vertex="1">
+          <mxGeometry x="265" y="40" width="115" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-97" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-96" vertex="1">
+          <mxGeometry x="40" y="165" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-99" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-96" vertex="1">
+          <mxGeometry x="40" y="85" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-102" value="data.output.prognostic" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-43" vertex="1">
+          <mxGeometry x="395" y="40" width="115" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-104" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-102" vertex="1">
+          <mxGeometry x="40" y="115" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-107" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-102" vertex="1">
+          <mxGeometry x="40" y="5" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-181" value="&lt;h1&gt;Data Output Index&lt;/h1&gt;&lt;p&gt;This Index represents the merged Zarrs provided by Anemoi-Datasets again but projected to the output. The Index has information, where each part of the data is, while only prognostic and forcing are actually passed in the &quot;full&quot; tensor.&lt;/p&gt;" style="text;html=1;strokeColor=none;fillColor=none;spacing=5;spacingTop=-20;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="pUHZdNjlp3whxigCHF0F-10" vertex="1">
+          <mxGeometry x="32.5" y="10" width="670" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-177" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="pUHZdNjlp3whxigCHF0F-2" source="pUHZdNjlp3whxigCHF0F-5" target="pUHZdNjlp3whxigCHF0F-10" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-65" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;shadow=0;" parent="1" source="pUHZdNjlp3whxigCHF0F-57" target="pUHZdNjlp3whxigCHF0F-3" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-57" value="Anemoi Datasets" style="swimlane;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="10" y="360" width="230" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-50" value="Zarr 1" style="swimlane;whiteSpace=wrap;html=1;" parent="pUHZdNjlp3whxigCHF0F-57" vertex="1">
+          <mxGeometry x="30" y="40" width="80" height="210" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-54" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-50" vertex="1">
+          <mxGeometry x="10" y="130" width="60" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-55" value="Forcing" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="pUHZdNjlp3whxigCHF0F-50" vertex="1">
+          <mxGeometry x="10" y="100" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-56" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-50" vertex="1">
+          <mxGeometry x="10" y="50" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-58" value="Zarr 2 (optional)" style="swimlane;whiteSpace=wrap;html=1;startSize=40;" parent="pUHZdNjlp3whxigCHF0F-57" vertex="1">
+          <mxGeometry x="120" y="40" width="80" height="210" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-60" value="Diagnostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fillStyle=auto;" parent="pUHZdNjlp3whxigCHF0F-58" vertex="1">
+          <mxGeometry x="10" y="90" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pUHZdNjlp3whxigCHF0F-61" value="Prognostic" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="pUHZdNjlp3whxigCHF0F-58" vertex="1">
+          <mxGeometry x="10" y="50" width="60" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

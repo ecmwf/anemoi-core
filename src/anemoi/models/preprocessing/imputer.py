@@ -32,7 +32,7 @@ class BaseImputer(BasePreprocessor, ABC):
 
         Parameters
         ----------
-        config : Dotconfig
+        config : DotDict
             configuration object
         statistics : dict
             Data statistics dictionary
