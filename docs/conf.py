@@ -92,6 +92,14 @@ intersphinx_mapping = {
         "https://anemoi-inference.readthedocs.io/en/latest/",
         ("../../anemoi-inference/docs/_build/html/objects.inv", None),
     ),
+    "anemoi-graphs": (
+        "https://anemoi-graphs.readthedocs.io/en/latest/",
+        ("../../anemoi-graphs/docs/_build/html/objects.inv", None),
+    ),
+    "anemoi-registry": (
+        "https://anemoi-registry.readthedocs.io/en/latest/",
+        ("../../anemoi-registry/docs/_build/html/objects.inv", None),
+    ),
 }
 
 
