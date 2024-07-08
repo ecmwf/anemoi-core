@@ -16,7 +16,7 @@ class NormalizerMixin:
 
         Parameters
         ----------
-        values : np.ndarray
+        values : np.ndarray of shape (N, M)
             Values to normalize.
 
         Returns
@@ -25,7 +25,7 @@ class NormalizerMixin:
             Normalized values.
         """
         if self.norm is None:
-            LOGGER.debug("Node weights are not normalized.")
+            LOGGER.debug(f"{self.__class__.__name__} values are not normalized.")
             return values
         if self.norm == "l1":
             return values / np.sum(values)
@@ -36,9 +36,9 @@ class NormalizerMixin:
         if self.norm == "unit-std":
             std = np.std(values)
             if std == 0:
-                LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} is 0. Cannot normalize.")
+                LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalization is skipped.")
                 return values
             return values / std
         raise ValueError(
-            f"Weight normalization \"{self.norm}\" is not valid. Options are: 'l1', 'l2', 'unit-max' or 'unit-std'."
+            f"Attribute normalization \"{self.norm}\" is not valid. Options are: 'l1', 'l2', 'unit-max' or 'unit-std'."
         )

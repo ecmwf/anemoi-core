@@ -30,7 +30,9 @@ def test_graphs(config_file: tuple[Path, str], mock_grids_path: tuple[str, int])
     for nodes in graph.node_stores:
         for node_attr in nodes.node_attrs():
             assert isinstance(nodes[node_attr], torch.Tensor)
+            assert nodes[node_attr].dtype in [torch.int32, torch.float32]
 
     for edges in graph.edge_stores:
         for edge_attr in edges.edge_attrs():
             assert isinstance(edges[edge_attr], torch.Tensor)
+            assert edges[edge_attr].dtype in [torch.int32, torch.float32]

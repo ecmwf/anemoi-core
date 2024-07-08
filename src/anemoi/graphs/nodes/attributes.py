@@ -1,12 +1,12 @@
 import logging
 from abc import ABC
 from abc import abstractmethod
-from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 import torch
 from scipy.spatial import SphericalVoronoi
+from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
@@ -15,11 +15,11 @@ from anemoi.graphs.normalizer import NormalizerMixin
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass
 class BaseWeights(ABC, NormalizerMixin):
     """Base class for the weights of the nodes."""
 
-    norm: Optional[str] = None
+    def __init__(self, norm: Optional[str] = None) -> None:
+        self.norm = norm
 
     @abstractmethod
     def get_raw_values(self, nodes: NodeStorage, *args, **kwargs): ...
@@ -29,19 +29,28 @@ class BaseWeights(ABC, NormalizerMixin):
         if values.ndim == 1:
             values = values[:, np.newaxis]
 
-        return torch.tensor(values)
+        norm_values = self.normalize(values)
 
-    def compute(self, nodes: NodeStorage, *args, **kwargs) -> torch.Tensor:
+        return torch.tensor(norm_values, dtype=torch.float32)
+
+    def compute(self, graph: HeteroData, nodes_name: str, *args, **kwargs) -> torch.Tensor:
         """Get the node weights.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            Graph.
+        nodes_name : str
+            Name of the nodes.
 
         Returns
         -------
         torch.Tensor
             Weights associated to the nodes.
         """
+        nodes = graph[nodes_name]
         weights = self.get_raw_values(nodes, *args, **kwargs)
-        norm_weights = self.normalize(weights)
-        return self.post_process(norm_weights)
+        return self.post_process(weights)
 
 
 class UniformWeights(BaseWeights):
@@ -63,7 +72,6 @@ class UniformWeights(BaseWeights):
         return np.ones(nodes.num_nodes)
 
 
-@dataclass
 class AreaWeights(BaseWeights):
     """Implements the area of the nodes as the weights.
 
@@ -84,9 +92,12 @@ class AreaWeights(BaseWeights):
         Compute the area attributes for each node.
     """
 
-    norm: Optional[str] = "unit-max"
-    radius: float = 1.0
-    centre: np.ndarray = np.array([0, 0, 0])
+    def __init__(
+        self, norm: Optional[str] = None, radius: float = 1.0, centre: np.ndarray = np.array([0, 0, 0])
+    ) -> None:
+        super().__init__(norm)
+        self.radius = radius
+        self.centre = centre
 
     def get_raw_values(self, nodes: NodeStorage, *args, **kwargs) -> np.ndarray:
         """Compute the area associated to each node.

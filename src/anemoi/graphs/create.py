@@ -46,11 +46,14 @@ class GraphCreator:
             HeteroData: The generated graph.
         """
         graph = HeteroData()
-        for name, nodes_cfg in self.config.nodes.items():
-            graph = instantiate(nodes_cfg.node_builder).update_graph(graph, name, nodes_cfg.get("attributes", {}))
+
+        for nodes_cfg in self.config.nodes:
+            graph = instantiate(nodes_cfg.node_builder, name=nodes_cfg.name).update_graph(
+                graph, nodes_cfg.get("attributes", {})
+            )
 
         for edges_cfg in self.config.edges:
-            graph = instantiate(edges_cfg.edge_builder, **edges_cfg.nodes).update_graph(
+            graph = instantiate(edges_cfg.edge_builder, edges_cfg.source_name, edges_cfg.target_name).update_graph(
                 graph, edges_cfg.get("attributes", {})
             )
 

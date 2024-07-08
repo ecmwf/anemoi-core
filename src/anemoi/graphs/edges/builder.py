@@ -18,34 +18,61 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseEdgeBuilder(ABC):
+    """Base class for edge builders."""
 
     def __init__(self, source_name: str, target_name: str):
-        super().__init__()
         self.source_name = source_name
         self.target_name = target_name
+
+    @property
+    def name(self) -> tuple[str, str, str]:
+        """Name of the edge subgraph."""
+        return self.source_name, "to", self.target_name
 
     @abstractmethod
     def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage): ...
 
-    def register_edges(self, graph: HeteroData, source_indices: np.ndarray, target_indices: np.ndarray) -> HeteroData:
+    def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
+        """Prepare nodes information."""
+        return graph[self.source_name], graph[self.target_name]
+
+    def get_edge_index(self, graph: HeteroData) -> torch.Tensor:
+        """Get the edge indices of source and target nodes.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            The graph.
+
+        Returns
+        -------
+        torch.Tensor of shape (2, num_edges)
+            The edge indices.
+        """
+        source_nodes, target_nodes = self.prepare_node_data(graph)
+
+        adjmat = self.get_adjacency_matrix(source_nodes, target_nodes)
+
+        # Get source & target indices of the edges
+        edge_index = np.stack([adjmat.col, adjmat.row], axis=0)
+
+        return torch.from_numpy(edge_index).to(torch.int32)
+
+    def register_edges(self, graph: HeteroData) -> HeteroData:
         """Register edges in the graph.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the edges.
-        source_indices : np.ndarray of shape (N, )
-            The indices of the source nodes.
-        target_indices : np.ndarray of shape (N, )
-            The indices of the target nodes.
 
         Returns
         -------
         HeteroData
             The graph with the registered edges.
         """
-        edge_index = np.stack([source_indices, target_indices], axis=0).astype(np.int32)
-        graph[(self.source_name, "to", self.target_name)].edge_index = torch.from_numpy(edge_index)
+        graph[self.name].edge_index = self.get_edge_index(graph)
+        graph[self.name].edge_type = type(self).__name__
         return graph
 
     def register_attributes(self, graph: HeteroData, config: DotDict) -> HeteroData:
@@ -64,14 +91,8 @@ class BaseEdgeBuilder(ABC):
             The graph with the registered attributes.
         """
         for attr_name, attr_config in config.items():
-            graph[self.source_name, "to", self.target_name][attr_name] = instantiate(attr_config).compute(
-                graph, self.source_name, self.target_name
-            )
+            graph[self.name][attr_name] = instantiate(attr_config).compute(graph, self.name)
         return graph
-
-    def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
-        """Prepare nodes information."""
-        return graph[self.source_name], graph[self.target_name]
 
     def update_graph(self, graph: HeteroData, attrs_config: Optional[DotDict] = None) -> HeteroData:
         """Update the graph with the edges.
@@ -88,11 +109,7 @@ class BaseEdgeBuilder(ABC):
         HeteroData
             The graph with the edges.
         """
-        source_nodes, target_nodes = self.prepare_node_data(graph)
-
-        adjmat = self.get_adjacency_matrix(source_nodes, target_nodes)
-
-        graph = self.register_edges(graph, adjmat.col, adjmat.row)
+        graph = self.register_edges(graph)
 
         if attrs_config is None:
             return graph
@@ -113,6 +130,17 @@ class KNNEdges(BaseEdgeBuilder):
         The name of the target nodes.
     num_nearest_neighbours : int
         Number of nearest neighbours.
+
+    Methods
+    -------
+    get_adjacency_matrix(source_nodes, target_nodes)
+        Compute the adjacency matrix for the KNN method.
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
     """
 
     def __init__(self, source_name: str, target_name: str, num_nearest_neighbours: int):
@@ -162,6 +190,19 @@ class CutOffEdges(BaseEdgeBuilder):
         Factor to multiply the grid reference distance to get the cut-off radius.
     radius : float
         Cut-off radius.
+
+    Methods
+    -------
+    get_cutoff_radius(graph, mask_attr)
+        Compute the cut-off radius.
+    get_adjacency_matrix(source_nodes, target_nodes)
+        Get the adjacency matrix for the cut-off method.
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
     """
 
     def __init__(self, source_name: str, target_name: str, cutoff_factor: float):
