@@ -57,16 +57,15 @@ def graph_nodes_and_edges() -> HeteroData:
 def config_file(tmp_path) -> tuple[str, str]:
     """Mock grid_definition_path with files for 3 resolutions."""
     cfg = {
-        "nodes": [
-            {
-                "name": "test_nodes",
+        "nodes": {
+            "test_nodes": {
                 "node_builder": {
                     "_target_": "anemoi.graphs.nodes.NPZFileNodes",
                     "grid_definition_path": str(tmp_path),
                     "resolution": "o16",
                 },
-            }
-        ],
+            },
+        },
         "edges": [
             {
                 "source_name": "test_nodes",
