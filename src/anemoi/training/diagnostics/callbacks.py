@@ -540,9 +540,9 @@ class AnemoiCheckpoint(ModelCheckpoint):
         elif self.config.diagnostics.log.mlflow.enabled:
             self._tracker_name = "mlflow"
 
-            from anemoi.training.diagnostics.mlflow_logger import AIFSMLflowLogger
+            from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
-            mlflow_logger = next(logger for logger in trainer.loggers if isinstance(logger, AIFSMLflowLogger))
+            mlflow_logger = next(logger for logger in trainer.loggers if isinstance(logger, AnemoiMLflowLogger))
             run_id = mlflow_logger.run_id
             run = mlflow_logger._mlflow_client.get_run(run_id)
 

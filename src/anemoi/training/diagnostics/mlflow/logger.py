@@ -1,5 +1,4 @@
-# (C) Copyright 2024 ECMWF.
-#
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 # In applying this licence, ECMWF does not waive the privileges and immunities
@@ -7,7 +6,6 @@
 # nor does it submit to any jurisdiction.
 
 import io
-import logging
 import os
 import re
 import sys
@@ -21,12 +19,34 @@ from typing import Optional
 from typing import Union
 from weakref import WeakValueDictionary
 
+import requests
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-LOGGER = logging.getLogger(__name__)
+from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.utils.logger import get_code_logger
+
+LOGGER = get_code_logger(__name__)
+
+
+def health_check(tracking_uri):
+    """Query the health endpoint of an MLflow server.
+    If the server is not reachable, raise an error and remind the user that authentication may be required."""
+
+    token = os.getenv("MLFLOW_TRACKING_TOKEN")
+
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(f"{tracking_uri}/health", headers=headers, timeout=60)
+
+    if response.text == "OK":
+        return
+
+    error_msg = f"Could not connect to MLflow server at {tracking_uri}. "
+    if not token:
+        error_msg += "The server may require authentication, did you forget to turn it on in the config?"
+    raise ConnectionError(error_msg)
 
 
 def get_mlflow_run_params(config, tracking_uri):
@@ -39,15 +59,24 @@ def get_mlflow_run_params(config, tracking_uri):
         tags["command"] = tags["command"] + " " + " ".join(sys.argv[1:])
     if config.training.run_id or config.training.fork_run_id:
         "Either run_id or fork_run_id must be provided to resume a run."
+
         import mlflow
+
+        if config.diagnostics.log.mlflow.authentication and not config.diagnostics.log.mlflow.offline:
+            TokenAuth(tracking_uri).authenticate()
 
         mlflow_client = mlflow.MlflowClient(tracking_uri)
 
-        if config.training.run_id:
+        if config.training.run_id and config.diagnostics.log.mlflow.on_resume_create_child:
             parent_run_id = config.training.run_id  # parent_run_id
             run_name = mlflow_client.get_run(parent_run_id).info.run_name
             tags["mlflow.parentRunId"] = parent_run_id
             tags["resumedRun"] = "True"  # tags can't take boolean values
+        elif config.training.run_id and not config.diagnostics.log.mlflow.on_resume_create_child:
+            run_id = config.training.run_id
+            run_name = mlflow_client.get_run(run_id).info.run_name
+            mlflow_client.update_run(run_id=run_id, status="RUNNING")
+            tags["resumedRun"] = "True"
         else:
             parent_run_id = config.training.fork_run_id
             tags["forkedRun"] = "True"
@@ -213,14 +242,18 @@ class LogsMonitor:
             # removes the cursor up and down symbols from the line
             # skip tqdm status bar updates ending with "curser up" but the last one in buffer to save space
             def _remove_csi(line):
+                # replacing the leftmost non-overlapping occurrences of pattern ansi_csi_re in string line by the replacement ""
                 return re.sub(ansi_csi_re, b"", line)
 
             for match in ansi_csi_re.finditer(line):
                 arg, command = match.groups()
                 arg = int(arg.decode()) if arg else 1
-                if command == b"A" and (b"0%" not in line and not self._shutdown):  # cursor up
+                if command == b"A" and (
+                    b"0%" not in line and not self._shutdown and b"[INFO]" not in line and b"[DEBUG]" not in line
+                ):  # cursor up
                     # only keep x*10% status updates from tqmd status bars that end with a cursor up
                     # always keep shutdown commands
+                    # always keep logger info and debug prints
                     line = b""
             return _remove_csi(line)
 
@@ -237,7 +270,7 @@ class LogsMonitor:
         self.experiment.log_artifact(self.run_id, str(self.file_save_path))
 
 
-class AIFSMLflowLogger(MLFlowLogger):
+class AnemoiMLflowLogger(MLFlowLogger):
     """A custom MLflow logger that logs terminal output."""
 
     def __init__(
@@ -253,6 +286,8 @@ class AIFSMLflowLogger(MLFlowLogger):
         forked: Optional[bool] = False,
         run_id: Optional[str] = None,
         offline: Optional[bool] = False,
+        authentication: Optional[bool] = None,
+        log_hyperparams: Optional[bool] = True,
         # artifact_location: Optional[str] = None,
         # avoid passing any artifact location otherwise it would mess up the offline logging of artifacts
     ) -> None:
@@ -267,6 +302,18 @@ class AIFSMLflowLogger(MLFlowLogger):
 
         self._resumed = resumed
         self._forked = forked
+        self._flag_log_hparams = log_hyperparams
+
+        if rank_zero_only.rank == 0:
+            enabled = authentication and not offline
+            self.auth = TokenAuth(tracking_uri, enabled=enabled)
+
+            if offline:
+                LOGGER.info("MLflow is logging offline.")
+            else:
+                LOGGER.info(f"MLflow token authentication {'enabled' if enabled else 'disabled'} for {tracking_uri}")
+                self.auth.authenticate()
+                health_check(tracking_uri)
 
         super().__init__(
             experiment_name=experiment_name,
@@ -279,6 +326,12 @@ class AIFSMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
+    @property
+    def experiment(self):
+        if rank_zero_only.rank == 0:
+            self.auth.authenticate()
+        return super().experiment
+
     @rank_zero_only
     def log_system_metrics(self) -> None:
         """Log system metrics (CPU, GPU, etc)."""
@@ -290,9 +343,8 @@ class AIFSMLflowLogger(MLFlowLogger):
             self.run_id,
             resume_logging=self.run_id is not None,
         )
-        global run_id_to_system_metrics_monitor
-        run_id_to_system_metrics_monitor = {}
-        run_id_to_system_metrics_monitor[self.run_id] = system_monitor
+        self.run_id_to_system_metrics_monitor = {}
+        self.run_id_to_system_metrics_monitor[self.run_id] = system_monitor
         system_monitor.start()
 
     @rank_zero_only
@@ -307,9 +359,8 @@ class AIFSMLflowLogger(MLFlowLogger):
             self.experiment,
             self.run_id,
         )
-        global run_id_to_log_monitor
-        run_id_to_log_monitor = {}
-        run_id_to_log_monitor[self.run_id] = log_monitor
+        self.run_id_to_log_monitor = {}
+        self.run_id_to_log_monitor[self.run_id] = log_monitor
         log_monitor.start()
 
     def _clean_params(self, params):
@@ -327,26 +378,29 @@ class AIFSMLflowLogger(MLFlowLogger):
     @rank_zero_only
     def log_hyperparams(self, params: Union[dict[str, Any], Namespace]) -> None:
         """Overwrite the log_hyperparams method to flatten config params using '.'."""
-        params = _convert_params(params)
-        params = _flatten_dict(params, delimiter=".")  # Flatten dict with '.' to not break API queries
-        params = self._clean_params(params)
+        if self._flag_log_hparams:
+            params = _convert_params(params)
+            params = _flatten_dict(params, delimiter=".")  # Flatten dict with '.' to not break API queries
+            params = self._clean_params(params)
 
-        from mlflow.entities import Param
+            from mlflow.entities import Param
 
-        # Truncate parameter values to 250 characters.
-        # TODO: MLflow 1.28 allows up to 500 characters: https://github.com/mlflow/mlflow/releases/tag/v1.28.0
-        params_list = [Param(key=k, value=str(v)[:250]) for k, v in params.items()]
+            # Truncate parameter values to 250 characters.
+            # TODO: MLflow 1.28 allows up to 500 characters: https://github.com/mlflow/mlflow/releases/tag/v1.28.0
+            params_list = [Param(key=k, value=str(v)[:250]) for k, v in params.items()]
 
-        for idx in range(0, len(params_list), 100):
-            self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])
+            for idx in range(0, len(params_list), 100):
+                self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])
 
     @rank_zero_only
     def finalize(self, status: str = "success") -> None:
-        # finalize logging and system metrics monitor
+        # save the last obtained refresh token to disk
+        self.auth.save()
 
-        if run_id_to_system_metrics_monitor:
-            run_id_to_system_metrics_monitor[self.run_id].finish()
-        if run_id_to_log_monitor:
-            run_id_to_log_monitor[self.run_id].finish(status)
+        # finalize logging and system metrics monitor
+        if getattr(self, "run_id_to_system_metrics_monitor", None):
+            self.run_id_to_system_metrics_monitor[self.run_id].finish()
+        if getattr(self, "run_id_to_log_monitor", None):
+            self.run_id_to_log_monitor[self.run_id].finish(status)
 
         super().finalize(status)
