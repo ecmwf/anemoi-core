@@ -2,8 +2,6 @@ name: Check Changelog Update on PR
 on:
   pull_request:
     types: [assigned, opened, synchronize, reopened, labeled, unlabeled]
-    branches:
-      - main
 jobs:
   Check-Changelog:
     name: Check Changelog Action
