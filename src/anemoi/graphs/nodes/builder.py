@@ -3,6 +3,7 @@ from abc import ABC
 from abc import abstractmethod
 from pathlib import Path
 from typing import Optional
+from typing import Union
 
 import numpy as np
 import torch
@@ -11,6 +12,9 @@ from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.generate.hexagonal import create_hexagonal_nodes
+from anemoi.graphs.generate.icosahedral import create_icosahedral_nodes
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -18,6 +22,11 @@ class BaseNodeBuilder(ABC):
     """Base class for node builders.
 
     The node coordinates are stored in the `x` attribute of the nodes and they are stored in radians.
+
+    Attributes
+    ----------
+    name : str
+        name of the nodes, key for the nodes in the HeteroData graph object.
     """
 
     def __init__(self, name: str) -> None:
@@ -106,7 +115,7 @@ class ZarrDatasetNodes(BaseNodeBuilder):
 
     Attributes
     ----------
-    ds : zarr.core.Array
+    dataset : zarr.core.Array
         The dataset.
 
     Methods
@@ -123,7 +132,7 @@ class ZarrDatasetNodes(BaseNodeBuilder):
 
     def __init__(self, dataset: DotDict, name: str) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.ds = open_dataset(dataset)
+        self.dataset = open_dataset(dataset)
         super().__init__(name)
 
     def get_coordinates(self) -> torch.Tensor:
@@ -134,7 +143,7 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         torch.Tensor of shape (N, 2)
             Coordinates of the nodes.
         """
-        return self.reshape_coords(self.ds.latitudes, self.ds.longitudes)
+        return self.reshape_coords(self.dataset.latitudes, self.dataset.longitudes)
 
 
 class NPZFileNodes(BaseNodeBuilder):
@@ -188,3 +197,50 @@ class NPZFileNodes(BaseNodeBuilder):
         """
         coords = self.reshape_coords(self.grid_definition["latitudes"], self.grid_definition["longitudes"])
         return coords
+
+
+class IcosahedralNodes(BaseNodeBuilder, ABC):
+    """Processor mesh based on a triangular mesh.
+
+    It is based on the icosahedral mesh, which is a mesh of triangles that covers the sphere.
+
+    Parameters
+    ----------
+    resolution : list[int] | int
+        Refinement level of the mesh.
+    """
+
+    def __init__(
+        self,
+        resolution: Union[int, list[int]],
+        name: str,
+    ) -> None:
+        self.resolutions = list(range(resolution + 1)) if isinstance(resolution, int) else resolution
+        super().__init__(name)
+
+    def get_coordinates(self) -> torch.Tensor:
+        self.nx_graph, coords_rad, self.node_ordering = self.create_nodes()
+        return torch.tensor(coords_rad[self.node_ordering], dtype=torch.float32)
+
+    @abstractmethod
+    def create_nodes(self) -> np.ndarray: ...
+
+    def register_attributes(self, graph: HeteroData, config: DotDict) -> HeteroData:
+        graph[self.name]["resolutions"] = self.resolutions
+        graph[self.name]["nx_graph"] = self.nx_graph
+        graph[self.name]["node_ordering"] = self.node_ordering
+        return super().register_attributes(graph, config)
+
+
+class TriNodes(IcosahedralNodes):
+    """It depends on the trimesh Python library."""
+
+    def create_nodes(self) -> np.ndarray:
+        return create_icosahedral_nodes(resolutions=self.resolutions)
+
+
+class HexNodes(IcosahedralNodes):
+    """It depends on the h3 Python library."""
+
+    def create_nodes(self) -> np.ndarray:
+        return create_hexagonal_nodes(self.resolutions)

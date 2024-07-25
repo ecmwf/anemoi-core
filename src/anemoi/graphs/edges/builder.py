@@ -3,6 +3,7 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Optional
 
+import networkx as nx
 import numpy as np
 import torch
 from anemoi.utils.config import DotDict
@@ -12,6 +13,10 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs import EARTH_RADIUS
+from anemoi.graphs.generate import hexagonal
+from anemoi.graphs.generate import icosahedral
+from anemoi.graphs.nodes.builder import HexNodes
+from anemoi.graphs.nodes.builder import TriNodes
 from anemoi.graphs.utils import get_grid_reference_distance
 
 LOGGER = logging.getLogger(__name__)
@@ -33,7 +38,7 @@ class BaseEdgeBuilder(ABC):
     def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage): ...
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
-        """Prepare nodes information."""
+        """Prepare node information and get source and target nodes."""
         return graph[self.source_name], graph[self.target_name]
 
     def get_edge_index(self, graph: HeteroData) -> torch.Tensor:
@@ -188,8 +193,6 @@ class CutOffEdges(BaseEdgeBuilder):
         The name of the target nodes.
     cutoff_factor : float
         Factor to multiply the grid reference distance to get the cut-off radius.
-    radius : float
-        Cut-off radius.
 
     Methods
     -------
@@ -235,7 +238,7 @@ class CutOffEdges(BaseEdgeBuilder):
         return radius
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
-        """Prepare nodes information."""
+        """Prepare node information and get source and target nodes."""
         self.radius = self.get_cutoff_radius(graph)
         return super().prepare_node_data(graph)
 
@@ -260,3 +263,66 @@ class CutOffEdges(BaseEdgeBuilder):
         nearest_neighbour.fit(source_nodes.x)
         adj_matrix = nearest_neighbour.radius_neighbors_graph(target_nodes.x, radius=self.radius).tocoo()
         return adj_matrix
+
+
+class MultiScaleEdges(BaseEdgeBuilder):
+    """Base class for multi-scale edges in the nodes of a graph."""
+
+    def __init__(self, source_name: str, target_name: str, x_hops: int):
+        super().__init__(source_name, target_name)
+        assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
+        assert isinstance(x_hops, int), "Number of x_hops must be an integer"
+        assert x_hops > 0, "Number of x_hops must be positive"
+        self.x_hops = x_hops
+
+    def adjacency_from_tri_nodes(self, source_nodes: NodeStorage):
+        source_nodes["nx_graph"] = icosahedral.add_edges_to_nx_graph(
+            source_nodes["nx_graph"],
+            resolutions=source_nodes["resolutions"],
+            x_hops=self.x_hops,
+        )  # HeteroData refuses to accept None
+
+        adjmat = nx.to_scipy_sparse_array(
+            source_nodes["nx_graph"], nodelist=list(range(len(source_nodes["nx_graph"]))), format="coo"
+        )
+        return adjmat
+
+    def adjacency_from_hex_nodes(self, source_nodes: NodeStorage):
+
+        source_nodes["nx_graph"] = hexagonal.add_edges_to_nx_graph(
+            source_nodes["nx_graph"],
+            resolutions=source_nodes["resolutions"],
+            x_hops=self.x_hops,
+        )
+
+        adjmat = nx.to_scipy_sparse_array(source_nodes["nx_graph"], format="coo")
+        return adjmat
+
+    def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage):
+        if self.node_type == TriNodes.__name__:
+            adjmat = self.adjacency_from_tri_nodes(source_nodes)
+        elif self.node_type == HexNodes.__name__:
+            adjmat = self.adjacency_from_hex_nodes(source_nodes)
+        else:
+            raise ValueError(f"Invalid node type {self.node_type}")
+
+        adjmat = self.post_process_adjmat(source_nodes, adjmat)
+
+        return adjmat
+
+    def post_process_adjmat(self, nodes: NodeStorage, adjmat):
+        graph_sorted = {node_pos: i for i, node_pos in enumerate(nodes["node_ordering"])}
+        sort_func = np.vectorize(graph_sorted.get)
+        adjmat.row = sort_func(adjmat.row)
+        adjmat.col = sort_func(adjmat.col)
+        return adjmat
+
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+        assert (
+            graph[self.source_name].node_type == TriNodes.__name__
+            or graph[self.source_name].node_type == HexNodes.__name__
+        ), f"{self.__class__.__name__} requires {TriNodes.__name__} or {HexNodes.__name__}."
+
+        self.node_type = graph[self.source_name].node_type
+
+        return super().update_graph(graph, attrs_config)
