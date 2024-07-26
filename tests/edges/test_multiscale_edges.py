@@ -6,7 +6,7 @@ from anemoi.graphs.nodes import HexNodes
 from anemoi.graphs.nodes import TriNodes
 
 
-class TestIcosahedralEdgesInit:
+class TestMultiScaleEdgesInit:
     def test_init(self):
         """Test MultiScaleEdges initialization."""
         assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1), MultiScaleEdges)
@@ -23,7 +23,7 @@ class TestIcosahedralEdgesInit:
             MultiScaleEdges("test_nodes", "test_nodes2", 0)
 
 
-class TestIcosahedralEdgesTransform:
+class TestMultiScaleEdgesTransform:
 
     @pytest.fixture()
     def tri_ico_graph(self) -> HeteroData:

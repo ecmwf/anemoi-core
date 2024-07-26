@@ -59,6 +59,22 @@ class GraphCreator:
 
         return graph
 
+    def clean(self, graph: HeteroData) -> HeteroData:
+        """Clean the hidden attributes of the nodes and edges."""
+        for nodes_name in graph.node_types:
+            node_attrs = list(graph[nodes_name].keys())
+            for node_attr_name in node_attrs:
+                if node_attr_name.startswith("_"):
+                    del graph[nodes_name][node_attr_name]
+
+        for edge_key in graph.edge_types:
+            edge_attrs = graph[edge_key].keys()
+            for edge_attr_name in edge_attrs:
+                if edge_attr_name.startswith("_"):
+                    del graph[edge_key][edge_attr_name]
+
+        return graph
+
     def save(self, graph: HeteroData) -> None:
         """Save the graph to the output path."""
         if not os.path.exists(self.path) or self.overwrite:
@@ -69,6 +85,7 @@ class GraphCreator:
         """Create the graph and save it to the output path."""
         self.init()
         graph = self.generate_graph()
+        graph = self.clean(graph)
         self.save(graph)
         return graph
 

@@ -276,26 +276,26 @@ class MultiScaleEdges(BaseEdgeBuilder):
         self.x_hops = x_hops
 
     def adjacency_from_tri_nodes(self, source_nodes: NodeStorage):
-        source_nodes["nx_graph"] = icosahedral.add_edges_to_nx_graph(
-            source_nodes["nx_graph"],
-            resolutions=source_nodes["resolutions"],
+        source_nodes["_nx_graph"] = icosahedral.add_edges_to_nx_graph(
+            source_nodes["_nx_graph"],
+            resolutions=source_nodes["_resolutions"],
             x_hops=self.x_hops,
         )  # HeteroData refuses to accept None
 
         adjmat = nx.to_scipy_sparse_array(
-            source_nodes["nx_graph"], nodelist=list(range(len(source_nodes["nx_graph"]))), format="coo"
+            source_nodes["_nx_graph"], nodelist=list(range(len(source_nodes["_nx_graph"]))), format="coo"
         )
         return adjmat
 
     def adjacency_from_hex_nodes(self, source_nodes: NodeStorage):
 
-        source_nodes["nx_graph"] = hexagonal.add_edges_to_nx_graph(
-            source_nodes["nx_graph"],
-            resolutions=source_nodes["resolutions"],
+        source_nodes["_nx_graph"] = hexagonal.add_edges_to_nx_graph(
+            source_nodes["_nx_graph"],
+            resolutions=source_nodes["_resolutions"],
             x_hops=self.x_hops,
         )
 
-        adjmat = nx.to_scipy_sparse_array(source_nodes["nx_graph"], format="coo")
+        adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
         return adjmat
 
     def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage):
@@ -311,7 +311,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
         return adjmat
 
     def post_process_adjmat(self, nodes: NodeStorage, adjmat):
-        graph_sorted = {node_pos: i for i, node_pos in enumerate(nodes["node_ordering"])}
+        graph_sorted = {node_pos: i for i, node_pos in enumerate(nodes["_node_ordering"])}
         sort_func = np.vectorize(graph_sorted.get)
         adjmat.row = sort_func(adjmat.row)
         adjmat.col = sort_func(adjmat.col)

@@ -28,7 +28,7 @@ def test_update_graph():
     node_builder = HexNodes(0, "test_nodes")
     graph = HeteroData()
     graph = node_builder.update_graph(graph, {})
-    assert "resolutions" in graph["test_nodes"]
-    assert "nx_graph" in graph["test_nodes"]
-    assert "node_ordering" in graph["test_nodes"]
-    assert len(graph["test_nodes"]["node_ordering"]) == graph["test_nodes"].num_nodes
+    assert "_resolutions" in graph["test_nodes"]
+    assert "_nx_graph" in graph["test_nodes"]
+    assert "_node_ordering" in graph["test_nodes"]
+    assert len(graph["test_nodes"]["_node_ordering"]) == graph["test_nodes"].num_nodes
