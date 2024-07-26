@@ -13,6 +13,12 @@ from anemoi.models.layers.mapper import BaseMapper
 
 
 class TestBaseMapper:
+    """Test the BaseMapper class."""
+
+    NUM_EDGES: int = 100
+    NUM_SRC_NODES: int = 100
+    NUM_DST_NODES: int = 200
+
     @pytest.fixture
     def mapper_init(self):
         in_channels_src: int = 3
@@ -50,7 +56,8 @@ class TestBaseMapper:
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
             activation=activation,
-            sub_graph=fake_graph,
+            sub_graph=fake_graph[("src", "to", "dst")],
+            sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
         )
 
@@ -71,10 +78,18 @@ class TestBaseMapper:
         )
 
     @pytest.fixture
-    def fake_graph(self):
+    def fake_graph(self) -> HeteroData:
+        """Fake graph."""
         graph = HeteroData()
-        graph.edge_attr = torch.rand((100, 128))
-        graph.edge_index = torch.randint(0, 100, (2, 100))
+        graph[("src", "to", "dst")].edge_index = torch.concat(
+            [
+                torch.randint(0, self.NUM_SRC_NODES, (1, self.NUM_EDGES)),
+                torch.randint(0, self.NUM_DST_NODES, (1, self.NUM_EDGES)),
+            ],
+            axis=0,
+        )
+        graph[("src", "to", "dst")].edge_attr1 = torch.rand((self.NUM_EDGES, 1))
+        graph[("src", "to", "dst")].edge_attr2 = torch.rand((self.NUM_EDGES, 32))
         return graph
 
     def test_initialization(self, mapper, mapper_init):

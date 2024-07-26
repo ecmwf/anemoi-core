@@ -16,6 +16,18 @@ Keep it human-readable, your future self will thank you!
 
 ### Removed
 
+## 0.2.0
+
+### Added
+
+- Option to choose the edge attributes
+
+### Changed
+
+- Updated to support new PyTorch Geometric HeteroData structure (defined by `anemoi-graphs` package).
+
+### Removed
+
 ## 0.1.0 Initial Release
 
 ### Added
