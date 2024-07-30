@@ -11,6 +11,17 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased]
 
 ### Added
+
+### Changed
+- The 'graph' argument of the GraphCreator class is optional, allowing users to create graphs without saving them.
+
+### Removed
+
+## 0.2.0 Initial Release
+
+### Added
+- New node builders by iteratively refining an icosahedron: TriNodes, HexNodes.
+- New edge builders for building multi-scale connections.
 - Added Changelog
 
 ### Changed

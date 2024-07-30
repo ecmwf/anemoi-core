@@ -1,5 +1,8 @@
 import logging
-import os
+from itertools import chain
+from pathlib import Path
+from typing import Optional
+from typing import Union
 
 import torch
 from anemoi.utils.config import DotDict
@@ -14,26 +17,9 @@ class GraphCreator:
 
     def __init__(
         self,
-        path,
-        config=None,
-        cache=None,
-        print=print,
-        overwrite=False,
-        **kwargs,
+        config: Union[Path, DotDict],
     ):
-        if isinstance(config, str) or isinstance(config, os.PathLike):
-            self.config = DotDict.from_file(config)
-        else:
-            self.config = config
-
-        self.path = path  # Output path
-        self.cache = cache
-        self.print = print
-        self.overwrite = overwrite
-
-    def init(self):
-        if self._path_readable() and not self.overwrite:
-            raise Exception(f"{self.path} already exists. Use overwrite=True to overwrite.")
+        self.config = DotDict.from_file(config) if isinstance(config, Path) else config
 
     def generate_graph(self) -> HeteroData:
         """Generate the graph.
@@ -60,41 +46,68 @@ class GraphCreator:
         return graph
 
     def clean(self, graph: HeteroData) -> HeteroData:
-        """Clean the hidden attributes of the nodes and edges."""
-        for nodes_name in graph.node_types:
-            node_attrs = list(graph[nodes_name].keys())
-            for node_attr_name in node_attrs:
-                if node_attr_name.startswith("_"):
-                    del graph[nodes_name][node_attr_name]
+        """Remove private attributes used during creation from the graph.
 
-        for edge_key in graph.edge_types:
-            edge_attrs = graph[edge_key].keys()
-            for edge_attr_name in edge_attrs:
-                if edge_attr_name.startswith("_"):
-                    del graph[edge_key][edge_attr_name]
+        Parameters
+        ----------
+        graph : HeteroData
+            generated graph
+
+        Returns
+        -------
+        HeteroData
+            cleaned graph
+        """
+        for type_name in chain(graph.node_types, graph.edge_types):
+            for attr_name in graph[type_name].keys():
+                if attr_name.startswith("_"):
+                    del graph[type_name][attr_name]
 
         return graph
 
-    def save(self, graph: HeteroData) -> None:
-        """Save the graph to the output path."""
-        if not os.path.exists(self.path) or self.overwrite:
-            torch.save(graph, self.path)
-            self.print(f"Graph saved at {self.path}.")
+    def save(self, graph: HeteroData, save_path: Path, overwrite: bool = False) -> None:
+        """Save the generated graph to the output path.
 
-    def create(self) -> HeteroData:
-        """Create the graph and save it to the output path."""
-        self.init()
+        Parameters
+        ----------
+        graph : HeteroData
+            generated graph
+        save_path : Path
+            location to save the graph
+        overwrite : bool, optional
+            whether to overwrite existing graph file, by default False
+        """
+        save_path = Path(save_path)
+
+        if not save_path.exists() or overwrite:
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(graph, save_path)
+            LOGGER.info(f"Graph saved at {save_path}.")
+        else:
+            LOGGER.info("Graph already exists. Use overwrite=True to overwrite.")
+
+    def create(self, save_path: Optional[Path] = None, overwrite: bool = False) -> HeteroData:
+        """Create the graph and save it to the output path.
+
+        Parameters
+        ----------
+        save_path : Path, optional
+            location to save the graph, by default None
+        overwrite : bool, optional
+            whether to overwrite existing graph file, by default False
+
+        Returns
+        -------
+        HeteroData
+            created graph object
+        """
+
         graph = self.generate_graph()
         graph = self.clean(graph)
-        self.save(graph)
+
+        if save_path is None:
+            LOGGER.warning("No output path specified. The graph will not be saved.")
+        else:
+            self.save(graph, save_path, overwrite)
+
         return graph
-
-    def _path_readable(self) -> bool:
-        """Check if the output path is readable."""
-        import torch
-
-        try:
-            torch.load(self.path)
-            return True
-        except FileNotFoundError:
-            return False

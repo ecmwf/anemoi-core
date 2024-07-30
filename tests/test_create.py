@@ -8,6 +8,7 @@
 
 from pathlib import Path
 
+import pytest
 import torch
 from torch_geometric.data import HeteroData
 
@@ -16,15 +17,15 @@ from anemoi.graphs.create import GraphCreator
 
 class TestGraphCreator:
 
-    def test_generate_graph(self, config_file: tuple[Path, str], mock_grids_path: tuple[str, int]):
+    @pytest.mark.parametrize("name", ["graph.pt", None])
+    def test_generate_graph(self, config_file: tuple[Path, str], mock_grids_path: tuple[str, int], name: str):
         """Test GraphCreator workflow."""
         tmp_path, config_name = config_file
-        graph_path = tmp_path / "graph.pt"
+        graph_path = tmp_path / name if isinstance(name, str) else None
         config_path = tmp_path / config_name
 
-        GraphCreator(graph_path, config_path).create()
+        graph = GraphCreator(config=config_path).create(save_path=graph_path)
 
-        graph = torch.load(graph_path)
         assert isinstance(graph, HeteroData)
         assert "test_nodes" in graph.node_types
         assert ("test_nodes", "to", "test_nodes") in graph.edge_types
@@ -45,3 +46,9 @@ class TestGraphCreator:
         for edges in graph.edge_stores:
             for edge_attr in edges.edge_attrs():
                 assert not edge_attr.startswith("_")
+
+        if graph_path is not None:
+            assert graph_path.exists()
+            graph_saved = torch.load(graph_path)
+            assert graph.node_types == graph_saved.node_types
+            assert graph.edge_types == graph_saved.edge_types
