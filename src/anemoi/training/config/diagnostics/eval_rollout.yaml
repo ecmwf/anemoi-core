@@ -78,6 +78,7 @@ log:
   mlflow:
     enabled: True
     offline: False
+    authentication: False
     log_model: False
     tracking_uri: '...'
     experiment_name: 'aifs_debug'
