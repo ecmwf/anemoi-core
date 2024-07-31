@@ -13,11 +13,19 @@ Keep it human-readable, your future self will thank you!
 ### Added
 
 ### Changed
-- The 'graph' argument of the GraphCreator class is optional, allowing users to create graphs without saving them.
 
 ### Removed
 
-## 0.2.0 Initial Release
+## [0.2.1] - Anemoi-graph Release, bug fix release
+
+### Added
+
+### Changed
+- Fix The 'save_path' argument of the GraphCreator class is optional, allowing users to create graphs without saving them.
+
+### Removed
+
+## [0.2.0] - Anemoi-graph Release, Icosahedral graph building
 
 ### Added
 - New node builders by iteratively refining an icosahedron: TriNodes, HexNodes.
@@ -28,7 +36,7 @@ Keep it human-readable, your future self will thank you!
 
 ### Removed
 
-## 0.1.0 Initial Release
+## [0.1.0] - Initial Release, Global graph building
 
 ### Added
 - Documentation
@@ -38,5 +46,8 @@ Keep it human-readable, your future self will thank you!
 
 ### Removed
 
-## Git Diffs:
+<!-- Add Git Diffs for Links above -->
+[unreleased]: https://github.com/ecmwf/anemoi-graphs/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/ecmwf/anemoi-graphs/compare/0.2.0...0.2.1
+[0.2.0]: https://github.com/ecmwf/anemoi-graphs/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/ecmwf/anemoi-graphs/releases/tag/0.1.0
