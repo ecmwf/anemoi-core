@@ -29,11 +29,10 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     module = GraphForecaster.load_from_checkpoint(lightning_checkpoint_path)
     model = module.model
 
-    save_metadata = model.metadata
+    metadata = dict(**model.metadata)
     model.metadata = None
     model.config = None
 
-    metadata = dict(**save_metadata)
     return model, metadata
 
 

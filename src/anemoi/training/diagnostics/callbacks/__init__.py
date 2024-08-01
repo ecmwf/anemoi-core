@@ -732,10 +732,10 @@ class AnemoiCheckpoint(ModelCheckpoint):
             save_config = model.config
             model.config = None
 
-            save_metadata = model.metadata
+            tmp_metadata = model.metadata
             model.metadata = None
 
-            metadata = dict(**save_metadata)
+            metadata = dict(**tmp_metadata)
 
             inference_checkpoint_filepath = Path(lightning_checkpoint_filepath).parent / Path(
                 "inference-" + str(Path(lightning_checkpoint_filepath).name),
@@ -746,7 +746,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
             save_metadata(inference_checkpoint_filepath, metadata)
 
             model.config = save_config
-            model.metadata = save_metadata
+            model.metadata = tmp_metadata
 
             self._last_global_step_saved = trainer.global_step
 
