@@ -30,7 +30,6 @@ class NativeGridDataset(IterableDataset):
         model_comm_num_groups: int = 1,
         shuffle: bool = True,
         label: str = "generic",
-        logging: str = "INFO",
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -56,7 +55,6 @@ class NativeGridDataset(IterableDataset):
         RuntimeError
             Multistep value cannot be negative.
         """
-        LOGGER.setLevel(logging)
         self.label = label
 
         self.data = data_reader

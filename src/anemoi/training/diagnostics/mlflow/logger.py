@@ -6,6 +6,7 @@
 # nor does it submit to any jurisdiction.
 
 import io
+import logging
 import os
 import re
 import sys
@@ -26,9 +27,8 @@ from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
-from anemoi.training.utils.logger import get_code_logger
 
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 def health_check(tracking_uri):

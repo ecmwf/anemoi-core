@@ -1,3 +1,4 @@
+import logging
 import os
 from functools import cached_property
 
@@ -10,9 +11,8 @@ from torch.utils.data import DataLoader
 
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.data.dataset import worker_init_func
-from anemoi.training.utils.logger import get_code_logger
 
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -27,7 +27,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             Job configuration
         """
         super().__init__()
-        LOGGER.setLevel(config.diagnostics.log.code.level)
 
         self.config = config
 
@@ -154,7 +153,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             model_comm_num_groups=self.model_comm_num_groups,
             shuffle=shuffle,
             label=label,
-            logging=self.config.diagnostics.log.code.level,
         )
         self._check_resolution(data.resolution)
         return data

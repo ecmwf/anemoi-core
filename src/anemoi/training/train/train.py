@@ -40,8 +40,6 @@ class AnemoiTrainer:
         OmegaConf.resolve(config)
         self.config = config
 
-        LOGGER.setLevel(self.config.diagnostics.log.code.level)
-
         # Default to not warm-starting from a checkpoint
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
         self.load_weights_only = config.training.load_weights_only

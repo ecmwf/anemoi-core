@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import sys
 import time
 import traceback
@@ -35,7 +36,7 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.utils.logger import get_code_logger
 
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class ParallelExecutor(ThreadPoolExecutor):
@@ -152,8 +153,6 @@ class RolloutEval(Callback):
             Dictionary with configuration settings
         """
         super().__init__()
-
-        LOGGER.setLevel(config.diagnostics.log.code.level)
 
         LOGGER.debug(
             "Setting up RolloutEval callback with rollout = %d, frequency = %d ...",
@@ -782,8 +781,6 @@ def get_callbacks(config: DictConfig) -> list:
     List
         A list of PyTorch Lightning callbacks
     """
-    LOGGER.setLevel(config.diagnostics.log.code.level)
-
     checkpoint_settings = {
         "dirpath": config.hardware.paths.checkpoints,
         "verbose": False,

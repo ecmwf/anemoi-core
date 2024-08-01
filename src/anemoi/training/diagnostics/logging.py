@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -5,9 +6,7 @@ import pytorch_lightning as pl
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.training.utils.logger import get_code_logger
-
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 def get_mlflow_logger(config: DictConfig):

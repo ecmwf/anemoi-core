@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 from collections import defaultdict
@@ -8,6 +9,7 @@ import pytorch_lightning as pl
 import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -18,11 +20,9 @@ from torch_geometric.data import HeteroData
 
 from anemoi.training.losses.mse import WeightedMSELoss
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.utils.config import DotConfig
 from anemoi.training.utils.jsonify import map_config_to_primitives
-from anemoi.training.utils.logger import get_code_logger
 
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class GraphForecaster(pl.LightningModule):
@@ -54,8 +54,6 @@ class GraphForecaster(pl.LightningModule):
         """
         super().__init__()
 
-        LOGGER.setLevel(config.diagnostics.log.code.level)
-
         graph_data = graph_data.to(self.device)
 
         self.model = AnemoiModelInterface(
@@ -63,7 +61,7 @@ class GraphForecaster(pl.LightningModule):
             data_indices=data_indices,
             metadata=metadata,
             graph_data=graph_data,
-            config=DotConfig(map_config_to_primitives(OmegaConf.to_container(config, resolve=True))),
+            config=DotDict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True))),
         )
 
         self.data_indices = data_indices

@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -13,9 +14,8 @@ from scipy.interpolate import griddata
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
-from anemoi.training.utils.logger import get_code_logger
 
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 continents = Coastlines()
 
