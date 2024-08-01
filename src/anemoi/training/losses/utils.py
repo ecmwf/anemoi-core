@@ -1,11 +1,10 @@
+import logging
 from typing import Optional
 
 import torch
 from torch import nn
 
-from anemoi.training.utils.logger import get_code_logger
-
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 def grad_scaler(

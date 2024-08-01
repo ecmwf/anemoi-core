@@ -1,7 +1,10 @@
+import logging
 from abc import ABC
 from abc import abstractmethod
 
 import numpy as np
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BasePressureLevelScaler(ABC):

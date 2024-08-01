@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import sys
 import time
 import traceback
@@ -35,7 +36,7 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.utils.logger import get_code_logger
 
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class ParallelExecutor(ThreadPoolExecutor):

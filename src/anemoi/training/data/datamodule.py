@@ -1,3 +1,4 @@
+import logging
 import os
 from functools import cached_property
 
@@ -10,9 +11,8 @@ from torch.utils.data import DataLoader
 
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.data.dataset import worker_init_func
-from anemoi.training.utils.logger import get_code_logger
 
-LOGGER = get_code_logger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):

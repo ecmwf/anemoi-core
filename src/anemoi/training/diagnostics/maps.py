@@ -1,10 +1,13 @@
 import copy
 import json
+import logging
 
 import numpy as np
 from matplotlib.collections import LineCollection
 
 from anemoi.training import diagnostics
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EquirectangularProjection:
