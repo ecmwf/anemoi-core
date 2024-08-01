@@ -54,8 +54,6 @@ class GraphForecaster(pl.LightningModule):
         """
         super().__init__()
 
-        LOGGER.setLevel(config.diagnostics.log.code.level)
-
         graph_data = graph_data.to(self.device)
 
         self.model = AnemoiModelInterface(

@@ -88,8 +88,6 @@ log:
     run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True
   interval: 100
-  code:
-    level: "INFO"
 
 enable_progress_bar: True
 print_memory_summary: False

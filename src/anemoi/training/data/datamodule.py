@@ -27,7 +27,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             Job configuration
         """
         super().__init__()
-        LOGGER.setLevel(config.diagnostics.log.code.level)
 
         self.config = config
 
@@ -154,7 +153,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             model_comm_num_groups=self.model_comm_num_groups,
             shuffle=shuffle,
             label=label,
-            logging=self.config.diagnostics.log.code.level,
         )
         self._check_resolution(data.resolution)
         return data
