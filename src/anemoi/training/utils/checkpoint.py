@@ -5,11 +5,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import json
 from pathlib import Path
-from zipfile import ZipFile
 
 import torch
+from anemoi.utils.checkpoints import save_metadata
 
 from anemoi.training.train.forecaster import GraphForecaster
 
@@ -47,11 +46,7 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
         save_path (str): path to inference/anemoi checkpoint
     """
     inference_filepath = Path(save_path).parent / Path("inference-" + str(Path(save_path).name))
-    torch.save(model, inference_filepath)
 
-    with ZipFile(inference_filepath, "a") as zipf:
-        base = Path(inference_filepath).stem
-        zipf.writestr(
-            f"{base}/ai-models.json",
-            json.dumps(metadata),
-        )
+    torch.save(model, inference_filepath)
+    save_metadata(inference_filepath, metadata)
+    return inference_filepath
