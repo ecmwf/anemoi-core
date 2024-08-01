@@ -21,6 +21,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torchinfo
+from anemoi.utils.checkpoints import save_metadata
 from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
@@ -742,12 +743,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             torch.save(model, inference_checkpoint_filepath)
 
-            with ZipFile(inference_checkpoint_filepath, "a") as zipf:
-                base = Path(inference_checkpoint_filepath).stem
-                zipf.writestr(
-                    f"{base}/ai-models.json",
-                    json.dumps(metadata),
-                )
+            save_metadata(inference_checkpoint_filepath, metadata)
 
             model.config = save_config
             model.metadata = save_metadata
@@ -758,6 +754,10 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         # saving checkpoint used for pytorch-lightning based training
         trainer.save_checkpoint(lightning_checkpoint_filepath, self.save_weights_only)
+
+        # saving metadata for the checkpoint in same format as for inference
+        save_metadata(lightning_checkpoint_filepath, metadata)
+
         self._last_global_step_saved = trainer.global_step
         self._last_checkpoint_saved = lightning_checkpoint_filepath
 
