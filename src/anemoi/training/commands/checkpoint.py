@@ -25,8 +25,8 @@ class Checkpoint(Command):
             help=help,
             description=help,
         )
-        inference.add_argument("--input", "-i", required=True, metavar="input.ckpt")
-        inference.add_argument("--output", "-o", required=True, metavar="output.ckpt")
+        inference.add_argument("--input", "-i", required=True, metavar="training.ckpt")
+        inference.add_argument("--output", "-o", required=True, metavar="inference.ckpt")
 
     def run(self, args):
         if args.subcommand == "inference":
