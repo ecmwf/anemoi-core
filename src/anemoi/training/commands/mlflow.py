@@ -6,8 +6,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from anemoi.training.diagnostics.mlflow.auth import TokenAuth
-
 from . import Command
 
 
@@ -40,6 +38,8 @@ class MlFlow(Command):
 
     def run(self, args):
         if args.subcommand == "login":
+            from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+
             TokenAuth(url=args.url).login(force_credentials=args.force_credentials)
             return
 
