@@ -5,13 +5,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import argparse
+from __future__ import annotations
+
 import importlib.resources as pkg_resources
 import logging
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import Command
+
+if TYPE_CHECKING:
+    import argparse
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,21 +49,21 @@ class ConfigGenerator(Command):
         LOGGER.info(
             "Generating configs, please wait.",
         )
+        self.overwrite = args.overwrite
         if args.subcommand == "generate":
 
-            self.write_config(args.output, args.overwrite)
+            self.traverse_config(args.output)
 
             LOGGER.info("Inference checkpoint saved to %s", args.output)
             return
 
         if args.subcommand == "training_home":
             anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
-            self.write_config(anemoi_home, args.overwrite)
+            self.traverse_config(anemoi_home)
             LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
             return
 
-    @staticmethod
-    def write_config(destination_dir: Path | str, overwrite: bool = False) -> None:
+    def traverse_config(self, destination_dir: Path | str) -> None:
         """Writes the given configuration data to the specified file path."""
         config_package = "anemoi.training.config"
 
@@ -75,15 +80,19 @@ class ConfigGenerator(Command):
 
                     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Copy the file
-                    if not file_path.exists() or overwrite:
-                        try:
-                            shutil.copy2(item, file_path)
-                            LOGGER.info("Copied %s to %s", item.name, file_path)
-                        except Exception:
-                            LOGGER.exception("Failed to copy %s", item.name)
+                    if not file_path.exists() or self.overwrite:
+                        self.copy_file(item, file_path)
                     else:
                         LOGGER.info("File %s already exists, skipping", file_path)
+
+    @staticmethod
+    def copy_file(item: Path, file_path: Path) -> None:
+        """Copies the file to the destination directory."""
+        try:
+            shutil.copy2(item, file_path)
+            LOGGER.info("Copied %s to %s", item.name, file_path)
+        except Exception:
+            LOGGER.exception("Failed to copy %s", item.name)
 
 
 command = ConfigGenerator
