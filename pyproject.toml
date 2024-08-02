@@ -52,6 +52,7 @@ dynamic = [
 
 dependencies = [
   "anemoi-datasets[data]>=0.4",
+  "anemoi-graphs",
   "anemoi-models",
   "anemoi-utils[provenance]>=0.3.10",
   "einops>=0.6.1",
@@ -101,6 +102,18 @@ scripts.anemoi-training = "anemoi.training.__main__:main"
 version_file = "src/anemoi/training/_version.py"
 
 [tool.ruff]
-select = [
+lint.select = [
   "ALL",
+]
+lint.ignore = [
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D105",
+  "D401",
+  "E203",
+  "PT018",
+  "S101",
 ]
