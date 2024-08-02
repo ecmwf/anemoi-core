@@ -115,7 +115,7 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
         callback (AnemoiCheckpoint): callback to store checkpoints
         model (DummyModule): dummy lightning module
     """
-    trainer = Trainer(default_root_dir=tmp_path, callbacks=[callback], max_epochs=2, logger=False)
+    trainer = Trainer(default_root_dir=tmp_path, accelerator="cpu", callbacks=[callback], max_epochs=2, logger=False)
     trainer.fit(model)
 
     for ckpt_path in Path(tmp_path).iterdir():
