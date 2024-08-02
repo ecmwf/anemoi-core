@@ -1,3 +1,11 @@
+# (C) Copyright 2024 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import logging
 import os
 from pathlib import Path
@@ -24,6 +32,7 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
         ----------
         search_path : ConfigSearchPath
             Hydra ConfigSearchPath object.
+
         """
         for suffix in ("", "config"):
             anemoi_home_path = Path(Path.home(), ".config", "anemoi", "training", suffix)
@@ -38,7 +47,7 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
         for suffix in ("", "config"):
             env_anemoi_config_path = os.getenv("ANEMOI_CONFIG_PATH")
             if env_anemoi_config_path is None:
-                return
+                continue
             anemoi_config_path = Path(env_anemoi_config_path)
             if anemoi_config_path.exists() and not Path(anemoi_config_path, "config").exists():
                 search_path.prepend(
