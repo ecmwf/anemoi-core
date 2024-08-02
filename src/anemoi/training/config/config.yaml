@@ -3,7 +3,7 @@ defaults:
 - dataloader: native_grid
 - diagnostics: eval_rollout
 - hardware: example
-- graph: default
+- graph: multi_scale
 - model: gnn
 - training: default
 - _self_
