@@ -5,14 +5,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from typing import TYPE_CHECKING
 
 from . import Command
+
+if TYPE_CHECKING:
+    import argparse
 
 
 class MlFlow(Command):
     """Commands to interact with MLflow."""
 
-    def add_arguments(self, command_parser):
+    @staticmethod
+    def add_arguments(command_parser) -> None:  # noqa: ANN001
         subparsers = command_parser.add_subparsers(dest="subcommand", required=True)
 
         login = subparsers.add_parser(
@@ -22,7 +27,9 @@ class MlFlow(Command):
         login.add_argument(
             "--url",
             help="The URL of the authentication server",
-            required=True,  # TODO: once we have a config file, make this optional and load default value from the config
+            required=True,
+            # TODO (Gert Mertes): once we have a config file, make this optional #noqa: FIX002, TD003
+            # and load default value from config
         )
         login.add_argument(
             "--force-credentials",
@@ -36,7 +43,8 @@ class MlFlow(Command):
             help="Synchronise an offline run with an MLflow server (placeholder, not implemented).",
         )
 
-    def run(self, args):
+    @staticmethod
+    def run(args: "argparse.Namespace") -> None:
         if args.subcommand == "login":
             from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 
@@ -44,7 +52,7 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "sync":
-            raise NotImplementedError()
+            raise NotImplementedError
 
 
 command = MlFlow

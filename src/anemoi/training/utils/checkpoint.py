@@ -8,9 +8,9 @@
 from pathlib import Path
 
 import torch
-from anemoi.utils.checkpoints import save_metadata
 
 from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.utils.checkpoints import save_metadata
 
 
 def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
@@ -18,13 +18,14 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
 
     Parameters
     ----------
-        lightning_checkpoint_path : str
-            path to lightning checkpoint
+    lightning_checkpoint_path : str
+        path to lightning checkpoint
 
     Returns
     -------
-        Tuple[torch.nn.Module, Dict]
-            pytorch model, metadata
+    tuple[torch.nn.Module, dict]
+        pytorch model, metadata
+
     """
     module = GraphForecaster.load_from_checkpoint(lightning_checkpoint_path)
     model = module.model
@@ -40,9 +41,11 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     """Save a pytorch checkpoint for inference with the model metadata.
 
     Args:
+    ----
         model (torch.nn.Module): pytorch model
         metadata (Dict): metadata
         save_path (str): path to inference/anemoi checkpoint
+
     """
     inference_filepath = Path(save_path).parent / Path("inference-" + str(Path(save_path).name))
 

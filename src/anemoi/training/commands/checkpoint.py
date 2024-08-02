@@ -16,21 +16,23 @@ LOG = logging.getLogger(__name__)
 class Checkpoint(Command):
     """Commands to interact with training checkpoints."""
 
-    def add_arguments(self, command_parser: argparse.ArgumentParser):
+    @staticmethod
+    def add_arguments(command_parser: argparse.ArgumentParser) -> None:
         subparsers = command_parser.add_subparsers(dest="subcommand", required=True)
 
-        help = "Save an anemoi training checkpoint for inference."
+        help_msg = "Save an anemoi training checkpoint for inference."
         inference = subparsers.add_parser(
             "inference",
             help=help,
-            description=help,
+            description=help_msg,
         )
         inference.add_argument("--input", "-i", required=True, metavar="training.ckpt")
         inference.add_argument("--output", "-o", required=True, metavar="inference.ckpt")
 
-    def run(self, args):
+    @staticmethod
+    def run(args: argparse.Namespace) -> None:
         if args.subcommand == "inference":
-            LOG.info(f"Loading training checkpoint from {args.input}, please wait...")
+            LOG.info("Loading training checkpoint from %s, please wait...", args.input)
 
             from anemoi.training.utils.checkpoint import load_and_prepare_model
             from anemoi.training.utils.checkpoint import save_inference_checkpoint
@@ -38,7 +40,7 @@ class Checkpoint(Command):
             module, metadata = load_and_prepare_model(args.input)
             path = save_inference_checkpoint(module, metadata, args.output)
 
-            LOG.info(f"Inference checkpoint saved to {path}")
+            LOG.info("Inference checkpoint saved to %s", path)
             return
 
 

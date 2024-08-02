@@ -1,11 +1,18 @@
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import logging
 import os
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from lightning_fabric.utilities.optimizer import _optimizers_to_device
-from pytorch_lightning.overrides.distributed import _sync_module_states
+from lightning_fabric.utilities.optimizer import _optimizers_to_device  # noqa: PLC2701
+from pytorch_lightning.overrides.distributed import _sync_module_states  # noqa: PLC2701
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.trainer.states import TrainerFn
 
@@ -17,7 +24,17 @@ LOGGER = logging.getLogger(__name__)
 class DDPGroupStrategy(DDPStrategy):
     """Distributed Data Parallel strategy with group communication."""
 
-    def __init__(self, num_gpus_per_model: int, **kwargs) -> None:
+    def __init__(self, num_gpus_per_model: int, **kwargs: dict) -> None:
+        """Initialize the distributed strategy.
+
+        Parameters
+        ----------
+        num_gpus_per_model : int
+            Number of GPUs per model to shard over.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        """
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
 
@@ -33,14 +50,15 @@ class DDPGroupStrategy(DDPStrategy):
         )
 
         model_comm_group_ranks = np.split(
-            np.arange(self.world_size, dtype=int), int(self.world_size / self.model_comm_group_size)
+            np.arange(self.world_size, dtype=int),
+            int(self.world_size / self.model_comm_group_size),
         )
         model_comm_groups = [
             torch.distributed.new_group(x) for x in model_comm_group_ranks
         ]  # every rank has to create all of these
 
         model_comm_group_id, model_comm_group_nr, model_comm_group_rank = self.get_my_model_comm_group(
-            self.model_comm_group_size
+            self.model_comm_group_size,
         )
         model_comm_group = model_comm_groups[model_comm_group_id]
         self.model.set_model_comm_group(model_comm_group)
@@ -88,7 +106,7 @@ class DDPGroupStrategy(DDPStrategy):
         # seed ranks
         self.seed_rnd(model_comm_group_id)
 
-    def get_my_model_comm_group(self, num_gpus_per_model):
+    def get_my_model_comm_group(self, num_gpus_per_model: int) -> tuple[int, np.ndarray, int]:
         """Determine tasks that work together and from a model group."""
         model_comm_groups = np.arange(0, self.world_size, dtype=np.int32)
         model_comm_groups = np.split(model_comm_groups, self.world_size / num_gpus_per_model)
@@ -101,7 +119,7 @@ class DDPGroupStrategy(DDPStrategy):
                 model_comm_group_rank = np.ravel(np.asarray(model_comm_group == self.global_rank).nonzero())[0]
         return model_comm_group_id, model_comm_group_nr, model_comm_group_rank
 
-    def seed_rnd(self, model_comm_group_id: int) -> None:
+    def seed_rnd(self, model_comm_group_id: int) -> None:  # noqa: PLR6301
         """Seed the random number generators for the rank."""
         base_seed = get_base_seed()
         initial_seed = base_seed * (model_comm_group_id + 1)
@@ -109,7 +127,10 @@ class DDPGroupStrategy(DDPStrategy):
         np_rng = np.random.default_rng(rnd_seed)
         sanity_rnd = (torch.rand(1), np_rng.random())
         LOGGER.debug(
-            "Strategy: Rank %d, model comm group id %d, base seed %d, seeded with %d, running with random seed: %d, sanity rnd: %s",
+            (
+                "Strategy: Rank %d, model comm group id %d, base seed %d, seeded with %d, "
+                "running with random seed: %d, sanity rnd: %s"
+            ),
             int(os.environ.get("SLURM_PROCID", "0")),
             model_comm_group_id,
             base_seed,

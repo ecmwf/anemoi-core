@@ -1,20 +1,29 @@
+# (C) Copyright 2024 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+
+from __future__ import annotations
+
 import datetime
 import logging
 import os
 from functools import cached_property
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from anemoi.utils.provenance import gather_provenance_info
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
-from torch_geometric.data import HeteroData
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
@@ -25,6 +34,10 @@ from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.utils.provenance import gather_provenance_info
+
+if TYPE_CHECKING:
+    from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +46,14 @@ class AnemoiTrainer:
     """Utility class for training the model."""
 
     def __init__(self, config: DictConfig) -> None:
+        """Initialize the Anemoi trainer.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Config object from Hydra.
+
+        """
         # Allow for lower internal precision of float32 matrix multiplications.
         # This can increase performance (and TensorCore usage, where available).
         torch.set_float32_matmul_precision("high")
@@ -48,9 +69,9 @@ class AnemoiTrainer:
         self.config.training.run_id = self.run_id
         LOGGER.info("Run id: %s", self.config.training.run_id)
         # Update paths to contain the run ID
-        self.update_paths()
+        self._update_paths()
 
-        self.log_information()
+        self._log_information()
 
     @cached_property
     def datamodule(self) -> AnemoiDatasetsDataModule:
@@ -104,7 +125,8 @@ class AnemoiTrainer:
         from anemoi.graphs.create import GraphCreator
 
         return GraphCreator(config=self.config.graph).create(
-            save_path=graph_filename, overwrite=self.config.graph.overwrite
+            save_path=graph_filename,
+            overwrite=self.config.graph.overwrite,
         )
 
     @cached_property
@@ -123,7 +145,7 @@ class AnemoiTrainer:
         return GraphForecaster(**kwargs)
 
     @rank_zero_only
-    def get_mlflow_run_id(self) -> str:
+    def _get_mlflow_run_id(self) -> str:
         run_id = self.mlflow_logger.run_id
         # for resumed runs or offline runs logging this can be uesful
         LOGGER.info("Mlflow Run id: %s", run_id)
@@ -138,7 +160,7 @@ class AnemoiTrainer:
 
         if self.config.diagnostics.log.mlflow.enabled:
             # if using mlflow with a new run get the run_id from mlflow
-            return self.get_mlflow_run_id()
+            return self._get_mlflow_run_id()
 
         # Generate a random UUID
         import uuid
@@ -161,7 +183,7 @@ class AnemoiTrainer:
         return get_tensorboard_logger(self.config)
 
     @cached_property
-    def last_checkpoint(self) -> Optional[str]:
+    def last_checkpoint(self) -> str | None:
         """Path to the last checkpoint."""
         if not self.start_from_checkpoint:
             return None
@@ -201,7 +223,7 @@ class AnemoiTrainer:
         )
 
     @cached_property
-    def profiler(self) -> Optional[PyTorchProfiler]:
+    def profiler(self) -> PyTorchProfiler | None:
         """Returns a pytorch profiler object, if profiling is enabled."""
         if self.config.diagnostics.profiler:
             assert (
@@ -218,7 +240,7 @@ class AnemoiTrainer:
                 ],
                 schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    dir_name=self.config.hardware.paths.logs.tensorboard
+                    dir_name=self.config.hardware.paths.logs.tensorboard,
                 ),
                 profile_memory=True,
                 record_shapes=True,
@@ -239,18 +261,18 @@ class AnemoiTrainer:
 
     @cached_property
     def accelerator(self) -> str:
-        assert self.config.hardware.accelerator in [
+        assert self.config.hardware.accelerator in {
             "auto",
             "cpu",
             "gpu",
             "cuda",
             "tpu",
-        ], f"Invalid accelerator ({self.config.hardware.accelerator}) in hardware config."
+        }, f"Invalid accelerator ({self.config.hardware.accelerator}) in hardware config."
         if self.config.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
         return self.config.hardware.accelerator
 
-    def log_information(self) -> None:
+    def _log_information(self) -> None:
         # Log number of variables (features)
         num_fc_features = len(self.datamodule.ds_train.data.variables) - len(self.config.data.forcing)
         LOGGER.debug("Total number of prognostic variables: %d", num_fc_features)
@@ -269,7 +291,7 @@ class AnemoiTrainer:
         LOGGER.debug("Effective learning rate: %.3e", total_number_of_model_instances * self.config.training.lr.rate)
         LOGGER.debug("Rollout window length: %d", self.config.training.rollout.start)
 
-    def update_paths(self) -> None:
+    def _update_paths(self) -> None:
         """Update the paths in the configuration."""
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
@@ -282,7 +304,7 @@ class AnemoiTrainer:
             self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, parent_run)
 
     @cached_property
-    def strategy(self):
+    def strategy(self) -> DDPGroupStrategy:
         """Training strategy."""
         return DDPGroupStrategy(
             self.config.hardware.num_gpus_per_model,
@@ -317,13 +339,13 @@ class AnemoiTrainer:
         )
 
         trainer.fit(
-            self.model, datamodule=self.datamodule, ckpt_path=None if self.load_weights_only else self.last_checkpoint
+            self.model,
+            datamodule=self.datamodule,
+            ckpt_path=None if self.load_weights_only else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
-            LOGGER.debug(f"memory summary: {torch.cuda.memory_summary()}")
-
-        LOGGER.debug(f"memory summary: {torch.cuda.memory_summary()}")
+            LOGGER.debug("memory summary: %s", torch.cuda.memory_summary())
 
         LOGGER.debug("---- DONE. ----")
 

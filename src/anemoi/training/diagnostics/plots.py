@@ -1,5 +1,14 @@
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+from __future__ import annotations
+
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
@@ -7,7 +16,6 @@ import numpy as np
 from matplotlib.colors import BoundaryNorm
 from matplotlib.colors import ListedColormap
 from matplotlib.colors import TwoSlopeNorm
-from matplotlib.figure import Figure
 from pyshtools.expand import SHGLQ
 from pyshtools.expand import SHExpandGLQ
 from scipy.interpolate import griddata
@@ -15,9 +23,21 @@ from scipy.interpolate import griddata
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
 
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
+from dataclasses import dataclass
+
 LOGGER = logging.getLogger(__name__)
 
 continents = Coastlines()
+
+
+@dataclass
+class LatLonData:
+    latitudes: np.ndarray
+    longitudes: np.ndarray
+    data: np.ndarray
 
 
 def init_plot_settings() -> None:
@@ -37,13 +57,14 @@ def init_plot_settings() -> None:
     plt.rc("figure", titlesize=small_font_size)  # fontsize of the figure title
 
 
-def _hide_axes_ticks(ax) -> None:
+def _hide_axes_ticks(ax: plt.Axes) -> None:
     """Hide x/y-axis ticks.
 
     Parameters
     ----------
     ax : matplotlib.axes
         Axes object handle
+
     """
     plt.setp(ax.get_xticklabels(), visible=False)
     plt.setp(ax.get_yticklabels(), visible=False)
@@ -53,8 +74,8 @@ def _hide_axes_ticks(ax) -> None:
 def plot_loss(
     x: np.ndarray,
     colors: np.ndarray,
-    xticks=None,
-    legend_patches=None,
+    xticks: dict[str, int] | None = None,
+    legend_patches: list | None = None,
 ) -> Figure:
     """Plots data for one multilevel sample.
 
@@ -73,6 +94,7 @@ def plot_loss(
     -------
     Figure
         The figure object handle.
+
     """
     # create plot
     # more space for legend
@@ -92,7 +114,7 @@ def plot_loss(
     return fig
 
 
-def plot_power_spectrum(
+def plot_power_spectrum(  # noqa: PLR0914
     parameters: dict[str, int],
     latlons: np.ndarray,
     x: np.ndarray,
@@ -121,6 +143,7 @@ def plot_power_spectrum(
     -------
     Figure
         The figure object handle.
+
     """
     n_plots_x, n_plots_y = len(parameters), 1
 
@@ -172,10 +195,14 @@ def plot_power_spectrum(
         amplitude_p = np.array(compute_spectra(yp_i))
 
         ax[plot_idx].loglog(
-            np.arange(1, amplitude_t.shape[0]), amplitude_t[1 : (amplitude_t.shape[0])], label="Truth (ERA5)"
+            np.arange(1, amplitude_t.shape[0]),
+            amplitude_t[1 : (amplitude_t.shape[0])],
+            label="Truth (ERA5)",
         )
         ax[plot_idx].loglog(
-            np.arange(1, amplitude_p.shape[0]), amplitude_p[1 : (amplitude_p.shape[0])], label="Predicted"
+            np.arange(1, amplitude_p.shape[0]),
+            amplitude_p[1 : (amplitude_p.shape[0])],
+            label="Predicted",
         )
 
         ax[plot_idx].legend()
@@ -200,6 +227,7 @@ def compute_spectra(field: np.ndarray) -> np.ndarray:
     -------
     np.ndarray
         spectra of field by wavenumber
+
     """
     field = np.array(field)
 
@@ -212,9 +240,7 @@ def compute_spectra(field: np.ndarray) -> np.ndarray:
     coeff_amp = coeffs_field[0, :, :] ** 2 + coeffs_field[1, :, :] ** 2
 
     # sum over meridional direction
-    spectra = np.sum(coeff_amp, axis=0)
-
-    return spectra
+    return np.sum(coeff_amp, axis=0)
 
 
 def plot_histogram(
@@ -243,6 +269,7 @@ def plot_histogram(
     -------
     Figure
         The figure object handle.
+
     """
     n_plots_x, n_plots_y = len(parameters), 1
 
@@ -263,9 +290,9 @@ def plot_histogram(
             hist_yp, bins_yp = np.histogram(yp, bins=100)
 
         # Visualization trick for tp
-        if variable_name == "tp" or variable_name == "cp":
-            hist_yt = hist_yt * bins_yt[:-1]
-            hist_yp = hist_yp * bins_yp[:-1]
+        if variable_name in {"tp", "cp"}:
+            hist_yt *= bins_yt[:-1]
+            hist_yp *= bins_yp[:-1]
         # Plot the modified histogram
         ax[plot_idx].bar(bins_yt[:-1], hist_yt, width=np.diff(bins_yt), color="blue", alpha=0.7, label="Truth (ERA5)")
         ax[plot_idx].bar(bins_yp[:-1], hist_yp, width=np.diff(bins_yp), color="red", alpha=0.7, label="AIFS")
@@ -280,7 +307,7 @@ def plot_histogram(
     return fig
 
 
-def plot_predicted_multilevel_flat_sample(
+def plot_predicted_multilevel_flat_sample(  # noqa: PLR0913, PLR0917
     parameters: dict[str, int],
     n_plots_per_sample: int,
     latlons: np.ndarray,
@@ -318,6 +345,7 @@ def plot_predicted_multilevel_flat_sample(
     -------
     Figure
         The figure object handle.
+
     """
     n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
 
@@ -340,9 +368,9 @@ def plot_predicted_multilevel_flat_sample(
     return fig
 
 
-def plot_flat_sample(
-    fig,
-    ax,
+def plot_flat_sample(  # noqa: PLR0913, PLR0917
+    fig: Figure,
+    ax: plt.Axes,
     lon: np.ndarray,
     lat: np.ndarray,
     input_: np.ndarray,
@@ -378,8 +406,9 @@ def plot_flat_sample(
         Accumulation levels used for precipitation related plots
     cmap_precip: str
         Colors used for each accumulation level
+
     """
-    if vname == "tp" or vname == "cp":
+    if vname in {"tp", "cp"}:
         # Create a custom colormap for precipitation
         nws_precip_colors = cmap_precip
         precip_colormap = ListedColormap(nws_precip_colors)
@@ -389,28 +418,42 @@ def plot_flat_sample(
         norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
 
         # converting to mm from m
-        truth = truth * 1000.0
-        pred = pred * 1000.0
-        scatter_plot(fig, ax[1], lon, lat, truth, cmap=precip_colormap, norm=norm, title=f"{vname} target")
-        scatter_plot(fig, ax[2], lon, lat, pred, cmap=precip_colormap, norm=norm, title=f"{vname} pred")
+        truth *= 1000.0
+        pred *= 1000.0
+        scatter_plot(fig, ax[1], lon=lon, lat=lat, data=truth, cmap=precip_colormap, norm=norm, title=f"{vname} target")
+        scatter_plot(fig, ax[2], lon=lon, lat=lat, data=pred, cmap=precip_colormap, norm=norm, title=f"{vname} pred")
         scatter_plot(
-            fig, ax[3], lon, lat, truth - pred, cmap="bwr", norm=TwoSlopeNorm(vcenter=0.0), title=f"{vname} pred err"
+            fig,
+            ax[3],
+            lon=lon,
+            lat=lat,
+            data=truth - pred,
+            cmap="bwr",
+            norm=TwoSlopeNorm(vcenter=0.0),
+            title=f"{vname} pred err",
         )
     else:
-        scatter_plot(fig, ax[1], lon, lat, truth, title=f"{vname} target")
-        scatter_plot(fig, ax[2], lon, lat, pred, title=f"{vname} pred")
+        scatter_plot(fig, ax[1], lon=lon, lat=lat, data=truth, title=f"{vname} target")
+        scatter_plot(fig, ax[2], lon=lon, lat=lat, data=pred, title=f"{vname} pred")
         scatter_plot(
-            fig, ax[3], lon, lat, truth - pred, cmap="bwr", norm=TwoSlopeNorm(vcenter=0.0), title=f"{vname} pred err"
+            fig,
+            ax[3],
+            lon=lon,
+            lat=lat,
+            data=truth - pred,
+            cmap="bwr",
+            norm=TwoSlopeNorm(vcenter=0.0),
+            title=f"{vname} pred err",
         )
 
     if sum(input_) != 0:
-        scatter_plot(fig, ax[0], lon, lat, input_, title=f"{vname} input")
+        scatter_plot(fig, ax[0], lon=lon, lat=lat, data=input_, title=f"{vname} input")
         scatter_plot(
             fig,
             ax[4],
-            lon,
-            lat,
-            pred - input_,
+            lon=lon,
+            lat=lat,
+            data=pred - input_,
             cmap="bwr",
             norm=TwoSlopeNorm(vcenter=0.0),
             title=f"{vname} increment [pred - input]",
@@ -418,9 +461,9 @@ def plot_flat_sample(
         scatter_plot(
             fig,
             ax[5],
-            lon,
-            lat,
-            truth - input_,
+            lon=lon,
+            lat=lat,
+            data=truth - input_,
             cmap="bwr",
             norm=TwoSlopeNorm(vcenter=0.0),
             title=f"{vname} persist err",
@@ -431,15 +474,16 @@ def plot_flat_sample(
         ax[5].axis("off")
 
 
-def scatter_plot(
-    fig,
-    ax,
+def scatter_plot(  # noqa: PLR0913
+    fig: Figure,
+    ax: plt.Axes,
+    *,
     lon: np.array,
     lat: np.array,
     data: np.array,
     cmap: str = "viridis",
-    norm: Optional[str] = None,
-    title: Optional[str] = None,
+    norm: str | None = None,
+    title: str | None = None,
 ) -> None:
     """Lat-lon scatter plot: can work with arbitrary grids.
 
@@ -503,6 +547,7 @@ def plot_graph_features(
     -------
     Figure
         Figure object handle
+
     """
     nplots = features.shape[-1]
     figsize = (nplots * 4, 3)
@@ -515,6 +560,6 @@ def plot_graph_features(
 
     for i in range(nplots):
         ax_ = ax[i] if nplots > 1 else ax
-        scatter_plot(fig, ax_, pc_lon, pc_lat, features[..., i])
+        scatter_plot(fig, ax_, lon=pc_lon, lat=pc_lat, data=features[..., i])
 
     return fig

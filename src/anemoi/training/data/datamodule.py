@@ -1,14 +1,21 @@
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import logging
 import os
 from functools import cached_property
 
 import pytorch_lightning as pl
-from anemoi.datasets.data import open_dataset
-from anemoi.models.data_indices.collection import IndexCollection
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
+from anemoi.datasets.data import open_dataset
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.data.dataset import worker_init_func
 
@@ -25,6 +32,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         ----------
         config : DictConfig
             Job configuration
+
         """
         super().__init__()
 
@@ -41,7 +49,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         ), f"Timestep isn't a multiple of data frequency, {timestep}, or data frequency, {frequency}"
         self.timeincrement = int(timestep[:-1]) // int(frequency[:-1])
         LOGGER.info(
-            f"Timeincrement set to {self.timeincrement} for data with frequency, {frequency}, and timestep, {timestep}"
+            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
+            self.timeincrement,
+            frequency,
+            timestep,
         )
 
         self.global_rank = int(os.environ.get("SLURM_PROCID", "0"))  # global rank
@@ -84,7 +95,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             )
             self.config.dataloader.training.end = self.config.dataloader.validation.start - 1
 
-    def _check_resolution(self, resolution) -> None:
+    def _check_resolution(self, resolution) -> None:  # noqa: ANN001
         assert (
             self.config.data.resolution.lower() == resolution.lower()
         ), f"Network resolution {self.config.data.resolution=} does not match dataset resolution {resolution=}"
@@ -104,7 +115,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
-            open_dataset(OmegaConf.to_container(self.config.dataloader.training, resolve=True)), label="train"
+            open_dataset(OmegaConf.to_container(self.config.dataloader.training, resolve=True)),
+            label="train",
         )
 
     @cached_property
@@ -140,7 +152,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
 
     def _get_dataset(
-        self, data_reader, shuffle: bool = True, rollout: int = 1, label: str = "generic"
+        self,
+        data_reader,  # noqa: ANN001
+        shuffle: bool = True,  # noqa: FBT001, FBT002
+        rollout: int = 1,
+        label: str = "generic",
     ) -> NativeGridDataset:
         r = max(rollout, self.rollout)
         data = NativeGridDataset(
@@ -158,7 +174,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return data
 
     def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:
-        assert stage in ["training", "validation", "test"]
+        assert stage in {"training", "validation", "test"}
         return DataLoader(
             ds,
             batch_size=self.config.dataloader.batch_size[stage],

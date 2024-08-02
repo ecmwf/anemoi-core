@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # (C) Copyright 2024 ECMWF.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -10,10 +9,14 @@
 
 import logging
 import sys
+from typing import TYPE_CHECKING
 
 from anemoi.training.train.train import main as anemoi_train
 
 from . import Command
+
+if TYPE_CHECKING:
+    import argparse
 
 LOGGER = logging.getLogger(__name__)
 
@@ -21,18 +24,20 @@ LOGGER = logging.getLogger(__name__)
 class Train(Command):
     accept_unknown_args = True
 
-    def add_arguments(self, parser):
+    @staticmethod
+    def add_arguments(parser: "argparse.ArgumentParser") -> "argparse.ArgumentParser":
         return parser
 
-    def run(self, args, unknown_args=None):
+    @staticmethod
+    def run(args, unknown_args=None) -> None:  # noqa: ANN001
         del args
 
         if unknown_args is not None:
-            sys.argv = [sys.argv[0]] + unknown_args
+            sys.argv = [sys.argv[0], *unknown_args]
         else:
             sys.argv = [sys.argv[0]]
 
-        LOGGER.info(f"Running anemoi training command with overrides: {sys.argv[1:]}")
+        LOGGER.info("Running anemoi training command with overrides: %s", sys.argv[1:])
         anemoi_train()
 
 

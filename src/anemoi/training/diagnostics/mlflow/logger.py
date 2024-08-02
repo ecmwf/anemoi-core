@@ -5,36 +5,48 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
+
 import io
 import logging
 import os
 import re
 import sys
 import time
-from argparse import Namespace
 from pathlib import Path
 from threading import Thread
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
-from typing import Optional
-from typing import Union
 from weakref import WeakValueDictionary
 
 import requests
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
-from pytorch_lightning.loggers.mlflow import _convert_params
-from pytorch_lightning.loggers.mlflow import _flatten_dict
+from pytorch_lightning.loggers.mlflow import _convert_params  # noqa: PLC2701
+from pytorch_lightning.loggers.mlflow import _flatten_dict  # noqa: PLC2701
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 
+if TYPE_CHECKING:
+    from argparse import Namespace
+
+    from omegaconf import OmegaConf
+
 LOGGER = logging.getLogger(__name__)
 
 
-def health_check(tracking_uri):
+def health_check(tracking_uri: str) -> None:
     """Query the health endpoint of an MLflow server.
-    If the server is not reachable, raise an error and remind the user that authentication may be required."""
 
+    If the server is not reachable, raise an error and remind the user that authentication may be required.
+
+    Raises
+    ------
+    ConnectionError
+        If the server is not reachable.
+
+    """
     token = os.getenv("MLFLOW_TRACKING_TOKEN")
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -49,7 +61,7 @@ def health_check(tracking_uri):
     raise ConnectionError(error_msg)
 
 
-def get_mlflow_run_params(config, tracking_uri):
+def get_mlflow_run_params(config: OmegaConf, tracking_uri: str) -> tuple[str | None, str, dict[str, Any]]:
     run_id = None
     tags = {"projectName": config.diagnostics.log.mlflow.project_name}
     # create a tag with the command used to run the script
@@ -111,13 +123,34 @@ class LogsMonitor:
         MLflow run ID.
     log_time_interval : int
         Interval (in seconds) at which to write buffered terminal outputs, default 30
+
     """
 
     _buffer_registry = WeakValueDictionary()
     _old_out_write = None
     _old_err_write = None
 
-    def __init__(self, artifact_save_dir, experiment, run_id, log_time_interval=30.0) -> None:
+    def __init__(
+        self,
+        artifact_save_dir: str | Path,
+        experiment: MLFlowLogger.experiment,
+        run_id: str,
+        log_time_interval: float = 30.0,
+    ) -> None:
+        """Initialize the LogsMonitor.
+
+        Parameters
+        ----------
+        artifact_save_dir : str | Path
+            Directory for artifact saves.
+        experiment : MLFlowLogger.experiment
+            Experiment from MLFlow
+        run_id : str
+            Run ID
+        log_time_interval : float, optional
+            Logging time interval in seconds, by default 30.0
+
+        """
         # active run
         self.experiment = experiment
         self.run_id = run_id
@@ -144,7 +177,7 @@ class LogsMonitor:
         cls._old_out_write = sys.stdout.write
         cls._old_err_write = sys.stderr.write
 
-        def new_out_write(data) -> None:
+        def new_out_write(data) -> None:  # noqa: ANN001
             # out to buffer
             cls._old_out_write(data)
             if isinstance(data, str):
@@ -152,7 +185,7 @@ class LogsMonitor:
             for buffer in cls._buffer_registry.values():
                 buffer.write(data)
 
-        def new_err_write(data) -> None:
+        def new_err_write(data) -> None:  # noqa: ANN001
             # err to buffer
             cls._old_err_write(data)
             if isinstance(data, str):
@@ -179,18 +212,17 @@ class LogsMonitor:
         self._buffer_registry[id(self)] = self._io_buffer
         # Start thread to asynchronously collect logs
         self._th_collector.start()
-        LOGGER.info("Termial Log Path: " + str(self.file_save_path))
+        LOGGER.info("Termial Log Path: %s", self.file_save_path)
         if os.getenv("SLURM_JOB_ID"):
-            LOGGER.info("SLURM job id: " + os.getenv("SLURM_JOB_ID"))
+            LOGGER.info("SLURM job id: %s", os.getenv("SLURM_JOB_ID"))
 
-    def finish(self, status) -> None:
+    def finish(self, status: str) -> None:
         """Stop the monitoring and close the log file."""
         if not self._started:
             return
         LOGGER.info(
-            "Stopping terminal log monitoring and saving buffered terminal outputs. Final status: "
-            + status.upper()
-            + "."
+            ("Stopping terminal log monitoring and saving buffered terminal outputs. Final status: %s"),
+            status.upper(),
         )
         self._shutdown = True
         # read and store remaining buffered logs
@@ -238,11 +270,12 @@ class LogsMonitor:
 
         ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")
 
-        def _handle_csi(line):
+        def _handle_csi(line: bytes) -> bytes:
             # removes the cursor up and down symbols from the line
             # skip tqdm status bar updates ending with "curser up" but the last one in buffer to save space
-            def _remove_csi(line):
-                # replacing the leftmost non-overlapping occurrences of pattern ansi_csi_re in string line by the replacement ""
+            def _remove_csi(line: bytes) -> bytes:
+                # replacing the leftmost non-overlapping occurrences of
+                # pattern ansi_csi_re in string line by the replacement ""
                 return re.sub(ansi_csi_re, b"", line)
 
             for match in ansi_csi_re.finditer(line):
@@ -261,10 +294,10 @@ class LogsMonitor:
         with self.file_save_path.open("a") as logfile:
             for line in lines:
                 # handle cursor up and down symbols
-                line = _handle_csi(line)
+                cleaned_line = _handle_csi(line)
                 # handle each line for carriage returns
-                line = line.rsplit(b"\r")[-1]
-                logfile.write(line.decode())
+                cleaned_line = cleaned_line.rsplit(b"\r")[-1]
+                logfile.write(cleaned_line.decode())
 
             logfile.flush()
         self.experiment.log_artifact(self.run_id, str(self.file_save_path))
@@ -273,24 +306,54 @@ class LogsMonitor:
 class AnemoiMLflowLogger(MLFlowLogger):
     """A custom MLflow logger that logs terminal output."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         experiment_name: str = "lightning_logs",
-        run_name: Optional[str] = None,
-        tracking_uri: Optional[str] = os.getenv("MLFLOW_TRACKING_URI"),
-        tags: Optional[dict[str, Any]] = None,
-        save_dir: Optional[str] = "./mlruns",
-        log_model: Literal[True, False, "all"] = False,
+        run_name: str | None = None,
+        tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
+        tags: dict[str, Any] | None = None,
+        save_dir: str | None = "./mlruns",
+        log_model: Literal[True, False, "all"] = False,  # noqa: FBT002
         prefix: str = "",
-        resumed: Optional[bool] = False,
-        forked: Optional[bool] = False,
-        run_id: Optional[str] = None,
-        offline: Optional[bool] = False,
-        authentication: Optional[bool] = None,
-        log_hyperparams: Optional[bool] = True,
-        # artifact_location: Optional[str] = None,
-        # avoid passing any artifact location otherwise it would mess up the offline logging of artifacts
+        resumed: bool | None = False,  # noqa: FBT001, FBT002
+        forked: bool | None = False,  # noqa: FBT001, FBT002
+        run_id: str | None = None,
+        offline: bool | None = False,  # noqa: FBT001, FBT002
+        authentication: bool | None = None,  # noqa: FBT001
+        log_hyperparams: bool | None = True,  # noqa: FBT001, FBT002
     ) -> None:
+        """Initialize the AnemoiMLflowLogger.
+
+        Parameters
+        ----------
+        experiment_name : str, optional
+            Name of experiment, by default "lightning_logs"
+        run_name : str | None, optional
+            Name of run, by default None
+        tracking_uri : str | None, optional
+            Tracking URI of server, by default os.getenv("MLFLOW_TRACKING_URI")
+        tags : dict[str, Any] | None, optional
+            Tags to apply, by default None
+        save_dir : str | None, optional
+            Directory to save logs to, by default "./mlruns"
+        log_model : Literal[True, False, "all"], optional
+            Log model checkpoints to server (expensive), by default False
+        prefix : str, optional
+            Prefix for experiments, by default ""
+        resumed : bool | None, optional
+            Whether the run was resumed or not, by default False
+        forked : bool | None, optional
+            Whether the run was forked or not, by default False
+        run_id : str | None, optional
+            Run id of current run, by default None
+        offline : bool | None, optional
+            Whether to run offline or not, by default False
+        authentication : bool | None, optional
+            Whether to authenticate with server or not, by default None
+        log_hyperparams : bool | None, optional
+            Whether to log hyperparameters, by default True
+
+        """
         if offline:
             # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
             tracking_uri = None
@@ -311,7 +374,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             if offline:
                 LOGGER.info("MLflow is logging offline.")
             else:
-                LOGGER.info(f"MLflow token authentication {'enabled' if enabled else 'disabled'} for {tracking_uri}")
+                LOGGER.info("MLflow token authentication {'enabled' if enabled else 'disabled'} for %s", tracking_uri)
                 self.auth.authenticate()
                 health_check(tracking_uri)
 
@@ -327,7 +390,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         )
 
     @property
-    def experiment(self):
+    def experiment(self) -> MLFlowLogger.experiment:
         if rank_zero_only.rank == 0:
             self.auth.authenticate()
         return super().experiment
@@ -348,7 +411,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         system_monitor.start()
 
     @rank_zero_only
-    def log_terminal_output(self, artifact_save_dir="") -> None:
+    def log_terminal_output(self, artifact_save_dir: str | Path = "") -> None:
         """Log terminal logs to MLflow."""
         # path for logging terminal logs
         # for now the 'terminal_logs' file is kept in the same folder as the plots
@@ -363,7 +426,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self.run_id_to_log_monitor[self.run_id] = log_monitor
         log_monitor.start()
 
-    def _clean_params(self, params):
+    @staticmethod
+    def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
         """Clean up params to avoid issues with mlflow.
 
         Too many logged params will make the server take longer to render the
@@ -376,7 +440,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         return params
 
     @rank_zero_only
-    def log_hyperparams(self, params: Union[dict[str, Any], Namespace]) -> None:
+    def log_hyperparams(self, params: dict[str, Any] | Namespace) -> None:
         """Overwrite the log_hyperparams method to flatten config params using '.'."""
         if self._flag_log_hparams:
             params = _convert_params(params)
@@ -386,7 +450,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
             from mlflow.entities import Param
 
             # Truncate parameter values to 250 characters.
-            # TODO: MLflow 1.28 allows up to 500 characters: https://github.com/mlflow/mlflow/releases/tag/v1.28.0
+            # TODO (Ana Prieto Nemesio): MLflow 1.28 allows up to 500 characters: # noqa: FIX002
+            # https://github.com/mlflow/mlflow/releases/tag/v1.28.0
             params_list = [Param(key=k, value=str(v)[:250]) for k, v in params.items()]
 
             for idx in range(0, len(params_list), 100):

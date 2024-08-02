@@ -1,15 +1,25 @@
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+from __future__ import annotations
+
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
-import pytorch_lightning as pl
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+
+if TYPE_CHECKING:
+    import pytorch_lightning as pl
 
 LOGGER = logging.getLogger(__name__)
 
 
-def get_mlflow_logger(config: DictConfig):
+def get_mlflow_logger(config: DictConfig) -> None:
     if not config.diagnostics.log.mlflow.enabled:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
@@ -34,9 +44,12 @@ def get_mlflow_logger(config: DictConfig):
     log_hyperparams = True
     if resumed and not config.diagnostics.log.mlflow.on_resume_create_child:
         LOGGER.info(
-            "Resuming run without creating child run - MLFlow logs will not update the\
-                initial runs hyperparameters with those of the resumed run.\
-                To update the initial run's hyperparameters, set `diagnostics.log.mlflow.on_resume_create_child: True`.",
+            (
+                "Resuming run without creating child run - MLFlow logs will not update the"
+                "initial runs hyperparameters with those of the resumed run."
+                "To update the initial run's hyperparameters, set "
+                "`diagnostics.log.mlflow.on_resume_create_child: True`."
+            ),
         )
         log_hyperparams = False
 
@@ -66,7 +79,7 @@ def get_mlflow_logger(config: DictConfig):
     return logger
 
 
-def get_tensorboard_logger(config: DictConfig) -> Optional[pl.loggers.TensorBoardLogger]:
+def get_tensorboard_logger(config: DictConfig) -> pl.loggers.TensorBoardLogger | None:
     """Setup TensorBoard experiment logger.
 
     Parameters
@@ -78,6 +91,7 @@ def get_tensorboard_logger(config: DictConfig) -> Optional[pl.loggers.TensorBoar
     -------
     Optional[pl.loggers.TensorBoardLogger]
         Logger object, or None
+
     """
     if not config.diagnostics.log.tensorboard.enabled:
         LOGGER.debug("Tensorboard logging is disabled.")
@@ -85,14 +99,13 @@ def get_tensorboard_logger(config: DictConfig) -> Optional[pl.loggers.TensorBoar
 
     from pytorch_lightning.loggers import TensorBoardLogger
 
-    logger = TensorBoardLogger(
+    return TensorBoardLogger(
         save_dir=config.hardware.paths.logs.tensorboard,
         log_graph=False,
     )
-    return logger
 
 
-def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> Optional[pl.loggers.WandbLogger]:
+def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.loggers.WandbLogger | None:
     """Setup Weights & Biases experiment logger.
 
     Parameters
@@ -106,6 +119,12 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> Optional[
     -------
     Optional[pl.loggers.WandbLogger]
         Logger object
+
+    Raises
+    ------
+    ImportError
+        If `wandb` is not installed
+
     """
     if not config.diagnostics.log.wandb.enabled:
         LOGGER.debug("Weights & Biases logging is disabled.")
@@ -114,7 +133,8 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> Optional[
     try:
         from pytorch_lightning.loggers.wandb import WandbLogger
     except ImportError as err:
-        raise ImportError("To activate W&B logging, please install `wandb` as an optional dependency.") from err
+        msg = "To activate W&B logging, please install `wandb` as an optional dependency."
+        raise ImportError(msg) from err
 
     logger = WandbLogger(
         project="aifs-fc",

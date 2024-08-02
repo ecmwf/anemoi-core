@@ -76,7 +76,7 @@ optional-dependencies.all = [
 ]
 
 optional-dependencies.dev = [
-  "anemoi-training[tests]",
+  "anemoi-training[docs,tests]",
 ]
 optional-dependencies.docs = [
   "nbsphinx",
@@ -102,6 +102,13 @@ scripts.anemoi-training = "anemoi.training.__main__:main"
 version_file = "src/anemoi/training/_version.py"
 
 [tool.ruff]
+target-version = "py39"
+line-length = 120
+src = [
+  "src",
+]
+
+preview = true
 lint.select = [
   "ALL",
 ]
@@ -114,6 +121,9 @@ lint.ignore = [
   "D105",
   "D401",
   "E203",
+  "PLC0415",
   "PT018",
   "S101",
 ]
+
+lint.isort.force-single-line = true

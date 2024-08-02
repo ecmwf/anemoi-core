@@ -1,3 +1,12 @@
+# (C) Copyright 2024 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+
 import logging
 import math
 import os
@@ -7,20 +16,21 @@ from collections.abc import Mapping
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.interface import AnemoiModelInterface
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
+from torch.distributed.distributed_c10d import ProcessGroup
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.mse import WeightedMSELoss
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.utils.jsonify import map_config_to_primitives
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +61,7 @@ class GraphForecaster(pl.LightningModule):
             Indices of the training data,
         metadata : dict
             Provenance information
+
         """
         super().__init__()
 
@@ -114,7 +125,7 @@ class GraphForecaster(pl.LightningModule):
         return self.model(x, self.model_comm_group)
 
     @staticmethod
-    def metrics_loss_scaling(config: DictConfig, data_indices):
+    def metrics_loss_scaling(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, torch.Tensor]:
         metric_ranges = defaultdict(list)
         loss_scaling = (
             np.ones((len(data_indices.data.output.full),), dtype=np.float32) * config.training.loss_scaling.default
@@ -153,18 +164,23 @@ class GraphForecaster(pl.LightningModule):
         loss_scaling = torch.from_numpy(loss_scaling)
         return metric_ranges, loss_scaling
 
-    def set_model_comm_group(self, model_comm_group) -> None:
+    def set_model_comm_group(self, model_comm_group: ProcessGroup) -> None:
         LOGGER.debug("set_model_comm_group: %s", model_comm_group)
         self.model_comm_group = model_comm_group
 
     def advance_input(
-        self, x: torch.Tensor, y_pred: torch.Tensor, batch: torch.Tensor, rollout_step: int
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        batch: torch.Tensor,
+        rollout_step: int,
     ) -> torch.Tensor:
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
         x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
-            ..., self.data_indices.model.output.prognostic
+            ...,
+            self.data_indices.model.output.prognostic,
         ]
 
         # get new "constants" needed for time-varying fields
@@ -181,8 +197,9 @@ class GraphForecaster(pl.LightningModule):
         self,
         batch: torch.Tensor,
         batch_idx: int,
-        validation_mode: bool = False,
+        validation_mode: bool = False,  # noqa: FBT001, FBT002
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        del batch_idx
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         batch = self.model.pre_processors(batch)  # normalized in-place
         metrics = {}
@@ -193,7 +210,6 @@ class GraphForecaster(pl.LightningModule):
         y_preds = []
         for rollout_step in range(self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-            # if rollout_step > 0: torch.cuda.empty_cache() # uncomment if rollout fails with OOM
             y_pred = self(x)
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
@@ -204,7 +220,10 @@ class GraphForecaster(pl.LightningModule):
 
             if validation_mode:
                 metrics_next, y_preds_next = self.calculate_val_metrics(
-                    y_pred, y, rollout_step, enable_plot=self.enable_plot
+                    y_pred,
+                    y,
+                    rollout_step,
+                    enable_plot=self.enable_plot,
                 )
                 metrics.update(metrics_next)
                 y_preds.extend(y_preds_next)
@@ -213,14 +232,21 @@ class GraphForecaster(pl.LightningModule):
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds
 
-    def calculate_val_metrics(self, y_pred, y, rollout_step, enable_plot=False):
+    def calculate_val_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int,
+        enable_plot: bool = False,  # noqa: FBT001, FBT002
+    ) -> tuple[dict, list]:
         metrics = {}
         y_preds = []
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
         for mkey, indices in self.metric_ranges.items():
             metrics[f"{mkey}_{rollout_step + 1}"] = self.metrics(
-                y_pred_postprocessed[..., indices], y_postprocessed[..., indices]
+                y_pred_postprocessed[..., indices],
+                y_postprocessed[..., indices],
             )
 
         if enable_plot:
@@ -249,7 +275,18 @@ class GraphForecaster(pl.LightningModule):
         )
         return train_loss
 
-    def lr_scheduler_step(self, scheduler, metric) -> None:
+    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
+        """Step the learning rate scheduler by Pytorch Lightning.
+
+        Parameters
+        ----------
+        scheduler : CosineLRScheduler
+            Learning rate scheduler object.
+        metric : Optional[Any]
+            Metric object for e.g. ReduceLRonPlateau. Default is None.
+
+        """
+        del metric
         scheduler.step(epoch=self.trainer.global_step)
 
     def on_train_epoch_end(self) -> None:
@@ -284,7 +321,7 @@ class GraphForecaster(pl.LightningModule):
             )
         return val_loss, y_preds
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
         if self.use_zero_optimizer:
             optimizer = ZeroRedundancyOptimizer(
                 self.trainer.model.parameters(),
@@ -294,7 +331,9 @@ class GraphForecaster(pl.LightningModule):
             )
         else:
             optimizer = torch.optim.AdamW(
-                self.trainer.model.parameters(), betas=(0.9, 0.95), lr=self.lr
+                self.trainer.model.parameters(),
+                betas=(0.9, 0.95),
+                lr=self.lr,
             )  # , fused=True)
 
         scheduler = CosineLRScheduler(

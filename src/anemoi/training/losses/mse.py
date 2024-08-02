@@ -1,5 +1,15 @@
+# (C) Copyright 2024 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+
+from __future__ import annotations
+
 import logging
-from typing import Optional
 
 import torch
 from torch import nn
@@ -13,8 +23,8 @@ class WeightedMSELoss(nn.Module):
     def __init__(
         self,
         node_weights: torch.Tensor,
-        data_variances: Optional[torch.Tensor] = None,
-        ignore_nans: Optional[bool] = False,
+        data_variances: torch.Tensor | None = None,
+        ignore_nans: bool | None = False,  # noqa: FBT001, FBT002
     ) -> None:
         """Latitude- and (inverse-)variance-weighted MSE Loss.
 
@@ -26,6 +36,7 @@ class WeightedMSELoss(nn.Module):
             precomputed, per-variable stepwise variance estimate, by default None
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
+
         """
         super().__init__()
 
@@ -36,7 +47,12 @@ class WeightedMSELoss(nn.Module):
         if data_variances is not None:
             self.register_buffer("ivar", data_variances, persistent=True)
 
-    def forward(self, pred: torch.Tensor, target: torch.Tensor, squash=True) -> torch.Tensor:
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,  # noqa: FBT001, FBT002
+    ) -> torch.Tensor:
         """Calculates the lat-weighted MSE loss.
 
         Parameters
@@ -52,6 +68,7 @@ class WeightedMSELoss(nn.Module):
         -------
         torch.Tensor
             Weighted MSE loss
+
         """
         out = torch.square(pred - target)
 
@@ -63,12 +80,12 @@ class WeightedMSELoss(nn.Module):
         if squash:
             out = self.avg_function(out, dim=-1)
             # Weight by area
-            out = out * self.weights.expand_as(out)
+            out *= self.weights.expand_as(out)
             out /= self.sum_function(self.weights.expand_as(out))
             return self.sum_function(out)
 
         # Weight by area
-        out = out * self.weights[..., None].expand_as(out)
+        out *= self.weights[..., None].expand_as(out)
         # keep last dimension (variables) when summing weights
         out /= self.sum_function(self.weights[..., None].expand_as(out), axis=(0, 1, 2))
         return self.sum_function(out, axis=(0, 1, 2))

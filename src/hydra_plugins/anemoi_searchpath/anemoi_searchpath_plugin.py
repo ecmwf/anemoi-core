@@ -19,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiSearchPathPlugin(SearchPathPlugin):
     """Prepend the Anemoi home directory to the hydra searchpath."""
 
-    def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:
+    def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:  # noqa: PLR6301
         """Prepend the Anemoi directories to the hydra searchpath.
 
         This builds the hierarchy of the search path by prepending the Anemoi
@@ -41,21 +41,21 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
                     provider="anemoi-home-searchpath-plugin",
                     path=str(anemoi_home_path),
                 )
-                LOGGER.info(f"Prepending Anemoi Home ({anemoi_home_path}) to the search path.")
-                LOGGER.debug(f"Search path is now: {search_path}")
+                LOGGER.info("Prepending Anemoi Home (%s) to the search path.", anemoi_home_path)
+                LOGGER.debug("Search path is now: %s", search_path)
 
         for suffix in ("", "config"):
             env_anemoi_config_path = os.getenv("ANEMOI_CONFIG_PATH")
             if env_anemoi_config_path is None:
                 continue
-            anemoi_config_path = Path(env_anemoi_config_path)
+            anemoi_config_path = Path(env_anemoi_config_path, suffix)
             if anemoi_config_path.exists() and not Path(anemoi_config_path, "config").exists():
                 search_path.prepend(
                     provider="anemoi-env-searchpath-plugin",
                     path=str(anemoi_config_path),
                 )
-                LOGGER.info(f"Prepending Anemoi Config Env ({anemoi_config_path}) to the search path.")
-                LOGGER.debug(f"Search path is now: {search_path}")
+                LOGGER.info("Prepending Anemoi Config Env (%s) to the search path.", anemoi_config_path)
+                LOGGER.debug("Search path is now: %s", search_path)
 
         for suffix in ("", "config"):
             cwd_path = Path.cwd() / suffix
@@ -64,6 +64,6 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
                     provider="anemoi-cwd-searchpath-plugin",
                     path=str(cwd_path),
                 )
-                LOGGER.info(f"Prepending current user directory ({cwd_path}) to the search path. ")
-                LOGGER.debug(f"Search path is now: {search_path}")
-        LOGGER.info(f"Search path is now: {search_path}")
+                LOGGER.info("Prepending current user directory (%s) to the search path.", cwd_path)
+                LOGGER.debug("Search path is now: %s", search_path)
+        LOGGER.info("Search path is now: %s", search_path)
