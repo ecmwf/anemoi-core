@@ -1,5 +1,4 @@
 import datetime
-import os
 import shutil
 from pathlib import Path
 
@@ -50,8 +49,9 @@ class DummyModule(BoringModel):
 
 
 @pytest.fixture()
-def tmp_path() -> str:
-    return os.environ["HPCPERM"] + "/aifs/checkpoint_test"
+def tmp_path(tmp_path_factory) -> str:
+    # returns a session-scoped temporary directory
+    return str(tmp_path_factory.mktemp("test_checkpoint"))
 
 
 @pytest.fixture()
