@@ -1,12 +1,12 @@
 import datetime
-import json
 import os
 import shutil
 from pathlib import Path
-from zipfile import ZipFile
 
 import pytest
 import torch
+from anemoi.utils.checkpoints import load_metadata
+from anemoi.utils.config import DotDict
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
@@ -14,22 +14,13 @@ from pytorch_lightning.demos.boring_classes import BoringModel
 from torch import nn
 
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
-from anemoi.training.utils.config import DotConfig
 from anemoi.training.utils.jsonify import map_config_to_primitives
-
-
-def read_zipped_model_metadata(path: Path) -> dict:
-    with ZipFile(path) as myzip:
-        base = Path(path).stem
-        with myzip.open(f"{base}/ai-models.json") as myfile:
-            data = myfile.read()
-    return json.loads(data.decode("utf-8"))
 
 
 class DummyModel(torch.nn.Module):
     """Dummy pytorch model for testing."""
 
-    def __init__(self, *, config=DotConfig, metadata=dict):
+    def __init__(self, *, config=DotDict, metadata=dict):
         super().__init__()
 
         self.config = config
@@ -48,7 +39,7 @@ class DummyModel(torch.nn.Module):
 class DummyModule(BoringModel):
     """Dummy lightning module for testing."""
 
-    def __init__(self, *, config=DotConfig, metadata=dict) -> None:
+    def __init__(self, *, config=DotDict, metadata=dict) -> None:
         super().__init__()
         self.model = DummyModel(config=config, metadata=metadata)
         # self.hparams.update({"metadata": dict()})
@@ -66,7 +57,7 @@ def tmp_path() -> str:
 @pytest.fixture()
 def config() -> DictConfig:
     config = DictConfig({"diagnostics": {"log": {"wandb": {"enabled": False}, "mlflow": {"enabled": False}}}})
-    return DotConfig(map_config_to_primitives(OmegaConf.to_container(config, resolve=True)))
+    return DotDict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True)))
 
 
 @pytest.fixture()
@@ -132,7 +123,7 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
             pl_ckpt_name = (ckpt_path.name).replace("inference-", "")
 
             if Path(tmp_path + "/" + pl_ckpt_name).exists():
-                uuid = read_zipped_model_metadata(ckpt_path)["uuid"]
+                uuid = load_metadata(ckpt_path)["uuid"]
 
                 pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name)
 
