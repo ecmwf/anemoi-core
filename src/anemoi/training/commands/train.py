@@ -11,8 +11,6 @@ import logging
 import sys
 from typing import TYPE_CHECKING
 
-from anemoi.training.train.train import main as anemoi_train
-
 from . import Command
 
 if TYPE_CHECKING:
@@ -22,6 +20,8 @@ LOGGER = logging.getLogger(__name__)
 
 
 class Train(Command):
+    """Commands to train Anemoi models."""
+
     accept_unknown_args = True
 
     @staticmethod
@@ -38,6 +38,8 @@ class Train(Command):
             sys.argv = [sys.argv[0]]
 
         LOGGER.info("Running anemoi training command with overrides: %s", sys.argv[1:])
+        from anemoi.training.train.train import main as anemoi_train
+
         anemoi_train()
 
 
