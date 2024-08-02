@@ -76,8 +76,9 @@ optional-dependencies.all = [
 ]
 
 optional-dependencies.dev = [
-  "anemoi-training[docs,tests]",
+  "anemoi-training[docs,tests,all]",
 ]
+
 optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
