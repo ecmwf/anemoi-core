@@ -1,3 +1,10 @@
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import time
 
 import pytest
@@ -125,7 +132,10 @@ def test_api(mocker):
 
     assert response == response_json["response"]
     mock_post.assert_called_once_with(
-        "https://test.url/path", headers={"Content-Type": "application/x-www-form-urlencoded"}, json={"key": "value"}
+        "https://test.url/path",
+        json={"key": "value"},
+        headers=mocker.ANY,
+        timeout=mocker.ANY,
     )
 
     # api error
