@@ -68,13 +68,13 @@ class TokenAuth:
         self._refresh_token = value
         self.refresh_expires = time.time() + (REFRESH_EXPIRE_DAYS * 86400)  # 86400 seconds in a day
 
-    def enabled(self):  # noqa: ANN201
+    def enabled(fn):  # noqa: ANN201, N805
         """Decorator to call or ignore a function based on the `enabled` flag."""
 
-        @wraps(self)
+        @wraps(fn)
         def _wrapper(self, *args: list, **kwargs: dict):  # noqa: ANN001, ANN202
             if self._enabled:
-                return self(self, *args, **kwargs)
+                return fn(self, *args, **kwargs)
             return None
 
         return _wrapper
