@@ -28,8 +28,8 @@ class TokenAuth:
 
     def __init__(
         self,
-        url,  # noqa: ANN001
-        enabled=True,  # noqa: ANN001, FBT002
+        url: str,
+        enabled: bool = True,
     ) -> None:
         """Initialise the token authentication object.
 
@@ -64,7 +64,7 @@ class TokenAuth:
         return self._refresh_token
 
     @refresh_token.setter
-    def refresh_token(self, value) -> None:  # noqa: ANN001
+    def refresh_token(self, value: str) -> None:
         self._refresh_token = value
         self.refresh_expires = time.time() + (REFRESH_EXPIRE_DAYS * 86400)  # 86400 seconds in a day
 
@@ -80,7 +80,7 @@ class TokenAuth:
         return _wrapper
 
     @enabled
-    def login(self, force_credentials: bool = False, **kwargs: dict) -> None:  # noqa: FBT001, FBT002
+    def login(self, force_credentials: bool = False, **kwargs: dict) -> None:
         """Acquire a new refresh token and save it to disk.
 
         If an existing valid refresh token is already on disk it will be used.
@@ -173,7 +173,7 @@ class TokenAuth:
         expire_date = datetime.fromtimestamp(self.refresh_expires, tz=timezone.utc)
         self.log.info("Your MLflow login token is valid until %s UTC", expire_date.strftime("%Y-%m-%d %H:%M:%S"))
 
-    def _token_request(self, username=None, password=None, ignore_exc=False) -> dict:  # noqa: ANN001, FBT002
+    def _token_request(self, username=None, password=None, ignore_exc=False) -> dict:  # noqa: ANN001
         if username is not None and password is not None:
             path = "newtoken"
             payload = {"username": username, "password": password}
