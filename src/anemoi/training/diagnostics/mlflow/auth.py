@@ -5,6 +5,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import os
 import time
 from datetime import datetime
@@ -15,7 +16,6 @@ from getpass import getpass
 import requests
 from requests.exceptions import HTTPError
 
-from anemoi.training.utils.logger import get_code_logger
 from anemoi.utils.config import load_config
 from anemoi.utils.config import save_config
 from anemoi.utils.timer import Timer
@@ -54,7 +54,7 @@ class TokenAuth:
 
         # the command line tool adds a default handler to the root logger on runtime,
         # so we init our logger here (on runtime, not on import) to avoid duplicate handlers
-        self.log = get_code_logger(__name__)
+        self.log = logging.getLogger(__name__)
 
     def __call__(self) -> None:
         self.authenticate()
