@@ -11,7 +11,7 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased]
 
 ### Added
-
+- HEALPixNodes - nodebuilder based on Hierarchical Equal Area isoLatitude Pixelation of a sphere
 ### Changed
 
 ### Removed
