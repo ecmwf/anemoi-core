@@ -9,6 +9,12 @@ repos:
     language: python
     entry: jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace
     additional_dependencies: [jupyter]
+- repo: https://github.com/compilerla/conventional-pre-commit
+  rev: v3.4.0
+  hooks:
+    - id: conventional-pre-commit
+      stages: [commit-msg]
+      args: []
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v4.6.0
   hooks:
