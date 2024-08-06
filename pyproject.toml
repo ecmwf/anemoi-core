@@ -96,6 +96,7 @@ version_file = "src/anemoi/training/_version.py"
 target-version = "py39"
 line-length = 120
 src = [ "src" ]
+exclude = [ "docs/" ]
 
 preview = true
 lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
