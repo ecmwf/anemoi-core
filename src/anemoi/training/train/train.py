@@ -20,6 +20,7 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from anemoi.utils.provenance import gather_provenance_info
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
@@ -27,14 +28,13 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
-from anemoi.training.diagnostics.logging import get_mlflow_logger
-from anemoi.training.diagnostics.logging import get_tensorboard_logger
-from anemoi.training.diagnostics.logging import get_wandb_logger
+from anemoi.training.diagnostics.logger import get_mlflow_logger
+from anemoi.training.diagnostics.logger import get_tensorboard_logger
+from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.provenance import gather_provenance_info
 
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
