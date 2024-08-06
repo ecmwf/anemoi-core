@@ -231,7 +231,7 @@ class AnemoiTrainer:
             ), "Tensorboard logging must be enabled when profiling! Check your job config."
             return PyTorchProfiler(
                 dirpath=self.config.hardware.paths.logs.tensorboard,
-                filename="aifs-profiler",
+                filename="anemoi-profiler",
                 export_to_chrome=False,
                 # profiler-specific keywords
                 activities=[

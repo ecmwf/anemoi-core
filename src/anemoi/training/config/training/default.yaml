@@ -80,6 +80,6 @@ metrics:
 - v_850
 
 pressure_level_scaler:
-  _target_: aifs.data.scaling.ReluPressureLevelScaler
+  _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
   minimum: 0.2
   slope: 0.001

@@ -70,6 +70,8 @@ log:
     enabled: False
     offline: False
     log_model: False
+    project: 'Anemoi'
+    entity: ???
     # logger options (these probably come with some overhead)
     gradients: False
     parameters: False
@@ -81,8 +83,8 @@ log:
     authentication: False
     log_model: False
     tracking_uri: '...'
-    experiment_name: 'aifs_debug'
-    project_name: 'AIFS'
+    experiment_name: 'anemoi_debug'
+    project_name: 'Anemoi'
     system: True
     terminal: True
     run_name: null # If set to null, the run name will be the a random UUID

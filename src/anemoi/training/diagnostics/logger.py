@@ -137,8 +137,8 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
         raise ImportError(msg) from err
 
     logger = WandbLogger(
-        project="aifs-fc",
-        entity="ecmwf-ml",
+        project=config.diagnostics.log.wandb.project,
+        entity=config.diagnostics.log.wandb.entity,
         id=config.training.run_id,
         save_dir=config.hardware.paths.logs.wandb,
         offline=config.diagnostics.log.wandb.offline,
