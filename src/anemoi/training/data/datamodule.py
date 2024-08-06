@@ -8,14 +8,15 @@
 import logging
 import os
 from functools import cached_property
+from typing import Callable
 
 import pytorch_lightning as pl
+from anemoi.datasets.data import open_dataset
+from anemoi.models.data_indices.collection import IndexCollection
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
-from anemoi.datasets.data import open_dataset
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.data.dataset import worker_init_func
 
@@ -95,7 +96,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             )
             self.config.dataloader.training.end = self.config.dataloader.validation.start - 1
 
-    def _check_resolution(self, resolution) -> None:  # noqa: ANN001
+    def _check_resolution(self, resolution: str) -> None:
         assert (
             self.config.data.resolution.lower() == resolution.lower()
         ), f"Network resolution {self.config.data.resolution=} does not match dataset resolution {resolution=}"
@@ -153,8 +154,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def _get_dataset(
         self,
-        data_reader,  # noqa: ANN001
-        shuffle: bool = True,  # noqa: FBT001, FBT002
+        data_reader: Callable,
+        shuffle: bool = True,
         rollout: int = 1,
         label: str = "generic",
     ) -> NativeGridDataset:

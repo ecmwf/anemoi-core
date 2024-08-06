@@ -5,19 +5,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import TYPE_CHECKING
+import argparse
 
-from . import Command
-
-if TYPE_CHECKING:
-    import argparse
+from anemoi.training.commands import Command
 
 
 class MlFlow(Command):
     """Commands to interact with MLflow."""
 
     @staticmethod
-    def add_arguments(command_parser) -> None:  # noqa: ANN001
+    def add_arguments(command_parser: argparse.ArgumentParser) -> None:
         subparsers = command_parser.add_subparsers(dest="subcommand", required=True)
 
         login = subparsers.add_parser(
@@ -28,7 +25,7 @@ class MlFlow(Command):
             "--url",
             help="The URL of the authentication server",
             required=True,
-            # TODO (Gert Mertes): once we have a config file, make this optional #noqa: FIX002, TD003
+            # TODO (Gert Mertes): once we have a config file, make this optional
             # and load default value from config
         )
         login.add_argument(

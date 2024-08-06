@@ -9,6 +9,7 @@ import copy
 import json
 import logging
 
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
 
@@ -92,7 +93,7 @@ class Coastlines:
             lines.append(list(zip(*self.projection(x, y))))  # Convert lat/lon to Cartesian coordinates
         self.lines = LineCollection(lines, linewidth=0.5, color="black")
 
-    def plot_continents(self, ax) -> None:  # noqa: ANN001
+    def plot_continents(self, ax: plt.Axes) -> None:
         # Add the lines to the axis as a collection
         # Note that we have to provide a copy of the lines, because of Matplotlib
         ax.add_collection(copy.copy(self.lines))

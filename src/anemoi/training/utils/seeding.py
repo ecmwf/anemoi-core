@@ -16,6 +16,17 @@ def get_base_seed(base_seed_env: str | None = None) -> int:
     """Gets the base seed from the environment variables.
 
     Option to manually set a seed via export ANEMOI_BASE_SEED=xxx in job script
+
+    Parameters
+    ----------
+    base_seed_env : str, optional
+        Environment variable to use for the base seed, by default None
+
+    Returns
+    -------
+    int
+        Base seed.
+
     """
     env_var_list = ["ANEMOI_BASE_SEED", "SLURM_JOB_ID"]
     if base_seed_env is not None:

@@ -22,8 +22,8 @@ from weakref import WeakValueDictionary
 
 import requests
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
-from pytorch_lightning.loggers.mlflow import _convert_params  # noqa: PLC2701
-from pytorch_lightning.loggers.mlflow import _flatten_dict  # noqa: PLC2701
+from pytorch_lightning.loggers.mlflow import _convert_params
+from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
@@ -177,7 +177,7 @@ class LogsMonitor:
         cls._old_out_write = sys.stdout.write
         cls._old_err_write = sys.stderr.write
 
-        def new_out_write(data) -> None:  # noqa: ANN001
+        def new_out_write(data: str | bytes) -> None:
             # out to buffer
             cls._old_out_write(data)
             if isinstance(data, str):
@@ -185,7 +185,7 @@ class LogsMonitor:
             for buffer in cls._buffer_registry.values():
                 buffer.write(data)
 
-        def new_err_write(data) -> None:  # noqa: ANN001
+        def new_err_write(data: str | bytes) -> None:
             # err to buffer
             cls._old_err_write(data)
             if isinstance(data, str):
@@ -306,21 +306,21 @@ class LogsMonitor:
 class AnemoiMLflowLogger(MLFlowLogger):
     """A custom MLflow logger that logs terminal output."""
 
-    def __init__(  # noqa: PLR0913, PLR0917
+    def __init__(
         self,
         experiment_name: str = "lightning_logs",
         run_name: str | None = None,
         tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
         tags: dict[str, Any] | None = None,
         save_dir: str | None = "./mlruns",
-        log_model: Literal[True, False, "all"] = False,  # noqa: FBT002
+        log_model: Literal[True, False, "all"] = False,
         prefix: str = "",
-        resumed: bool | None = False,  # noqa: FBT001, FBT002
-        forked: bool | None = False,  # noqa: FBT001, FBT002
+        resumed: bool | None = False,
+        forked: bool | None = False,
         run_id: str | None = None,
-        offline: bool | None = False,  # noqa: FBT001, FBT002
-        authentication: bool | None = None,  # noqa: FBT001
-        log_hyperparams: bool | None = True,  # noqa: FBT001, FBT002
+        offline: bool | None = False,
+        authentication: bool | None = None,
+        log_hyperparams: bool | None = True,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -432,6 +432,16 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
         Too many logged params will make the server take longer to render the
         experiment.
+
+        Parameters
+        ----------
+        params : dict[str, Any]
+            Parameters to clean up.
+
+        Returns
+        -------
+        dict[str, Any]
+            Cleaned up params ready for MlFlow.
         """
         prefixes_to_remove = ["hardware", "data", "dataloader", "model", "training", "diagnostics", "metadata.config"]
         keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
@@ -450,7 +460,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             from mlflow.entities import Param
 
             # Truncate parameter values to 250 characters.
-            # TODO (Ana Prieto Nemesio): MLflow 1.28 allows up to 500 characters: # noqa: FIX002
+            # TODO (Ana Prieto Nemesio): MLflow 1.28 allows up to 500 characters:
             # https://github.com/mlflow/mlflow/releases/tag/v1.28.0
             params_list = [Param(key=k, value=str(v)[:250]) for k, v in params.items()]
 

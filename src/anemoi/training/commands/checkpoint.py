@@ -8,7 +8,7 @@
 import argparse
 import logging
 
-from . import Command
+from anemoi.training.co import Command
 
 LOG = logging.getLogger(__name__)
 

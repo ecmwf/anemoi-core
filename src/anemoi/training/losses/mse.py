@@ -24,7 +24,7 @@ class WeightedMSELoss(nn.Module):
         self,
         node_weights: torch.Tensor,
         data_variances: torch.Tensor | None = None,
-        ignore_nans: bool | None = False,  # noqa: FBT001, FBT002
+        ignore_nans: bool | None = False,
     ) -> None:
         """Latitude- and (inverse-)variance-weighted MSE Loss.
 
@@ -51,7 +51,7 @@ class WeightedMSELoss(nn.Module):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        squash: bool = True,  # noqa: FBT001, FBT002
+        squash: bool = True,
     ) -> torch.Tensor:
         """Calculates the lat-weighted MSE loss.
 

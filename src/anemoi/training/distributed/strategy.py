@@ -11,8 +11,8 @@ import os
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from lightning_fabric.utilities.optimizer import _optimizers_to_device  # noqa: PLC2701
-from pytorch_lightning.overrides.distributed import _sync_module_states  # noqa: PLC2701
+from lightning_fabric.utilities.optimizer import _optimizers_to_device
+from pytorch_lightning.overrides.distributed import _sync_module_states
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.trainer.states import TrainerFn
 
@@ -107,7 +107,18 @@ class DDPGroupStrategy(DDPStrategy):
         self.seed_rnd(model_comm_group_id)
 
     def get_my_model_comm_group(self, num_gpus_per_model: int) -> tuple[int, np.ndarray, int]:
-        """Determine tasks that work together and from a model group."""
+        """Determine tasks that work together and from a model group.
+
+        Parameters
+        ----------
+        num_gpus_per_model : int
+            Number of GPUs per model to shard over.
+
+        Returns
+        -------
+        tuple[int, np.ndarray, int]
+            Model_comm_group id, Model_comm_group Nr, Model_comm_group rank
+        """
         model_comm_groups = np.arange(0, self.world_size, dtype=np.int32)
         model_comm_groups = np.split(model_comm_groups, self.world_size / num_gpus_per_model)
 
@@ -119,7 +130,7 @@ class DDPGroupStrategy(DDPStrategy):
                 model_comm_group_rank = np.ravel(np.asarray(model_comm_group == self.global_rank).nonzero())[0]
         return model_comm_group_id, model_comm_group_nr, model_comm_group_rank
 
-    def seed_rnd(self, model_comm_group_id: int) -> None:  # noqa: PLR6301
+    def seed_rnd(self, model_comm_group_id: int) -> None:
         """Seed the random number generators for the rank."""
         base_seed = get_base_seed()
         initial_seed = base_seed * (model_comm_group_id + 1)

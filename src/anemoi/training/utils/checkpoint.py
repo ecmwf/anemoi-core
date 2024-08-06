@@ -5,12 +5,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import torch
+from anemoi.utils.checkpoints import save_metadata
 
 from anemoi.training.train.forecaster import GraphForecaster
-from anemoi.utils.checkpoints import save_metadata
 
 
 def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
@@ -37,17 +39,25 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     return model, metadata
 
 
-def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path: str) -> None:
+def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path: Path | str) -> Path:
     """Save a pytorch checkpoint for inference with the model metadata.
 
-    Args:
-    ----
-        model (torch.nn.Module): pytorch model
-        metadata (Dict): metadata
-        save_path (str): path to inference/anemoi checkpoint
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Pytorch model
+    metadata : dict
+        Anemoi Metadata to inject into checkpoint
+    save_path : Path | str
+        Directory to save anemoi checkpoint
 
+    Returns
+    -------
+    Path
+        Path to saved checkpoint
     """
-    inference_filepath = Path(save_path).parent / Path("inference-" + str(Path(save_path).name))
+    save_path = Path(save_path)
+    inference_filepath = save_path.parent / f"inference-{save_path.name}"
 
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata)

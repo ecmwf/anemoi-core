@@ -21,6 +21,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Callable
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -56,11 +57,11 @@ class ParallelExecutor(ThreadPoolExecutor):
     number-for-exception-in-concurrent-futures/24457608#24457608
     """
 
-    def submit(self, fn: Any, *args: list, **kwargs: dict) -> None:  # noqa: ANN401
+    def submit(self, fn: Any, *args, **kwargs) -> Callable:
         """Submits the wrapped function instead of `fn`."""
         return super().submit(self._function_wrapper, fn, *args, **kwargs)
 
-    def _function_wrapper(self, fn: Any, *args: list, **kwargs: dict) -> None:  # noqa: ANN401, PLR6301
+    def _function_wrapper(self, fn: Any, *args: list, **kwargs: dict) -> Callable:
         """Wraps `fn` in order to preserve the traceback of any kind of."""
         try:
             return fn(*args, **kwargs)
@@ -127,7 +128,7 @@ class BasePlotCallback(Callback, ABC):
 
         plt.close(fig)  # cleanup
 
-    def teardown(self, trainer, pl_module, stage) -> None:  # noqa: ANN001
+    def teardown(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
         """Method is called to close the threads."""
         del trainer, pl_module, stage  # unused
         if self._executor is not None:
@@ -143,7 +144,7 @@ class BasePlotCallback(Callback, ABC):
     @rank_zero_only
     def _async_plot(
         self,
-        trainer,  # noqa: ANN001
+        trainer: pl.Trainer,
         *args: list,
         **kwargs: dict,
     ) -> None:
@@ -165,7 +166,7 @@ class BasePlotCallback(Callback, ABC):
 class RolloutEval(Callback):
     """Evaluates the model performance over a (longer) rollout window."""
 
-    def __init__(self, config) -> None:  # noqa: ANN001
+    def __init__(self, config: OmegaConf) -> None:
         """Initialize RolloutEval callback.
 
         Parameters
@@ -293,15 +294,14 @@ class GraphTrainableFeaturesPlot(BasePlotCallback):
         self._graph_name_hidden = config.graph.hidden
 
     @rank_zero_only
-    def _plot(  # noqa: PLR0913, PLR0917
-        # self, trainer, latlon§s:np.ndarray, features:np.ndarray, tag:str, exp_log_tag:str
+    def _plot(
         self,
-        trainer,  # noqa: ANN001
-        latlons,  # noqa: ANN001
-        features,  # noqa: ANN001
-        epoch,  # noqa: ANN001
-        tag,  # noqa: ANN001
-        exp_log_tag,  # noqa: ANN001
+        trainer: pl.Trainer,
+        latlons: np.ndarray,
+        features: np.ndarray,
+        epoch: int,
+        tag: str,
+        exp_log_tag: str,
     ) -> None:
         fig = plot_graph_features(latlons, features)
         self._output_figure(trainer.logger, fig, epoch=epoch, tag=tag, exp_log_tag=exp_log_tag)
@@ -368,7 +368,7 @@ class PlotLoss(BasePlotCallback):
             return parts[0]
 
         # group parameters by their determined group name for > 15 parameters
-        if len(self.parameter_names) <= 15:  # noqa: PLR2004
+        if len(self.parameter_names) <= 15:
             # for <= 15 parameters, keep the full name of parameters
             parameters_to_groups = np.array(self.parameter_names)
             sort_by_parameter_group = np.arange(len(self.parameter_names), dtype=int)
@@ -418,8 +418,8 @@ class PlotLoss(BasePlotCallback):
         LOGGER.info("Order of parameters in loss histogram: %s", sorted_parameter_names)
 
         # get a color per group and project to parameter list
-        cmap = "tab10" if len(unique_group_list) <= 10 else "tab20"  # noqa: PLR2004
-        if len(unique_group_list) > 20:  # noqa: PLR2004
+        cmap = "tab10" if len(unique_group_list) <= 10 else "tab20"
+        if len(unique_group_list) > 20:
             LOGGER.warning("More than 20 groups detected, but colormap has only 20 colors.")
         # if all groups have count 1 use black color
         bar_color_per_group = (
@@ -437,7 +437,7 @@ class PlotLoss(BasePlotCallback):
             for ii in np.where(group_inverse == group_idx)[0]:
                 text_label += sorted_parameter_names[ii] + ", "
                 string_length += len(sorted_parameter_names[ii]) + 2
-                if string_length > 50:  # noqa: PLR2004
+                if string_length > 50:
                     # linebreak after 50 characters
                     text_label += "\n"
                     string_length = 0
@@ -448,14 +448,15 @@ class PlotLoss(BasePlotCallback):
     @rank_zero_only
     def _plot(
         self,
-        trainer,  # noqa: ANN001
-        pl_module,  # noqa: ANN001
-        outputs,  # noqa: ANN001
-        batch,  # noqa: ANN001
-        epoch,  # noqa: ANN001
+        trainer: pl.Trainer,
+        pl_module: pl.Lightning_module,
+        outputs: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+        epoch: int,
     ) -> None:
+        del batch_idx  # unused
         logger = trainer.logger
-        del trainer
 
         parameter_names = list(pl_module.data_indices.model.output.name_to_index.keys())
         paramter_positions = list(pl_module.data_indices.model.output.name_to_index.values())
@@ -478,7 +479,14 @@ class PlotLoss(BasePlotCallback):
                 exp_log_tag=f"loss_sample_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
             )
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:  # noqa: ANN001
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
         if batch_idx % self.plot_frequency == 0:
             self.plot(trainer, pl_module, outputs, batch, epoch=trainer.current_epoch)
 
@@ -499,15 +507,14 @@ class PlotSample(BasePlotCallback):
         self.sample_idx = self.config.diagnostics.plot.sample_idx
 
     @rank_zero_only
-    def _plot(  # noqa: PLR0913, PLR0917
-        # batch_idx: int, rollout_step: int, x: torch.Tensor, y_true: torch.Tensor, y_pred: torch.Tensor,
+    def _plot(
         self,
-        trainer,  # noqa: ANN001
-        pl_module,  # noqa: ANN001
-        outputs,  # noqa: ANN001
-        batch,  # noqa: ANN001
-        batch_idx,  # noqa: ANN001
-        epoch,  # noqa: ANN001
+        trainer: pl.Trainer,
+        pl_module: pl.Lightning_module,
+        outputs: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+        epoch: int,
     ) -> None:
         logger = trainer.logger
 
@@ -561,7 +568,14 @@ class PlotSample(BasePlotCallback):
                 exp_log_tag=f"val_pred_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
             )
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:  # noqa: ANN001
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.Lightning_module,
+        outputs: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
         if batch_idx % self.plot_frequency == 0:
             self.plot(trainer, pl_module, outputs, batch, batch_idx, epoch=trainer.current_epoch)
 
@@ -588,14 +602,14 @@ class PlotAdditionalMetrics(BasePlotCallback):
         self.sample_idx = self.config.diagnostics.plot.sample_idx
 
     @rank_zero_only
-    def _plot(  # noqa: PLR0913, PLR0917
+    def _plot(
         self,
-        trainer,  # noqa: ANN001
-        pl_module,  # noqa: ANN001
-        outputs,  # noqa: ANN001
-        batch,  # noqa: ANN001
-        batch_idx,  # noqa: ANN001
-        epoch,  # noqa: ANN001
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: list,
+        batch: torch.Tensor,
+        batch_idx: int,
+        epoch: int,
     ) -> None:
         logger = trainer.logger
 
@@ -674,7 +688,14 @@ class PlotAdditionalMetrics(BasePlotCallback):
                     exp_log_tag=f"val_pred_spec_rstep_{rollout_step:02d}_rank{local_rank:01d}",
                 )
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:  # noqa: ANN001
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
         if batch_idx % self.plot_frequency == 0:
             self.plot(trainer, pl_module, outputs, batch, batch_idx, epoch=trainer.current_epoch)
 
@@ -694,7 +715,12 @@ class ParentUUIDCallback(Callback):
         super().__init__()
         self.config = config
 
-    def on_load_checkpoint(self, trainer, pl_module, checkpoint) -> None:  # noqa: ANN001, PLR6301
+    def on_load_checkpoint(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        checkpoint: torch.nn.Module,
+    ) -> None:
         del trainer  # unused
         pl_module.hparams["metadata"]["parent_uuid"] = checkpoint["hyper_parameters"]["metadata"]["uuid"]
 
@@ -773,7 +799,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             mlflow_logger = next(logger for logger in trainer.loggers if isinstance(logger, AnemoiMLflowLogger))
             run_id = mlflow_logger.run_id
-            run = mlflow_logger._mlflow_client.get_run(run_id)  # noqa: SLF001
+            run = mlflow_logger._mlflow_client.get_run(run_id)
 
             if run is not None:
                 self._tracker_metadata = {
@@ -794,12 +820,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
             # We want a different uuid each time we save the model
             # so we can tell them apart in the catalogue (i.e. different epochs)
             checkpoint_uuid = str(uuid.uuid4())
-            trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid  # noqa: SLF001
+            trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
 
-            trainer.lightning_module._hparams["metadata"]["model"] = self.model_metadata(model)  # noqa: SLF001
-            trainer.lightning_module._hparams["metadata"]["tracker"] = self.tracker_metadata(trainer)  # noqa: SLF001
+            trainer.lightning_module._hparams["metadata"]["model"] = self.model_metadata(model)
+            trainer.lightning_module._hparams["metadata"]["tracker"] = self.tracker_metadata(trainer)
 
-            trainer.lightning_module._hparams["metadata"]["training"] = {  # noqa: SLF001
+            trainer.lightning_module._hparams["metadata"]["training"] = {
                 "current_epoch": trainer.current_epoch,
                 "global_step": trainer.global_step,
                 "elapsed_time": time.time() - self.start,
@@ -847,7 +873,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 logger.after_save_checkpoint(proxy(self))
 
 
-def get_callbacks(config: DictConfig) -> list:  # noqa: PLR0912, C901
+def get_callbacks(config: DictConfig) -> list:  # noqa: C901
     """Setup callbacks for PyTorch Lightning trainer.
 
     Parameters

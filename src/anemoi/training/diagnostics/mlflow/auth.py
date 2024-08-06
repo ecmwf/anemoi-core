@@ -5,6 +5,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
+
 import logging
 import os
 import time
@@ -12,13 +14,14 @@ from datetime import datetime
 from datetime import timezone
 from functools import wraps
 from getpass import getpass
+from typing import Callable
+from typing import Self
 
 import requests
-from requests.exceptions import HTTPError
-
 from anemoi.utils.config import load_config
 from anemoi.utils.config import save_config
 from anemoi.utils.timer import Timer
+from requests.exceptions import HTTPError
 
 REFRESH_EXPIRE_DAYS = 29
 
@@ -68,11 +71,23 @@ class TokenAuth:
         self._refresh_token = value
         self.refresh_expires = time.time() + (REFRESH_EXPIRE_DAYS * 86400)  # 86400 seconds in a day
 
-    def enabled(fn):  # noqa: ANN201, N805
-        """Decorator to call or ignore a function based on the `enabled` flag."""
+    @staticmethod
+    def enabled(fn: Callable) -> Callable:
+        """Decorator to call or ignore a function based on the `enabled` flag.
+
+        Parameters
+        ----------
+        fn : Callable
+            Function to wrap with enable flag.
+
+        Returns
+        -------
+        function | None
+            Wrapped function or None if `_enabled` property is False.
+        """
 
         @wraps(fn)
-        def _wrapper(self, *args: list, **kwargs: dict):  # noqa: ANN001, ANN202
+        def _wrapper(self: Self, *args, **kwargs) -> Callable | None:
             if self._enabled:
                 return fn(self, *args, **kwargs)
             return None
@@ -173,7 +188,12 @@ class TokenAuth:
         expire_date = datetime.fromtimestamp(self.refresh_expires, tz=timezone.utc)
         self.log.info("Your MLflow login token is valid until %s UTC", expire_date.strftime("%Y-%m-%d %H:%M:%S"))
 
-    def _token_request(self, username=None, password=None, ignore_exc=False) -> dict:  # noqa: ANN001
+    def _token_request(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        ignore_exc: bool = False,
+    ) -> dict:
         if username is not None and password is not None:
             path = "newtoken"
             payload = {"username": username, "password": password}

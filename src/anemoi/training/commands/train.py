@@ -5,13 +5,14 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-#
+
+from __future__ import annotations
 
 import logging
 import sys
 from typing import TYPE_CHECKING
 
-from . import Command
+from anemoi.training.co import Command
 
 if TYPE_CHECKING:
     import argparse
@@ -25,11 +26,11 @@ class Train(Command):
     accept_unknown_args = True
 
     @staticmethod
-    def add_arguments(parser: "argparse.ArgumentParser") -> "argparse.ArgumentParser":
+    def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         return parser
 
     @staticmethod
-    def run(args, unknown_args=None) -> None:  # noqa: ANN001
+    def run(args: list[str], unknown_args: list[str] | None = None) -> None:
         del args
 
         if unknown_args is not None:

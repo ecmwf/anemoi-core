@@ -19,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiSearchPathPlugin(SearchPathPlugin):
     """Prepend the Anemoi home directory to the hydra searchpath."""
 
-    def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:  # noqa: PLR6301
+    def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:
         """Prepend the Anemoi directories to the hydra searchpath.
 
         This builds the hierarchy of the search path by prepending the Anemoi

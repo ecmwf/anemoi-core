@@ -16,6 +16,9 @@ from collections.abc import Mapping
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.interface import AnemoiModelInterface
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -25,12 +28,9 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.mse import WeightedMSELoss
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.utils.jsonify import map_config_to_primitives
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -197,7 +197,7 @@ class GraphForecaster(pl.LightningModule):
         self,
         batch: torch.Tensor,
         batch_idx: int,
-        validation_mode: bool = False,  # noqa: FBT001, FBT002
+        validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         del batch_idx
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
@@ -237,7 +237,7 @@ class GraphForecaster(pl.LightningModule):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         rollout_step: int,
-        enable_plot: bool = False,  # noqa: FBT001, FBT002
+        enable_plot: bool = False,
     ) -> tuple[dict, list]:
         metrics = {}
         y_preds = []

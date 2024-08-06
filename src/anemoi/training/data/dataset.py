@@ -26,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 class NativeGridDataset(IterableDataset):
     """Iterable dataset for AnemoI data on the arbitrary grids."""
 
-    def __init__(  # noqa: PLR0913, PLR0917
+    def __init__(
         self,
         data_reader: Callable,
         rollout: int = 1,
@@ -35,7 +35,7 @@ class NativeGridDataset(IterableDataset):
         model_comm_group_rank: int = 0,
         model_comm_group_id: int = 0,
         model_comm_num_groups: int = 1,
-        shuffle: bool = True,  # noqa: FBT001, FBT002
+        shuffle: bool = True,
         label: str = "generic",
     ) -> None:
         """Initialize (part of) the dataset state.

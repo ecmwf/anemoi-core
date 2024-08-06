@@ -114,7 +114,7 @@ def plot_loss(
     return fig
 
 
-def plot_power_spectrum(  # noqa: PLR0914
+def plot_power_spectrum(
     parameters: dict[str, int],
     latlons: np.ndarray,
     x: np.ndarray,
@@ -307,7 +307,7 @@ def plot_histogram(
     return fig
 
 
-def plot_predicted_multilevel_flat_sample(  # noqa: PLR0913, PLR0917
+def plot_predicted_multilevel_flat_sample(
     parameters: dict[str, int],
     n_plots_per_sample: int,
     latlons: np.ndarray,
@@ -368,7 +368,7 @@ def plot_predicted_multilevel_flat_sample(  # noqa: PLR0913, PLR0917
     return fig
 
 
-def plot_flat_sample(  # noqa: PLR0913, PLR0917
+def plot_flat_sample(
     fig: Figure,
     ax: plt.Axes,
     lon: np.ndarray,
@@ -474,7 +474,7 @@ def plot_flat_sample(  # noqa: PLR0913, PLR0917
         ax[5].axis("off")
 
 
-def scatter_plot(  # noqa: PLR0913
+def scatter_plot(
     fig: Figure,
     ax: plt.Axes,
     *,

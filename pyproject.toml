@@ -10,20 +10,13 @@
 # https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
 
 [build-system]
-requires = [
-  "setuptools>=60",
-  "setuptools-scm>=8",
-]
+requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 
 [project]
 name = "anemoi-training"
 
 description = "A package to hold various functions to support training of ML models."
-keywords = [
-  "ai",
-  "tools",
-  "training",
-]
+keywords = [ "ai", "tools", "training" ]
 
 license = { file = "LICENSE" }
 authors = [
@@ -46,9 +39,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
-dynamic = [
-  "version",
-]
+dynamic = [ "version" ]
 
 dependencies = [
   "anemoi-datasets[data]>=0.4",
@@ -72,12 +63,9 @@ dependencies = [
   "zarr>=2.14.2",
 ]
 
-optional-dependencies.all = [
-]
+optional-dependencies.all = [  ]
 
-optional-dependencies.dev = [
-  "anemoi-training[docs,tests,all]",
-]
+optional-dependencies.dev = [ "anemoi-training[docs,tests,all]" ]
 
 optional-dependencies.docs = [
   "nbsphinx",
@@ -86,10 +74,7 @@ optional-dependencies.docs = [
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
-optional-dependencies.tests = [
-  "pytest",
-  "pytest-mock",
-]
+optional-dependencies.tests = [ "pytest", "pytest-mock" ]
 
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
@@ -105,15 +90,73 @@ version_file = "src/anemoi/training/_version.py"
 [tool.ruff]
 target-version = "py39"
 line-length = 120
-src = [
-  "src",
-]
+src = [ "src" ]
 
 preview = true
-lint.select = [
-  "ALL",
+lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
+lint.pydocstyle.convention = "numpy"
+select = [
+  "A", # flake8 builtins
+  # "ANN", # flake8-annotations
+  "ANN001", # Type annotation
+  "ANN201", # Return type public
+  "ANN202", # Return type private
+  "ANN205", # Return type static method
+  "ANN206", # Return type class method
+  "ARG",    # Unused arguments
+  "B",      # flake8-bugbear
+  "BLE",    # Non-specific exceptions
+  "C4",     # Comprehensions
+  "C90",    # Mccabe complexity
+  "COM",    # Commas
+  "CPY",    # Copyright
+  # "C",  # pylint convention
+  "D", # pydocstyle
+  # "DOC", # pydoclint
+  "DTZ", # Datetimes
+  "E",   # pycodestyle error
+  "EM",  # Error messages
+  "ERA", # Found unused code
+  "F",   # flake8 error
+  "FA",  # Future annotations
+  # "EXE", # Executable
+  # "FBT", # Boolean traps
+  "FLY",  # Fstrings
+  "FURB", # Modernising code
+  "G",    # flake8 logging format
+  "ICN",  # Import conventions
+  "ISC",  # Implicit string concatenation
+  "LOG",  # Logging
+  # "I", # isort
+  "N",    # pep8 naming
+  "NPY",  # Numpys
+  "PERF", # Perfomance linting
+  "PGH",  # Pygrep hooks
+  "PIE",  # Misc lints
+  # "PL",  # Pylint (superset of C, E, R, W)
+  "PT",  # Pytest
+  "PTH", # Use Pathlib
+  "Q",   # Quotes
+  "R",   # Refactor
+  "RET", # Return statements
+  "RSE", # Raises
+  "RUF", # Ruff specific
+  "S",   # bandit !IMPORTANT
+  "SIM", # flake8-simplify
+  "T10", # Debug statements
+  "T20", # Print statements
+  "TCH", # Type checking blocks
+  "TD",  # Todos
+  "TID", # Tidy imports
+  "TRY", # Exception handling antipatterns
+  "UP",  # Pyupgrade
+  "W",   # pycodestyle warning
+  "YTT", # flake8-2020
 ]
-lint.ignore = [
+
+ignore = [
+  "B018",
+  "B028",
   "D100",
   "D101",
   "D102",
@@ -122,11 +165,7 @@ lint.ignore = [
   "D105",
   "D401",
   "E203",
-  "FBT001",
-  "FBT002",
-  "PLC0415",
   "PT018",
   "S101",
+  "TD003",
 ]
-
-lint.isort.force-single-line = true
