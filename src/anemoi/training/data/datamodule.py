@@ -24,10 +24,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
-    """ECML data module for PyTorch Lightning."""
+    """Anemoi Datasets data module for PyTorch Lightning."""
 
     def __init__(self, config: DictConfig) -> None:
-        """Initialize ECML data module.
+        """Initialize Anemoi Datasets data module.
 
         Parameters
         ----------
