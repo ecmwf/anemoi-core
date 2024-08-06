@@ -10,13 +10,12 @@ import datetime
 from pathlib import Path
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import ListConfig
-from omegaconf import OmegaConf
-
 from anemoi.models.data_indices.collection import BaseIndex
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import BaseTensorIndex
+from omegaconf import DictConfig
+from omegaconf import ListConfig
+from omegaconf import OmegaConf
 
 
 def map_config_to_primitives(config: OmegaConf) -> dict:

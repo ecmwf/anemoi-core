@@ -15,7 +15,6 @@ from datetime import timezone
 from functools import wraps
 from getpass import getpass
 from typing import Callable
-from typing import Self
 
 import requests
 from anemoi.utils.config import load_config
@@ -87,7 +86,7 @@ class TokenAuth:
         """
 
         @wraps(fn)
-        def _wrapper(self: Self, *args, **kwargs) -> Callable | None:
+        def _wrapper(self: TokenAuth, *args, **kwargs) -> Callable | None:
             if self._enabled:
                 return fn(self, *args, **kwargs)
             return None

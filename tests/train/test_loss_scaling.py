@@ -1,13 +1,21 @@
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import pytest
 import torch
+from _pytest.fixtures import SubRequest
+from anemoi.models.data_indices.collection import IndexCollection
 from omegaconf import DictConfig
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.forecaster import GraphForecaster
 
 
-@pytest.fixture()
-def fake_data(request):
+@pytest.fixture
+def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
     config = DictConfig(
         {
             "data": {
@@ -106,7 +114,7 @@ expected_polynomial_scaling = torch.Tensor(
     ],
     indirect=["fake_data"],
 )
-def test_loss_scaling_vals(fake_data, expected_scaling) -> None:
+def test_loss_scaling_vals(fake_data: tuple[DictConfig, IndexCollection], expected_scaling: torch.Tensor) -> None:
     config, data_indices = fake_data
 
     _, loss_scaling = GraphForecaster.metrics_loss_scaling(config, data_indices)
@@ -115,7 +123,7 @@ def test_loss_scaling_vals(fake_data, expected_scaling) -> None:
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
-def test_metric_range(fake_data) -> None:
+def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices = fake_data
 
     metric_range, _ = GraphForecaster.metrics_loss_scaling(config, data_indices)
