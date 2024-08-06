@@ -65,7 +65,12 @@ dependencies = [
 
 optional-dependencies.all = [  ]
 
-optional-dependencies.dev = [ "anemoi-training[docs,tests,all]" ]
+optional-dependencies.dev = [
+  "anemoi-training[docs,tests,all]",
+  "black",
+  "pre-commit",
+  "ruff",
+]
 
 optional-dependencies.docs = [
   "nbsphinx",
