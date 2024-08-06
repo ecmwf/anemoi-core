@@ -82,7 +82,7 @@ log:
     offline: False
     authentication: False
     log_model: False
-    tracking_uri: '...'
+    tracking_uri: ???
     experiment_name: 'anemoi_debug'
     project_name: 'Anemoi'
     system: True

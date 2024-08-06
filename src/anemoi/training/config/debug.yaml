@@ -21,7 +21,7 @@ diagnostics:
     enabled: False
 hardware:
   files:
-    graph: ...
+    graph: ???
 model:
   num_channels: 128
 dataloader:

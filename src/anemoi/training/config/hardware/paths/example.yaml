@@ -1,6 +1,6 @@
-data: '...'
-grids: '...'
-output: '...'
+data: ???
+grids: ???
+output: ???
 logs:
   base: ${hardware.paths.output}logs/
   wandb: ${hardware.paths.logs.base}
