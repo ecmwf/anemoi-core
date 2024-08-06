@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from anemoi.training.co import Command
+from anemoi.training.commands import Command
 
 if TYPE_CHECKING:
     import argparse
