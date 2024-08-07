@@ -28,6 +28,8 @@ REFRESH_EXPIRE_DAYS = 29
 class TokenAuth:
     """Manage authentication with a keycloak token server."""
 
+    config_file = "mlflow-token.json"
+
     def __init__(
         self,
         url: str,
@@ -46,8 +48,7 @@ class TokenAuth:
         self.url = url
         self._enabled = enabled
 
-        self.config_file = "mlflow-token.json"
-        config = load_config(self.config_file)
+        config = self.load_config()
 
         self._refresh_token = config.get("refresh_token")
         self.refresh_expires = config.get("refresh_expires", 0)
@@ -69,6 +70,10 @@ class TokenAuth:
     def refresh_token(self, value: str) -> None:
         self._refresh_token = value
         self.refresh_expires = time.time() + (REFRESH_EXPIRE_DAYS * 86400)  # 86400 seconds in a day
+
+    @staticmethod
+    def load_config() -> dict:
+        return load_config(TokenAuth.config_file)
 
     @staticmethod
     def enabled(fn: Callable) -> Callable:
@@ -179,6 +184,7 @@ class TokenAuth:
             return
 
         config = {
+            "url": self.url,
             "refresh_token": self.refresh_token,
             "refresh_expires": self.refresh_expires,
         }
@@ -216,7 +222,7 @@ class TokenAuth:
         }
 
         try:
-            response = requests.post(f"{self.url}/{path}", headers=headers, json=payload, timeout=10)
+            response = requests.post(f"{self.url}/{path}", headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             response_json = response.json()
 

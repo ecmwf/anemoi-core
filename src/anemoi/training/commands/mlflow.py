@@ -25,10 +25,7 @@ class MlFlow(Command):
         )
         login.add_argument(
             "--url",
-            help="The URL of the authentication server",
-            required=True,
-            # TODO (Gert Mertes): once we have a config file, make this optional
-            # and load default value from config
+            help="The URL of the authentication server. If not provided, the last used URL will be tried.",
         )
         login.add_argument(
             "--force-credentials",
@@ -81,7 +78,13 @@ class MlFlow(Command):
         if args.subcommand == "login":
             from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 
-            TokenAuth(url=args.url).login(force_credentials=args.force_credentials)
+            url = args.url or TokenAuth.load_config().get("url")
+
+            if not url:
+                msg = "No URL provided and no past URL found. Rerun the command with --url"
+                raise ValueError(msg)
+
+            TokenAuth(url=url).login(force_credentials=args.force_credentials)
             return
 
         if args.subcommand == "sync":
