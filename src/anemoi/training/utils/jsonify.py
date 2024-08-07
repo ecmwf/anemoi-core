@@ -48,10 +48,8 @@ def map_config_to_primitives(config: OmegaConf) -> dict:
         config = [map_config_to_primitives(v) for v in config]
     elif isinstance(config, dict):
         config = {k: map_config_to_primitives(v) for k, v in config.items()}
-    elif isinstance(config, DictConfig):
-        config = map_config_to_primitives(dict(config))
-    elif isinstance(config, ListConfig):
-        config = map_config_to_primitives(list(config))
+    elif isinstance(config, (DictConfig, ListConfig)):
+        config = map_config_to_primitives(OmegaConf.to_container(config, resolve=True))
     elif isinstance(config, torch.Tensor):
         config = map_config_to_primitives(config.tolist())
     elif isinstance(config, (IndexCollection, BaseTensorIndex, BaseIndex)):
