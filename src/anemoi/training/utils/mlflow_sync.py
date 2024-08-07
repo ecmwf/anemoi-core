@@ -23,7 +23,7 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
 
     tmpdir = os.environ["TMPDIR"] if os.getenv("TMPDIR") else os.environ["SCRATCH"]
     user = os.environ["USER"]
-    Path(tmpdir).mkdir(parents=True)
+    Path(tmpdir).mkdir(parents=True, exist_ok=True)
     temp = tempfile.NamedTemporaryFile(dir=tmpdir, prefix=f"{user}_")
     os.environ["MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE"] = temp.name
     return temp
@@ -31,24 +31,26 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
 
 temp = export_log_output_file_path()
 
-import hydra  # noqa: E402
 import mlflow  # noqa: E402
-import mlflow_export_import.common.utils as mlflow_utils  # noqa: E402
 from mlflow.entities import RunStatus  # noqa: E402
 from mlflow.entities import RunTag  # noqa: E402
 from mlflow.tracking.context.default_context import _get_user  # noqa: E402
 from mlflow.utils.mlflow_tags import MLFLOW_USER  # noqa: E402
 from mlflow.utils.validation import MAX_METRICS_PER_BATCH  # noqa: E402
 from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH  # noqa: E402
-from mlflow_export_import.client.client_utils import create_http_client  # noqa: E402
-from mlflow_export_import.run.export_run import _get_metrics_with_steps  # noqa: E402
-from mlflow_export_import.run.export_run import _inputs_to_dict  # noqa: E402
-from mlflow_export_import.run.import_run import _import_inputs  # noqa: E402
-from mlflow_export_import.run.run_data_importer import _log_data  # noqa: E402
-from mlflow_export_import.run.run_data_importer import _log_metrics  # noqa: E402
-from mlflow_export_import.run.run_data_importer import _log_params  # noqa: E402
-from omegaconf import DictConfig  # noqa: E402
-from omegaconf import OmegaConf  # noqa: E402
+
+try:
+    import mlflow_export_import.common.utils as mlflow_utils
+    from mlflow_export_import.client.client_utils import create_http_client
+    from mlflow_export_import.run.export_run import _get_metrics_with_steps
+    from mlflow_export_import.run.export_run import _inputs_to_dict
+    from mlflow_export_import.run.import_run import _import_inputs
+    from mlflow_export_import.run.run_data_importer import _log_data
+    from mlflow_export_import.run.run_data_importer import _log_metrics
+    from mlflow_export_import.run.run_data_importer import _log_params
+except ImportError:
+    msg = "The 'mlflow_export_import' package is not installed. Please install it from https://github.com/mlflow/mlflow-export-import"
+    raise ImportError(msg) from None
 
 LOGGER = logging.getLogger(__name__)
 
@@ -89,12 +91,23 @@ def import_run_data(mlflow_client: mlflow.MlflowClient, run_dct: dict, run_id: s
 class MlFlowSync:
     """Class to sync an offline run to the destination tracking uri."""
 
-    def __init__(self, config: DictConfig) -> None:
-        # Resolve the config to avoid shenanigans with lazy loading
-        OmegaConf.resolve(config)
-        self.config = config
+    def __init__(
+        self,
+        source_tracking_uri: str,
+        dest_tracking_uri: str,
+        run_id: str,
+        experiment_name: str = "anemoi_debug",
+        export_deleted_runs: bool = False,
+        log_level: str = "INFO",
+    ) -> None:
+        self.source_tracking_uri = source_tracking_uri
+        self.dest_tracking_uri = dest_tracking_uri
+        self.run_id = run_id
+        self.experiment_name = experiment_name
+        self.export_deleted_runs = export_deleted_runs
+        self.log_level = log_level
 
-        LOGGER.setLevel(self.config.diagnostics.log.code.level)
+        LOGGER.setLevel(self.log_level)
 
     @staticmethod
     def update_run_id(params: dict, key: str, new_run_id: str, offline_run_id: str) -> dict:
@@ -107,11 +120,11 @@ class MlFlowSync:
         return params
 
     def update_parent_run_info(self, tags: dict, tag_key: str, tag_dest: str, dst_run_id: str) -> dict:
-        mlflow.set_tracking_uri(self.config.dest_tracking_uri)
+        mlflow.set_tracking_uri(self.dest_tracking_uri)
 
         # Check if there is already a parent run in the destination tracking uri
         runs = mlflow.search_runs(
-            experiment_ids=mlflow.get_experiment_by_name(self.config.experiment_name).experiment_id,
+            experiment_ids=mlflow.get_experiment_by_name(self.experiment_name).experiment_id,
             filter_string=f"params.metadata.offline_run_id = '{tags[tag_key]}'",
         )
 
@@ -130,10 +143,10 @@ class MlFlowSync:
         """Blocks sync if top-level parent run or single runs are unavailable."""
         run_logged = False
         if status == "FINISHED":
-            mlflow.set_tracking_uri(self.config.dest_tracking_uri)
+            mlflow.set_tracking_uri(self.dest_tracking_uri)
             synced_runs = mlflow.search_runs(
-                experiment_ids=mlflow.get_experiment_by_name(self.config.experiment_name).experiment_id,
-                filter_string=f"params.metadata.offline_run_id = '{self.config.run_id}'",
+                experiment_ids=mlflow.get_experiment_by_name(self.experiment_name).experiment_id,
+                filter_string=f"params.metadata.offline_run_id = '{self.run_id}'",
             )
             if not synced_runs.empty:  # single run (no child) already logged
                 run_logged = True
@@ -143,17 +156,17 @@ class MlFlowSync:
         self,
     ) -> None:
         """Sync an offline run to the destination tracking uri."""
-        src_mlflow_client = mlflow.MlflowClient(self.config.source_tracking_uri)
-        dest_mlflow_client = mlflow.MlflowClient(self.config.dest_tracking_uri)
+        src_mlflow_client = mlflow.MlflowClient(self.source_tracking_uri)
+        dest_mlflow_client = mlflow.MlflowClient(self.dest_tracking_uri)
         http_client = create_http_client(dest_mlflow_client)
         # GET SOURCE RUN ##
-        run = src_mlflow_client.get_run(self.config.run_id)
+        run = src_mlflow_client.get_run(self.run_id)
         run_logged = self.check_run_is_logged(status=run.info.status)
         if run_logged:
-            LOGGER.info("Run already imported %s into experiment %s", self.config.run_id, self.config.experiment_name)
+            LOGGER.info("Run already imported %s into experiment %s", self.run_id, self.experiment_name)
             return
 
-        if run.info.lifecycle_stage == "deleted" and not self.config.export_deleted_runs:
+        if run.info.lifecycle_stage == "deleted" and not self.export_deleted_runs:
             LOGGER.warning(
                 "Not exporting run %s because its lifecycle_stage is  %s",
                 run.info.run_id,
@@ -171,7 +184,7 @@ class MlFlowSync:
         run_info = mlflow_utils.strip_underscores(run.info)
         src_user_id = run_info["user_id"]
 
-        exp = dest_mlflow_client.get_experiment_by_name(self.config.experiment_name)
+        exp = dest_mlflow_client.get_experiment_by_name(self.experiment_name)
         dst_run = dest_mlflow_client.create_run(exp.experiment_id)
         dst_run_id = dst_run.info.run_id
 
@@ -242,9 +255,9 @@ class MlFlowSync:
             )
             _import_inputs(http_client, src_run_dct, dst_run_id)
 
-            path = Path(self.config.source_tracking_uri, run.info.experiment_id, self.config.run_id, "artifacts")
+            path = Path(self.source_tracking_uri, run.info.experiment_id, self.run_id, "artifacts")
             if path.exists():
-                mlflow.set_tracking_uri(self.config.dest_tracking_uri)
+                mlflow.set_tracking_uri(self.dest_tracking_uri)
                 dest_mlflow_client.log_artifacts(dst_run_id, path)
             dest_mlflow_client.set_terminated(dst_run_id, RunStatus.to_string(RunStatus.FINISHED))
 
@@ -255,11 +268,6 @@ class MlFlowSync:
             traceback.print_exc()
             raise Exception(e, "Importing run %s of experiment %s failed", dst_run_id, exp.name) from e  # noqa: TRY002
 
-        LOGGER.info("Imported run %s into experiment %s", dst_run_id, self.config.experiment_name)
+        LOGGER.info("Imported run %s into experiment %s", dst_run_id, self.experiment_name)
 
         temp.close()
-
-
-@hydra.main(version_base=None, config_path="../config", config_name="mlflow_sync")
-def main(config: DictConfig) -> None:
-    MlFlowSync(config).sync()

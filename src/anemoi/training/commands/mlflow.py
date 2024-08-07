@@ -17,9 +17,11 @@ class MlFlow(Command):
     def add_arguments(command_parser: argparse.ArgumentParser) -> None:
         subparsers = command_parser.add_subparsers(dest="subcommand", required=True)
 
+        help_msg = "Log in and acquire a token from keycloak."
         login = subparsers.add_parser(
             "login",
-            help="Log in and acquire a token from keycloak.",
+            help=help_msg,
+            description=help_msg,
         )
         login.add_argument(
             "--url",
@@ -35,13 +37,47 @@ class MlFlow(Command):
             help="Force a credential login even if a token is available.",
         )
 
-        subparsers.add_parser(
+        help_msg = "Synchronise an offline run with an MLflow server."
+        sync = subparsers.add_parser(
             "sync",
-            help="Synchronise an offline run with an MLflow server (placeholder, not implemented).",
+            help=help_msg,
+            description=help_msg,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        sync.add_argument(
+            "--source",
+            "-s",
+            help="The MLflow logs source directory.",
+            required=True,
+            default=argparse.SUPPRESS,
+        )
+        sync.add_argument(
+            "--destination",
+            "-d",
+            help="The destination MLflow tracking URI.",
+            required=True,
+            default=argparse.SUPPRESS,
+        )
+        sync.add_argument("--run-id", "-r", help="The run ID to sync.", required=True, default=argparse.SUPPRESS)
+        sync.add_argument(
+            "--experiment-name",
+            "-e",
+            help="The experiment name to sync to.",
+            default="anemoi_debug",
+        )
+        sync.add_argument(
+            "--export-deleted-runs",
+            "-x",
+            action="store_true",
+        )
+        sync.add_argument(
+            "--verbose",
+            "-v",
+            action="store_true",
         )
 
     @staticmethod
-    def run(args: "argparse.Namespace") -> None:
+    def run(args: argparse.Namespace) -> None:
         if args.subcommand == "login":
             from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 
@@ -49,7 +85,19 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "sync":
-            raise NotImplementedError
+            from anemoi.training.utils.mlflow_sync import MlFlowSync
+
+            log_level = "DEBUG" if args.verbose else "INFO"
+
+            MlFlowSync(
+                args.source,
+                args.destination,
+                args.run_id,
+                args.experiment_name,
+                args.export_deleted_runs,
+                log_level,
+            ).sync()
+            return
 
 
 command = MlFlow
