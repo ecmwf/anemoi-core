@@ -49,5 +49,5 @@ jobs:
 
   deploy:
     needs: [checks, quality]
-    uses: ecmwf/reusable-workflow/.github/workflows/cd-pypi.yml@v2
+    uses: ecmwf-actions/reusable-workflows/.github/workflows/cd-pypi.yml@v2
     secrets: inherit
