@@ -23,7 +23,7 @@ class Checkpoint(Command):
         help_msg = "Save an anemoi training checkpoint for inference."
         inference = subparsers.add_parser(
             "inference",
-            help=help,
+            help=help_msg,
             description=help_msg,
         )
         inference.add_argument("--input", "-i", required=True, metavar="training.ckpt")
