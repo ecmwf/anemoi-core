@@ -11,6 +11,8 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased]
 
 ### Added
+ - MLflow token authentication
+ - Added Changelog
 
 ### Changed
 
@@ -20,9 +22,5 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 - Initial implementation anemoi-training
-
-### Changed
-
-### Removed
 
 <!-- Add Git Diffs for Links above -->
