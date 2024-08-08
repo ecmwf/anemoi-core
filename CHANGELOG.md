@@ -11,6 +11,8 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased]
 
 ### Added
+- added downstream-ci pipeline
+- readthedocs PR update check action
 
 ### Changed
 
