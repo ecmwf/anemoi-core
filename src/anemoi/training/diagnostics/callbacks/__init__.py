@@ -859,16 +859,16 @@ class AnemoiCheckpoint(ModelCheckpoint):
         # saving checkpoint used for pytorch-lightning based training
         trainer.save_checkpoint(lightning_checkpoint_filepath, self.save_weights_only)
 
-        # saving metadata for the checkpoint in same format as for inference
-        save_metadata(lightning_checkpoint_filepath, metadata)
-
         self._last_global_step_saved = trainer.global_step
         self._last_checkpoint_saved = lightning_checkpoint_filepath
 
-        # notify loggers
         if trainer.is_global_zero:
             from weakref import proxy
 
+            # save metadata for the training checkpoint in the same format as inference
+            save_metadata(lightning_checkpoint_filepath, metadata)
+
+            # notify loggers
             for logger in trainer.loggers:
                 logger.after_save_checkpoint(proxy(self))
 
