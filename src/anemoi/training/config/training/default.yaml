@@ -70,7 +70,7 @@ loss_scaling:
     10u: 0.1
     10v: 0.1
     2d: 0.5
-    tp: 0.25
+    tp: 0.025
     cp: 0.0025
 
 metrics:
