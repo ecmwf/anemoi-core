@@ -27,6 +27,7 @@ Keep it human-readable, your future self will thank you!
  - Downstream CI to test all dependencies with changes
  - Changelog Status check
  - Readthedocs PR builder
+ - Changelog Release Updater Workflow
 
 #### Miscellaneous
  - Extended ruff Ruleset
