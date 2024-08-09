@@ -11,12 +11,21 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased]
 
 ### Added
-- added downstream-ci pipeline
-- readthedocs PR update check action
 
 ### Changed
 
 ### Removed
+
+## 0.2.1
+
+### Added
+
+- downstream-ci pipeline
+- readthedocs PR update check action
+
+### Removed
+
+- anemoi-datasets dependency
 
 ## 0.2.0
 
