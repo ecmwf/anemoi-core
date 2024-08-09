@@ -1,3 +1,11 @@
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+from __future__ import annotations
+
 import time
 
 import pytest
@@ -5,7 +13,15 @@ import pytest
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 
 
-def mocks(mocker, token_request={}, load_config={}):
+def mocks(
+    mocker: pytest.MockerFixture,
+    token_request: dict | None = None,
+    load_config: dict | None = None,
+) -> pytest.Mock:
+    if load_config is None:
+        load_config = {}
+    if token_request is None:
+        token_request = {}
     response = {
         "access_token": "access_token",
         "expires_in": 3600,
@@ -43,13 +59,13 @@ def mocks(mocker, token_request={}, load_config={}):
     return mock_token_request
 
 
-def test_auth(mocker):
+def test_auth(mocker: pytest.MockerFixture) -> None:
     mock_token_request = mocks(mocker)
 
     auth = TokenAuth("https://test.url")
 
     assert auth.access_token is None
-    assert auth.refresh_token == "old_refresh_token"
+    assert auth.refresh_token == "old_refresh_token"  # noqa: S105
 
     auth.authenticate()
     # test that no new token is requested the second time
@@ -57,12 +73,12 @@ def test_auth(mocker):
 
     mock_token_request.assert_called_once()
 
-    assert auth.access_token == "access_token"
+    assert auth.access_token == "access_token"  # noqa: S105
     assert auth.access_expires > time.time()
-    assert auth.refresh_token == "new_refresh_token"
+    assert auth.refresh_token == "new_refresh_token"  # noqa: S105
 
 
-def test_not_logged_in(mocker):
+def test_not_logged_in(mocker: pytest.MockerFixture) -> None:
     # no refresh token
     mocks(mocker, load_config={"refresh_token": None})
     auth = TokenAuth("https://test.url")
@@ -74,7 +90,7 @@ def test_not_logged_in(mocker):
     pytest.raises(RuntimeError, auth.authenticate)
 
 
-def test_login(mocker):
+def test_login(mocker: pytest.MockerFixture) -> None:
     # normal login
     mock_token_request = mocks(mocker)
     auth = TokenAuth("https://test.url")
@@ -87,25 +103,25 @@ def test_login(mocker):
     auth = TokenAuth("https://test.url")
     auth.login()
 
-    mock_token_request.assert_called_once_with(username="username", password="password")
+    mock_token_request.assert_called_once_with(username="username", password="password")  # noqa: S106
 
     # forced credential login
     mock_token_request = mocks(mocker)
     auth = TokenAuth("https://test.url")
     auth.login(force_credentials=True)
 
-    mock_token_request.assert_called_once_with(username="username", password="password")
+    mock_token_request.assert_called_once_with(username="username", password="password")  # noqa: S106
 
     # failed login
     mock_token_request = mocks(mocker, token_request={"refresh_token": None})
     auth = TokenAuth("https://test.url")
     pytest.raises(RuntimeError, auth.login)
 
-    mock_token_request.assert_called_with(username="username", password="password")
+    mock_token_request.assert_called_with(username="username", password="password")  # noqa: S106
     assert mock_token_request.call_count == 2
 
 
-def test_enabled(mocker):
+def test_enabled(mocker: pytest.MockerFixture) -> None:
     mock_token_request = mocks(mocker)
     auth = TokenAuth("https://test.url", enabled=False)
     auth.authenticate()
@@ -113,7 +129,7 @@ def test_enabled(mocker):
     mock_token_request.assert_not_called()
 
 
-def test_api(mocker):
+def test_api(mocker: pytest.MockerFixture) -> None:
     mocks(mocker)
     auth = TokenAuth("https://test.url")
     mock_post = mocker.patch("requests.post")
@@ -125,7 +141,10 @@ def test_api(mocker):
 
     assert response == response_json["response"]
     mock_post.assert_called_once_with(
-        "https://test.url/path", headers={"Content-Type": "application/x-www-form-urlencoded"}, json={"key": "value"}
+        "https://test.url/path",
+        json={"key": "value"},
+        headers=mocker.ANY,
+        timeout=mocker.ANY,
     )
 
     # api error

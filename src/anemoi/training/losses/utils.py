@@ -7,8 +7,9 @@
 # nor does it submit to any jurisdiction.
 #
 
+from __future__ import annotations
+
 import logging
-from typing import Optional
 
 import torch
 from torch import nn
@@ -20,7 +21,7 @@ def grad_scaler(
     module: nn.Module,
     grad_in: tuple[torch.Tensor, ...],
     grad_out: tuple[torch.Tensor, ...],
-) -> Optional[tuple[torch.Tensor, ...]]:
+) -> tuple[torch.Tensor, ...] | None:
     """Scales the loss gradients.
 
     Uses the formula in https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
@@ -40,10 +41,10 @@ def grad_scaler(
     -------
     tuple[torch.Tensor, ...]
         Re-scaled input gradients
+
     """
-    del module, grad_out  # not needed
-    # loss = module(x_pred, x_true)
-    # so - the first grad_input is that of the predicted state and the second is that of the "ground truth" (== zero)
+    del module, grad_out
+    # first grad_input is that of the predicted state and the second is that of the "ground truth" (== zero)
     channels = grad_in[0].shape[-1]  # number of channels
     channel_weights = torch.reciprocal(torch.sum(torch.abs(grad_in[0]), dim=1, keepdim=True))  # channel-wise weights
     new_grad_in = (

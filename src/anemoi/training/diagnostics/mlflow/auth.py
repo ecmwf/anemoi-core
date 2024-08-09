@@ -5,11 +5,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
+
+import logging
 import os
 import time
 from datetime import datetime
+from datetime import timezone
 from functools import wraps
 from getpass import getpass
+from typing import Callable
 
 import requests
 from anemoi.utils.config import load_config
@@ -17,32 +22,33 @@ from anemoi.utils.config import save_config
 from anemoi.utils.timer import Timer
 from requests.exceptions import HTTPError
 
-from anemoi.training.utils.logger import get_code_logger
-
 REFRESH_EXPIRE_DAYS = 29
 
 
 class TokenAuth:
     """Manage authentication with a keycloak token server."""
 
+    config_file = "mlflow-token.json"
+
     def __init__(
         self,
-        url,
-        enabled=True,
-    ):
-        """Parameters
+        url: str,
+        enabled: bool = True,
+    ) -> None:
+        """Initialise the token authentication object.
+
+        Parameters
         ----------
         url : str
             URL of the authentication server.
         enabled : bool, optional
             Set this to False to turn off authentication, by default True
-        """
 
+        """
         self.url = url
         self._enabled = enabled
 
-        self.config_file = "mlflow-token.json"
-        config = load_config(self.config_file)
+        config = self.load_config()
 
         self._refresh_token = config.get("refresh_token")
         self.refresh_expires = config.get("refresh_expires", 0)
@@ -51,33 +57,49 @@ class TokenAuth:
 
         # the command line tool adds a default handler to the root logger on runtime,
         # so we init our logger here (on runtime, not on import) to avoid duplicate handlers
-        self.log = get_code_logger(__name__)
+        self.log = logging.getLogger(__name__)
 
-    def __call__(self):
+    def __call__(self) -> None:
         self.authenticate()
 
     @property
-    def refresh_token(self):
+    def refresh_token(self) -> str:
         return self._refresh_token
 
     @refresh_token.setter
-    def refresh_token(self, value):
+    def refresh_token(self, value: str) -> None:
         self._refresh_token = value
         self.refresh_expires = time.time() + (REFRESH_EXPIRE_DAYS * 86400)  # 86400 seconds in a day
 
-    def enabled(fn):
-        """Decorator to call or ignore a function based on the `enabled` flag."""
+    @staticmethod
+    def load_config() -> dict:
+        return load_config(TokenAuth.config_file)
+
+    @staticmethod
+    def enabled(fn: Callable) -> Callable:
+        """Decorator to call or ignore a function based on the `enabled` flag.
+
+        Parameters
+        ----------
+        fn : Callable
+            Function to wrap with enable flag.
+
+        Returns
+        -------
+        function | None
+            Wrapped function or None if `_enabled` property is False.
+        """
 
         @wraps(fn)
-        def _wrapper(self, *args, **kwargs):
+        def _wrapper(self: TokenAuth, *args, **kwargs) -> Callable | None:
             if self._enabled:
                 return fn(self, *args, **kwargs)
-            return
+            return None
 
         return _wrapper
 
     @enabled
-    def login(self, force_credentials=False, **kwargs):
+    def login(self, force_credentials: bool = False, **kwargs: dict) -> None:
         """Acquire a new refresh token and save it to disk.
 
         If an existing valid refresh token is already on disk it will be used.
@@ -89,14 +111,17 @@ class TokenAuth:
         ----------
         force_credentials : bool, optional
             Force a username/password prompt even if a refreh token is available, by default False.
+        kwargs : dict
+            Additional keyword arguments.
 
         Raises
         ------
         RuntimeError
             A new refresh token could not be acquired.
-        """
 
-        self.log.info(f"🌐 Logging in to {self.url}")
+        """
+        del kwargs  # unused
+        self.log.info("🌐 Logging in to %s", self.url)
         new_refresh_token = None
 
         if not force_credentials and self.refresh_token and self.refresh_expires > time.time():
@@ -110,7 +135,8 @@ class TokenAuth:
             new_refresh_token = self._token_request(username=username, password=password).get("refresh_token")
 
         if not new_refresh_token:
-            raise RuntimeError("❌ Failed to log in. Please try again.")
+            msg = "❌ Failed to log in. Please try again."
+            raise RuntimeError(msg)
 
         self.refresh_token = new_refresh_token
         self.save()
@@ -118,7 +144,7 @@ class TokenAuth:
         self.log.info("✅ Successfully logged in to MLflow. Happy logging!")
 
     @enabled
-    def authenticate(self, **kwargs):
+    def authenticate(self, **kwargs: dict) -> None:
         """Check the access token and refresh it if necessary.
 
         The access token is stored in memory and in the environment variable `MLFLOW_TRACKING_TOKEN`.
@@ -130,13 +156,15 @@ class TokenAuth:
         ------
         RuntimeError
             No refresh token is available or the token request failed.
-        """
 
+        """
+        del kwargs  # unused
         if self.access_expires > time.time():
             return
 
         if not self.refresh_token or self.refresh_expires < time.time():
-            raise RuntimeError("You are not logged in to MLflow. Please log in first.")
+            msg = "You are not logged in to MLflow. Please log in first."
+            raise RuntimeError(msg)
 
         with Timer("Access token refreshed", self.log):
             response = self._token_request()
@@ -148,23 +176,29 @@ class TokenAuth:
         os.environ["MLFLOW_TRACKING_TOKEN"] = self.access_token
 
     @enabled
-    def save(self, **kwargs):
+    def save(self, **kwargs: dict) -> None:
         """Save the latest refresh token to disk."""
-
+        del kwargs  # unused
         if not self.refresh_token:
             self.log.warning("No refresh token to save.")
             return
 
         config = {
+            "url": self.url,
             "refresh_token": self.refresh_token,
             "refresh_expires": self.refresh_expires,
         }
         save_config(self.config_file, config)
 
-        expire_date = datetime.fromtimestamp(self.refresh_expires)
+        expire_date = datetime.fromtimestamp(self.refresh_expires, tz=timezone.utc)
         self.log.info("Your MLflow login token is valid until %s UTC", expire_date.strftime("%Y-%m-%d %H:%M:%S"))
 
-    def _token_request(self, username=None, password=None, ignore_exc=False):
+    def _token_request(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        ignore_exc: bool = False,
+    ) -> dict:
         if username is not None and password is not None:
             path = "newtoken"
             payload = {"username": username, "password": password}
@@ -174,29 +208,30 @@ class TokenAuth:
 
         try:
             response = self._request(path, payload)
-        except Exception as err:
+        except Exception:
             if ignore_exc:
                 return {}
-            raise err
+            raise
 
         return response
 
-    def _request(self, path, payload):
+    def _request(self, path: str, payload: dict) -> dict:
 
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
         }
 
         try:
-            response = requests.post(f"{self.url}/{path}", headers=headers, json=payload)
+            response = requests.post(f"{self.url}/{path}", headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             response_json = response.json()
 
             if response_json.get("status", "") != "OK":
                 error_description = response_json.get("response", "Error acquiring token.")
-                raise RuntimeError(f"❌ {error_description}")
+                msg = f"❌ {error_description}"
+                raise RuntimeError(msg)
 
             return response_json["response"]
-        except HTTPError as http_err:
-            self.log.error(f"HTTP error occurred: {http_err}")
+        except HTTPError:
+            self.log.exception("HTTP error occurred")
             raise

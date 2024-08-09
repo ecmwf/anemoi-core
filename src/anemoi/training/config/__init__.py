@@ -4,11 +4,3 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
-
-def test_training():
-    pass
-
-
-if __name__ == "__main__":
-    test_training()

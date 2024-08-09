@@ -1,19 +1,18 @@
-# (C) Copyright 2024 ECMWF.
-#
+# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-#
 
 import logging
 import os
 from functools import cached_property
+from typing import Callable
 
 import pytorch_lightning as pl
 from anemoi.datasets.data import open_dataset
-from anemoi.models.data.data_indices.collection import IndexCollection
+from anemoi.models.data_indices.collection import IndexCollection
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -24,19 +23,19 @@ from anemoi.training.data.dataset import worker_init_func
 LOGGER = logging.getLogger(__name__)
 
 
-class ECMLDataModule(pl.LightningDataModule):
-    """ECML data module for PyTorch Lightning."""
+class AnemoiDatasetsDataModule(pl.LightningDataModule):
+    """Anemoi Datasets data module for PyTorch Lightning."""
 
     def __init__(self, config: DictConfig) -> None:
-        """Initialize ECML data module.
+        """Initialize Anemoi Datasets data module.
 
         Parameters
         ----------
         config : DictConfig
             Job configuration
+
         """
         super().__init__()
-        LOGGER.setLevel(config.diagnostics.log.code.level)
 
         self.config = config
 
@@ -51,7 +50,10 @@ class ECMLDataModule(pl.LightningDataModule):
         ), f"Timestep isn't a multiple of data frequency, {timestep}, or data frequency, {frequency}"
         self.timeincrement = int(timestep[:-1]) // int(frequency[:-1])
         LOGGER.info(
-            f"Timeincrement set to {self.timeincrement} for data with frequency, {frequency}, and timestep, {timestep}"
+            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
+            self.timeincrement,
+            frequency,
+            timestep,
         )
 
         self.global_rank = int(os.environ.get("SLURM_PROCID", "0"))  # global rank
@@ -94,31 +96,32 @@ class ECMLDataModule(pl.LightningDataModule):
             )
             self.config.dataloader.training.end = self.config.dataloader.validation.start - 1
 
-    def _check_resolution(self, resolution) -> None:
+    def _check_resolution(self, resolution: str) -> None:
         assert (
             self.config.data.resolution.lower() == resolution.lower()
         ), f"Network resolution {self.config.data.resolution=} does not match dataset resolution {resolution=}"
 
     @cached_property
     def statistics(self) -> dict:
-        return self.dataset_train.statistics
+        return self.ds_train.statistics
 
     @cached_property
     def metadata(self) -> dict:
-        return self.dataset_train.metadata
+        return self.ds_train.metadata
 
     @cached_property
     def data_indices(self) -> IndexCollection:
-        return IndexCollection(self.config, self.dataset_train.name_to_index)
+        return IndexCollection(self.config, self.ds_train.name_to_index)
 
     @cached_property
-    def dataset_train(self) -> NativeGridDataset:
+    def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
-            open_dataset(OmegaConf.to_container(self.config.dataloader.training, resolve=True)), label="train"
+            open_dataset(OmegaConf.to_container(self.config.dataloader.training, resolve=True)),
+            label="train",
         )
 
     @cached_property
-    def dataset_validation(self) -> NativeGridDataset:
+    def ds_valid(self) -> NativeGridDataset:
         r = self.rollout
         if self.config.diagnostics.eval.enabled:
             r = max(r, self.config.diagnostics.eval.rollout)
@@ -134,7 +137,7 @@ class ECMLDataModule(pl.LightningDataModule):
         )
 
     @cached_property
-    def dataset_test(self) -> NativeGridDataset:
+    def ds_test(self) -> NativeGridDataset:
         assert self.config.dataloader.training.end < self.config.dataloader.test.start, (
             f"Training end date {self.config.dataloader.training.end} is not before"
             f"test start date {self.config.dataloader.test.start}"
@@ -150,7 +153,11 @@ class ECMLDataModule(pl.LightningDataModule):
         )
 
     def _get_dataset(
-        self, data_reader, shuffle: bool = True, rollout: int = 1, label: str = "generic"
+        self,
+        data_reader: Callable,
+        shuffle: bool = True,
+        rollout: int = 1,
+        label: str = "generic",
     ) -> NativeGridDataset:
         r = max(rollout, self.rollout)
         data = NativeGridDataset(
@@ -163,13 +170,12 @@ class ECMLDataModule(pl.LightningDataModule):
             model_comm_num_groups=self.model_comm_num_groups,
             shuffle=shuffle,
             label=label,
-            logging=self.config.diagnostics.log.code.level,
         )
         self._check_resolution(data.resolution)
         return data
 
     def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:
-        assert stage in ["training", "validation", "test"]
+        assert stage in {"training", "validation", "test"}
         return DataLoader(
             ds,
             batch_size=self.config.dataloader.batch_size[stage],
@@ -186,10 +192,10 @@ class ECMLDataModule(pl.LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
-        return self._get_dataloader(self.dataset_train, "training")
+        return self._get_dataloader(self.ds_train, "training")
 
     def val_dataloader(self) -> DataLoader:
-        return self._get_dataloader(self.dataset_validation, "validation")
+        return self._get_dataloader(self.ds_valid, "validation")
 
     def test_dataloader(self) -> DataLoader:
-        return self._get_dataloader(self.dataset_test, "test")
+        return self._get_dataloader(self.ds_test, "test")

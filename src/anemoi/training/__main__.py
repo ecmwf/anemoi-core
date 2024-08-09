@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # (C) Copyright 2024 ECMWF.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -16,11 +15,11 @@ from .commands import COMMANDS
 
 
 # For read-the-docs
-def create_parser():
+def create_parser() -> None:
     return make_parser(__doc__, COMMANDS)
 
 
-def main():
+def main() -> None:
     cli_main(__version__, __doc__, COMMANDS)
 
 

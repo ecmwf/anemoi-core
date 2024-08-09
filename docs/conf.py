@@ -33,12 +33,9 @@ project = "Anemoi Training"
 author = "ECMWF"
 
 year = datetime.datetime.now().year
-if year == 2024:
-    years = "2024"
-else:
-    years = "2024-%s" % (year,)
+years = "2024" if year == 2024 else f"2024-{year}"
 
-copyright = "%s, ECMWF" % (years,)
+copyright = f"{years}, ECMWF"
 
 
 try:

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # (C) Copyright 2024 ECMWF.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -8,7 +7,7 @@
 # nor does it submit to any jurisdiction.
 #
 
-import os
+from pathlib import Path
 
 from anemoi.utils.cli import Command
 from anemoi.utils.cli import Failed
@@ -17,8 +16,8 @@ from anemoi.utils.cli import register_commands
 __all__ = ["Command"]
 
 COMMANDS = register_commands(
-    os.path.dirname(__file__),
+    Path(__file__).parent,
     __name__,
     lambda x: x.command(),
-    lambda name, error: Failed(name, error),
+    Failed,
 )

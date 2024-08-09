@@ -1,0 +1,9 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: eval_rollout
+- hardware: example
+- graph: multi_scale
+- model: gnn
+- training: default
+- _self_

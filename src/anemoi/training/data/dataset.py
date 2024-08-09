@@ -4,21 +4,21 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
+from __future__ import annotations
 
 import logging
 import os
 import random
 from functools import cached_property
 from typing import Callable
-from typing import Optional
 
 import numpy as np
 import torch
-from anemoi.utils import get_base_seed
 from einops import rearrange
 from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
+
+from anemoi.training.utils.seeding import get_base_seed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +37,6 @@ class NativeGridDataset(IterableDataset):
         model_comm_num_groups: int = 1,
         shuffle: bool = True,
         label: str = "generic",
-        logging: str = "INFO",
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -47,6 +46,8 @@ class NativeGridDataset(IterableDataset):
             user function that opens and returns the zarr array data
         rollout : int, optional
             length of rollout window, by default 12
+        timeincrement : int, optional
+            time increment between samples, by default 1
         multistep : int, optional
             collate (t-1, ... t - multistep) into the input state vector, by default 1
         model_comm_group_rank : int, optional
@@ -57,13 +58,10 @@ class NativeGridDataset(IterableDataset):
             total number of device groups, by default 1
         shuffle : bool, optional
             Shuffle batches, by default True
+        label : str, optional
+            label for the dataset, by default "generic"
 
-        Raises
-        ------
-        RuntimeError
-            Multistep value cannot be negative.
         """
-        LOGGER.setLevel(logging)
         self.label = label
 
         self.data = data_reader
@@ -83,7 +81,7 @@ class NativeGridDataset(IterableDataset):
 
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
-        self.chunk_index_range: Optional[np.ndarray] = None
+        self.chunk_index_range: np.ndarray | None = None
         self.shuffle = shuffle
 
         # Data dimensions
@@ -123,6 +121,7 @@ class NativeGridDataset(IterableDataset):
             Number of workers
         worker_id : int
             Worker ID
+
         """
         self.worker_id = worker_id
 
@@ -168,7 +167,10 @@ class NativeGridDataset(IterableDataset):
         sanity_rnd = self.rng.random(1)
 
         LOGGER.debug(
-            "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, group_rank %d, base_seed %d) using seed %d, sanity rnd %f",
+            (
+                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
+                "group_rank %d, base_seed %d) using seed %d, sanity rnd %f"
+            ),
             worker_id,
             self.label,
             os.getpid(),
@@ -180,10 +182,10 @@ class NativeGridDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def __iter__(self):
+    def __iter__(self) -> torch.Tensor:
         """Return an iterator over the dataset.
 
-        The datasets are retrieved by ECML Tools from zarr files. This iterator yields
+        The datasets are retrieved by Anemoi Datasets from zarr files. This iterator yields
         chunked batches for DDP and sharded training.
 
         Currently it receives data with an ensemble dimension, which is discarded for
@@ -191,13 +193,18 @@ class NativeGridDataset(IterableDataset):
         """
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
-                self.chunk_index_range, size=self.n_samples_per_worker, replace=False
+                self.chunk_index_range,
+                size=self.n_samples_per_worker,
+                replace=False,
             )
         else:
             shuffled_chunk_indices = self.chunk_index_range
 
         LOGGER.debug(
-            "Worker pid %d, label %s, worker id %d, global_rank %d, model comm group %d, group_rank %d using indices[0:10]: %s",
+            (
+                "Worker pid %d, label %s, worker id %d, global_rank %d, "
+                "model comm group %d, group_rank %d using indices[0:10]: %s"
+            ),
             os.getpid(),
             self.label,
             self.worker_id,
@@ -216,6 +223,16 @@ class NativeGridDataset(IterableDataset):
             self.ensemble_dim = 1
 
             yield torch.from_numpy(x)
+
+    def __len__(self) -> int:
+        # Total number of valid ICs is dataset length minus rollout minus additional multistep inputs
+        len_corrected = len(self.data) - (self.rollout + (self.multi_step - 1)) * self.timeincrement
+
+        # Divide this equally across shards (one shard per group!)
+        shard_size = len_corrected // self.model_comm_num_groups
+        shard_start = self.model_comm_group_id * shard_size + (self.multi_step - 1) * self.timeincrement
+        shard_end = min((self.model_comm_group_id + 1) * shard_size, len(self.data) - self.rollout * self.timeincrement)
+        return shard_end - shard_start
 
     def __repr__(self) -> str:
         return f"""
@@ -241,6 +258,7 @@ def worker_init_func(worker_id: int) -> None:
     ------
     RuntimeError
         If worker_info is None
+
     """
     worker_info = get_worker_info()  # information specific to each worker process
     if worker_info is None:
