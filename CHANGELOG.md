@@ -15,8 +15,8 @@ Keep it human-readable, your future self will thank you!
 #### Subcommands
  - Subcommand for training `anemoi-training train`
  - Subcommand for config generation of configs
- - Subcommand for mlflow authentication
- - Subcommand for chechkpoint handling
+ - Subcommand for mlflow: login and sync
+ - Subcommand for checkpoint handling
 
 #### Functionality
  - Searchpaths for Hydra configs, to enable configs in CWD, `ANEMOI_CONFIG_PATH` env, and `.config/anemoi/training` in addition to package defaults
@@ -58,7 +58,7 @@ Keep it human-readable, your future self will thank you!
  - Bumped versions in Pre-commit hooks
 
 ### Removed
- - MlFlow Offline Sync (needs non-pip dependencies)
+ - Dependency on mlflow-export-import
  - Specific user configs
 
 <!-- Add Git Diffs for Links above -->
