@@ -13,14 +13,14 @@ Keep it human-readable, your future self will thank you!
 ### Added
 
 ### Changed
+
  - Update CI to inherit from common infrastructue reusable workflows
  - run downstream-ci only when src and tests folders have changed
-
-- New error messages for wrongs graphs.
+ - New error messages for wrongs graphs.
 
 ### Removed
 
-## 0.2.1
+## [0.2.1] - Dependency update
 
 ### Added
 
@@ -31,7 +31,7 @@ Keep it human-readable, your future self will thank you!
 
 - anemoi-datasets dependency
 
-## 0.2.0
+## [0.2.0] - Support Heterodata
 
 ### Added
 
@@ -41,18 +41,15 @@ Keep it human-readable, your future self will thank you!
 
 - Updated to support new PyTorch Geometric HeteroData structure (defined by `anemoi-graphs` package).
 
-### Removed
-
-## 0.1.0 Initial Release
+## [0.1.0] - Initial Release
 
 ### Added
 - Documentation
 - Initial code release with models, layers, distributed, preprocessing, and data_indices
 - Added Changelog
 
-### Changed
-
-### Removed
-
-## Git Diffs:
+<!-- Add Git Diffs for Links above -->
+[unreleased]: https://github.com/ecmwf/anemoi-models/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/ecmwf/anemoi-models/compare/0.2.0...0.2.1
+[0.2.0]: https://github.com/ecmwf/anemoi-models/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/ecmwf/anemoi-models/releases/tag/0.1.0
