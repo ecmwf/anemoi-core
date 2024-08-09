@@ -17,6 +17,7 @@ Keep it human-readable, your future self will thank you!
 ### Changed
 - Fix `anemoi-graphs create`. Config argument is cast to a Path.
 - Fix GraphCreator().clean() to not iterate over a dictionary that may change size during iterations.
+- Fix missing binary dependency
 
 ### Removed
 
