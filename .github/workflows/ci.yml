@@ -8,6 +8,9 @@ on:
       - 'develop'
     tags-ignore:
       - '**'
+    paths:
+      - "src/**"
+      - "tests/**"
 
   # Trigger the workflow on pull request
   pull_request: ~
