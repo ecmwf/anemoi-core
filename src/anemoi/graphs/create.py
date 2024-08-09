@@ -19,7 +19,10 @@ class GraphCreator:
         self,
         config: Union[Path, DotDict],
     ):
-        self.config = DotDict.from_file(config) if isinstance(config, Path) else config
+        if isinstance(config, Path) or isinstance(config, str):
+            self.config = DotDict.from_file(config)
+        else:
+            self.config = config
 
     def generate_graph(self) -> HeteroData:
         """Generate the graph.
@@ -59,7 +62,7 @@ class GraphCreator:
             cleaned graph
         """
         for type_name in chain(graph.node_types, graph.edge_types):
-            for attr_name in graph[type_name].keys():
+            for attr_name in list(graph[type_name].keys()):
                 if attr_name.startswith("_"):
                     del graph[type_name][attr_name]
 

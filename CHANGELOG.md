@@ -15,6 +15,8 @@ Keep it human-readable, your future self will thank you!
 - added downstream-ci pipeline
 
 ### Changed
+- Fix `anemoi-graphs create`. Config argument is cast to a Path.
+- Fix GraphCreator().clean() to not iterate over a dictionary that may change size during iterations.
 
 ### Removed
 
