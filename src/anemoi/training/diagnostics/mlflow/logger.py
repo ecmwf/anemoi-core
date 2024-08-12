@@ -374,7 +374,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             if offline:
                 LOGGER.info("MLflow is logging offline.")
             else:
-                LOGGER.info("MLflow token authentication {'enabled' if enabled else 'disabled'} for %s", tracking_uri)
+                LOGGER.info("MLflow token authentication %s for %s", "enabled" if enabled else "disabled", tracking_uri)
                 self.auth.authenticate()
                 health_check(tracking_uri)
 
