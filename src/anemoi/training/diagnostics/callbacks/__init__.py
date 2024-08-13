@@ -488,7 +488,7 @@ class PlotLoss(BasePlotCallback):
         batch_idx: int,
     ) -> None:
         if batch_idx % self.plot_frequency == 0:
-            self.plot(trainer, pl_module, outputs, batch, epoch=trainer.current_epoch)
+            self.plot(trainer, pl_module, outputs, batch, batch_idx, epoch=trainer.current_epoch)
 
 
 class PlotSample(BasePlotCallback):

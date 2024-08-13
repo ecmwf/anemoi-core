@@ -35,6 +35,7 @@ Keep it human-readable, your future self will thank you!
  - `__future__` annotations for typehints
  - Added Typehints where missing
  - Added Changelog
+ - Correct errors in callback plots
 
 ### Changed
 
