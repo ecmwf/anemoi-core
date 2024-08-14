@@ -18,6 +18,7 @@ Keep it human-readable, your future self will thank you!
 - Fix `anemoi-graphs create`. Config argument is cast to a Path.
 - Fix GraphCreator().clean() to not iterate over a dictionary that may change size during iterations.
 - Fix missing binary dependency
+- **Fix**: Updated `get_raw_values` method in `AreaWeights` to ensure compatibility with `scipy.spatial.SphericalVoronoi` by converting `latitudes` and `longitudes` to NumPy arrays before passing them to the `latlon_rad_to_cartesian` function. This resolves an issue where the function would fail if passed Torch Tensors directly.
 
 ### Removed
 
