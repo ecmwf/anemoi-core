@@ -58,6 +58,7 @@ Keep it human-readable, your future self will thank you!
  - Moved callbacks into folder to fascilitate future refactor
  - Adjusted PyPI release infrastructure to common ECMWF workflow
  - Bumped versions in Pre-commit hooks
+ - Fix crash when logging hyperparameters with missing values in the config
 
 ### Removed
  - Dependency on mlflow-export-import

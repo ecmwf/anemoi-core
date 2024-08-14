@@ -27,6 +27,7 @@ from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.utils.jsonify import map_config_to_primitives
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -454,6 +455,11 @@ class AnemoiMLflowLogger(MLFlowLogger):
         """Overwrite the log_hyperparams method to flatten config params using '.'."""
         if self._flag_log_hparams:
             params = _convert_params(params)
+
+            # this is needed to resolve optional missing config values to a string, instead of raising a missing error
+            if config := params.get("config"):
+                params["config"] = map_config_to_primitives(config)
+
             params = _flatten_dict(params, delimiter=".")  # Flatten dict with '.' to not break API queries
             params = self._clean_params(params)
 
