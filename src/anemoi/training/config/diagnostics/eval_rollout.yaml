@@ -78,7 +78,7 @@ log:
   tensorboard:
     enabled: False
   mlflow:
-    enabled: True
+    enabled: False
     offline: False
     authentication: False
     log_model: False

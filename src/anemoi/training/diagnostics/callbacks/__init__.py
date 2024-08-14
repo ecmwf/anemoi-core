@@ -789,10 +789,9 @@ class AnemoiCheckpoint(ModelCheckpoint):
                     "url": run.url,
                     "project": run.project,
                 }
-            else:
-                self._tracker_metadata = {}
+            return {self._tracker_name: self._tracker_metadata}
 
-        elif self.config.diagnostics.log.mlflow.enabled:
+        if self.config.diagnostics.log.mlflow.enabled:
             self._tracker_name = "mlflow"
 
             from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
@@ -808,10 +807,9 @@ class AnemoiCheckpoint(ModelCheckpoint):
                     "url": run.info.artifact_uri,
                     "project": run.info.experiment_id,
                 }
-            else:
-                self._tracker_metadata = {}
+            return {self._tracker_name: self._tracker_metadata}
 
-        return {self._tracker_name: self._tracker_metadata}
+        return {}
 
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:

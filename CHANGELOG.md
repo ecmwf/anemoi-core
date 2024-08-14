@@ -59,6 +59,7 @@ Keep it human-readable, your future self will thank you!
  - Adjusted PyPI release infrastructure to common ECMWF workflow
  - Bumped versions in Pre-commit hooks
  - Fix crash when logging hyperparameters with missing values in the config
+ - Fixed "null" tracker metadata when tracking is disabled, now returns an empty dict
 
 ### Removed
  - Dependency on mlflow-export-import
