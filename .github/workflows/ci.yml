@@ -1,26 +1,29 @@
 name: ci
 
 on:
-  # Trigger the workflow on push to master or develop, except tag creation
+  # Trigger the workflow on push to main or develop, except tag creation
   push:
     branches:
       - 'main'
       - 'develop'
     tags-ignore:
       - '**'
-    paths:
-      - "src/**"
-      - "tests/**"
+    paths-ignore: &paths-ignore
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "README.md"
 
   # Trigger the workflow on pull request
-  pull_request: ~
+  pull_request:
+    paths-ignore: *paths-ignore
 
-  # Trigger the workflow manuallyp instals
+  # Trigger the workflow manually
   workflow_dispatch: ~
 
   # Trigger after public PR approved for CI
   pull_request_target:
     types: [labeled]
+    paths-ignore: *paths-ignore
 
 jobs:
   # Run CI including downstream packages on self-hosted runners

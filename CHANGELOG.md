@@ -62,6 +62,7 @@ Keep it human-readable, your future self will thank you!
  - Fix crash when logging hyperparameters with missing values in the config
  - Fixed "null" tracker metadata when tracking is disabled, now returns an empty dict
  - Pinned numpy<2 until we can test all migration
+ - (ci): path ignore of docs for downstream ci
 
 ### Removed
  - Dependency on mlflow-export-import
