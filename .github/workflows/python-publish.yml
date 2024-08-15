@@ -11,13 +11,12 @@ jobs:
   quality:
     uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-precommit-run.yml@v2
     with:
-      skip_hooks: "no-commit-to-branch"
+      skip-hooks: "no-commit-to-branch"
 
   checks:
     strategy:
       matrix:
         python-version: ["3.9", "3.10"]
-
     uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
     with:
       python-version: ${{ matrix.python-version }}
