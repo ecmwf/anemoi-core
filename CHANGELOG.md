@@ -66,6 +66,7 @@ Keep it human-readable, your future self will thank you!
 ### Removed
  - Dependency on mlflow-export-import
  - Specific user configs
+ - __len__ function of NativeGridDataset as it lead to bugs
 
 <!-- Add Git Diffs for Links above -->
 

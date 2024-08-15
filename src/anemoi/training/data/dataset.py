@@ -224,16 +224,6 @@ class NativeGridDataset(IterableDataset):
 
             yield torch.from_numpy(x)
 
-    def __len__(self) -> int:
-        # Total number of valid ICs is dataset length minus rollout minus additional multistep inputs
-        len_corrected = len(self.data) - (self.rollout + (self.multi_step - 1)) * self.timeincrement
-
-        # Divide this equally across shards (one shard per group!)
-        shard_size = len_corrected // self.model_comm_num_groups
-        shard_start = self.model_comm_group_id * shard_size + (self.multi_step - 1) * self.timeincrement
-        shard_end = min((self.model_comm_group_id + 1) * shard_size, len(self.data) - self.rollout * self.timeincrement)
-        return shard_end - shard_start
-
     def __repr__(self) -> str:
         return f"""
             {super().__repr__()}
