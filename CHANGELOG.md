@@ -24,7 +24,7 @@ Keep it human-readable, your future self will thank you!
 - ci: Reusable workflows for push, PR, and releases
 - ci: ignore docs for downstream ci
 - ci: changed Changelog action to create PR
-- ci: fixes
+- ci: fixes and permissions
 
 ### Removed
 
