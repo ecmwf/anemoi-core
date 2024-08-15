@@ -23,6 +23,7 @@ Keep it human-readable, your future self will thank you!
 - **Fix**: Updated `get_raw_values` method in `AreaWeights` to ensure compatibility with `scipy.spatial.SphericalVoronoi` by converting `latitudes` and `longitudes` to NumPy arrays before passing them to the `latlon_rad_to_cartesian` function. This resolves an issue where the function would fail if passed Torch Tensors directly.
 - ci: Reusable workflows for push, PR, and releases
 - ci: ignore docs for downstream ci
+- ci: changed Changelog action to create PR
 
 ### Removed
 

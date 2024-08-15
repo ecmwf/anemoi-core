@@ -28,9 +28,12 @@ jobs:
           heading-text: ${{ github.event.release.name }}
           release-notes: ${{ github.event.release.body }}
 
-      - name: Commit updated CHANGELOG
-        uses: stefanzweifel/git-auto-commit-action@v5
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        branch: docs/changelog-update-${{ github.event.release.tag_name }}
+        title: '[Changelog] Update to ${{ github.event.release.tag_name }}'
+        labels: |
+            automated pr
         with:
-          branch: ${{ github.event.release.target_commitish }}
-          commit_message: Update CHANGELOG
-          file_pattern: CHANGELOG.md
+          add-paths: |
+            CHANGELOG.md
