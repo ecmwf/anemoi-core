@@ -61,10 +61,12 @@ class GraphCreator:
         HeteroData
             cleaned graph
         """
+        LOGGER.info("Cleaning graph.")
         for type_name in chain(graph.node_types, graph.edge_types):
-            for attr_name in list(graph[type_name].keys()):
-                if attr_name.startswith("_"):
-                    del graph[type_name][attr_name]
+            attr_names_to_remove = [attr_name for attr_name in graph[type_name] if attr_name.startswith("_")]
+            for attr_name in attr_names_to_remove:
+                del graph[type_name][attr_name]
+                LOGGER.info(f"{attr_name} deleted from graph.")
 
         return graph
 
