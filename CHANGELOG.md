@@ -13,6 +13,7 @@ Keep it human-readable, your future self will thank you!
 ### Added
 - HEALPixNodes - nodebuilder based on Hierarchical Equal Area isoLatitude Pixelation of a sphere
 - added downstream-ci pipeline and cd-pypi reusable workflow
+- Changelog release updater
 
 ### Changed
 - Fix bug in graph cleaning method
