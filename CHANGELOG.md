@@ -63,6 +63,7 @@ Keep it human-readable, your future self will thank you!
  - Fixed "null" tracker metadata when tracking is disabled, now returns an empty dict
  - Pinned numpy<2 until we can test all migration
  - (ci): path ignore of docs for downstream ci
+ - (ci): remove yaml anchor, unsupported by Github
 
 ### Removed
  - Dependency on mlflow-export-import
