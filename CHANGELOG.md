@@ -36,6 +36,7 @@ Keep it human-readable, your future self will thank you!
  - Added Typehints where missing
  - Added Changelog
  - Correct errors in callback plots
+ - fix error in the default config
 
 ### Changed
 

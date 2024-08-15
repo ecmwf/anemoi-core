@@ -30,8 +30,8 @@ edges:
   # Processor configuration
   target_name: ${graph.hidden}
   edge_builder:
-    _target_: anemoi.graphs.edges.TriIcosahedralEdges
-    xhops: 1
+    _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
   attributes: ${graph.attributes.edges}
 - source_name: ${graph.hidden}
   # Decoder configuration
