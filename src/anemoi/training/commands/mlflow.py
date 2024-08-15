@@ -60,7 +60,7 @@ class MlFlow(Command):
             "--experiment-name",
             "-e",
             help="The experiment name to sync to.",
-            default="anemoi_debug",
+            default="anemoi-debug",
         )
         sync.add_argument(
             "--export-deleted-runs",
