@@ -27,6 +27,7 @@ Keep it human-readable, your future self will thank you!
 - ci: fixes and permissions
 
 ### Removed
+ci: testing for python 3.9
 
 ## [0.2.1] - Anemoi-graph Release, bug fix release
 
