@@ -4,6 +4,7 @@ name: "Update Changelog"
 on:
   release:
     types: [released]
+  workflow_dispatch: ~
 
 permissions:
   pull-requests: write
@@ -17,6 +18,8 @@ jobs:
       # updated CHANGELOG back to the repository.
       # https://github.blog/changelog/2023-02-02-github-actions-updating-the-default-github_token-permissions-to-read-only/
       contents: write
+      pull-requests: read
+      statuses: write
 
     steps:
       - name: Checkout code
