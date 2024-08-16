@@ -48,7 +48,8 @@ When developing multiple new functions for a feature:
  Code Style and Documentation
 ******************************
 
-#. Follow PEP 8 guidelines for Python code style.
+#. Follow PEP 8 guidelines for Python code style, the pre-commit hooks
+   will help enforce this.
 #. Write clear, concise docstrings for all classes and functions using
    the Numpy style.
 #. Use type hints to improve code readability and catch potential

@@ -17,7 +17,7 @@ These missing values in the configuration are placeholders for the user
 to fill in marked with `???`. You can find the default configurations in
 the `anemoi-training` repository under `src/anemoi/training/configs/`.
 Alternatively, the next section will show you how to `generate a user
-config file <start/hydra-intro>`_.
+config file <hydra-intro>`_.
 
 *******************************
  Preparing training components

@@ -191,7 +191,7 @@ Anemoi training uses the ``CosineLRScheduler`` from PyTorch as it's
 learning rate scheduler. The user can configure the maximum learning
 rate by setting ``config.training.lr.rate``. Note that this learning
 rate is scaled by the number of GPUs where for the `data parallelism
-<user-guide/distributed>`_.
+<distributed>`_.
 
 .. code:: yaml
 

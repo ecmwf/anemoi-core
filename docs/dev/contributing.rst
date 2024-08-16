@@ -62,7 +62,7 @@ When committing code changes:
 
 #. Make small, focused commits with clear and concise messages.
 
-#. Follow the Conventional `Commits guidelines
+#. Follow the `Conventional Commits guidelines
    <https://www.conventionalcommits.org/>`_, e.g., "feat:", "fix:",
    "docs:", etc.
 
@@ -70,6 +70,9 @@ When committing code changes:
    feature" not "Added feature").
 
 #. Reference relevant issue numbers in commit messages when applicable.
+
+#. Update the ``CHANGELOG.md`` file with a human-friendly summary of
+   your changes.
 
 **********************
  Pull Request Process
@@ -104,6 +107,15 @@ better suited for GPU execution.
 ************************
  Building Documentation
 ************************
+
+You can build the documentation locally to preview changes before
+submitting a Pull Request. We use Sphinx for documentation.
+
+You can install the dependencies for building the documentation with:
+
+.. code:: bash
+
+   pip install '.[docs]'
 
 To build the documentation locally:
 
