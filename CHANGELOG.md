@@ -64,15 +64,16 @@ Keep it human-readable, your future self will thank you!
  - Fixed docstrings
 
 #### Miscellaneous
-
--   Moved callbacks into folder to fascilitate future refactor
--   Adjusted PyPI release infrastructure to common ECMWF workflow
--   Bumped versions in Pre-commit hooks
--   Fix crash when logging hyperparameters with missing values in the config
--   Fixed "null" tracker metadata when tracking is disabled, now returns an empty dict
--   Pinned numpy<2 until we can test all migration
--   (ci): path ignore of docs for downstream ci
--   (ci): remove yaml anchor, unsupported by Github
+ - Moved callbacks into folder to fascilitate future refactor
+ - Adjusted PyPI release infrastructure to common ECMWF workflow
+ - Bumped versions in Pre-commit hooks
+ - Fix crash when logging hyperparameters with missing values in the config
+ - Fixed "null" tracker metadata when tracking is disabled, now returns an empty dict
+ - Pinned numpy<2 until we can test all migration
+ - (ci): path ignore of docs for downstream ci
+ - (ci): remove yaml anchor, unsupported by Github
+ - ci: make python QA reusable
+ - ci: permissions on changelog updater
 
 ### Removed
 
