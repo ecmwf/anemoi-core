@@ -16,18 +16,17 @@ Keep it human-readable, your future self will thank you!
 - Changelog release updater
 
 ### Changed
-- Fix bug in graph cleaning method
-- Fix `anemoi-graphs create`. Config argument is cast to a Path.
-- Fix GraphCreator().clean() to not iterate over a dictionary that may change size during iterations.
-- Fix missing binary dependency
-- **Fix**: Updated `get_raw_values` method in `AreaWeights` to ensure compatibility with `scipy.spatial.SphericalVoronoi` by converting `latitudes` and `longitudes` to NumPy arrays before passing them to the `latlon_rad_to_cartesian` function. This resolves an issue where the function would fail if passed Torch Tensors directly.
+- fix: added support for Python3.9.
+- fix: bug in graph cleaning method
+- fix: `anemoi-graphs create` CLI argument is casted to a Path.
+- ci: fix missing binary dependency in ci-config.yaml
+- fix: Updated `get_raw_values` method in `AreaWeights` to ensure compatibility with `scipy.spatial.SphericalVoronoi` by converting `latitudes` and `longitudes` to NumPy arrays before passing them to the `latlon_rad_to_cartesian` function. This resolves an issue where the function would fail if passed Torch Tensors directly.
 - ci: Reusable workflows for push, PR, and releases
 - ci: ignore docs for downstream ci
 - ci: changed Changelog action to create PR
 - ci: fixes and permissions
 
 ### Removed
-ci: testing for python 3.9
 
 ## [0.2.1] - Anemoi-graph Release, bug fix release
 

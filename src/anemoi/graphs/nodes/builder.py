@@ -1,9 +1,9 @@
+from __future__ import annotations
+
 import logging
 from abc import ABC
 from abc import abstractmethod
 from pathlib import Path
-from typing import Optional
-from typing import Union
 
 import numpy as np
 import torch
@@ -44,7 +44,7 @@ class BaseNodeBuilder(ABC):
         graph[self.name].node_type = type(self).__name__
         return graph
 
-    def register_attributes(self, graph: HeteroData, config: Optional[DotDict] = None) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, config: DotDict = None) -> HeteroData:
         """Register attributes in the nodes of the graph specified.
 
         Parameters
@@ -85,7 +85,7 @@ class BaseNodeBuilder(ABC):
         coords = np.deg2rad(coords)
         return torch.tensor(coords, dtype=torch.float32)
 
-    def update_graph(self, graph: HeteroData, attr_config: Optional[DotDict] = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attr_config: DotDict | None = None) -> HeteroData:
         """Update the graph with new nodes.
 
         Parameters
@@ -212,7 +212,7 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
 
     def __init__(
         self,
-        resolution: Union[int, list[int]],
+        resolution: int | list[int],
         name: str,
     ) -> None:
         self.resolutions = list(range(resolution + 1)) if isinstance(resolution, int) else resolution

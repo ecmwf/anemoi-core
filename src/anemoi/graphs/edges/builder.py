@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import logging
 from abc import ABC
 from abc import abstractmethod
-from typing import Optional
 
 import networkx as nx
 import numpy as np
@@ -99,7 +100,7 @@ class BaseEdgeBuilder(ABC):
             graph[self.name][attr_name] = instantiate(attr_config).compute(graph, self.name)
         return graph
 
-    def update_graph(self, graph: HeteroData, attrs_config: Optional[DotDict] = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
         """Update the graph with the edges.
 
         Parameters
@@ -214,7 +215,7 @@ class CutOffEdges(BaseEdgeBuilder):
         assert cutoff_factor > 0, "Cutoff factor must be positive"
         self.cutoff_factor = cutoff_factor
 
-    def get_cutoff_radius(self, graph: HeteroData, mask_attr: Optional[torch.Tensor] = None):
+    def get_cutoff_radius(self, graph: HeteroData, mask_attr: torch.Tensor | None = None):
         """Compute the cut-off radius.
 
         The cut-off radius is computed as the product of the target nodes reference distance and the cut-off factor.

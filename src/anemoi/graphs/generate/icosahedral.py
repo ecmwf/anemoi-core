@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import logging
 from collections.abc import Iterable
-from typing import Optional
 
 import networkx as nx
 import numpy as np
@@ -168,7 +169,7 @@ def add_neigbours_edges(
     node_idx: int,
     neighbour_indices: Iterable[int],
     self_loops: bool = False,
-    vertex_mapping_index: Optional[np.ndarray] = None,
+    vertex_mapping_index: np.ndarray | None = None,
 ) -> None:
     """Adds the edges of one node to its neighbours.
 

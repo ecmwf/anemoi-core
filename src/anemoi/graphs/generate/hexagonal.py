@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 import h3
 import networkx as nx
@@ -8,7 +8,7 @@ from sklearn.metrics.pairwise import haversine_distances
 
 def create_hexagonal_nodes(
     resolutions: list[int],
-    area: Optional[dict] = None,
+    area: dict | None = None,
 ) -> tuple[nx.Graph, np.ndarray, list[int]]:
     """Creates a global mesh from a refined icosahedro.
 
@@ -50,7 +50,7 @@ def create_hexagonal_nodes(
 def add_nodes_for_resolution(
     graph: nx.Graph,
     resolution: int,
-    **area_kwargs: Optional[dict],
+    **area_kwargs: dict | None,
 ) -> nx.Graph:
     """Add all nodes at a specified refinement level to a graph.
 
@@ -74,7 +74,7 @@ def add_nodes_for_resolution(
 
 def get_nodes_at_resolution(
     resolution: int,
-    area: Optional[dict] = None,
+    area: dict | None = None,
 ) -> set[str]:
     """Get nodes at a specified refinement level over the entire globe.
 
@@ -160,7 +160,7 @@ def add_neighbour_edges(
 def add_edges_to_children(
     graph: nx.Graph,
     refinement_levels: tuple[int],
-    depth_children: Optional[int] = None,
+    depth_children: int | None = None,
 ) -> nx.Graph:
     """Adds edges to the children of the nodes at the specified resolution levels.
 
