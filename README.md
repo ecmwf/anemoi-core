@@ -1,4 +1,4 @@
-# anemoi-utils
+# anemoi-training
 
 **DISCLAIMER**
 This project is **BETA** and will be **Experimental** for the foreseeable future.
