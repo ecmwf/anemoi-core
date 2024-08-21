@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterable
 
 import networkx as nx
@@ -10,8 +9,6 @@ from sklearn.metrics.pairwise import haversine_distances
 from sklearn.neighbors import BallTree
 
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
-
-logger = logging.getLogger(__name__)
 
 
 def create_icosahedral_nodes(

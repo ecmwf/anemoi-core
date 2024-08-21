@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from abc import ABC
 from abc import abstractmethod
 
@@ -11,8 +10,6 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges.directional import directional_edge_features
 from anemoi.graphs.normalizer import NormalizerMixin
 from anemoi.graphs.utils import haversine_distance
-
-LOGGER = logging.getLogger(__name__)
 
 
 class BaseEdgeAttribute(ABC, NormalizerMixin):
@@ -50,10 +47,12 @@ class BaseEdgeAttribute(ABC, NormalizerMixin):
 class EdgeDirection(BaseEdgeAttribute):
     """Edge direction feature.
 
-    If using the rotated features, the direction of the edge is computed
-    rotating the target nodes to the north pole. If not, it is computed
-    as the diference in latitude and longitude between the source and
-    target nodes.
+    This class calculates the direction of an edge using either:
+    1. Rotated features: The target nodes are rotated to the north pole to compute the edge direction.
+    2. Non-rotated features: The direction is computed as the difference in latitude and longitude between the source
+    and target nodes.
+
+    The resulting direction is represented as a unit vector starting at (0, 0), with X and Y components.
 
     Attributes
     ----------
