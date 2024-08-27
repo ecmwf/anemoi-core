@@ -11,6 +11,7 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased]
 
 ### Added
+ - CI workflow to update the changelog on release
 
 ### Changed
 
