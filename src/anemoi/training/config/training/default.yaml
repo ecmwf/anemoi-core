@@ -79,16 +79,6 @@ metrics:
 - u_850
 - v_850
 
-# Bounding configuration
-# bounding_strategies: #order in which these variables are defined matters!
-#   tp:
-#     _target_: anemoi.models.models.bounding.ReluBoundingStrategy #[0, infinity)
-#   cp:
-#     _target_: anemoi.models.models.bounding.FractionHardtanhBoundingStrategy # fraction of tp
-#     min_val: 0
-#     max_val: 1
-#     total_var: tp
-
 pressure_level_scaler:
   _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
   minimum: 0.2
