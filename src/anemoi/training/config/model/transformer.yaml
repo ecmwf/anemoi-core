@@ -48,13 +48,12 @@ attributes:
 
 node_loss_weight: area_weight
 
-
 # Bounding configuration
 # bounding: #These are applied in order
-#   - _target_: anemoi.models.layers.bounding.ReluBoundingStrategy #[0, infinity)
+#   - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
 #     variables:
 #     - tp
-#   - _target_: anemoi.models.layers.bounding.FractionHardtanhBoundingStrategy # fraction of tp
+#   - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
 #     variables:
 #     - cp
 #     min_val: 0
