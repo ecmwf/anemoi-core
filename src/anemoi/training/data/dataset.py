@@ -19,6 +19,7 @@ from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
 
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -110,6 +111,15 @@ class NativeGridDataset(IterableDataset):
         """Return dataset resolution."""
         return self.data.resolution
 
+    @cached_property
+    def valid_dates(self) -> np.ndarray:
+        """Return valid dates.
+        
+        If there are no missing dates, total number of valid ICs is
+        dataset length minus rollout minus additional multistep inputs.
+        """
+        return get_usable_indices(self.data.missing, len(self.data), self.rollout, self.multi_step, self.timeincrement)
+
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Called by worker_init_func on each copy of dataset.
 
@@ -125,11 +135,8 @@ class NativeGridDataset(IterableDataset):
         """
         self.worker_id = worker_id
 
-        # Total number of valid ICs is dataset length minus rollout minus additional multistep inputs
-        len_corrected = len(self.data) - (self.rollout + (self.multi_step - 1)) * self.timeincrement
-
         # Divide this equally across shards (one shard per group!)
-        shard_size = len_corrected // self.model_comm_num_groups
+        shard_size = len(self.valid_dates) // self.model_comm_num_groups
         shard_start = self.model_comm_group_id * shard_size + (self.multi_step - 1) * self.timeincrement
         shard_end = min((self.model_comm_group_id + 1) * shard_size, len(self.data) - self.rollout * self.timeincrement)
 
@@ -149,7 +156,7 @@ class NativeGridDataset(IterableDataset):
             high,
         )
 
-        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
+        self.chunk_index_range = self.valid_dates[np.arange(low, high, dtype=np.uint32)]
 
         # each worker must have a different seed for its random number generator,
         # otherwise all the workers will output exactly the same data
