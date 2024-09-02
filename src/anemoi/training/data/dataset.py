@@ -114,7 +114,7 @@ class NativeGridDataset(IterableDataset):
     @cached_property
     def valid_dates(self) -> np.ndarray:
         """Return valid dates.
-        
+
         If there are no missing dates, total number of valid ICs is
         dataset length minus rollout minus additional multistep inputs.
         """
