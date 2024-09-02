@@ -16,6 +16,7 @@ Keep it human-readable, your future self will thank you!
 
 - Enable the callback for plotting a histogram for variables containing NaNs
 - Enforce same binning for histograms comparing true data to predicted data
+- Fix: Inference checkpoints are now saved according the frequency settings defined in the config
 
 ## [0.1.0 - Anemoi training - First release](https://github.com/ecmwf/anemoi-training/compare/x.x.x...0.1.0) - 2024-08-16
 
