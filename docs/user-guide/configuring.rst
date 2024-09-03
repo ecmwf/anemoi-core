@@ -103,7 +103,7 @@ match the dataset you provide.
    - diagnostics: eval_rollout
    - hardware: example
    - graph: multi_scale
-   - model: transformer
+   - model: transformer # Change from default group
    - training: default
    - _self_
 
@@ -127,7 +127,7 @@ match the dataset you provide.
 When we save this `example.yaml` file, we can run the training with this
 config using:
 
-.. code:: console
+.. code:: bash
 
    anemoi-training train --config-name=example.yaml
 
