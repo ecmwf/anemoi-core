@@ -14,10 +14,12 @@ The training script will intentionally crash as it does not know where
 your data is stored.
 
 These missing values in the configuration are placeholders for the user
-to fill in marked with `???`. You can find the default configurations in
-the `anemoi-training` repository under `src/anemoi/training/configs/`.
-Alternatively, the next section will show you how to `generate a user
-config file <hydra-intro>`_.
+to fill in marked with ``???``. You can find the default configurations
+in the `Anemoi Training repository
+<https://github.com/ecmwf/anemoi-training>`_ under
+``src/anemoi/training/config/``. Alternatively, the next section will
+show you how to :ref:`generate a user config file <Configuring the
+Training>`.
 
 *******************************
  Preparing training components
@@ -25,13 +27,13 @@ config file <hydra-intro>`_.
 
 Anemoi Training requires two primary components to get started:
 
-#. **Graph Definition from `Anemoi Graphs
-   <https://anemoi-graphs.readthedocs.org>`_:** This defines the
-   structure of your machine learning model, including the layers,
-   connections, and operations that will be used during training.
+#. **Graph Definition** from `Anemoi Graphs
+   <https://anemoi-graphs.readthedocs.org>`_: This defines the structure
+   of your machine learning model, including the layers, connections,
+   and operations that will be used during training.
 
-#. **Dataset from `Anemoi Datasets
-   <https://anemoi-datasets.readthedocs.org>`_:** This provides the
+#. **Dataset** from `Anemoi Datasets
+   <https://anemoi-datasets.readthedocs.org>`_ : This provides the
    training data that will be fed into the model. The dataset should be
    pre-processed and formatted according to the specifications of the
    Anemoi Datasets module.

@@ -80,7 +80,20 @@ Example Config File
 ===================
 
 Here is an example of a config file that changes the model to a
-transformer, the learning rate to 1e-3, and the number of GPUs to 1:
+transformer, the learning rate to 1e-3, and the number of GPUs to 1. We
+also need to specify the paths to the data, output, and graph data and
+give the names of the files to use. You can get a dataset from the
+`Anemoi Datasets catalogue <https://anemoi.ecmwf.int/>`_ or create one
+using the `Anemoi Datasets
+<https://anemoi-datasets.readthedocs.io/en/latest/>`_ package.
+
+You can create a graph using `Anemoi Graphs
+<https://anemoi-graphs.readthedocs.io/en/latest/>`_ or one will be
+created for you at runtime. Note that you must specify a filename for
+the graph, here we use `first_graph_m320.pt`.
+
+You'll also notice we've specified a resolution for the data, this must
+match the dataset you provide.
 
 .. code:: yaml
 
@@ -90,12 +103,22 @@ transformer, the learning rate to 1e-3, and the number of GPUs to 1:
    - diagnostics: eval_rollout
    - hardware: example
    - graph: multi_scale
-   - model: transformer # Change from default group
+   - model: transformer
    - training: default
    - _self_
 
+   data:
+      resolution: n320
+
    hardware:
       num_gpus_per_node: 1
+      paths:
+         output: /home/username/anemoi/training/output
+         data: /home/username/anemoi/datasets
+         graph: /home/username/anemoi/training/graphs
+      files:
+         dataset: datset-n320-2019-2021-6h.zarr
+         graph: first_graph_m320.pt
 
    training:
       lr:
@@ -104,7 +127,7 @@ transformer, the learning rate to 1e-3, and the number of GPUs to 1:
 When we save this `example.yaml` file, we can run the training with this
 config using:
 
-.. code:: bash
+.. code:: console
 
    anemoi-training train --config-name=example.yaml
 

@@ -55,7 +55,7 @@ config is in the hardware folder. The model config is in the model
 folder.
 
 You will need to specify the location of your anemoi dataset in the
-hardware paths and files. These contain ``???``` as placeholders.
+hardware paths and files. These contain ``???`` as placeholders.
 
 Anemoi training provides two default configurations ``config.yaml`` and
 ``debug.yaml``. The first is a generic config file, while the second is
@@ -74,13 +74,15 @@ added to the training command like so:
 
 The following missing config options which must be overridden by users:
 
--  ``hardware.files``: Name of datasets used for training.
 -  ``hardware.paths.data``: Location of base directory where datasets
    are stored
+
+-  ``hardware.paths.graph``: Location of graph directory
+
 -  ``hardware.paths.output``: Location of output directory
 
-Optionally, you can also override the following:
+-  ``hardware.files.dataset``: Filename(s) of datasets used for training
 
 -  ``hardware.files.graph``: If you have pre-computed a specific graph,
-   specify this here. Otherwise, a new graph will be constructed on the
-   fly.
+   specify its filename here. Otherwise, a new graph will be constructed
+   on the fly and written to the filename given.
