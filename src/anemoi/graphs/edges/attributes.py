@@ -63,10 +63,8 @@ class EdgeDirection(BaseEdgeAttribute):
 
     Methods
     -------
-    get_raw_values(graph, source_name, target_name)
-        Compute directions between nodes connected by edges.
     compute(graph, source_name, target_name)
-        Compute directional attributes.
+        Compute direction of all edges.
     """
 
     def __init__(self, norm: str | None = None, luse_rotated_features: bool = True) -> None:
@@ -109,8 +107,6 @@ class EdgeLength(BaseEdgeAttribute):
 
     Methods
     -------
-    get_raw_values(graph, source_name, target_name)
-        Compute haversine distance between nodes connected by edges.
     compute(graph, source_name, target_name)
         Compute edge lengths attributes.
     """

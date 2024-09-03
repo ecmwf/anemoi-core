@@ -120,13 +120,11 @@ class ZarrDatasetNodes(BaseNodeBuilder):
 
     Methods
     -------
-    get_coordinates()
-        Get the lat-lon coordinates of the nodes.
-    register_nodes(graph, name)
+    register_nodes(graph)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, config)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attr_config)
+    update_graph(graph, attr_config)
         Update the graph with new nodes and attributes.
     """
 
@@ -160,13 +158,11 @@ class NPZFileNodes(BaseNodeBuilder):
 
     Methods
     -------
-    get_coordinates()
-        Get the lat-lon coordinates of the nodes.
-    register_nodes(graph, name)
+    register_nodes(graph)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, config)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attr_config)
+    update_graph(graph, attr_config)
         Update the graph with new nodes and attributes.
     """
 
@@ -233,14 +229,52 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
 
 
 class TriNodes(IcosahedralNodes):
-    """It depends on the trimesh Python library."""
+    """Nodes based on iterative refinements of an icosahedron.
+
+    It depends on the trimesh Python library.
+
+    Attributes
+    ----------
+    resolutions : list[int]
+        Refinement level of the mesh.
+    name : str
+        The name of the nodes.
+
+    Methods
+    -------
+    register_nodes(graph)
+        Register the nodes in the graph.
+    register_attributes(graph, config)
+        Register the attributes in the nodes of the graph specified.
+    update_graph(graph, attr_config)
+        Update the graph with new nodes and attributes.
+    """
 
     def create_nodes(self) -> np.ndarray:
         return create_icosahedral_nodes(resolutions=self.resolutions)
 
 
 class HexNodes(IcosahedralNodes):
-    """It depends on the h3 Python library."""
+    """Nodes based on iterative refinements of an icosahedron.
+
+    It depends on the h3 Python library.
+
+    Attributes
+    ----------
+    resolutions : list[int]
+        Refinement level of the mesh.
+    name : str
+        The name of the nodes.
+
+    Methods
+    -------
+    register_nodes(graph)
+        Register the nodes in the graph.
+    register_attributes(graph, config)
+        Register the attributes in the nodes of the graph specified.
+    update_graph(graph, attr_config)
+        Update the graph with new nodes and attributes.
+    """
 
     def create_nodes(self) -> np.ndarray:
         return create_hexagonal_nodes(self.resolutions)
@@ -260,8 +294,6 @@ class HEALPixNodes(BaseNodeBuilder):
 
     Methods
     -------
-    get_coordinates()
-        Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
     register_attributes(graph, name, config)

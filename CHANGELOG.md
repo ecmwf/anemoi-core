@@ -18,6 +18,8 @@ Keep it human-readable, your future self will thank you!
 - added downstream-ci pipeline and cd-pypi reusable workflow
 - Changelog release updater
 
+- Create package documentation.
+
 ### Changed
 - fix: added support for Python3.9.
 - fix: bug in graph cleaning method
