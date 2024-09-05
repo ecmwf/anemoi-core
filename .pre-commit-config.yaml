@@ -34,7 +34,7 @@ repos:
     - --force-single-line-imports
     - --profile black
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.6.2
+  rev: v0.6.3
   hooks:
   - id: ruff
     # Next line if for documenation cod snippets
