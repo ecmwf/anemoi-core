@@ -14,7 +14,6 @@ from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
-from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import Processors
 
 
@@ -73,9 +72,9 @@ class AnemoiModelInterface(torch.nn.Module):
         self.pre_processors = Processors(processors)
         self.post_processors = Processors(processors, inverse=True)
 
-        # Instantiate the model (Can be generalised to other models in the future, here we use AnemoiModelEncProcDec)
-        self.model = AnemoiModelEncProcDec(
-            config=self.config, data_indices=self.data_indices, graph_data=self.graph_data
+        # Instantiate the model
+        self.model = instantiate(
+            self.config.model.model, config=self.config, data_indices=self.data_indices, graph_data=self.graph_data
         )
 
         # Use the forward method of the model directly

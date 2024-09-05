@@ -18,6 +18,7 @@ Keep it human-readable, your future self will thank you!
  - Update CI to inherit from common infrastructue reusable workflows
  - run downstream-ci only when src and tests folders have changed
  - New error messages for wrongs graphs.
+ - Feature: Change model to be instantiatable in the interface, addressing [#28](https://github.com/ecmwf/anemoi-models/issues/28) through [#29](https://github.com/ecmwf/anemoi-models/pulls/29)
 
 ### Removed
 
