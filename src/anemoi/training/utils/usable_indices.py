@@ -42,9 +42,8 @@ def get_usable_indices(
 
     usable_indices = np.arange(series_length)  # set of all indices
 
-    # No missing indices
     if missing_indices is None:
-        return usable_indices[prev_invalid_dates : series_length - next_invalid_dates]
+        missing_indices = set()
 
     missing_indices |= {-1, series_length}  # to filter initial and final indices
 
