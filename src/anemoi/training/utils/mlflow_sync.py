@@ -24,7 +24,7 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
     tmpdir = os.environ["TMPDIR"] if os.getenv("TMPDIR") else os.environ["SCRATCH"]
     user = os.environ["USER"]
     Path(tmpdir).mkdir(parents=True, exist_ok=True)
-    temp = tempfile.NamedTemporaryFile(dir=tmpdir, prefix=f"{user}_")
+    temp = tempfile.NamedTemporaryFile(dir=tmpdir, prefix=f"{user}_")  # noqa: SIM115
     os.environ["MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE"] = temp.name
     return temp
 

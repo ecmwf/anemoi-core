@@ -4,6 +4,11 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
+# * [WHY ARE CALLBACKS UNDER __init__.py?]
+# * This functionality will be restructured in the near future
+# * so for now callbacks are under __init__.py
+
 from __future__ import annotations
 
 import copy
@@ -811,6 +816,15 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         return {}
 
+    def _remove_checkpoint(self, trainer: "pl.Trainer", filepath: str) -> None:
+        """Calls the strategy to remove the checkpoint file."""
+        super()._remove_checkpoint(trainer, filepath)
+        trainer.strategy.remove_checkpoint(self._get_inference_checkpoint_filepath(filepath))
+
+    def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
+        """Defines the filepath for the inference checkpoint."""
+        return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
+
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:
             model = self._torch_drop_down(trainer)
@@ -839,9 +853,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             metadata = dict(**tmp_metadata)
 
-            inference_checkpoint_filepath = Path(lightning_checkpoint_filepath).parent / Path(
-                "inference-" + str(Path(lightning_checkpoint_filepath).name),
-            )
+            inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             torch.save(model, inference_checkpoint_filepath)
 
