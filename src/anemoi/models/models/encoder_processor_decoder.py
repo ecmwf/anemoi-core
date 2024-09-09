@@ -104,22 +104,23 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        self.num_input_channels = len(data_indices.model.input)
-        self.num_output_channels = len(data_indices.model.output)
-        self._internal_input_idx = data_indices.model.input.prognostic
-        self._internal_output_idx = data_indices.model.output.prognostic
+        self.num_input_channels = len(data_indices.internal_model.input)
+        self.num_output_channels = len(data_indices.internal_model.output)
+        self._internal_input_idx = data_indices.internal_model.input.prognostic
+        self._internal_output_idx = data_indices.internal_model.output.prognostic
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
 
-        assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
-            data_indices.model.output.diagnostic
+        assert len(self._internal_output_idx) == len(data_indices.internal_model.output.full) - len(
+            data_indices.internal_model.output.diagnostic
         ), (
-            f"Mismatch between the internal data indices ({len(self._internal_output_idx)}) and the output indices excluding "
-            f"diagnostic variables ({len(data_indices.model.output.full) - len(data_indices.model.output.diagnostic)})",
+            f"Mismatch between the internal data indices ({len(self._internal_output_idx)}) and "
+            f"the internal output indices excluding diagnostic variables "
+            f"({len(data_indices.internal_model.output.full) - len(data_indices.internal_model.output.diagnostic)})",
         )
         assert len(self._internal_input_idx) == len(
             self._internal_output_idx,
-        ), f"Model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
+        ), f"Internal model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
 
     def _define_tensor_sizes(self, config: DotDict) -> None:
         self._data_grid_size = self._graph_data[self._graph_name_data].num_nodes

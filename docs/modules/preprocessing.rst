@@ -33,3 +33,16 @@ following classes:
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+**********
+ Remapper
+**********
+
+The remapper module is used to remap one variable to multiple other
+variables that have been listed in data.remapped:. The module contains
+the following classes:
+
+.. automodule:: anemoi.models.preprocessing.remapper
+   :members:
+   :no-undoc-members:
+   :show-inheritance:

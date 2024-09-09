@@ -65,7 +65,7 @@ class AnemoiModelInterface(torch.nn.Module):
         """Builds the model and pre- and post-processors."""
         # Instantiate processors
         processors = [
-            [name, instantiate(processor, statistics=self.statistics, data_indices=self.data_indices)]
+            [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
             for name, processor in self.config.data.processors.items()
         ]
 

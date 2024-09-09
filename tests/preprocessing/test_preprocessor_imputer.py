@@ -26,6 +26,7 @@ def non_default_input_imputer():
                 "imputer": {"default": "none", "mean": ["y"], "maximum": ["x"], "none": ["z"], "minimum": ["q"]},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
+                "remapped": [],
             },
         },
     )
@@ -37,7 +38,7 @@ def non_default_input_imputer():
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
-    return InputImputer(config=config.data.imputer, statistics=statistics, data_indices=data_indices)
+    return InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=statistics)
 
 
 @pytest.fixture()
@@ -49,6 +50,7 @@ def default_input_imputer():
                 "imputer": {"default": "minimum"},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
+                "remapped": [],
             },
         },
     )
@@ -86,6 +88,7 @@ def default_constant_imputer():
                 "imputer": {"default": "none", 0: ["x"], 3.0: ["y"], 22.7: ["z"], 10: ["q"]},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
+                "remapped": [],
             },
         },
     )
@@ -103,6 +106,7 @@ def non_default_constant_imputer():
                 "imputer": {"default": 22.7},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
+                "remapped": [],
             },
         },
     )

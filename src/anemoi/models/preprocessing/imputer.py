@@ -33,16 +33,15 @@ class BaseImputer(BasePreprocessor, ABC):
         Parameters
         ----------
         config : DotDict
-            configuration object
+            configuration object of the processor
+        data_indices : IndexCollection
+            Data indices for input and output variables
         statistics : dict
             Data statistics dictionary
-        data_indices : dict
-            Data indices for input and output variables
         """
-        super().__init__(config, statistics, data_indices)
+        super().__init__(config, data_indices, statistics)
 
         self.nan_locations = None
-        self.data_indices = data_indices
 
     def _validate_indices(self):
         assert len(self.index_training_input) == len(self.index_inference_input) <= len(self.replacement), (
@@ -174,8 +173,8 @@ class InputImputer(BaseImputer):
     def __init__(
         self,
         config=None,
+        data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
-        data_indices: Optional[dict] = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -201,7 +200,10 @@ class ConstantImputer(BaseImputer):
     """
 
     def __init__(
-        self, config=None, statistics: Optional[dict] = None, data_indices: Optional[IndexCollection] = None
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 

@@ -34,13 +34,13 @@ class InputNormalizer(BasePreprocessor):
         Parameters
         ----------
         config : DotDict
-            configuration object
+            configuration object of the processor
+        data_indices : IndexCollection
+            Data indices for input and output variables
         statistics : dict
             Data statistics dictionary
-        data_indices : dict
-            Data indices for input and output variables
         """
-        super().__init__(config, statistics, data_indices)
+        super().__init__(config, data_indices, statistics)
 
         name_to_index_training_input = self.data_indices.data.input.name_to_index
 
