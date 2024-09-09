@@ -510,6 +510,8 @@ class PlotSample(BasePlotCallback):
         """
         super().__init__(config)
         self.sample_idx = self.config.diagnostics.plot.sample_idx
+        self.precip_and_related_fields = self.config.diagnostics.plot.precip_and_related_fields
+        LOGGER.info(f"Using defined accumulation colormap for fields: {self.precip_and_related_fields}")
 
     @rank_zero_only
     def _plot(
@@ -563,6 +565,7 @@ class PlotSample(BasePlotCallback):
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
+                precip_and_related_fields=self.precip_and_related_fields,
             )
 
             self._output_figure(
@@ -605,6 +608,8 @@ class PlotAdditionalMetrics(BasePlotCallback):
         """
         super().__init__(config)
         self.sample_idx = self.config.diagnostics.plot.sample_idx
+        self.precip_and_related_fields = self.config.diagnostics.plot.precip_and_related_fields
+        LOGGER.info(f"Using precip histogram plotting method for fields: {self.precip_and_related_fields}")
 
     @rank_zero_only
     def _plot(
@@ -658,6 +663,7 @@ class PlotAdditionalMetrics(BasePlotCallback):
                     data[0, ...].squeeze(),
                     data[rollout_step + 1, ...].squeeze(),
                     output_tensor[rollout_step, ...],
+                    precip_and_related_fields=self.precip_and_related_fields,
                 )
 
                 self._output_figure(
