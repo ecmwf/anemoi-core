@@ -12,6 +12,10 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
+#### Miscellaneous
+
+- Introduction of remapper to anemoi-models leads to changes in the data indices and some preprocessors cannot be applied in-place anymore.
+
 #### Functionality
 
 - Enable the callback for plotting a histogram for variables containing NaNs
