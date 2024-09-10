@@ -28,11 +28,9 @@ def input_remapper():
                 },
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
-                "remapped": [
-                    {
-                        "d": ["cos_d", "sin_d"],
-                    }
-                ],
+                "remapped": {
+                    "d": ["cos_d", "sin_d"],
+                },
             },
         },
     )

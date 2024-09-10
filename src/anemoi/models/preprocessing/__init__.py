@@ -8,15 +8,13 @@
 #
 
 import logging
-from typing import TYPE_CHECKING
 from typing import Optional
 
 import torch
 from torch import Tensor
 from torch import nn
 
-if TYPE_CHECKING:
-    from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 

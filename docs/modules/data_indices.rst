@@ -53,7 +53,7 @@ remapper-preprocessor.
 
    data:
      remapped:
-       - d:
+       d:
          - "d_1"
          - "d_2"
 

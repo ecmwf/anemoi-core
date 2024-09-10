@@ -19,12 +19,10 @@ def data_indices():
             "data": {
                 "forcing": ["x", "e"],
                 "diagnostic": ["z", "q"],
-                "remapped": [
-                    {
-                        "e": ["e_1", "e_2"],
-                        "d": ["d_1", "d_2"],
-                    }
-                ],
+                "remapped": {
+                    "e": ["e_1", "e_2"],
+                    "d": ["d_1", "d_2"],
+                },
             },
         },
     )

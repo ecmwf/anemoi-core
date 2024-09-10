@@ -26,7 +26,7 @@ def non_default_input_imputer():
                 "imputer": {"default": "none", "mean": ["y"], "maximum": ["x"], "none": ["z"], "minimum": ["q"]},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
-                "remapped": [],
+                "remapped": {},
             },
         },
     )
