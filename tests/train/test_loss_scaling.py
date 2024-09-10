@@ -21,11 +21,9 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
             "data": {
                 "forcing": ["x"],
                 "diagnostic": ["z", "q"],
-                "remapped": [
-                    {
-                        "d": ["cos_d", "sin_d"],
-                    },
-                ],
+                "remapped": {
+                    "d": ["cos_d", "sin_d"],
+                },
             },
             "training": {
                 "loss_scaling": {
