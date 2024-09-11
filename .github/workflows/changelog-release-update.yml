@@ -1,0 +1,35 @@
+# .github/workflows/update-changelog.yaml
+name: "Update Changelog"
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch: ~
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.release.target_commitish }}
+
+    - name: Update Changelog
+      uses: stefanzweifel/changelog-updater-action@v1
+      with:
+        latest-version: ${{ github.event.release.tag_name }}
+        heading-text: ${{ github.event.release.name }}
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v6
+      with:
+        branch: docs/changelog-update-${{ github.event.release.tag_name }}
+        title: '[Changelog] Update to ${{ github.event.release.tag_name }}'
+        add-paths: |
+          CHANGELOG.md

@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -28,7 +28,7 @@ def get_rotation_from_unit_vecs(points: np.ndarray, reference: np.ndarray) -> Ro
     return Rotation.from_rotvec(np.transpose(v_unit * theta))
 
 
-def compute_directions(loc1: np.ndarray, loc2: np.ndarray, pole_vec: Optional[np.ndarray] = None) -> np.ndarray:
+def compute_directions(loc1: np.ndarray, loc2: np.ndarray, pole_vec: np.ndarray | None = None) -> np.ndarray:
     """Compute the direction of the edge joining the nodes considered.
 
     Parameters

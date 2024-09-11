@@ -1,11 +1,11 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
 
 
-def get_nearest_neighbour(coords_rad: torch.Tensor, mask: Optional[torch.Tensor] = None) -> NearestNeighbors:
+def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
     """Get NearestNeighbour object fitted to coordinates.
 
     Parameters
@@ -32,7 +32,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: Optional[torch.Tensor]
     return nearest_neighbour
 
 
-def get_grid_reference_distance(coords_rad: torch.Tensor, mask: Optional[torch.Tensor] = None) -> float:
+def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> float:
     """Get the reference distance of the grid.
 
     It is the maximum distance of a node in the mesh with respect to its nearest neighbour.

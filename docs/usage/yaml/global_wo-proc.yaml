@@ -1,0 +1,17 @@
+nodes:
+  data: ...
+  hidden: ...
+
+edges:
+  # A) Encoder connections
+  - source_name: data
+    target_name: hidden
+    edge_builder:
+      _target_: anemoi.graphs.edges.CutOffEdges
+      cutoff_factor: 0.7
+  # B) Decoder connections
+  - source_name: hidden
+    target_name: hidden
+    edge_builder:
+      _target_: anemoi.graphs.edges.KNNEdges
+      nearest_neighbours: 3
