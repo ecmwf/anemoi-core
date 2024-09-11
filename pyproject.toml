@@ -1,0 +1,97 @@
+# (C) Copyright 2024 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+
+[build-system]
+build-backend = "setuptools.build_meta"
+
+requires = [
+  "setuptools>=61",
+  "setuptools-scm>=8",
+]
+
+[project]
+name = "anemoi-models"
+description = "A package to hold various functions to support training of ML models."
+readme = "README.md"
+keywords = [
+  "ai",
+  "models",
+  "tools",
+]
+
+license = { file = "LICENSE" }
+authors = [
+  { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
+]
+
+requires-python = ">=3.9"
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+dynamic = [
+  "version",
+]
+dependencies = [
+  "anemoi-utils>=0.1.9",
+  "einops>=0.6.1",
+  "hydra-core>=1.3",
+  "torch>=2.2",
+  "torch-geometric>=2.3,<2.5",
+]
+optional-dependencies.all = [
+]
+
+optional-dependencies.dev = [
+  "hypothesis",
+  "nbsphinx",
+  "pandoc",
+  "pytest",
+  "rstfmt",
+  "sphinx",
+  "sphinx-argparse<0.5",
+  "sphinx-rtd-theme",
+]
+
+optional-dependencies.docs = [
+  "nbsphinx",
+  "pandoc",
+  "rstfmt",
+  "sphinx",
+  "sphinx-argparse<0.5",
+  "sphinx-rtd-theme",
+]
+
+optional-dependencies.tests = [
+  "hypothesis",
+  "pytest",
+]
+
+urls.Documentation = "https://anemoi-models.readthedocs.io/"
+urls.Homepage = "https://github.com/ecmwf/anemoi-models/"
+urls.Issues = "https://github.com/ecmwf/anemoi-models/issues"
+urls.Repository = "https://github.com/ecmwf/anemoi-models/"
+# Changelog = "https://github.com/ecmwf/anemoi-models/CHANGELOG.md"
+# Add subcommand in the `commands` directory
+scripts.anemoi-models = "anemoi.models.__main__:main"
+
+[tool.setuptools_scm]
+version_file = "src/anemoi/models/_version.py"

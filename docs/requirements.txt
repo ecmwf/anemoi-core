@@ -1,9 +1,0 @@
-# These are the requirements for readthedoc
-sphinx
-sphinx_rtd_theme
-nbsphinx
-
-# Also requires `brew install pandoc` on Mac
-pandoc
-
-rstfmt
