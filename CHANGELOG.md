@@ -20,7 +20,6 @@ Keep it human-readable, your future self will thank you!
 
 - Enable the callback for plotting a histogram for variables containing NaNs
 - Enforce same binning for histograms comparing true data to predicted data
-- Feature: Support training for datasets with missing time steps [#48](https://github.com/ecmwf/anemoi-training/pulls/48)
 - Fix: Inference checkpoints are now saved according the frequency settings defined in the config
 - Feature: Add configurable models [#50](https://github.com/ecmwf/anemoi-training/pulls/50)
 - Feature: Support training for datasets with missing time steps [#48](https://github.com/ecmwf/anemoi-training/pulls/48)
