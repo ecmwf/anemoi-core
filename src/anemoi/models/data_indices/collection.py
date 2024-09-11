@@ -30,9 +30,11 @@ class IndexCollection:
         self.diagnostic = (
             [] if config.data.diagnostic is None else OmegaConf.to_container(config.data.diagnostic, resolve=True)
         )
-        # config.data.remapped is a list of diccionaries: every remapper is one entry of the list
+        # config.data.remapped is an optional dictionary with every remapper as one entry
         self.remapped = (
-            dict() if config.data.remapped is None else OmegaConf.to_container(config.data.remapped, resolve=True)
+            dict()
+            if config.data.get("remapped") is None
+            else OmegaConf.to_container(config.data.remapped, resolve=True)
         )
         self.forcing_remapped = self.forcing.copy()
 
