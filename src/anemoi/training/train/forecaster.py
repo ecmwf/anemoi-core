@@ -84,7 +84,10 @@ class GraphForecaster(pl.LightningModule):
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
-        self.metric_ranges, loss_scaling = self.metrics_loss_scaling(config, data_indices)
+        self.metric_ranges, self.metric_ranges_validation, loss_scaling = self.metrics_loss_scaling(
+            config,
+            data_indices,
+        )
         self.loss = WeightedMSELoss(node_weights=self.loss_weights, data_variances=loss_scaling)
         self.metrics = WeightedMSELoss(node_weights=self.loss_weights, ignore_nans=True)
 
@@ -127,8 +130,10 @@ class GraphForecaster(pl.LightningModule):
     @staticmethod
     def metrics_loss_scaling(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, torch.Tensor]:
         metric_ranges = defaultdict(list)
+        metric_ranges_validation = defaultdict(list)
         loss_scaling = (
-            np.ones((len(data_indices.data.output.full),), dtype=np.float32) * config.training.loss_scaling.default
+            np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
+            * config.training.loss_scaling.default
         )
 
         pressure_level = instantiate(config.training.pressure_level_scaler)
@@ -140,15 +145,17 @@ class GraphForecaster(pl.LightningModule):
             pressure_level.minimum,
         )
 
-        for key, idx in data_indices.model.output.name_to_index.items():
+        for key, idx in data_indices.internal_model.output.name_to_index.items():
             # Split pressure levels on "_" separator
             split = key.split("_")
-            if len(split) > 1:
+            if len(split) > 1 and split[-1].isdigit():
                 # Create grouped metrics for pressure levels (e.g. Q, T, U, V, etc.) for logger
                 metric_ranges[f"pl_{split[0]}"].append(idx)
                 # Create pressure levels in loss scaling vector
                 if split[0] in config.training.loss_scaling.pl:
-                    loss_scaling[idx] = config.training.loss_scaling.pl[split[0]] * pressure_level.scaler(int(split[1]))
+                    loss_scaling[idx] = config.training.loss_scaling.pl[split[0]] * pressure_level.scaler(
+                        int(split[-1]),
+                    )
                 else:
                     LOGGER.debug("Parameter %s was not scaled.", key)
             else:
@@ -162,7 +169,19 @@ class GraphForecaster(pl.LightningModule):
             if key in config.training.metrics:
                 metric_ranges[key] = [idx]
         loss_scaling = torch.from_numpy(loss_scaling)
-        return metric_ranges, loss_scaling
+        # metric for validation, after postprocessing
+        for key, idx in data_indices.model.output.name_to_index.items():
+            # Split pressure levels on "_" separator
+            split = key.split("_")
+            if len(split) > 1 and split[1].isdigit():
+                # Create grouped metrics for pressure levels (e.g. Q, T, U, V, etc.) for logger
+                metric_ranges_validation[f"pl_{split[0]}"].append(idx)
+            else:
+                metric_ranges_validation[f"sfc_{key}"].append(idx)
+            # Create specific metrics from hydra to log in logger
+            if key in config.training.metrics:
+                metric_ranges_validation[key] = [idx]
+        return metric_ranges, metric_ranges_validation, loss_scaling
 
     def set_model_comm_group(self, model_comm_group: ProcessGroup) -> None:
         LOGGER.debug("set_model_comm_group: %s", model_comm_group)
@@ -178,18 +197,18 @@ class GraphForecaster(pl.LightningModule):
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
+        x[:, -1, :, :, self.data_indices.internal_model.input.prognostic] = y_pred[
             ...,
-            self.data_indices.model.output.prognostic,
+            self.data_indices.internal_model.output.prognostic,
         ]
 
         # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
+        x[:, -1, :, :, self.data_indices.internal_model.input.forcing] = batch[
             :,
             self.multi_step + rollout_step,
             :,
             :,
-            self.data_indices.data.input.forcing,
+            self.data_indices.internal_data.input.forcing,
         ]
         return x
 
@@ -201,18 +220,24 @@ class GraphForecaster(pl.LightningModule):
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         del batch_idx
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        batch = self.model.pre_processors(batch)  # normalized in-place
+        # for validation not normalized in-place because remappers cannot be applied in-place
+        batch = self.model.pre_processors(batch, in_place=not validation_mode)
         metrics = {}
 
-        # start rollout
-        x = batch[:, 0 : self.multi_step, ..., self.data_indices.data.input.full]  # (bs, multi_step, latlon, nvar)
+        # start rollout of preprocessed batch
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.internal_data.input.full,
+        ]  # (bs, multi_step, latlon, nvar)
 
         y_preds = []
         for rollout_step in range(self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
+            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             loss += checkpoint(self.loss, y_pred, y, use_reentrant=False)
 
@@ -243,7 +268,7 @@ class GraphForecaster(pl.LightningModule):
         y_preds = []
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
-        for mkey, indices in self.metric_ranges.items():
+        for mkey, indices in self.metric_ranges_validation.items():
             metrics[f"{mkey}_{rollout_step + 1}"] = self.metrics(
                 y_pred_postprocessed[..., indices],
                 y_postprocessed[..., indices],

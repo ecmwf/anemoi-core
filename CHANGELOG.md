@@ -12,17 +12,27 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
+#### Miscellaneous
+
+- Introduction of remapper to anemoi-models leads to changes in the data indices. Some preprocessors cannot be applied in-place anymore.
+
 #### Functionality
 
 - Enable the callback for plotting a histogram for variables containing NaNs
 - Enforce same binning for histograms comparing true data to predicted data
-- Fix: Inference checkpoints are now saved according the frequency settings defined in the config
+- Fix: Inference checkpoints are now saved according the frequency settings defined in the config [#37](https://github.com/ecmwf/anemoi-training/pull/37)
+- Feature: Add configurable models [#50](https://github.com/ecmwf/anemoi-training/pulls/50)
+- Feature: Support training for datasets with missing time steps [#48](https://github.com/ecmwf/anemoi-training/pulls/48)
+
+### Fixed
+
+- Fix `TypeError` raised when trying to JSON serialise `datetime.timedelta` object - [#43](https://github.com/ecmwf/anemoi-training/pull/43)
 
 ### Changed
 
 - Updated configuration examples in documentation and corrected links - [#46](https://github.com/ecmwf/anemoi-training/pull/46)
 
-## [0.1.0 - Anemoi training - First release](https://github.com/ecmwf/anemoi-training/compare/x.x.x...0.1.0) - 2024-08-16
+## [0.1.0 - Anemoi training - First release](https://github.com/ecmwf/anemoi-training/releases/tag/0.1.0) - 2024-08-16
 
 ### Added
 
@@ -56,6 +66,7 @@ Keep it human-readable, your future self will thank you!
 - Correct errors in callback plots
 - fix error in the default config
 - example slurm config
+- ability to configure precip-type plots
 
 ### Changed
 

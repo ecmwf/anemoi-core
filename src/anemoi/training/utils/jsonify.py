@@ -13,6 +13,7 @@ import torch
 from anemoi.models.data_indices.collection import BaseIndex
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import BaseTensorIndex
+from anemoi.utils.dates import frequency_to_string
 from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
@@ -44,6 +45,8 @@ def map_config_to_primitives(config: OmegaConf) -> dict:
         config = str(config)
     elif isinstance(config, datetime.date):
         config = config.isoformat()
+    elif isinstance(config, datetime.timedelta):
+        config = frequency_to_string(config)
     elif isinstance(config, (list, tuple)):
         config = [map_config_to_primitives(v) for v in config]
     elif isinstance(config, dict):
