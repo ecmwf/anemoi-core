@@ -118,7 +118,7 @@ match the dataset you provide.
          graph: /home/username/anemoi/training/graphs
       files:
          dataset: datset-n320-2019-2021-6h.zarr
-         graph: first_graph_m320.pt
+         graph: first_graph_n320.pt
 
    training:
       lr:
