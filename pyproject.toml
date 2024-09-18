@@ -11,20 +11,13 @@
 [build-system]
 build-backend = "setuptools.build_meta"
 
-requires = [
-  "setuptools>=61",
-  "setuptools-scm>=8",
-]
+requires = [ "setuptools>=61", "setuptools-scm>=8" ]
 
 [project]
 name = "anemoi-models"
 description = "A package to hold various functions to support training of ML models."
 readme = "README.md"
-keywords = [
-  "ai",
-  "models",
-  "tools",
-]
+keywords = [ "ai", "models", "tools" ]
 
 license = { file = "LICENSE" }
 authors = [
@@ -47,9 +40,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
-dynamic = [
-  "version",
-]
+dynamic = [ "version" ]
 dependencies = [
   "anemoi-utils>=0.1.9",
   "einops>=0.6.1",
@@ -57,19 +48,9 @@ dependencies = [
   "torch>=2.2",
   "torch-geometric>=2.3,<2.5",
 ]
-optional-dependencies.all = [
-]
+optional-dependencies.all = [  ]
 
-optional-dependencies.dev = [
-  "hypothesis",
-  "nbsphinx",
-  "pandoc",
-  "pytest",
-  "rstfmt",
-  "sphinx",
-  "sphinx-argparse<0.5",
-  "sphinx-rtd-theme",
-]
+optional-dependencies.dev = [ "anemoi-models[all,docs,tests]" ]
 
 optional-dependencies.docs = [
   "nbsphinx",
@@ -80,10 +61,7 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
 ]
 
-optional-dependencies.tests = [
-  "hypothesis",
-  "pytest",
-]
+optional-dependencies.tests = [ "hypothesis", "pytest" ]
 
 urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"

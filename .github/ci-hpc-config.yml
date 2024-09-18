@@ -1,0 +1,7 @@
+build:
+  python: '3.10'
+  modules:
+    - ninja
+  python_dependencies:
+    - ecmwf/anemoi-utils@develop
+  parallel: 64

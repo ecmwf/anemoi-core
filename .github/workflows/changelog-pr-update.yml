@@ -2,6 +2,9 @@ name: Check Changelog Update on PR
 on:
   pull_request:
     types: [assigned, opened, synchronize, reopened, labeled, unlabeled]
+    paths-ignore:
+      - .pre-commit-config.yaml
+      - .readthedocs.yaml
 jobs:
   Check-Changelog:
     name: Check Changelog Action
