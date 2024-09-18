@@ -55,7 +55,15 @@ class BaseBlock(nn.Module, ABC):
 class TransformerProcessorBlock(BaseBlock):
     """Transformer block with MultiHeadSelfAttention and MLPs."""
 
-    def __init__(self, num_channels, hidden_dim, num_heads, activation, window_size: int):
+    def __init__(
+        self,
+        num_channels: int,
+        hidden_dim: int,
+        num_heads: int,
+        activation: str,
+        window_size: int,
+        dropout_p: float = 0.0,
+    ):
         super().__init__()
 
         try:
@@ -72,7 +80,7 @@ class TransformerProcessorBlock(BaseBlock):
             window_size=window_size,
             bias=False,
             is_causal=False,
-            dropout=0.0,
+            dropout_p=dropout_p,
         )
 
         self.mlp = nn.Sequential(

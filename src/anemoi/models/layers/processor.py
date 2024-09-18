@@ -95,6 +95,7 @@ class TransformerProcessor(BaseProcessor):
         cpu_offload: bool = False,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
+        dropout_p: float = 0.1,
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -113,6 +114,8 @@ class TransformerProcessor(BaseProcessor):
             ratio of mlp hidden dimension to embedding dimension, default 4
         activation : str, optional
             Activation function, by default "GELU"
+        dropout_p: float, optional
+            Dropout probability used for multi-head self attention, default 0.0
         """
         super().__init__(
             num_channels=num_channels,
@@ -133,6 +136,7 @@ class TransformerProcessor(BaseProcessor):
             num_layers=self.chunk_size,
             window_size=window_size,
             activation=activation,
+            dropout_p=dropout_p,
         )
 
         self.offload_layers(cpu_offload)
