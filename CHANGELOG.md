@@ -11,6 +11,8 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.1.0...HEAD)
 
 ### Added
+- Codeowners file (#56)
+- Changelog merge strategy (#56)
 
 #### Miscellaneous
 
@@ -27,6 +29,7 @@ Keep it human-readable, your future self will thank you!
 ### Fixed
 
 - Fix `TypeError` raised when trying to JSON serialise `datetime.timedelta` object - [#43](https://github.com/ecmwf/anemoi-training/pull/43)
+- Bugfixes for CI (#56)
 
 ### Changed
 

@@ -76,7 +76,7 @@ optional-dependencies.docs = [
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
-optional-dependencies.tests = [ "pytest", "pytest-mock" ]
+optional-dependencies.tests = [ "hypothesis", "pytest", "pytest-mock" ]
 
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
