@@ -25,6 +25,7 @@ Keep it human-readable, your future self will thank you!
 - Fix: Inference checkpoints are now saved according the frequency settings defined in the config [#37](https://github.com/ecmwf/anemoi-training/pull/37)
 - Feature: Add configurable models [#50](https://github.com/ecmwf/anemoi-training/pulls/50)
 - Feature: Support training for datasets with missing time steps [#48](https://github.com/ecmwf/anemoi-training/pulls/48)
+- Long Rollout Plots
 
 ### Fixed
 
@@ -47,7 +48,6 @@ Keep it human-readable, your future self will thank you!
 - Subcommand for checkpoint handling
 
 #### Functionality
-
 - Searchpaths for Hydra configs, to enable configs in CWD, `ANEMOI_CONFIG_PATH` env, and `.config/anemoi/training` in addition to package defaults
 - MlFlow token authentication
 - Configurable pressure level scaling

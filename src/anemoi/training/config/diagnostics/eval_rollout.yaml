@@ -44,6 +44,10 @@ plot:
     moisture: [tp, cp, tcw]
     sfc_wind: [10u, 10v]
   learned_features: False
+  longrollout:
+    enabled: False
+    rollout: [60]
+    frequency: 20 # every X epochs
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
