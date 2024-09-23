@@ -10,26 +10,31 @@ Keep it human-readable, your future self will thank you!
 
 ## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.3.0...HEAD)
 
+### Added
+- Codeowners file
+- Pygrep precommit hooks
+- Docsig precommit hooks
+- Changelog merge strategy
+- configurabilty of the dropout probability in the the MultiHeadSelfAttention module
+- Variable Bounding as configurable model layers [#13](https://github.com/ecmwf/anemoi-models/issues/13)
+
+### Changed
+- Bugfixes for CI
+
+### Removed
+
 ## [0.3.0](https://github.com/ecmwf/anemoi-models/compare/0.2.1...0.3.0) - Remapping of (meteorological) Variables
 
 ### Added
 
 - CI workflow to update the changelog on release
-- configurabilty of the dropout probability in the the MultiHeadSelfAttention module
-- CI workflow to update the changelog on release
 - Remapper: Preprocessor for remapping one variable to multiple ones. Includes changes to the data indices since the remapper changes the number of variables. With optional config keywords.
-- Codeowners file
-- Pygrep precommit hooks
-- Docsig precommit hooks
-- Changelog merge strategy
-
 
 ### Changed
 
 - Update CI to inherit from common infrastructue reusable workflows
 - run downstream-ci only when src and tests folders have changed
 - New error messages for wrongs graphs.
-- Bugfixes for CI
 
 ### Removed
 

@@ -67,6 +67,8 @@ class AnemoiModelEncProcDec(nn.Module):
         self._register_latlon("data", self._graph_name_data)
         self._register_latlon("hidden", self._graph_name_hidden)
 
+        self.data_indices = data_indices
+
         self.num_channels = config.model.num_channels
 
         input_dim = self.multi_step * self.num_input_channels + self.latlons_data.shape[1] + self.trainable_data_size
@@ -101,6 +103,14 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self._hidden_grid_size,
             dst_grid_size=self._data_grid_size,
+        )
+
+        # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
+        self.boundings = nn.ModuleList(
+            [
+                instantiate(cfg, name_to_index=self.data_indices.model.output.name_to_index)
+                for cfg in getattr(config.model, "bounding", [])
+            ]
         )
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
@@ -251,4 +261,9 @@ class AnemoiModelEncProcDec(nn.Module):
 
         # residual connection (just for the prognostic variables)
         x_out[..., self._internal_output_idx] += x[:, -1, :, :, self._internal_input_idx]
+
+        for bounding in self.boundings:
+            # bounding performed in the order specified in the config file
+            x_out = bounding(x_out)
+
         return x_out
