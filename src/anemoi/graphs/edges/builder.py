@@ -153,7 +153,7 @@ class KNNEdges(BaseEdgeBuilder):
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive"
         self.num_nearest_neighbours = num_nearest_neighbours
 
-    def get_adjacency_matrix(self, source_nodes: np.ndarray, target_nodes: np.ndarray):
+    def get_adjacency_matrix(self, source_nodes: np.ndarray, target_nodes: np.ndarray) -> np.ndarray:
         """Compute the adjacency matrix for the KNN method.
 
         Parameters
@@ -162,6 +162,11 @@ class KNNEdges(BaseEdgeBuilder):
             The source nodes.
         target_nodes : np.ndarray
             The target nodes.
+
+        Returns
+        -------
+        np.ndarray
+            The adjacency matrix.
         """
         assert self.num_nearest_neighbours is not None, "number of neighbors required for knn encoder"
         LOGGER.info(
@@ -203,13 +208,13 @@ class CutOffEdges(BaseEdgeBuilder):
         Update the graph with the edges.
     """
 
-    def __init__(self, source_name: str, target_name: str, cutoff_factor: float):
+    def __init__(self, source_name: str, target_name: str, cutoff_factor: float) -> None:
         super().__init__(source_name, target_name)
         assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float"
         assert cutoff_factor > 0, "Cutoff factor must be positive"
         self.cutoff_factor = cutoff_factor
 
-    def get_cutoff_radius(self, graph: HeteroData, mask_attr: torch.Tensor | None = None):
+    def get_cutoff_radius(self, graph: HeteroData, mask_attr: torch.Tensor | None = None) -> float:
         """Compute the cut-off radius.
 
         The cut-off radius is computed as the product of the target nodes
@@ -238,7 +243,7 @@ class CutOffEdges(BaseEdgeBuilder):
         self.radius = self.get_cutoff_radius(graph)
         return super().prepare_node_data(graph)
 
-    def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage):
+    def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> np.ndarray:
         """Get the adjacency matrix for the cut-off method.
 
         Parameters
@@ -247,6 +252,11 @@ class CutOffEdges(BaseEdgeBuilder):
             The source nodes.
         target_nodes : NodeStorage
             The target nodes.
+
+        Returns
+        -------
+        np.ndarray
+            The adjacency matrix.
         """
         LOGGER.info(
             "Using CutOff-Edges (with radius = %.1f km) between %s and %s.",

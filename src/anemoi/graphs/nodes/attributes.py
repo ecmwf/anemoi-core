@@ -43,6 +43,10 @@ class BaseWeights(ABC, NormalizerMixin):
             Graph.
         nodes_name : str
             Name of the nodes.
+        args : tuple
+            Additional arguments.
+        kwargs : dict
+            Additional keyword arguments.
 
         Returns
         -------
@@ -70,6 +74,10 @@ class UniformWeights(BaseWeights):
         ----------
         nodes : NodeStorage
             Nodes of the graph.
+        args : tuple
+            Additional arguments.
+        kwargs : dict
+            Additional keyword arguments.
 
         Returns
         -------
@@ -111,6 +119,10 @@ class AreaWeights(BaseWeights):
         ----------
         nodes : NodeStorage
             Nodes of the graph.
+        args : tuple
+            Additional arguments.
+        kwargs : dict
+            Additional keyword arguments.
 
         Returns
         -------

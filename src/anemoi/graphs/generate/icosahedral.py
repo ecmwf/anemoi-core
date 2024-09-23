@@ -22,8 +22,6 @@ def create_icosahedral_nodes(
     ----------
     resolutions : list[int]
         Levels of mesh resolution to consider.
-    aoi_mask_builder : KNNAreaMaskBuilder
-        KNNAreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
 
     Returns
     -------
@@ -86,10 +84,6 @@ def add_edges_to_nx_graph(
         Levels of mesh refinement levels to consider.
     x_hops : int, optional
         Number of hops between 2 nodes to consider them neighbours, by default 1.
-    aoi_mask_builder : KNNAreaMaskBuilder
-        NearestNeighbors with the cloud of points to limit the mesh area, by default None.
-    margin_radius_km : float, optional
-        Margin radius in km to consider when creating the processor mesh, by default 0.0.
 
     Returns
     -------
@@ -137,9 +131,6 @@ def get_neighbours_within_hops(tri_mesh: trimesh.Trimesh, x_hops: int) -> dict[i
         The mesh to consider.
     x_hops : int
         Number of hops between 2 nodes to consider them neighbours.
-    valid_nodes : list[int], optional
-        List of valid nodes to consider, by default None. It is useful to consider only a subset of the nodes to save
-        computation time.
 
     Returns
     -------
@@ -178,7 +169,7 @@ def add_neigbours_edges(
         A 2D array of shape (num_vertices, 2) with the planar coordinates of the mesh, in radians.
     node_idx : int
         The node considered.
-    neighbours : list[int]
+    neighbour_indices : list[int]
         The neighbours of the node.
     self_loops : bool, optional
         Whether is supported to add self-loops, by default False.

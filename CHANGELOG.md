@@ -10,6 +10,12 @@ Keep it human-readable, your future self will thank you!
 
 ## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.3.0...HEAD)
 
+### Added
+- ci: hpc-config, CODEOWNERS (#49)
+
+### Changed
+- ci: small fixes and updates pre-commit, downsteam-ci (#49)
+
 ## [0.3.0 Anemoi-graphs, minor release](https://github.com/ecmwf/anemoi-graphs/compare/0.2.1...0.3.0) - 2024-09-03
 
 ### Added

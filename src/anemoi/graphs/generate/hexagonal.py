@@ -62,6 +62,11 @@ def add_nodes_for_resolution(
         The H3 refinement level. It can be an integer from 0 to 15.
     area_kwargs: dict
         Additional arguments to pass to the get_nodes_at_resolution function.
+
+    Returns
+    -------
+    graph : networkx.Graph
+        The graph with the added nodes.
     """
 
     nodes = get_nodes_at_resolution(resolution, **area_kwargs)
@@ -173,6 +178,11 @@ def add_edges_to_children(
     depth_children : Optional[int], optional
         The number of resolution levels to consider for the connections of children. Defaults to 1, which includes
         connections up to the next resolution level, by default None
+
+    Returns
+    -------
+    graph : nx.Graph
+        graph with the added edges
     """
     if depth_children is None:
         depth_children = len(refinement_levels)
@@ -215,6 +225,11 @@ def add_edge(
         The H3 index of the tail of the edge.
     target_node_h3_idx : str
         The H3 index of the head of the edge.
+
+    Returns
+    -------
+    graph : networkx.Graph
+        The graph with the added edge.
     """
     if not graph.has_node(source_node_h3_idx) or not graph.has_node(target_node_h3_idx):
         return graph

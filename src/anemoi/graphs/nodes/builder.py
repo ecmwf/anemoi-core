@@ -204,6 +204,8 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
     ----------
     resolution : list[int] | int
         Refinement level of the mesh.
+    name : str
+        The name of the nodes.
     """
 
     def __init__(
