@@ -1,0 +1,19 @@
+build:
+  python: '3.10'
+  modules:
+    - ninja
+  dependencies:
+    - ecmwf/ecbuild@develop
+    - ecmwf/eccodes@develop
+    - ecmwf/eckit@develop
+    - ecmwf/odc@develop
+  python_dependencies:
+    - ecmwf/anemoi-utils@develop
+    - ecmwf/anemoi-datasets@develop
+    - ecmwf/anemoi-models@develop
+    - ecmwf/anemoi-graphs@develop
+  parallel: 64
+
+  pytest_cmd: |
+    python -m pytest -vv -m 'not notebook and not no_cache_init' --cov=. --cov-report=xml
+    python -m coverage report

@@ -4,6 +4,11 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
+# * [WHY ARE CALLBACKS UNDER __init__.py?]
+# * This functionality will be restructured in the near future
+# * so for now callbacks are under __init__.py
+
 from __future__ import annotations
 
 import copy
@@ -191,15 +196,15 @@ class RolloutEval(Callback):
         batch: torch.Tensor,
     ) -> None:
         loss = torch.zeros(1, dtype=batch.dtype, device=pl_module.device, requires_grad=False)
-        # NB! the batch is already normalized in-place - see pl_model.validation_step()
         metrics = {}
 
         # start rollout
+        batch = pl_module.model.pre_processors(batch, in_place=False)
         x = batch[
             :,
             0 : pl_module.multi_step,
             ...,
-            pl_module.data_indices.data.input.full,
+            pl_module.data_indices.internal_data.input.full,
         ]  # (bs, multi_step, latlon, nvar)
         assert (
             batch.shape[1] >= self.rollout + pl_module.multi_step
@@ -212,7 +217,7 @@ class RolloutEval(Callback):
                     :,
                     pl_module.multi_step + rollout_step,
                     ...,
-                    pl_module.data_indices.data.output.full,
+                    pl_module.data_indices.internal_data.output.full,
                 ]  # target, shape = (bs, latlon, nvar)
                 # y includes the auxiliary variables, so we must leave those out when computing the loss
                 loss += pl_module.loss(y_pred, y)
@@ -403,10 +408,10 @@ class PlotLoss(BasePlotCallback):
             parameters_to_groups = unique_group_list[group_inverse]
             unique_group_list, group_inverse = np.unique(parameters_to_groups, return_inverse=True)
 
-            # sort paramters by groups
+            # sort parameters by groups
             sort_by_parameter_group = np.argsort(group_inverse, kind="stable")
 
-        # apply new order to paramters
+        # apply new order to parameters
         sorted_parameter_names = np.array(self.parameter_names)[sort_by_parameter_group]
         parameters_to_groups = parameters_to_groups[sort_by_parameter_group]
         unique_group_list, group_inverse, group_counts = np.unique(
@@ -455,17 +460,19 @@ class PlotLoss(BasePlotCallback):
         batch_idx: int,
         epoch: int,
     ) -> None:
-        del batch_idx  # unused
         logger = trainer.logger
 
-        parameter_names = list(pl_module.data_indices.model.output.name_to_index.keys())
-        paramter_positions = list(pl_module.data_indices.model.output.name_to_index.values())
+        parameter_names = list(pl_module.data_indices.internal_model.output.name_to_index.keys())
+        parameter_positions = list(pl_module.data_indices.internal_model.output.name_to_index.values())
         # reorder parameter_names by position
-        self.parameter_names = [parameter_names[i] for i in np.argsort(paramter_positions)]
+        self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
 
+        batch = pl_module.model.pre_processors(batch, in_place=False)
         for rollout_step in range(pl_module.rollout):
             y_hat = outputs[1][rollout_step]
-            y_true = batch[:, pl_module.multi_step + rollout_step, ..., pl_module.data_indices.data.output.full]
+            y_true = batch[
+                :, pl_module.multi_step + rollout_step, ..., pl_module.data_indices.internal_data.output.full
+            ]
             loss = pl_module.loss(y_hat, y_true, squash=False).cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
@@ -505,6 +512,8 @@ class PlotSample(BasePlotCallback):
         """
         super().__init__(config)
         self.sample_idx = self.config.diagnostics.plot.sample_idx
+        self.precip_and_related_fields = self.config.diagnostics.plot.precip_and_related_fields
+        LOGGER.info(f"Using defined accumulation colormap for fields: {self.precip_and_related_fields}")
 
     @rank_zero_only
     def _plot(
@@ -535,11 +544,12 @@ class PlotSample(BasePlotCallback):
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
         local_rank = pl_module.local_rank
 
+        batch = pl_module.model.pre_processors(batch, in_place=False)
         input_tensor = batch[
             self.sample_idx,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
-            pl_module.data_indices.data.output.full,
+            pl_module.data_indices.internal_data.output.full,
         ].cpu()
         data = self.post_processors(input_tensor).numpy()
 
@@ -558,6 +568,7 @@ class PlotSample(BasePlotCallback):
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
+                precip_and_related_fields=self.precip_and_related_fields,
             )
 
             self._output_figure(
@@ -600,6 +611,8 @@ class PlotAdditionalMetrics(BasePlotCallback):
         """
         super().__init__(config)
         self.sample_idx = self.config.diagnostics.plot.sample_idx
+        self.precip_and_related_fields = self.config.diagnostics.plot.precip_and_related_fields
+        LOGGER.info(f"Using precip histogram plotting method for fields: {self.precip_and_related_fields}")
 
     @rank_zero_only
     def _plot(
@@ -625,12 +638,12 @@ class PlotAdditionalMetrics(BasePlotCallback):
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
         local_rank = pl_module.local_rank
-
+        batch = pl_module.model.pre_processors(batch, in_place=False)
         input_tensor = batch[
             self.sample_idx,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
-            pl_module.data_indices.data.output.full,
+            pl_module.data_indices.internal_data.output.full,
         ].cpu()
         data = self.post_processors(input_tensor).numpy()
         output_tensor = self.post_processors(
@@ -653,6 +666,7 @@ class PlotAdditionalMetrics(BasePlotCallback):
                     data[0, ...].squeeze(),
                     data[rollout_step + 1, ...].squeeze(),
                     output_tensor[rollout_step, ...],
+                    precip_and_related_fields=self.precip_and_related_fields,
                 )
 
                 self._output_figure(
@@ -811,6 +825,15 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         return {}
 
+    def _remove_checkpoint(self, trainer: "pl.Trainer", filepath: str) -> None:
+        """Calls the strategy to remove the checkpoint file."""
+        super()._remove_checkpoint(trainer, filepath)
+        trainer.strategy.remove_checkpoint(self._get_inference_checkpoint_filepath(filepath))
+
+    def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
+        """Defines the filepath for the inference checkpoint."""
+        return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
+
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:
             model = self._torch_drop_down(trainer)
@@ -839,9 +862,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             metadata = dict(**tmp_metadata)
 
-            inference_checkpoint_filepath = Path(lightning_checkpoint_filepath).parent / Path(
-                "inference-" + str(Path(lightning_checkpoint_filepath).name),
-            )
+            inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             torch.save(model, inference_checkpoint_filepath)
 

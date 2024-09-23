@@ -21,6 +21,9 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
             "data": {
                 "forcing": ["x"],
                 "diagnostic": ["z", "q"],
+                "remapped": {
+                    "d": ["cos_d", "sin_d"],
+                },
             },
             "training": {
                 "loss_scaling": {
@@ -36,7 +39,7 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
             },
         },
     )
-    name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6}
+    name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
     return config, data_indices
 
@@ -70,6 +73,8 @@ expected_linear_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
+        1,  # cos_d
+        1,  # sin_d
     ],
 )
 expected_relu_scaling = torch.Tensor(
@@ -80,6 +85,8 @@ expected_relu_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
+        1,  # cos_d
+        1,  # sin_d
     ],
 )
 expected_constant_scaling = torch.Tensor(
@@ -90,6 +97,8 @@ expected_constant_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
+        1,  # cos_d
+        1,  # sin_d
     ],
 )
 expected_polynomial_scaling = torch.Tensor(
@@ -100,6 +109,8 @@ expected_polynomial_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
+        1,  # cos_d
+        1,  # sin_d
     ],
 )
 
@@ -117,7 +128,7 @@ expected_polynomial_scaling = torch.Tensor(
 def test_loss_scaling_vals(fake_data: tuple[DictConfig, IndexCollection], expected_scaling: torch.Tensor) -> None:
     config, data_indices = fake_data
 
-    _, loss_scaling = GraphForecaster.metrics_loss_scaling(config, data_indices)
+    _, _, loss_scaling = GraphForecaster.metrics_loss_scaling(config, data_indices)
 
     assert torch.allclose(loss_scaling, expected_scaling)
 
@@ -126,9 +137,9 @@ def test_loss_scaling_vals(fake_data: tuple[DictConfig, IndexCollection], expect
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices = fake_data
 
-    metric_range, _ = GraphForecaster.metrics_loss_scaling(config, data_indices)
+    metric_range, metric_ranges_validation, _ = GraphForecaster.metrics_loss_scaling(config, data_indices)
 
-    expected_metric_range = {
+    expected_metric_range_validation = {
         "pl_y": [
             data_indices.model.output.name_to_index["y_50"],
             data_indices.model.output.name_to_index["y_500"],
@@ -138,7 +149,14 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
         "sfc_q": [data_indices.model.output.name_to_index["q"]],
         "sfc_z": [data_indices.model.output.name_to_index["z"]],
         "other": [data_indices.model.output.name_to_index["other"]],
+        "sfc_d": [data_indices.model.output.name_to_index["d"]],
         "y_850": [data_indices.model.output.name_to_index["y_850"]],
     }
 
+    expected_metric_range = expected_metric_range_validation.copy()
+    del expected_metric_range["sfc_d"]
+    expected_metric_range["sfc_cos_d"] = [data_indices.internal_model.output.name_to_index["cos_d"]]
+    expected_metric_range["sfc_sin_d"] = [data_indices.internal_model.output.name_to_index["sin_d"]]
+
+    assert dict(metric_ranges_validation) == expected_metric_range_validation
     assert dict(metric_range) == expected_metric_range
