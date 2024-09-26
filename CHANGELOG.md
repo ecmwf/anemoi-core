@@ -31,6 +31,7 @@ Keep it human-readable, your future self will thank you!
 
 - Fix `TypeError` raised when trying to JSON serialise `datetime.timedelta` object - [#43](https://github.com/ecmwf/anemoi-training/pull/43)
 - Bugfixes for CI (#56)
+- Show correct subcommand in MLFlow - Addresses [#39](https://github.com/ecmwf/anemoi-training/issues/39) in [#61](https://github.com/ecmwf/anemoi-training/pull/61)
 
 ### Changed
 
