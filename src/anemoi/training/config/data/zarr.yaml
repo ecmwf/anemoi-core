@@ -57,10 +57,6 @@ imputer:
 remapper:
   default: "none"
 
-  # # For the fraction activation to be robust, the fraction variable should
-  # # be normalised with the standard deviation of the total variable
-  # fraction_normalisation: [["tp","cp"]] #first variable is the total variable
-
 # processors including imputers and normalizers are applied in order of definition
 processors:
   # example_imputer:
