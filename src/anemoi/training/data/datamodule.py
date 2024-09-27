@@ -1,9 +1,10 @@
 # (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# (C) Copyright 2024 Deutscher Wetterdienst.
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation
-# nor does it submit to any jurisdiction.
+# In applying this licence, the above institution do not waive the privileges
+# and immunities granted to it by virtue of its status as an intergovernmental
+# organisation  nor does it submit to any jurisdiction.
 
 import logging
 import os
@@ -96,6 +97,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             )
             self.config.dataloader.training.end = self.config.dataloader.validation.start - 1
 
+        if not self.config.dataloader.pin_memory:
+            LOGGER.info("Data loader memory pinning disabled.")
+
     def _check_resolution(self, resolution: str) -> None:
         assert (
             self.config.data.resolution.lower() == resolution.lower()
@@ -185,7 +189,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             num_workers=self.config.dataloader.num_workers[stage],
             # use of pinned memory can speed up CPU-to-GPU data transfers
             # see https://pytorch.org/docs/stable/notes/cuda.html#cuda-memory-pinning
-            pin_memory=True,
+            pin_memory=self.config.dataloader.pin_memory,
             # worker initializer
             worker_init_fn=worker_init_func,
             # prefetch batches
