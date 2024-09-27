@@ -38,7 +38,23 @@ class BasePreprocessor(nn.Module):
             Data indices for input and output variables
         statistics : dict
             Data statistics dictionary
+        data_indices : dict
+            Data indices for input and output variables
+
+        Attributes
+        ----------
+        default : str
+            Default method for variables not specified in the config
+        method_config : dict
+            Dictionary of the methods with lists of variables
+        methods : dict
+            Dictionary of the variables with methods
+        data_indices : IndexCollection
+            Data indices for input and output variables
+        remap : dict
+            Dictionary of the variables with remapped names in the config
         """
+
         super().__init__()
 
         self.default, self.method_config = self._process_config(config)
@@ -47,8 +63,10 @@ class BasePreprocessor(nn.Module):
         self.data_indices = data_indices
 
     def _process_config(self, config):
+        _special_keys = ["default", "remap"]  # Keys that do not contain a list of variables in a preprocessing method.
         default = config.get("default", "none")
-        method_config = {k: v for k, v in config.items() if k != "default" and v is not None and v != "none"}
+        self.remap = config.get("remap", {})
+        method_config = {k: v for k, v in config.items() if k not in _special_keys and v is not None and v != "none"}
 
         if not method_config:
             LOGGER.warning(

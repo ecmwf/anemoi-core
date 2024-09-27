@@ -49,6 +49,16 @@ class InputNormalizer(BasePreprocessor):
         mean = statistics["mean"]
         stdev = statistics["stdev"]
 
+        # Optionally reuse statistic of one variable for another variable
+        statistics_remap = {}
+        for remap, source in self.remap.items():
+            idx_src, idx_remap = name_to_index_training_input[source], name_to_index_training_input[remap]
+            statistics_remap[idx_remap] = (minimum[idx_src], maximum[idx_src], mean[idx_src], stdev[idx_src])
+
+        # Two-step to avoid overwriting the original statistics in the loop (this reduces dependence on order)
+        for idx, new_stats in statistics_remap.items():
+            minimum[idx], maximum[idx], mean[idx], stdev[idx] = new_stats
+
         self._validate_normalization_inputs(name_to_index_training_input, minimum, maximum, mean, stdev)
 
         _norm_add = np.zeros((minimum.size,), dtype=np.float32)
@@ -56,12 +66,20 @@ class InputNormalizer(BasePreprocessor):
 
         for name, i in name_to_index_training_input.items():
             method = self.methods.get(name, self.default)
+
             if method == "mean-std":
                 LOGGER.debug(f"Normalizing: {name} is mean-std-normalised.")
                 if stdev[i] < (mean[i] * 1e-6):
                     warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
                 _norm_mul[i] = 1 / stdev[i]
                 _norm_add[i] = -mean[i] / stdev[i]
+
+            elif method == "std":
+                LOGGER.debug(f"Normalizing: {name} is std-normalised.")
+                if stdev[i] < (mean[i] * 1e-6):
+                    warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
+                _norm_mul[i] = 1 / stdev[i]
+                _norm_add[i] = 0
 
             elif method == "min-max":
                 LOGGER.debug(f"Normalizing: {name} is min-max-normalised to [0, 1].")
@@ -92,16 +110,20 @@ class InputNormalizer(BasePreprocessor):
             f"Error parsing methods in InputNormalizer methods ({len(self.methods)}) "
             f"and entries in config ({sum(len(v) for v in self.method_config)}) do not match."
         )
+
+        # Check that all sizes align
         n = minimum.size
         assert maximum.size == n, (maximum.size, n)
         assert mean.size == n, (mean.size, n)
         assert stdev.size == n, (stdev.size, n)
 
+        # Check for typos in method config
         assert isinstance(self.methods, dict)
         for name, method in self.methods.items():
             assert name in name_to_index_training_input, f"{name} is not a valid variable name"
             assert method in [
                 "mean-std",
+                "std",
                 # "robust",
                 "min-max",
                 "max",

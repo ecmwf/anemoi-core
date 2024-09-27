@@ -20,6 +20,7 @@ class TestGraphTransformerProcessorChunk:
         mlp_hidden_ratio: int = 4
         activation: str = "GELU"
         window_size: int = 13
+        dropout_p: float = 0.1
 
         # num_heads must be evenly divisible by num_channels for MHSA
         return (
@@ -29,6 +30,7 @@ class TestGraphTransformerProcessorChunk:
             mlp_hidden_ratio,
             activation,
             window_size,
+            dropout_p,
         )
 
     @pytest.fixture
@@ -40,6 +42,7 @@ class TestGraphTransformerProcessorChunk:
             mlp_hidden_ratio,
             activation,
             window_size,
+            dropout_p,
         ) = init
         return TransformerProcessorChunk(
             num_channels=num_channels,
@@ -48,6 +51,7 @@ class TestGraphTransformerProcessorChunk:
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,
             window_size=window_size,
+            dropout_p=dropout_p,
         )
 
     def test_all_blocks(self, processor_chunk):

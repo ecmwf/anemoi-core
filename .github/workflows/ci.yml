@@ -37,7 +37,7 @@ jobs:
   downstream-ci-hpc:
     name: downstream-ci-hpc
     if: ${{ !github.event.pull_request.head.repo.fork && github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci' }}
-    uses: ecmwf-actions/downstream-ci/.github/workflows/downstream-ci.yml@main
+    uses: ecmwf-actions/downstream-ci/.github/workflows/downstream-ci-hpc.yml@main
     with:
       anemoi-models: ecmwf/anemoi-models@${{ github.event.pull_request.head.sha || github.sha }}
     secrets: inherit

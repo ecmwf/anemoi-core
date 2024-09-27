@@ -40,7 +40,7 @@ class MultiHeadSelfAttention(nn.Module):
         bias: bool = False,
         is_causal: bool = False,
         window_size: Optional[int] = None,
-        dropout: float = 0.0,
+        dropout_p: float = 0.0,
     ):
         super().__init__()
 
@@ -48,11 +48,11 @@ class MultiHeadSelfAttention(nn.Module):
             embed_dim % num_heads == 0
         ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
 
-        self.dropout = dropout
         self.num_heads = num_heads
         self.embed_dim = embed_dim
         self.head_dim = embed_dim // num_heads  # q k v
         self.window_size = (window_size, window_size)  # flash attention
+        self.dropout_p = dropout_p
         self.is_causal = is_causal
 
         self.lin_qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=bias)
@@ -86,15 +86,22 @@ class MultiHeadSelfAttention(nn.Module):
         query = shard_heads(query, shapes=shapes, mgroup=model_comm_group)
         key = shard_heads(key, shapes=shapes, mgroup=model_comm_group)
         value = shard_heads(value, shapes=shapes, mgroup=model_comm_group)
+        dropout_p = self.dropout_p if self.training else 0.0
 
         if _FLASH_ATTENTION_AVAILABLE:
             query, key, value = (
                 einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
             )
-            out = self.attention(query, key, value, causal=False, window_size=self.window_size)
+            out = self.attention(query, key, value, causal=False, window_size=self.window_size, dropout_p=dropout_p)
             out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         else:
-            out = self.attention(query, key, value, is_causal=False)  # expects (batch heads grid variable) format
+            out = self.attention(
+                query,
+                key,
+                value,
+                is_causal=False,
+                dropout_p=dropout_p,
+            )  # expects (batch heads grid variable) format
 
         out = shard_sequence(out, shapes=shapes, mgroup=model_comm_group)
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")

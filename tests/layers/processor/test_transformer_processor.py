@@ -21,6 +21,7 @@ def transformer_processor_init():
     cpu_offload = False
     num_heads = 16
     mlp_hidden_ratio = 4
+    dropout_p = 0.1
     return (
         num_layers,
         window_size,
@@ -30,6 +31,7 @@ def transformer_processor_init():
         cpu_offload,
         num_heads,
         mlp_hidden_ratio,
+        dropout_p,
     )
 
 
@@ -44,6 +46,7 @@ def transformer_processor(transformer_processor_init):
         cpu_offload,
         num_heads,
         mlp_hidden_ratio,
+        dropout_p,
     ) = transformer_processor_init
     return TransformerProcessor(
         num_layers=num_layers,
@@ -54,6 +57,7 @@ def transformer_processor(transformer_processor_init):
         cpu_offload=cpu_offload,
         num_heads=num_heads,
         mlp_hidden_ratio=mlp_hidden_ratio,
+        dropout_p=dropout_p,
     )
 
 
@@ -67,6 +71,7 @@ def test_transformer_processor_init(transformer_processor, transformer_processor
         _cpu_offload,
         _num_heads,
         _mlp_hidden_ratio,
+        _dropout_p,
     ) = transformer_processor_init
     assert isinstance(transformer_processor, TransformerProcessor)
     assert transformer_processor.num_chunks == num_chunks
@@ -84,6 +89,7 @@ def test_transformer_processor_forward(transformer_processor, transformer_proces
         _cpu_offload,
         _num_heads,
         _mlp_hidden_ratio,
+        _dropout_p,
     ) = transformer_processor_init
     gridsize = 100
     batch_size = 1
