@@ -2,8 +2,11 @@
 name: "Update Changelog"
 
 on:
-  release:
-    types: [released]
+  workflow_run:
+    workflows:
+      - Upload Python Package
+    types:
+      - completed
 
 permissions:
   pull-requests: write
@@ -12,6 +15,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
     - name: Checkout code
@@ -29,6 +33,12 @@ jobs:
       uses: peter-evans/create-pull-request@v6
       with:
         branch: docs/changelog-update-${{ github.event.release.tag_name }}
+        base: develop
         title: '[Changelog] Update to ${{ github.event.release.tag_name }}'
+        body: |
+          This PR updates the changelog to include the changes in the latest release.
+
+          > [!CAUTION]
+          > Merge DO NOT squash to correctly update the tag version of `develop` branch.
         add-paths: |
           CHANGELOG.md

@@ -8,12 +8,17 @@ on:
       - 'develop'
     tags-ignore:
       - '**'
-    paths:
-      - "src/**"
-      - "tests/**"
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "README.md"
 
   # Trigger the workflow on pull request
-  pull_request: ~
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "README.md"
 
   # Trigger the workflow manuallyp instals
   workflow_dispatch: ~
@@ -21,6 +26,10 @@ on:
   # Trigger after public PR approved for CI
   pull_request_target:
     types: [labeled]
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "README.md"
 
 jobs:
   # Run CI including downstream packages on self-hosted runners

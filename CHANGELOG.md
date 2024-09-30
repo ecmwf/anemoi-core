@@ -20,6 +20,8 @@ Keep it human-readable, your future self will thank you!
 
 ### Changed
 - Bugfixes for CI
+- Change Changelog CI to run after successful publish
+- pytest for downstream-ci-hpc
 
 ### Removed
 
