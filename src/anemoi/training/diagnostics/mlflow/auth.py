@@ -75,20 +75,8 @@ class TokenAuth:
     def load_config() -> dict:
         return load_config(TokenAuth.config_file)
 
-    @staticmethod
-    def enabled(fn: Callable) -> Callable:
-        """Decorator to call or ignore a function based on the `enabled` flag.
-
-        Parameters
-        ----------
-        fn : Callable
-            Function to wrap with enable flag.
-
-        Returns
-        -------
-        function | None
-            Wrapped function or None if `_enabled` property is False.
-        """
+    def enabled(fn: Callable) -> Callable:  # noqa: N805
+        """Decorator to call or ignore a function based on the `enabled` flag."""
 
         @wraps(fn)
         def _wrapper(self: TokenAuth, *args, **kwargs) -> Callable | None:
