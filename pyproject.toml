@@ -44,7 +44,7 @@ dynamic = [ "version" ]
 dependencies = [
   "anemoi-datasets>=0.4",
   "anemoi-graphs",
-  "anemoi-models",
+  "anemoi-models>=0.3",
   "anemoi-utils[provenance]>=0.3.10",
   "einops>=0.6.1",
   "hydra-core>=1.3",
