@@ -97,7 +97,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             )
             self.config.dataloader.training.end = self.config.dataloader.validation.start - 1
 
-        if not self.config.dataloader.pin_memory:
+        if not self.config.dataloader.get("pin_memory", True):
             LOGGER.info("Data loader memory pinning disabled.")
 
     def _check_resolution(self, resolution: str) -> None:
@@ -189,7 +189,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             num_workers=self.config.dataloader.num_workers[stage],
             # use of pinned memory can speed up CPU-to-GPU data transfers
             # see https://pytorch.org/docs/stable/notes/cuda.html#cuda-memory-pinning
-            pin_memory=self.config.dataloader.pin_memory,
+            pin_memory=self.config.dataloader.get("pin_memory", True),
             # worker initializer
             worker_init_fn=worker_init_func,
             # prefetch batches
