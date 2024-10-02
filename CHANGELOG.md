@@ -11,12 +11,14 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.3.0...HEAD)
 
 ### Added
+
 - Codeowners file
 - Pygrep precommit hooks
 - Docsig precommit hooks
 - Changelog merge strategy
 - configurabilty of the dropout probability in the the MultiHeadSelfAttention module
 - Variable Bounding as configurable model layers [#13](https://github.com/ecmwf/anemoi-models/issues/13)
+- GraphTransformerMapperBlock chunking to reduce memory usage during inference [#46](https://github.com/ecmwf/anemoi-models/pull/46)
 
 ### Changed
 - Bugfixes for CI

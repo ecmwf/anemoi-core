@@ -18,7 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.khop_edges import sort_edges_1hop
+from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.chunk import GNNProcessorChunk
@@ -235,7 +235,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
         target_nodes = sum(x[0] for x in shape_nodes)
-        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop(
+        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
             target_nodes,
             edge_attr,
             edge_index,

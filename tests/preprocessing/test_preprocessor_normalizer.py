@@ -68,7 +68,7 @@ def remap_normalizer():
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
-    return InputNormalizer(config=config.data.normalizer, statistics=statistics, data_indices=data_indices)
+    return InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics)
 
 
 def test_normalizer_not_inplace(input_normalizer) -> None:
