@@ -12,6 +12,10 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 - ci: hpc-config, CODEOWNERS (#49)
+- feat: New node builder class, CutOutZarrDatasetNodes, to create nodes from 2 datasets. (#30)
+- feat: New class, KNNAreaMaskBuilder, to specify Area of Interest (AOI) based on a set of nodes. (#30)
+- feat: New node builder classes, LimitedAreaXXXXXNodes, to create nodes within an Area of Interest (AOI). (#30)
+- feat: Expanded MultiScaleEdges to support multi-scale connections in limited area graphs. (#30)
 
 ### Changed
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)
@@ -20,7 +24,7 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
-- HEALPixNodes - nodebuilder based on Hierarchical Equal Area isoLatitude Pixelation of a sphere.
+- HEALPixNodes - nodebuilder based on Hierarchical Equal Area isoLatitude Pixelation of a sphere
 
 - Inspection tools: interactive plots, and distribution plots of edge & node attributes.
 

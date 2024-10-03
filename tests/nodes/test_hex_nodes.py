@@ -3,7 +3,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes import HexNodes
-from anemoi.graphs.nodes.builder import BaseNodeBuilder
+from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 
 @pytest.mark.parametrize("resolution", [0, 2])

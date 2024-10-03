@@ -5,6 +5,7 @@ from typing import Optional
 from typing import Union
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import EdgeStorage
@@ -83,7 +84,9 @@ def plot_distribution_attributes(
 
     # Define the layout
     _, axs = plt.subplots(num_items, dim_attrs, figsize=(10 * num_items, 10))
-    if axs.ndim == 1:
+    if num_items == dim_attrs == 1:
+        axs = np.array([[axs]])
+    elif axs.ndim == 1:
         axs = axs.reshape(num_items, dim_attrs)
 
     for i, (item_name, item_store) in enumerate(graph_items):

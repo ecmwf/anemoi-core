@@ -4,8 +4,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import AreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
-from anemoi.graphs.nodes.builder import BaseNodeBuilder
-from anemoi.graphs.nodes.builder import HEALPixNodes
+from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
+from anemoi.graphs.nodes.builders.from_healpix import HEALPixNodes
 
 
 @pytest.mark.parametrize("resolution", [2, 5, 7])

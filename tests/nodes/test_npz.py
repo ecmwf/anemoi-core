@@ -4,7 +4,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import AreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
-from anemoi.graphs.nodes.builder import NPZFileNodes
+from anemoi.graphs.nodes.builders.from_file import NPZFileNodes
 
 
 @pytest.mark.parametrize("resolution", ["o16", "o48", "5km5"])
