@@ -50,6 +50,7 @@ class Train(Command):
         """Merge the sys.argv with the known subcommands to pass to hydra.
 
         This is done for interactive DDP, which will spawn the rank > 0 processes from sys.argv[0]
+        and for hydra, which ingests sys.argv[1:]
 
         Parameters
         ----------
@@ -64,7 +65,7 @@ class Train(Command):
         argv = Path(sys.argv[0])
 
         # this will turn "/env/bin/anemoi-training train" into "/env/bin/.anemoi-training-train"
-        # the dot at the beginning is intentional to not trigger autocomplete
+        # the dot at the beginning is intentional to not interfere with autocomplete
         modified_sysargv = argv.with_name(f".{argv.name}-{args.command}")
 
         if hasattr(args, "subcommand"):
