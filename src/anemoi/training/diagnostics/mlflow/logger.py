@@ -66,7 +66,9 @@ def get_mlflow_run_params(config: OmegaConf, tracking_uri: str) -> tuple[str | N
     run_id = None
     tags = {"projectName": config.diagnostics.log.mlflow.project_name}
     # create a tag with the command used to run the script
-    tags["command"] = sys.argv[0].split("/")[-1]  # get the python script name
+    command = os.environ.get("ANEMOI_TRAINING_CMD", sys.argv[0])
+    tags["command"] = command.split("/")[-1]  # get the python script name
+    tags["mlflow.source.name"] = command
     if len(sys.argv) > 1:
         # add the arguments to the command tag
         tags["command"] = tags["command"] + " " + " ".join(sys.argv[1:])
