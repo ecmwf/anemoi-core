@@ -100,6 +100,10 @@ intersphinx_mapping = {
         "https://anemoi-registry.readthedocs.io/en/latest/",
         ("../../anemoi-registry/docs/_build/html/objects.inv", None),
     ),
+    "anemoi-transform": (
+        "https://anemoi-transform.readthedocs.io/en/latest/",
+        ("../../anemoi-transform/docs/_build/html/objects.inv", None),
+    ),
 }
 
 # -- Options for HTML output -------------------------------------------------
