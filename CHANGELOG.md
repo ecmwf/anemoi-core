@@ -12,6 +12,7 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
+- Add anemoi-transform link to documentation
 - Codeowners file
 - Pygrep precommit hooks
 - Docsig precommit hooks
