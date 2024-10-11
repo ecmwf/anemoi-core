@@ -30,11 +30,7 @@ class TokenAuth:
 
     config_file = "mlflow-token.json"
 
-    def __init__(
-        self,
-        url: str,
-        enabled: bool = True,
-    ) -> None:
+    def __init__(self, url: str, enabled: bool = True, target_env_var: str = "MLFLOW_TRACKING_TOKEN") -> None:
         """Initialise the token authentication object.
 
         Parameters
@@ -43,9 +39,13 @@ class TokenAuth:
             URL of the authentication server.
         enabled : bool, optional
             Set this to False to turn off authentication, by default True
+        target_env_var : str, optional
+            The environment variable to store the access token in after authenticating,
+            by default `MLFLOW_TRACKING_TOKEN`
 
         """
         self.url = url
+        self.target_env_var = target_env_var
         self._enabled = enabled
 
         config = self.load_config()
@@ -91,14 +91,16 @@ class TokenAuth:
         """Acquire a new refresh token and save it to disk.
 
         If an existing valid refresh token is already on disk it will be used.
-        If not, or the token has expired, the user will be prompted for credentials.
+        If not, or the token has expired, the user will be asked to obtain one from the API.
+
+        Refresh token expiry time is set in the `REFRESH_EXPIRE_DAYS` constant (default 29 days).
 
         This function should be called once, interactively, right before starting a training run.
 
         Parameters
         ----------
         force_credentials : bool, optional
-            Force a username/password prompt even if a refreh token is available, by default False.
+            Force a credential login even if a refreh token is available, by default False.
         kwargs : dict
             Additional keyword arguments.
 
@@ -116,11 +118,12 @@ class TokenAuth:
             new_refresh_token = self._token_request(ignore_exc=True).get("refresh_token")
 
         if not new_refresh_token:
-            self.log.info("📝 Please sign in with your credentials.")
-            username = input("Username: ")
-            password = getpass("Password: ")
+            self.log.info("📝 Please obtain a seed refresh token from %s/seed", self.url)
+            self.log.info("📝 and paste it here (you will not see the output, just press enter after pasting):")
+            self.refresh_token = getpass("Refresh Token: ")
 
-            new_refresh_token = self._token_request(username=username, password=password).get("refresh_token")
+            # perform a new refresh token request to check if the seed refresh token is valid
+            new_refresh_token = self._token_request().get("refresh_token")
 
         if not new_refresh_token:
             msg = "❌ Failed to log in. Please try again."
@@ -133,9 +136,11 @@ class TokenAuth:
 
     @enabled
     def authenticate(self, **kwargs: dict) -> None:
-        """Check the access token and refresh it if necessary.
+        """Check the access token and refresh it if necessary. A new refresh token will also be acquired upon refresh.
 
-        The access token is stored in memory and in the environment variable `MLFLOW_TRACKING_TOKEN`.
+        This requires a valid refresh token to be available, obtained from the `login` method.
+
+        The access token is stored in memory and in an environment variable.
         If the access token is still valid, this function does nothing.
 
         This function should be called before every MLflow API request.
@@ -161,7 +166,7 @@ class TokenAuth:
         self.access_expires = time.time() + (response.get("expires_in") * 0.7)  # bit of buffer
         self.refresh_token = response.get("refresh_token")
 
-        os.environ["MLFLOW_TRACKING_TOKEN"] = self.access_token
+        os.environ[self.target_env_var] = self.access_token
 
     @enabled
     def save(self, **kwargs: dict) -> None:
@@ -183,16 +188,10 @@ class TokenAuth:
 
     def _token_request(
         self,
-        username: str | None = None,
-        password: str | None = None,
         ignore_exc: bool = False,
     ) -> dict:
-        if username is not None and password is not None:
-            path = "newtoken"
-            payload = {"username": username, "password": password}
-        else:
-            path = "refreshtoken"
-            payload = {"refresh_token": self.refresh_token}
+        path = "refreshtoken"
+        payload = {"refresh_token": self.refresh_token}
 
         try:
             response = self._request(path, payload)

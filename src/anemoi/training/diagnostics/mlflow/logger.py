@@ -20,13 +20,13 @@ from typing import Any
 from typing import Literal
 from weakref import WeakValueDictionary
 
-import requests
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.diagnostics.mlflow.utils import health_check
 from anemoi.training.utils.jsonify import map_config_to_primitives
 
 if TYPE_CHECKING:
@@ -35,31 +35,6 @@ if TYPE_CHECKING:
     from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
-
-
-def health_check(tracking_uri: str) -> None:
-    """Query the health endpoint of an MLflow server.
-
-    If the server is not reachable, raise an error and remind the user that authentication may be required.
-
-    Raises
-    ------
-    ConnectionError
-        If the server is not reachable.
-
-    """
-    token = os.getenv("MLFLOW_TRACKING_TOKEN")
-
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(f"{tracking_uri}/health", headers=headers, timeout=60)
-
-    if response.text == "OK":
-        return
-
-    error_msg = f"Could not connect to MLflow server at {tracking_uri}. "
-    if not token:
-        error_msg += "The server may require authentication, did you forget to turn it on in the config?"
-    raise ConnectionError(error_msg)
 
 
 def get_mlflow_run_params(config: OmegaConf, tracking_uri: str) -> tuple[str | None, str, dict[str, Any]]:
