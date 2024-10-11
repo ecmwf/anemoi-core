@@ -45,6 +45,7 @@ class MlFlow(Command):
             "--source",
             "-s",
             help="The MLflow logs source directory.",
+            metavar="DIR",
             required=True,
             default=argparse.SUPPRESS,
         )
@@ -52,15 +53,30 @@ class MlFlow(Command):
             "--destination",
             "-d",
             help="The destination MLflow tracking URI.",
+            metavar="URI",
             required=True,
             default=argparse.SUPPRESS,
         )
-        sync.add_argument("--run-id", "-r", help="The run ID to sync.", required=True, default=argparse.SUPPRESS)
+        sync.add_argument(
+            "--run-id",
+            "-r",
+            help="The run ID to sync.",
+            metavar="ID",
+            required=True,
+            default=argparse.SUPPRESS,
+        )
         sync.add_argument(
             "--experiment-name",
             "-e",
             help="The experiment name to sync to.",
+            metavar="NAME",
             default="anemoi-debug",
+        )
+        sync.add_argument(
+            "--authentication",
+            "-a",
+            action="store_true",
+            help="The destination server requires authentication.",
         )
         sync.add_argument(
             "--export-deleted-runs",
@@ -88,7 +104,17 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "sync":
+            from anemoi.training.diagnostics.mlflow.utils import health_check
             from anemoi.training.utils.mlflow_sync import MlFlowSync
+
+            if args.authentication:
+                from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+
+                auth = TokenAuth(url=args.destination)
+                auth.login()
+                auth.authenticate()
+
+            health_check(args.destination)
 
             log_level = "DEBUG" if args.verbose else "INFO"
 
