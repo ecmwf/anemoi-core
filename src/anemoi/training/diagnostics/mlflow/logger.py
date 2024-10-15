@@ -20,6 +20,7 @@ from typing import Any
 from typing import Literal
 from weakref import WeakValueDictionary
 
+from packaging.version import Version
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
@@ -440,12 +441,14 @@ class AnemoiMLflowLogger(MLFlowLogger):
             params = _flatten_dict(params, delimiter=".")  # Flatten dict with '.' to not break API queries
             params = self._clean_params(params)
 
+            import mlflow
             from mlflow.entities import Param
 
-            # Truncate parameter values to 250 characters.
-            # TODO (Ana Prieto Nemesio): MLflow 1.28 allows up to 500 characters:
-            # https://github.com/mlflow/mlflow/releases/tag/v1.28.0
-            params_list = [Param(key=k, value=str(v)[:250]) for k, v in params.items()]
+            # Truncate parameter values.
+            truncation_length = 250
+            if Version(mlflow.VERSION) >= Version("1.28.0"):
+                truncation_length = 500
+            params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in params.items()]
 
             for idx in range(0, len(params_list), 100):
                 self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])
