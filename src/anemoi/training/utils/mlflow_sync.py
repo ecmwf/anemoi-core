@@ -49,7 +49,7 @@ try:
     from mlflow_export_import.run.run_data_importer import _log_metrics
     from mlflow_export_import.run.run_data_importer import _log_params
 except ImportError:
-    msg = "The 'mlflow_export_import' package is not installed. Please install it from https://github.com/mlflow/mlflow-export-import"
+    msg = "The 'mlflow-export-import' package is not installed. Please install it from https://github.com/mlflow/mlflow-export-import"
     raise ImportError(msg) from None
 
 LOGGER = logging.getLogger(__name__)
