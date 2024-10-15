@@ -28,6 +28,7 @@ Keep it human-readable, your future self will thank you!
 - Feature: Add configurable models [#50](https://github.com/ecmwf/anemoi-training/pulls/50)
 - Feature: Authentication support for mlflow sync - [#51](https://github.com/ecmwf/anemoi-training/pull/51)
 - Feature: Support training for datasets with missing time steps [#48](https://github.com/ecmwf/anemoi-training/pulls/48)
+- Feature: `AnemoiMlflowClient`, an mlflow client with authentication support [#86](https://github.com/ecmwf/anemoi-training/pull/86)
 - Long Rollout Plots
 
 ### Fixed
