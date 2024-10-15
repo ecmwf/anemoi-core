@@ -128,6 +128,7 @@ of the *Anemoi* packages.
 *****************
 
 -  :ref:`anemoi-utils <anemoi-utils:index-page>`
+-  :ref:`anemoi-transform <anemoi-transform:index-page>`
 -  :ref:`anemoi-datasets <anemoi-datasets:index-page>`
 -  :ref:`anemoi-models <anemoi-models:index-page>`
 -  :ref:`anemoi-graphs <anemoi-graphs:index-page>`

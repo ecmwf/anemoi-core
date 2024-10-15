@@ -11,6 +11,10 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.3.0...HEAD)
 
 ### Added
+
+- Add anemoi-transform link to documentation
+
+### Added
 - ci: hpc-config, CODEOWNERS (#49)
 - feat: New node builder class, CutOutZarrDatasetNodes, to create nodes from 2 datasets. (#30)
 - feat: New class, KNNAreaMaskBuilder, to specify Area of Interest (AOI) based on a set of nodes. (#30)
