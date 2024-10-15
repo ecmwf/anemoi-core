@@ -11,6 +11,8 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.1.0...HEAD)
 
 ### Added
+
+- Add anemoi-transform link to documentation
 - Codeowners file (#56)
 - Changelog merge strategy (#56)
 
