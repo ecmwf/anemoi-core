@@ -10,6 +10,8 @@ Keep it human-readable, your future self will thank you!
 
 ## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.3.0...HEAD)
 
+- Add synchronisation workflow
+
 ### Added
 
 - Add anemoi-transform link to documentation

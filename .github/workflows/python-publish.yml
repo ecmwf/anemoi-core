@@ -9,11 +9,13 @@ on:
 
 jobs:
   quality:
+    if: ${{ !contains(github.repository, 'private') }}
     uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-precommit-run.yml@v2
     with:
       skip-hooks: "no-commit-to-branch"
 
   checks:
+    if: ${{ !contains(github.repository, 'private') }}
     strategy:
       matrix:
         python-version: ["3.9", "3.10", "3.x"]
