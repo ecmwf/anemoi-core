@@ -1,0 +1,10 @@
+---
+defaults:
+- paths: example
+- files: example
+
+# number of GPUs per node and number of nodes (for DDP)
+accelerator: auto
+num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
+num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
+num_gpus_per_model: 1

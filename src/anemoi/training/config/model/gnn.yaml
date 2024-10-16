@@ -1,0 +1,48 @@
+activation: GELU
+num_channels: 512
+
+model:
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+
+processor:
+  _target_: anemoi.models.layers.processor.GNNProcessor
+  _convert_: all
+  activation: ${model.activation}
+  trainable_size: ${model.trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_layers: 16
+  num_chunks: 2
+  mlp_extra_layers: 0
+
+encoder:
+  _target_: anemoi.models.layers.mapper.GNNForwardMapper
+  _convert_: all
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_extra_layers: 0
+
+decoder:
+  _target_: anemoi.models.layers.mapper.GNNBackwardMapper
+  _convert_: all
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_extra_layers: 0
+
+trainable_parameters:
+  data: 8
+  hidden: 8
+  data2hidden: 8
+  hidden2data: 8
+  hidden2hidden: 8
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+node_loss_weight: area_weight

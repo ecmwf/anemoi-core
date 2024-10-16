@@ -1,0 +1,85 @@
+# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
+run_id: null
+fork_run_id: null
+load_weights_only: null # only load model weights, do not restore optimiser states etc.
+
+# run in deterministic mode ; slows down
+deterministic: False
+
+# miscellaneous
+precision: 16-mixed
+
+# multistep input
+# 1 = single step scheme, X(t-1) used to predict X(t)
+# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
+# Deepmind use k = 2 in their model
+multistep_input: 2
+
+# gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
+# the effective batch size becomes num-devices * batch_size * k
+accum_grad_batches: 1
+
+# clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
+gradient_clip:
+  val: 32.
+  algorithm: value
+
+# stochastic weight averaging
+# https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
+swa:
+  enabled: False
+  lr: 1.e-4
+
+# use ZeroRedundancyOptimizer ; saves memory for larger models
+zero_optimizer: False
+
+# dynamic rescaling of the loss gradient
+# see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
+# don't enable this by default until it's been tested and proven beneficial
+loss_gradient_scaling: False
+
+# length of the "rollout" window (see Keisler's paper)
+rollout:
+  start: 1
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  max: 1
+
+max_epochs: 200
+lr:
+  rate: 0.625e-4 #local_lr
+  iterations: 300000
+  min: 3e-7 #Not scaled by #GPU
+
+# Changes in per-gpu batch_size should come with a rescaling of the local_lr
+# in order to keep a constant global_lr
+# global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
+
+loss_scaling:
+  default: 1
+  pl:
+    q: 0.6 #1
+    t: 6   #1
+    u: 0.8 #0.5
+    v: 0.5 #0.33
+    w: 0.001
+    z: 12  #1
+  sfc:
+    sp: 10
+    10u: 0.1
+    10v: 0.1
+    2d: 0.5
+    tp: 0.025
+    cp: 0.0025
+
+metrics:
+- z_500
+- t_850
+- u_850
+- v_850
+
+pressure_level_scaler:
+  _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
+  minimum: 0.2
+  slope: 0.001

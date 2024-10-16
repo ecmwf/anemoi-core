@@ -1,0 +1,100 @@
+---
+eval:
+  enabled: False
+  # use this to evaluate the model over longer rollouts, every so many validation batches
+  rollout: 12
+  frequency: 20
+plot:
+  enabled: True
+  asynchronous: True
+  frequency: 750
+  sample_idx: 0
+  per_sample: 6
+  parameters:
+  - z_500
+  - t_850
+  - u_850
+  - v_850
+  - 2t
+  - 10u
+  - 10v
+  - sp
+  - tp
+  - cp
+  #Defining the accumulation levels for precipitation related fields and the colormap
+  accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+  cmap_accumulation: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
+  precip_and_related_fields: [tp, cp]
+  # Histogram and Spectrum plots
+  parameters_histogram:
+  - z_500
+  - tp
+  - 2t
+  - 10u
+  - 10v
+  parameters_spectrum:
+  - z_500
+  - tp
+  - 2t
+  - 10u
+  - 10v
+  # group parameters by categories when visualizing contributions to the loss
+  # one-parameter groups are possible to highlight individual parameters
+  parameter_groups:
+    moisture: [tp, cp, tcw]
+    sfc_wind: [10u, 10v]
+  learned_features: False
+  longrollout:
+    enabled: False
+    rollout: [60]
+    frequency: 20 # every X epochs
+
+debug:
+  # this will detect and trace back NaNs / Infs etc. but will slow down training
+  anomaly_detection: False
+
+# activate the pytorch profiler (disable this in production)
+# remember to also activate the tensorboard logger (below)
+profiler: False
+
+checkpoint:
+  every_n_minutes:
+    save_frequency: 30 # Approximate, as this is checked at the end of training steps
+    num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
+
+  every_n_epochs:
+    save_frequency: 1
+    num_models_saved: -1 # If set to -1, all checkpoints are kept ensuring runs can be continued/forked at any point in the training process
+
+  every_n_train_steps:
+    save_frequency: null # Does not scale with rollout
+    num_models_saved: 0
+
+log:
+  wandb:
+    enabled: False
+    offline: False
+    log_model: False
+    project: 'Anemoi'
+    entity: ???
+    # logger options (these probably come with some overhead)
+    gradients: False
+    parameters: False
+  tensorboard:
+    enabled: False
+  mlflow:
+    enabled: False
+    offline: False
+    authentication: False
+    log_model: False
+    tracking_uri: ???
+    experiment_name: 'anemoi-debug'
+    project_name: 'Anemoi'
+    system: True
+    terminal: True
+    run_name: null # If set to null, the run name will be the a random UUID
+    on_resume_create_child: True
+  interval: 100
+
+enable_progress_bar: True
+print_memory_summary: False

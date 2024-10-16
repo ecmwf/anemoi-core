@@ -14,13 +14,9 @@ import datetime
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(".."))
-
-
 read_the_docs_build = os.environ.get("READTHEDOCS", None) == "True"
 
-# top = os.path.realpath(os.path.dirname(os.path.dirname(__file__)))
-# sys.path.insert(0, top)
+sys.path.insert(0, os.path.join(os.path.abspath(".."), "src"))
 
 
 source_suffix = ".rst"
@@ -32,20 +28,22 @@ html_logo = "_static/logo.png"
 
 # -- Project information -----------------------------------------------------
 
-project = "Anemoi"
+project = "Anemoi Training"
 
 author = "ECMWF"
 
 year = datetime.datetime.now().year
-if year == 2024:
-    years = "2024"
-else:
-    years = "2024-%s" % (year,)
+years = "2024" if year == 2024 else f"2024-{year}"
 
-copyright = "%s, ECMWF" % (years,)
+copyright = f"{years}, ECMWF"
 
 
-release = "0.1.0"
+try:
+    from anemoi.training._version import __version__
+
+    release = __version__
+except ImportError:
+    release = "0.0.0"
 
 
 # -- General configuration ---------------------------------------------------
@@ -61,6 +59,8 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
+    "sphinxarg.ext",
+    "sphinx.ext.autosectionlabel",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -93,11 +93,19 @@ intersphinx_mapping = {
         "https://anemoi-inference.readthedocs.io/en/latest/",
         ("../../anemoi-inference/docs/_build/html/objects.inv", None),
     ),
+    "anemoi-graphs": (
+        "https://anemoi-graphs.readthedocs.io/en/latest/",
+        ("../../anemoi-graphs/docs/_build/html/objects.inv", None),
+    ),
+    "anemoi-registry": (
+        "https://anemoi-registry.readthedocs.io/en/latest/",
+        ("../../anemoi-registry/docs/_build/html/objects.inv", None),
+    ),
+    "anemoi-transform": (
+        "https://anemoi-transform.readthedocs.io/en/latest/",
+        ("../../anemoi-transform/docs/_build/html/objects.inv", None),
+    ),
 }
-
-
-# https://www.notion.so/Deepnote-Launch-Buttons-63c642a5e875463495ed2341e83a4b2a
-
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -114,3 +122,5 @@ html_css_files = ["style.css"]
 
 
 todo_include_todos = not read_the_docs_build
+
+autodoc_member_order = "bysource"  # Keep file order
