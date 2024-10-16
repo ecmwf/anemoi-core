@@ -24,6 +24,7 @@ jobs:
       python-version: ${{ matrix.python-version }}
 
   deploy:
+    if: ${{ !contains(github.repository, 'private') }}
     needs: [checks, quality]
     uses: ecmwf-actions/reusable-workflows/.github/workflows/cd-pypi.yml@v2
     secrets: inherit
