@@ -5,7 +5,7 @@ repos:
   - id: clear-notebooks-output
     name: clear-notebooks-output
     files: tools/.*\.ipynb$
-    stages: [Nonepre-commitNone]
+    stages: [pre-commit]
     language: python
     entry: jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace
     additional_dependencies: [jupyter]
