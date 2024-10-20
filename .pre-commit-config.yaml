@@ -43,13 +43,12 @@ repos:
   rev: v0.6.9
   hooks:
   - id: ruff
-    # Next line if for documenation cod snippets
-    exclude: '.*/[^_].*_\.py$'
     args:
     - --line-length=120
     - --fix
     - --exit-non-zero-on-fix
     - --preview
+    - --exclude=docs/**/*_.py
 - repo: https://github.com/sphinx-contrib/sphinx-lint
   rev: v1.0.0
   hooks:
