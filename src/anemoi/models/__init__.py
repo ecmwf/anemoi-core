@@ -6,4 +6,4 @@
 # nor does it submit to any jurisdiction.
 
 
-from ._version import __version__
+from ._version import __version__ as __version__
