@@ -28,6 +28,7 @@ Keep it human-readable, your future self will thank you!
 - Change Changelog CI to run after successful publish
 - pytest for downstream-ci-hpc
 - Update CODEOWNERS
+- Fix pre-commit regex
 
 ### Removed
 
