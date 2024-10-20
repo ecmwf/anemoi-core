@@ -5,6 +5,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from ._version import __version__
+from ._version import __version__ as __version__
 
 EARTH_RADIUS = 6371.0  # km
