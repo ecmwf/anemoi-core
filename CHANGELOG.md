@@ -12,6 +12,10 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
+- fix: bug in color when plotting isolated nodes
+
+### Added
+
 - Add anemoi-transform link to documentation
 
 ### Added

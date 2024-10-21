@@ -6,6 +6,7 @@ from typing import Union
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
+from matplotlib.colors import rgb2hex
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.plotting.prepare import compute_isolated_nodes
@@ -136,7 +137,7 @@ def plot_isolated_nodes(graph: HeteroData, out_file: Optional[Union[str, Path]] 
                 mode="markers",
                 hoverinfo="text",
                 name=name,
-                marker={"showscale": False, "color": colorbar[len(nodes)], "size": 10},
+                marker={"showscale": False, "color": rgb2hex(colorbar[len(nodes)]), "size": 10},
             ),
         )
 
