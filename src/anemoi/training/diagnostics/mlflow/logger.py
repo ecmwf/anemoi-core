@@ -33,53 +33,9 @@ from anemoi.training.utils.jsonify import map_config_to_primitives
 if TYPE_CHECKING:
     from argparse import Namespace
 
-    from omegaconf import OmegaConf
+    import mlflow
 
 LOGGER = logging.getLogger(__name__)
-
-
-def get_mlflow_run_params(config: OmegaConf, tracking_uri: str) -> tuple[str | None, str, dict[str, Any]]:
-    run_id = None
-    tags = {"projectName": config.diagnostics.log.mlflow.project_name}
-    # create a tag with the command used to run the script
-    command = os.environ.get("ANEMOI_TRAINING_CMD", sys.argv[0])
-    tags["command"] = command.split("/")[-1]  # get the python script name
-    tags["mlflow.source.name"] = command
-    if len(sys.argv) > 1:
-        # add the arguments to the command tag
-        tags["command"] = tags["command"] + " " + " ".join(sys.argv[1:])
-    if config.training.run_id or config.training.fork_run_id:
-        "Either run_id or fork_run_id must be provided to resume a run."
-
-        import mlflow
-
-        if config.diagnostics.log.mlflow.authentication and not config.diagnostics.log.mlflow.offline:
-            TokenAuth(tracking_uri).authenticate()
-
-        mlflow_client = mlflow.MlflowClient(tracking_uri)
-
-        if config.training.run_id and config.diagnostics.log.mlflow.on_resume_create_child:
-            parent_run_id = config.training.run_id  # parent_run_id
-            run_name = mlflow_client.get_run(parent_run_id).info.run_name
-            tags["mlflow.parentRunId"] = parent_run_id
-            tags["resumedRun"] = "True"  # tags can't take boolean values
-        elif config.training.run_id and not config.diagnostics.log.mlflow.on_resume_create_child:
-            run_id = config.training.run_id
-            run_name = mlflow_client.get_run(run_id).info.run_name
-            mlflow_client.update_run(run_id=run_id, status="RUNNING")
-            tags["resumedRun"] = "True"
-        else:
-            parent_run_id = config.training.fork_run_id
-            tags["forkedRun"] = "True"
-            tags["forkedRunId"] = parent_run_id
-
-    if config.diagnostics.log.mlflow.run_name:
-        run_name = config.diagnostics.log.mlflow.run_name
-    else:
-        import uuid
-
-        run_name = f"{uuid.uuid4()!s}"
-    return run_id, run_name, tags
 
 
 class LogsMonitor:
@@ -90,7 +46,7 @@ class LogsMonitor:
 
     Note: If there is an error, the terminal output logging ends before the error message is printed into the log file.
     In order for the user to see the error message, the user must look at the slurm output file.
-    We provide the SLRM job id in the very beginning of the log file and print the final status of the run in the end.
+    We provide the SLURM job id in the very beginning of the log file and print the final status of the run in the end.
 
     Parameters
     ----------
@@ -191,7 +147,7 @@ class LogsMonitor:
         self._buffer_registry[id(self)] = self._io_buffer
         # Start thread to asynchronously collect logs
         self._th_collector.start()
-        LOGGER.info("Termial Log Path: %s", self.file_save_path)
+        LOGGER.info("Terminal Log Path: %s", self.file_save_path)
         if os.getenv("SLURM_JOB_ID"):
             LOGGER.info("SLURM job id: %s", os.getenv("SLURM_JOB_ID"))
 
@@ -288,18 +244,20 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def __init__(
         self,
         experiment_name: str = "lightning_logs",
+        project_name: str = "anemoi",
         run_name: str | None = None,
         tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
-        tags: dict[str, Any] | None = None,
         save_dir: str | None = "./mlruns",
         log_model: Literal[True, False, "all"] = False,
         prefix: str = "",
         resumed: bool | None = False,
         forked: bool | None = False,
         run_id: str | None = None,
+        fork_run_id: str | None = None,
         offline: bool | None = False,
         authentication: bool | None = None,
         log_hyperparams: bool | None = True,
+        on_resume_create_child: bool | None = True,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -307,12 +265,12 @@ class AnemoiMLflowLogger(MLFlowLogger):
         ----------
         experiment_name : str, optional
             Name of experiment, by default "lightning_logs"
+        project_name : str, optional
+            Name of the project, by default "anemoi"
         run_name : str | None, optional
             Name of run, by default None
         tracking_uri : str | None, optional
             Tracking URI of server, by default os.getenv("MLFLOW_TRACKING_URI")
-        tags : dict[str, Any] | None, optional
-            Tags to apply, by default None
         save_dir : str | None, optional
             Directory to save logs to, by default "./mlruns"
         log_model : Literal[True, False, "all"], optional
@@ -325,13 +283,16 @@ class AnemoiMLflowLogger(MLFlowLogger):
             Whether the run was forked or not, by default False
         run_id : str | None, optional
             Run id of current run, by default None
+        fork_run_id : str | None, optional
+            Fork Run id from parent run, by default None
         offline : bool | None, optional
             Whether to run offline or not, by default False
         authentication : bool | None, optional
             Whether to authenticate with server or not, by default None
         log_hyperparams : bool | None, optional
             Whether to log hyperparameters, by default True
-
+        on_resume_create_child: bool | None, optional
+            Whether to create a child run when resuming a run, by default False
         """
         if offline:
             # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
@@ -346,6 +307,9 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self._forked = forked
         self._flag_log_hparams = log_hyperparams
 
+        self._fork_run_server2server = None
+        self._parent_run_server2server = None
+
         if rank_zero_only.rank == 0:
             enabled = authentication and not offline
             self.auth = TokenAuth(tracking_uri, enabled=enabled)
@@ -357,6 +321,15 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 self.auth.authenticate()
                 health_check(tracking_uri)
 
+        run_id, run_name, tags = self._get_mlflow_run_params(
+            project_name=project_name,
+            run_name=run_name,
+            config_run_id=run_id,
+            fork_run_id=fork_run_id,
+            tracking_uri=tracking_uri,
+            on_resume_create_child=on_resume_create_child,
+        )
+
         super().__init__(
             experiment_name=experiment_name,
             run_name=run_name,
@@ -367,6 +340,83 @@ class AnemoiMLflowLogger(MLFlowLogger):
             prefix=prefix,
             run_id=run_id,
         )
+
+    def _check_server2server_lineage(self, run: mlflow.entities.Run) -> bool:
+        """Address lineage and metadata for server2server runs.
+
+        Those are runs that have been sync from one remote server to another
+        """
+        server2server = run.data.tags.get("server2server", "False") == "True"
+        LOGGER.info("Server2Server: %s", server2server)
+        if server2server:
+            parent_run_across_servers = run.data.params.get(
+                "metadata.offline_run_id",
+                run.data.params.get("metadata.server2server_run_id"),
+            )
+            if self._forked:
+                # if we want to fork a resume run we need to set the parent_run_across_servers
+                # but just to restore the checkpoint
+                self._fork_run_server2server = parent_run_across_servers
+            else:
+                self._parent_run_server2server = parent_run_across_servers
+
+    def _get_mlflow_run_params(
+        self,
+        project_name: str,
+        run_name: str,
+        config_run_id: str,
+        fork_run_id: str,
+        tracking_uri: str,
+        on_resume_create_child: bool,
+    ) -> tuple[str | None, str, dict[str, Any]]:
+
+        run_id = None
+        tags = {"projectName": project_name}
+
+        # create a tag with the command used to run the script
+        command = os.environ.get("ANEMOI_TRAINING_CMD", sys.argv[0])
+        tags["command"] = command.split("/")[-1]  # get the python script name
+        tags["mlflow.source.name"] = command
+        if len(sys.argv) > 1:
+            # add the arguments to the command tag
+            tags["command"] = tags["command"] + " " + " ".join(sys.argv[1:])
+
+        if config_run_id or fork_run_id:
+            "Either run_id or fork_run_id must be provided to resume a run."
+            import mlflow
+
+            mlflow_client = mlflow.MlflowClient(tracking_uri)
+
+            if config_run_id and on_resume_create_child:
+                parent_run_id = config_run_id  # parent_run_id
+                parent_run = mlflow_client.get_run(parent_run_id)
+                run_name = parent_run.info.run_name
+                self._check_server2server_lineage(parent_run)
+                tags["mlflow.parentRunId"] = parent_run_id
+                tags["resumedRun"] = "True"  # tags can't take boolean values
+            elif config_run_id and not on_resume_create_child:
+                run_id = config_run_id
+                run = mlflow_client.get_run(run_id)
+                run_name = run.info.run_name
+                self._check_server2server_lineage(run)
+                mlflow_client.update_run(run_id=run_id, status="RUNNING")
+                tags["resumedRun"] = "True"
+            else:
+                parent_run_id = fork_run_id
+                tags["forkedRun"] = "True"
+                tags["forkedRunId"] = parent_run_id
+                run = mlflow_client.get_run(parent_run_id)
+                self._check_server2server_lineage(run)
+
+        if not run_name:
+            import uuid
+
+            run_name = f"{uuid.uuid4()!s}"
+
+        if os.getenv("SLURM_JOB_ID"):
+            tags["SLURM_JOB_ID"] = os.getenv("SLURM_JOB_ID")
+
+        return run_id, run_name, tags
 
     @property
     def experiment(self) -> MLFlowLogger.experiment:

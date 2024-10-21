@@ -25,7 +25,6 @@ def get_mlflow_logger(config: DictConfig) -> None:
         return None
 
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
-    from anemoi.training.diagnostics.mlflow.logger import get_mlflow_run_params
 
     resumed = config.training.run_id is not None
     forked = config.training.fork_run_id is not None
@@ -39,7 +38,6 @@ def get_mlflow_logger(config: DictConfig) -> None:
         tracking_uri = save_dir
     # create directory if it does not exist
     Path(config.hardware.paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
-    run_id, run_name, tags = get_mlflow_run_params(config, tracking_uri)
 
     log_hyperparams = True
     if resumed and not config.diagnostics.log.mlflow.on_resume_create_child:
@@ -53,19 +51,22 @@ def get_mlflow_logger(config: DictConfig) -> None:
         )
         log_hyperparams = False
 
+    LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
     logger = AnemoiMLflowLogger(
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
+        project_name=config.diagnostics.log.mlflow.project_name,
         tracking_uri=tracking_uri,
         save_dir=save_dir,
-        run_name=run_name,
-        run_id=run_id,
+        run_name=config.diagnostics.log.mlflow.run_name,
+        run_id=config.training.run_id,
+        fork_run_id=config.training.fork_run_id,
         log_model=config.diagnostics.log.mlflow.log_model,
         offline=offline,
-        tags=tags,
         resumed=resumed,
         forked=forked,
         log_hyperparams=log_hyperparams,
         authentication=config.diagnostics.log.mlflow.authentication,
+        on_resume_create_child=config.diagnostics.log.mlflow.on_resume_create_child,
     )
     config_params = OmegaConf.to_container(config, resolve=True)
 
