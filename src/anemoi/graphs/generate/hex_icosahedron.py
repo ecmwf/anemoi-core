@@ -40,8 +40,8 @@ def create_hex_nodes(
     node_ordering = get_coordinates_ordering(coords_rad)
 
     if area_mask_builder is not None:
-        aoi_mask = area_mask_builder.get_mask(coords_rad)
-        node_ordering = node_ordering[aoi_mask[node_ordering]]
+        area_mask = area_mask_builder.get_mask(coords_rad)
+        node_ordering = node_ordering[area_mask[node_ordering]]
 
     graph = create_nx_graph_from_hex_coords(nodes, node_ordering)
 

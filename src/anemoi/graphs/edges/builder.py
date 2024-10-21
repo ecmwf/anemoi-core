@@ -17,9 +17,11 @@ from torch_geometric.data.storage import NodeStorage
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate import hex_icosahedron
 from anemoi.graphs.generate import tri_icosahedron
+from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import HexNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaHexNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaTriNodes
+from anemoi.graphs.nodes.builders.from_refined_icosahedron import StretchedTriNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import TriNodes
 from anemoi.graphs.utils import get_grid_reference_distance
 
@@ -202,7 +204,7 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
         num_nearest_neighbours: int,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
-    ):
+    ) -> None:
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer"
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive"
@@ -279,7 +281,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         cutoff_factor: float,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
-    ) -> None:
+    ):
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float"
         assert cutoff_factor > 0, "Cutoff factor must be positive"
@@ -370,7 +372,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
         Update the graph with the edges.
     """
 
-    VALID_NODES = [TriNodes, HexNodes, LimitedAreaTriNodes, LimitedAreaHexNodes]
+    VALID_NODES = [TriNodes, HexNodes, LimitedAreaTriNodes, LimitedAreaHexNodes, StretchedTriNodes]
 
     def __init__(self, source_name: str, target_name: str, x_hops: int, **kwargs):
         super().__init__(source_name, target_name)
@@ -390,6 +392,18 @@ class MultiScaleEdges(BaseEdgeBuilder):
 
         return nodes
 
+    def add_edges_from_stretched_tri_nodes(self, nodes: NodeStorage) -> NodeStorage:
+        all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
+        all_points_mask_builder.fit_coords(nodes.x.numpy())
+
+        nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
+            nodes["_nx_graph"],
+            resolutions=nodes["_resolutions"],
+            x_hops=self.x_hops,
+            area_mask_builder=all_points_mask_builder,
+        )
+        return nodes
+
     def add_edges_from_hex_nodes(self, nodes: NodeStorage) -> NodeStorage:
         nodes["_nx_graph"] = hex_icosahedron.add_edges_to_nx_graph(
             nodes["_nx_graph"],
@@ -404,6 +418,8 @@ class MultiScaleEdges(BaseEdgeBuilder):
             source_nodes = self.add_edges_from_tri_nodes(source_nodes)
         elif self.node_type in [HexNodes.__name__, LimitedAreaHexNodes.__name__]:
             source_nodes = self.add_edges_from_hex_nodes(source_nodes)
+        elif self.node_type == StretchedTriNodes.__name__:
+            source_nodes = self.add_edges_from_stretched_tri_nodes(source_nodes)
         else:
             raise ValueError(f"Invalid node type {self.node_type}")
 

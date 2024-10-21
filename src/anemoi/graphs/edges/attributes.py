@@ -140,6 +140,9 @@ class EdgeLength(BaseEdgeAttribute):
 
     def post_process(self, values: np.ndarray) -> torch.Tensor:
         """Post-process edge lengths."""
+        values = super().post_process(values)
+
         if self.invert:
             values = 1 - values
-        return super().post_process(values)
+
+        return values

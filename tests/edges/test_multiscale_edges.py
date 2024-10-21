@@ -1,8 +1,11 @@
+import numpy as np
 import pytest
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import MultiScaleEdges
+from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.nodes import HexNodes
+from anemoi.graphs.nodes import StretchedTriNodes
 from anemoi.graphs.nodes import TriNodes
 
 
@@ -62,3 +65,28 @@ class TestMultiScaleEdgesTransform:
         edges = MultiScaleEdges("fail_nodes", "fail_nodes", 1)
         with pytest.raises(AssertionError):
             edges.update_graph(tri_ico_graph)
+
+
+class TestMultiScaleEdgesStretched:
+
+    @pytest.fixture()
+    def tri_graph(self, mocker) -> HeteroData:
+        """Return a HeteroData object with stretched Tri nodes."""
+        graph = HeteroData()
+        node_builder = StretchedTriNodes(5, 7, "hidden", None, None)
+        node_builder.area_mask_builder = KNNAreaMaskBuilder("hidden", 400)
+        node_builder.area_mask_builder.fit_coords(np.array([[0, 0]]))
+        # We are considering a 400km radius circle centered at (0, 0) as the area of
+        # interest for the stretched graph.
+
+        mocker.patch.object(node_builder.area_mask_builder, "fit", return_value=None)
+
+        graph = node_builder.update_graph(graph, {})
+        return graph
+
+    def test_edges(self, tri_graph: HeteroData):
+        """Test MultiScaleEdges update method."""
+        edges = MultiScaleEdges("hidden", "hidden", x_hops=1)
+        graph = edges.update_graph(tri_graph)
+        assert ("hidden", "to", "hidden") in graph.edge_types
+        assert len(graph[("hidden", "to", "hidden")].edge_index) > 0
