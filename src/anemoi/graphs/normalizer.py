@@ -12,7 +12,7 @@ class NormalizerMixin:
         """Normalize the given values.
 
         It supports different normalization methods: None, 'l1',
-        'l2', 'unit-max' and 'unit-std'.
+        'l2', 'unit-max', 'unit-range' and 'unit-std'.
 
         Parameters
         ----------
@@ -33,6 +33,8 @@ class NormalizerMixin:
             return values / np.linalg.norm(values)
         if self.norm == "unit-max":
             return values / np.amax(values)
+        if self.norm == "unit-range":
+            return (values - np.amin(values)) / (np.amax(values) - np.amin(values))
         if self.norm == "unit-std":
             std = np.std(values)
             if std == 0:

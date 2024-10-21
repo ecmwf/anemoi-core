@@ -4,7 +4,7 @@ import pytest
 from anemoi.graphs.normalizer import NormalizerMixin
 
 
-@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-std"])
+@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std"])
 def test_normalizer(norm: str):
     """Test NormalizerMixin normalize method."""
 

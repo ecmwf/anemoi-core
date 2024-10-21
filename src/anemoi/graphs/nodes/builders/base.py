@@ -25,15 +25,20 @@ class BaseNodeBuilder(ABC):
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self.aoi_mask_builder = None
+        self.area_mask_builder = None
 
-    def register_nodes(self, graph: HeteroData) -> None:
+    def register_nodes(self, graph: HeteroData) -> HeteroData:
         """Register nodes in the graph.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the nodes.
+
+        Returns
+        -------
+        HeteroData
+            The graph with the registered nodes.
         """
         graph[self.name].x = self.get_coordinates()
         graph[self.name].node_type = type(self).__name__

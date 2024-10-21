@@ -7,6 +7,7 @@ from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_refined_icosahedron import HexNodes
 from .builders.from_refined_icosahedron import LimitedAreaHexNodes
 from .builders.from_refined_icosahedron import LimitedAreaTriNodes
+from .builders.from_refined_icosahedron import StretchedTriNodes
 from .builders.from_refined_icosahedron import TriNodes
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "LimitedAreaNPZFileNodes",
     "LimitedAreaTriNodes",
     "LimitedAreaHexNodes",
+    "StretchedTriNodes",
 ]

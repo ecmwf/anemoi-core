@@ -138,12 +138,12 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         margin_radius_km: float = 100.0,
     ) -> None:
 
-        self.aoi_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
+        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
         super().__init__(resolution, grid_definition_path, name)
 
     def register_nodes(self, graph: HeteroData) -> None:
-        self.aoi_mask_builder.fit(graph)
+        self.area_mask_builder.fit(graph)
         return super().register_nodes(graph)
 
     def get_coordinates(self) -> np.ndarray:
@@ -151,11 +151,11 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
 
         LOGGER.info(
             "Limiting the processor mesh to a radius of %.2f km from the output mesh.",
-            self.aoi_mask_builder.margin_radius_km,
+            self.area_mask_builder.margin_radius_km,
         )
-        aoi_mask = self.aoi_mask_builder.get_mask(coords)
+        area_mask = self.area_mask_builder.get_mask(coords)
 
-        LOGGER.info("Dropping %d nodes from the processor mesh.", len(aoi_mask) - aoi_mask.sum())
-        coords = coords[aoi_mask]
+        LOGGER.info("Dropping %d nodes from the processor mesh.", len(area_mask) - area_mask.sum())
+        coords = coords[area_mask]
 
         return coords
