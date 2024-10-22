@@ -30,6 +30,7 @@ Keep it human-readable, your future self will thank you!
 ### Changed
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)
 - Update CODEOWNERS
+- ci: extened python versions to include 3.11 and 3.12
 
 ## [0.3.0 Anemoi-graphs, minor release](https://github.com/ecmwf/anemoi-graphs/compare/0.2.1...0.3.0) - 2024-09-03
 
