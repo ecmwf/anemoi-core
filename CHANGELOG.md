@@ -28,6 +28,7 @@ Keep it human-readable, your future self will thank you!
 - Change Changelog CI to run after successful publish
 - pytest for downstream-ci-hpc
 - Update CODEOWNERS
+- ci: extened python versions to include 3.11 and 3.12 [#66](https://github.com/ecmwf/anemoi-models/pull/66)
 
 ### Removed
 
