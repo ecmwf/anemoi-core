@@ -29,6 +29,7 @@ Keep it human-readable, your future self will thank you!
 - pytest for downstream-ci-hpc
 - Update CODEOWNERS
 - ci: extened python versions to include 3.11 and 3.12 [#66](https://github.com/ecmwf/anemoi-models/pull/66)
+- Update copyright notice
 
 ### Removed
 
