@@ -21,7 +21,7 @@ Keep it human-readable, your future self will thank you!
 - ci: fix pyshtools install error (#100) https://github.com/ecmwf/anemoi-training/pull/100
 
 ### Changed
-
+- Update copyright notice
 
 ## [0.2.0 - Feature release](https://github.com/ecmwf/anemoi-training/compare/0.1.0...0.2.0) - 2024-10-16
 
