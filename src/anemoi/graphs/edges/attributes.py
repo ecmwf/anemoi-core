@@ -8,11 +8,11 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges.directional import directional_edge_features
-from anemoi.graphs.normalizer import NormalizerMixin
+from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import haversine_distance
 
 
-class BaseEdgeAttribute(ABC, NormalizerMixin):
+class BaseEdgeAttribute(ABC, NormaliserMixin):
     """Base class for edge attributes."""
 
     def __init__(self, norm: str | None = None) -> None:
@@ -26,7 +26,7 @@ class BaseEdgeAttribute(ABC, NormalizerMixin):
         if values.ndim == 1:
             values = values[:, np.newaxis]
 
-        normed_values = self.normalize(values)
+        normed_values = self.normalise(values)
 
         return torch.tensor(normed_values, dtype=torch.float32)
 
@@ -57,7 +57,7 @@ class EdgeDirection(BaseEdgeAttribute):
     Attributes
     ----------
     norm : Optional[str]
-        Normalization method.
+        Normalisation method.
     luse_rotated_features : bool
         Whether to use rotated features.
 
@@ -101,7 +101,7 @@ class EdgeLength(BaseEdgeAttribute):
     Attributes
     ----------
     norm : str
-        Normalization method.
+        Normalisation method.
     invert : bool
         Whether to invert the edge lengths, i.e. 1 - edge_length.
 

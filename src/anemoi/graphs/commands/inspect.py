@@ -1,7 +1,7 @@
 import argparse
 
-from anemoi.graphs.descriptor import GraphDescriptor
-from anemoi.graphs.inspector import GraphInspector
+from anemoi.graphs.describe import GraphDescriptor
+from anemoi.graphs.inspect import GraphInspector
 
 from . import Command
 
