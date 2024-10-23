@@ -5,27 +5,27 @@ import numpy as np
 LOGGER = logging.getLogger(__name__)
 
 
-class NormalizerMixin:
-    """Mixin class for normalizing attributes."""
+class NormaliserMixin:
+    """Mixin class for normalising attributes."""
 
-    def normalize(self, values: np.ndarray) -> np.ndarray:
-        """Normalize the given values.
+    def normalise(self, values: np.ndarray) -> np.ndarray:
+        """Normalise the given values.
 
-        It supports different normalization methods: None, 'l1',
+        It supports different normalisation methods: None, 'l1',
         'l2', 'unit-max', 'unit-range' and 'unit-std'.
 
         Parameters
         ----------
         values : np.ndarray of shape (N, M)
-            Values to normalize.
+            Values to normalise.
 
         Returns
         -------
         np.ndarray
-            Normalized values.
+            Normalised values.
         """
         if self.norm is None:
-            LOGGER.debug(f"{self.__class__.__name__} values are not normalized.")
+            LOGGER.debug(f"{self.__class__.__name__} values are not normalised.")
             return values
         if self.norm == "l1":
             return values / np.sum(values)
@@ -38,9 +38,9 @@ class NormalizerMixin:
         if self.norm == "unit-std":
             std = np.std(values)
             if std == 0:
-                LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalization is skipped.")
+                LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalisation is skipped.")
                 return values
             return values / std
         raise ValueError(
-            f"Attribute normalization \"{self.norm}\" is not valid. Options are: 'l1', 'l2', 'unit-max' or 'unit-std'."
+            f"Attribute normalisation \"{self.norm}\" is not valid. Options are: 'l1', 'l2', 'unit-max' or 'unit-std'."
         )

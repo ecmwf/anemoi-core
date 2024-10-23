@@ -1,4 +1,4 @@
-from anemoi.graphs.descriptor import GraphDescriptor
+from anemoi.graphs.describe import GraphDescriptor
 
 from . import Command
 
