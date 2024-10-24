@@ -1,9 +1,12 @@
-# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# (C) Copyright 2024 Anemoi contributors.
+#
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 from __future__ import annotations
 
 import logging
@@ -25,7 +28,6 @@ def get_mlflow_logger(config: DictConfig) -> None:
         return None
 
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
-    from anemoi.training.diagnostics.mlflow.logger import get_mlflow_run_params
 
     resumed = config.training.run_id is not None
     forked = config.training.fork_run_id is not None
@@ -39,7 +41,6 @@ def get_mlflow_logger(config: DictConfig) -> None:
         tracking_uri = save_dir
     # create directory if it does not exist
     Path(config.hardware.paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
-    run_id, run_name, tags = get_mlflow_run_params(config, tracking_uri)
 
     log_hyperparams = True
     if resumed and not config.diagnostics.log.mlflow.on_resume_create_child:
@@ -53,19 +54,22 @@ def get_mlflow_logger(config: DictConfig) -> None:
         )
         log_hyperparams = False
 
+    LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
     logger = AnemoiMLflowLogger(
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
+        project_name=config.diagnostics.log.mlflow.project_name,
         tracking_uri=tracking_uri,
         save_dir=save_dir,
-        run_name=run_name,
-        run_id=run_id,
+        run_name=config.diagnostics.log.mlflow.run_name,
+        run_id=config.training.run_id,
+        fork_run_id=config.training.fork_run_id,
         log_model=config.diagnostics.log.mlflow.log_model,
         offline=offline,
-        tags=tags,
         resumed=resumed,
         forked=forked,
         log_hyperparams=log_hyperparams,
         authentication=config.diagnostics.log.mlflow.authentication,
+        on_resume_create_child=config.diagnostics.log.mlflow.on_resume_create_child,
     )
     config_params = OmegaConf.to_container(config, resolve=True)
 

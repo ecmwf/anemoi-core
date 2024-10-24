@@ -1,11 +1,12 @@
-# (C) Copyright 2024 ECMWF.
+# (C) Copyright 2024 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-#
+
 
 from __future__ import annotations
 
@@ -68,6 +69,10 @@ class AnemoiTrainer:
 
         self.config.training.run_id = self.run_id
         LOGGER.info("Run id: %s", self.config.training.run_id)
+
+        # Get the server2server lineage
+        self._get_server2server_lineage()
+
         # Update paths to contain the run ID
         self._update_paths()
 
@@ -147,7 +152,7 @@ class AnemoiTrainer:
     @rank_zero_only
     def _get_mlflow_run_id(self) -> str:
         run_id = self.mlflow_logger.run_id
-        # for resumed runs or offline runs logging this can be uesful
+        # for resumed runs or offline runs logging this can be useful
         LOGGER.info("Mlflow Run id: %s", run_id)
         return run_id
 
@@ -188,18 +193,21 @@ class AnemoiTrainer:
         if not self.start_from_checkpoint:
             return None
 
+        fork_id = self.fork_run_server2server or self.config.training.fork_run_id
         checkpoint = Path(
             self.config.hardware.paths.checkpoints.parent,
-            self.config.training.fork_run_id or self.run_id,
+            fork_id or self.lineage_run,
             self.config.hardware.files.warm_start or "last.ckpt",
         )
-
         # Check if the last checkpoint exists
         if Path(checkpoint).exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
             return checkpoint
 
-        LOGGER.warning("Could not find last checkpoint: %s", checkpoint)
+        if rank_zero_only.rank == 0:
+            msg = "Could not find last checkpoint: %s", checkpoint
+            raise RuntimeError(msg)
+
         return None
 
     @cached_property
@@ -252,10 +260,13 @@ class AnemoiTrainer:
     def loggers(self) -> list:
         loggers = []
         if self.config.diagnostics.log.wandb.enabled:
+            LOGGER.info("W&B logger enabled")
             loggers.append(self.wandb_logger)
         if self.config.diagnostics.log.tensorboard.enabled:
+            LOGGER.info("TensorBoard logger enabled")
             loggers.append(self.tensorboard_logger)
         if self.config.diagnostics.log.mlflow.enabled:
+            LOGGER.info("MLFlow logger enabled")
             loggers.append(self.mlflow_logger)
         return loggers
 
@@ -291,17 +302,33 @@ class AnemoiTrainer:
         LOGGER.debug("Effective learning rate: %.3e", total_number_of_model_instances * self.config.training.lr.rate)
         LOGGER.debug("Rollout window length: %d", self.config.training.rollout.start)
 
+    def _get_server2server_lineage(self) -> None:
+        """Get the server2server lineage."""
+        self.parent_run_server2server = None
+        self.fork_run_server2server = None
+        if self.config.diagnostics.log.mlflow.enabled:
+            self.parent_run_server2server = self.mlflow_logger._parent_run_server2server
+            LOGGER.info("Parent run server2server: %s", self.parent_run_server2server)
+            self.fork_run_server2server = self.mlflow_logger._fork_run_server2server
+            LOGGER.info("Fork run server2server: %s", self.fork_run_server2server)
+
     def _update_paths(self) -> None:
         """Update the paths in the configuration."""
+        self.lineage_run = None
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
-            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.run_id)
-            self.config.hardware.paths.plots = Path(self.config.hardware.paths.plots, self.run_id)
+            self.lineage_run = self.parent_run_server2server or self.run_id
+            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
+            self.config.hardware.paths.plots = Path(self.config.hardware.paths.plots, self.lineage_run)
         elif self.config.training.fork_run_id:
+            # WHEN USING MANY NODES/GPUS
+            self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
-            parent_run = self.config.training.fork_run_id
-            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, parent_run)
+            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
+
+        LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
+        LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
 
     @cached_property
     def strategy(self) -> DDPGroupStrategy:
