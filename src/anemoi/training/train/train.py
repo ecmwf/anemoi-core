@@ -203,8 +203,12 @@ class AnemoiTrainer:
         if Path(checkpoint).exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
             return checkpoint
-        msg = "Could not find last checkpoint: %s", checkpoint
-        raise RuntimeError(msg)
+
+        if rank_zero_only.rank == 0:
+            msg = "Could not find last checkpoint: %s", checkpoint
+            raise RuntimeError(msg)
+
+        return None
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:

@@ -297,15 +297,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
         on_resume_create_child: bool | None, optional
             Whether to create a child run when resuming a run, by default False
         """
-        if offline:
-            # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
-            tracking_uri = None
-
-        else:
-            # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
-            # saving dir and save all artifacts/metrics to the remote server database
-            save_dir = None
-
         self._resumed = resumed
         self._forked = forked
         self._flag_log_hparams = log_hyperparams
@@ -313,10 +304,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self._fork_run_server2server = None
         self._parent_run_server2server = None
 
-        if rank_zero_only.rank == 0:
-            enabled = authentication and not offline
-            self.auth = TokenAuth(tracking_uri, enabled=enabled)
+        enabled = authentication and not offline
+        self.auth = TokenAuth(tracking_uri, enabled=enabled)
 
+        if rank_zero_only.rank == 0:
             if offline:
                 LOGGER.info("MLflow is logging offline.")
             else:
@@ -332,6 +323,15 @@ class AnemoiMLflowLogger(MLFlowLogger):
             tracking_uri=tracking_uri,
             on_resume_create_child=on_resume_create_child,
         )
+        # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
+        if offline:
+            # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
+            tracking_uri = None
+
+        else:
+            # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
+            # saving dir and save all artifacts/metrics to the remote server database
+            save_dir = None
 
         super().__init__(
             experiment_name=experiment_name,
@@ -388,6 +388,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             "Either run_id or fork_run_id must be provided to resume a run."
             import mlflow
 
+            self.auth.authenticate()
             mlflow_client = mlflow.MlflowClient(tracking_uri)
 
             if config_run_id and on_resume_create_child:
