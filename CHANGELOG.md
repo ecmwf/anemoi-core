@@ -31,6 +31,7 @@ Keep it human-readable, your future self will thank you!
 ### Changed
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)
 - Update CODEOWNERS
+- Fix pre-commit regex
 - ci: extened python versions to include 3.11 and 3.12
 - Update copyright notice
 - Fix `__version__` import in init

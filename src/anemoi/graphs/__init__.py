@@ -5,7 +5,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 EARTH_RADIUS = 6371.0  # km
 try:
     # NOTE: the `_version.py` file must not be present in the git repository
