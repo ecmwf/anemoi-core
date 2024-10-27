@@ -5,7 +5,7 @@ Please see the [read the docs](https://anemoi-training.readthedocs.io/en/latest/
 
 ## Contributors
 
-Thank you to all the wonderful people who have contributed to Anemoi. Contributions can come in many forms, including code, documentation, bug reports, feature suggestions, design, and more. A list of code-based contributors can be found [here](https://github.com/ecmwf/training/graphs/contributors).
+Thank you to all the wonderful people who have contributed to Anemoi. Contributions can come in many forms, including code, documentation, bug reports, feature suggestions, design, and more. A list of code-based contributors can be found [here](https://github.com/ecmwf/anemoi-training/graphs/contributors).
 
 
 ## Contributing Organisations
