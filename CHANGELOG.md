@@ -27,6 +27,7 @@ Keep it human-readable, your future self will thank you!
 - feat: New method update_graph(graph) in the GraphCreator class. (#60)
 - feat: New class StretchedTriNodes to create a stretched mesh. (#51)
 - feat: Expanded MultiScaleEdges to support multi-scale connections in stretched graphs. (#51)
+- feat: Add CONTRIBUTORS.md file. (#72)
 
 ### Changed
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)
