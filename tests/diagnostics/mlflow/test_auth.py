@@ -1,11 +1,15 @@
-# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# (C) Copyright 2024 Anemoi contributors.
+#
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -47,12 +51,8 @@ def mocks(
         "anemoi.training.diagnostics.mlflow.auth.save_config",
     )
     mocker.patch(
-        "anemoi.training.diagnostics.mlflow.auth.input",
-        return_value="username",
-    )
-    mocker.patch(
         "anemoi.training.diagnostics.mlflow.auth.getpass",
-        return_value="password",
+        return_value="seed_refresh_token",
     )
     mocker.patch("os.environ")
 
@@ -103,21 +103,20 @@ def test_login(mocker: pytest.MockerFixture) -> None:
     auth = TokenAuth("https://test.url")
     auth.login()
 
-    mock_token_request.assert_called_once_with(username="username", password="password")  # noqa: S106
+    mock_token_request.assert_called_once()
 
     # forced credential login
     mock_token_request = mocks(mocker)
     auth = TokenAuth("https://test.url")
     auth.login(force_credentials=True)
 
-    mock_token_request.assert_called_once_with(username="username", password="password")  # noqa: S106
+    mock_token_request.assert_called_once()
 
     # failed login
     mock_token_request = mocks(mocker, token_request={"refresh_token": None})
     auth = TokenAuth("https://test.url")
     pytest.raises(RuntimeError, auth.login)
 
-    mock_token_request.assert_called_with(username="username", password="password")  # noqa: S106
     assert mock_token_request.call_count == 2
 
 
@@ -153,3 +152,11 @@ def test_api(mocker: pytest.MockerFixture) -> None:
 
     with pytest.raises(RuntimeError):
         auth._request("path", {"key": "value"})
+
+
+def test_target_env_var(mocker: pytest.MockerFixture) -> None:
+    mocks(mocker)
+    auth = TokenAuth("https://test.url", target_env_var="MLFLOW_TEST_ENV_VAR")
+    auth.authenticate()
+
+    os.environ.__setitem__.assert_called_once_with("MLFLOW_TEST_ENV_VAR", "access_token")

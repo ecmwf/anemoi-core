@@ -23,7 +23,7 @@ authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13" # Unable to use 3.13 until pyshtools updates
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -83,6 +83,10 @@ urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
 urls.Issues = "https://github.com/ecmwf/anemoi-training/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-training/"
+# command for interactive DDP (not supposed to be used directly)
+# the dot is intentional, so it doesn't trigger autocomplete
+scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
+
 # Add subcommand in the `commands` directory
 scripts.anemoi-training = "anemoi.training.__main__:main"
 

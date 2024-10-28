@@ -1,9 +1,12 @@
-# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# (C) Copyright 2024 Anemoi contributors.
+#
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 
 from __future__ import annotations
 
@@ -20,88 +23,22 @@ from typing import Any
 from typing import Literal
 from weakref import WeakValueDictionary
 
-import requests
+from packaging.version import Version
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.diagnostics.mlflow.utils import health_check
 from anemoi.training.utils.jsonify import map_config_to_primitives
 
 if TYPE_CHECKING:
     from argparse import Namespace
 
-    from omegaconf import OmegaConf
+    import mlflow
 
 LOGGER = logging.getLogger(__name__)
-
-
-def health_check(tracking_uri: str) -> None:
-    """Query the health endpoint of an MLflow server.
-
-    If the server is not reachable, raise an error and remind the user that authentication may be required.
-
-    Raises
-    ------
-    ConnectionError
-        If the server is not reachable.
-
-    """
-    token = os.getenv("MLFLOW_TRACKING_TOKEN")
-
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(f"{tracking_uri}/health", headers=headers, timeout=60)
-
-    if response.text == "OK":
-        return
-
-    error_msg = f"Could not connect to MLflow server at {tracking_uri}. "
-    if not token:
-        error_msg += "The server may require authentication, did you forget to turn it on in the config?"
-    raise ConnectionError(error_msg)
-
-
-def get_mlflow_run_params(config: OmegaConf, tracking_uri: str) -> tuple[str | None, str, dict[str, Any]]:
-    run_id = None
-    tags = {"projectName": config.diagnostics.log.mlflow.project_name}
-    # create a tag with the command used to run the script
-    tags["command"] = sys.argv[0].split("/")[-1]  # get the python script name
-    if len(sys.argv) > 1:
-        # add the arguments to the command tag
-        tags["command"] = tags["command"] + " " + " ".join(sys.argv[1:])
-    if config.training.run_id or config.training.fork_run_id:
-        "Either run_id or fork_run_id must be provided to resume a run."
-
-        import mlflow
-
-        if config.diagnostics.log.mlflow.authentication and not config.diagnostics.log.mlflow.offline:
-            TokenAuth(tracking_uri).authenticate()
-
-        mlflow_client = mlflow.MlflowClient(tracking_uri)
-
-        if config.training.run_id and config.diagnostics.log.mlflow.on_resume_create_child:
-            parent_run_id = config.training.run_id  # parent_run_id
-            run_name = mlflow_client.get_run(parent_run_id).info.run_name
-            tags["mlflow.parentRunId"] = parent_run_id
-            tags["resumedRun"] = "True"  # tags can't take boolean values
-        elif config.training.run_id and not config.diagnostics.log.mlflow.on_resume_create_child:
-            run_id = config.training.run_id
-            run_name = mlflow_client.get_run(run_id).info.run_name
-            mlflow_client.update_run(run_id=run_id, status="RUNNING")
-            tags["resumedRun"] = "True"
-        else:
-            parent_run_id = config.training.fork_run_id
-            tags["forkedRun"] = "True"
-            tags["forkedRunId"] = parent_run_id
-
-    if config.diagnostics.log.mlflow.run_name:
-        run_name = config.diagnostics.log.mlflow.run_name
-    else:
-        import uuid
-
-        run_name = f"{uuid.uuid4()!s}"
-    return run_id, run_name, tags
 
 
 class LogsMonitor:
@@ -112,7 +49,7 @@ class LogsMonitor:
 
     Note: If there is an error, the terminal output logging ends before the error message is printed into the log file.
     In order for the user to see the error message, the user must look at the slurm output file.
-    We provide the SLRM job id in the very beginning of the log file and print the final status of the run in the end.
+    We provide the SLURM job id in the very beginning of the log file and print the final status of the run in the end.
 
     Parameters
     ----------
@@ -213,7 +150,7 @@ class LogsMonitor:
         self._buffer_registry[id(self)] = self._io_buffer
         # Start thread to asynchronously collect logs
         self._th_collector.start()
-        LOGGER.info("Termial Log Path: %s", self.file_save_path)
+        LOGGER.info("Terminal Log Path: %s", self.file_save_path)
         if os.getenv("SLURM_JOB_ID"):
             LOGGER.info("SLURM job id: %s", os.getenv("SLURM_JOB_ID"))
 
@@ -310,18 +247,20 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def __init__(
         self,
         experiment_name: str = "lightning_logs",
+        project_name: str = "anemoi",
         run_name: str | None = None,
         tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
-        tags: dict[str, Any] | None = None,
         save_dir: str | None = "./mlruns",
         log_model: Literal[True, False, "all"] = False,
         prefix: str = "",
         resumed: bool | None = False,
         forked: bool | None = False,
         run_id: str | None = None,
+        fork_run_id: str | None = None,
         offline: bool | None = False,
         authentication: bool | None = None,
         log_hyperparams: bool | None = True,
+        on_resume_create_child: bool | None = True,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -329,12 +268,12 @@ class AnemoiMLflowLogger(MLFlowLogger):
         ----------
         experiment_name : str, optional
             Name of experiment, by default "lightning_logs"
+        project_name : str, optional
+            Name of the project, by default "anemoi"
         run_name : str | None, optional
             Name of run, by default None
         tracking_uri : str | None, optional
             Tracking URI of server, by default os.getenv("MLFLOW_TRACKING_URI")
-        tags : dict[str, Any] | None, optional
-            Tags to apply, by default None
         save_dir : str | None, optional
             Directory to save logs to, by default "./mlruns"
         log_model : Literal[True, False, "all"], optional
@@ -347,14 +286,44 @@ class AnemoiMLflowLogger(MLFlowLogger):
             Whether the run was forked or not, by default False
         run_id : str | None, optional
             Run id of current run, by default None
+        fork_run_id : str | None, optional
+            Fork Run id from parent run, by default None
         offline : bool | None, optional
             Whether to run offline or not, by default False
         authentication : bool | None, optional
             Whether to authenticate with server or not, by default None
         log_hyperparams : bool | None, optional
             Whether to log hyperparameters, by default True
-
+        on_resume_create_child: bool | None, optional
+            Whether to create a child run when resuming a run, by default False
         """
+        self._resumed = resumed
+        self._forked = forked
+        self._flag_log_hparams = log_hyperparams
+
+        self._fork_run_server2server = None
+        self._parent_run_server2server = None
+
+        enabled = authentication and not offline
+        self.auth = TokenAuth(tracking_uri, enabled=enabled)
+
+        if rank_zero_only.rank == 0:
+            if offline:
+                LOGGER.info("MLflow is logging offline.")
+            else:
+                LOGGER.info("MLflow token authentication %s for %s", "enabled" if enabled else "disabled", tracking_uri)
+                self.auth.authenticate()
+                health_check(tracking_uri)
+
+        run_id, run_name, tags = self._get_mlflow_run_params(
+            project_name=project_name,
+            run_name=run_name,
+            config_run_id=run_id,
+            fork_run_id=fork_run_id,
+            tracking_uri=tracking_uri,
+            on_resume_create_child=on_resume_create_child,
+        )
+        # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
         if offline:
             # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
             tracking_uri = None
@@ -363,21 +332,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
             # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
             # saving dir and save all artifacts/metrics to the remote server database
             save_dir = None
-
-        self._resumed = resumed
-        self._forked = forked
-        self._flag_log_hparams = log_hyperparams
-
-        if rank_zero_only.rank == 0:
-            enabled = authentication and not offline
-            self.auth = TokenAuth(tracking_uri, enabled=enabled)
-
-            if offline:
-                LOGGER.info("MLflow is logging offline.")
-            else:
-                LOGGER.info("MLflow token authentication %s for %s", "enabled" if enabled else "disabled", tracking_uri)
-                self.auth.authenticate()
-                health_check(tracking_uri)
 
         super().__init__(
             experiment_name=experiment_name,
@@ -389,6 +343,84 @@ class AnemoiMLflowLogger(MLFlowLogger):
             prefix=prefix,
             run_id=run_id,
         )
+
+    def _check_server2server_lineage(self, run: mlflow.entities.Run) -> bool:
+        """Address lineage and metadata for server2server runs.
+
+        Those are runs that have been sync from one remote server to another
+        """
+        server2server = run.data.tags.get("server2server", "False") == "True"
+        LOGGER.info("Server2Server: %s", server2server)
+        if server2server:
+            parent_run_across_servers = run.data.params.get(
+                "metadata.offline_run_id",
+                run.data.params.get("metadata.server2server_run_id"),
+            )
+            if self._forked:
+                # if we want to fork a resume run we need to set the parent_run_across_servers
+                # but just to restore the checkpoint
+                self._fork_run_server2server = parent_run_across_servers
+            else:
+                self._parent_run_server2server = parent_run_across_servers
+
+    def _get_mlflow_run_params(
+        self,
+        project_name: str,
+        run_name: str,
+        config_run_id: str,
+        fork_run_id: str,
+        tracking_uri: str,
+        on_resume_create_child: bool,
+    ) -> tuple[str | None, str, dict[str, Any]]:
+
+        run_id = None
+        tags = {"projectName": project_name}
+
+        # create a tag with the command used to run the script
+        command = os.environ.get("ANEMOI_TRAINING_CMD", sys.argv[0])
+        tags["command"] = command.split("/")[-1]  # get the python script name
+        tags["mlflow.source.name"] = command
+        if len(sys.argv) > 1:
+            # add the arguments to the command tag
+            tags["command"] = tags["command"] + " " + " ".join(sys.argv[1:])
+
+        if config_run_id or fork_run_id:
+            "Either run_id or fork_run_id must be provided to resume a run."
+            import mlflow
+
+            self.auth.authenticate()
+            mlflow_client = mlflow.MlflowClient(tracking_uri)
+
+            if config_run_id and on_resume_create_child:
+                parent_run_id = config_run_id  # parent_run_id
+                parent_run = mlflow_client.get_run(parent_run_id)
+                run_name = parent_run.info.run_name
+                self._check_server2server_lineage(parent_run)
+                tags["mlflow.parentRunId"] = parent_run_id
+                tags["resumedRun"] = "True"  # tags can't take boolean values
+            elif config_run_id and not on_resume_create_child:
+                run_id = config_run_id
+                run = mlflow_client.get_run(run_id)
+                run_name = run.info.run_name
+                self._check_server2server_lineage(run)
+                mlflow_client.update_run(run_id=run_id, status="RUNNING")
+                tags["resumedRun"] = "True"
+            else:
+                parent_run_id = fork_run_id
+                tags["forkedRun"] = "True"
+                tags["forkedRunId"] = parent_run_id
+                run = mlflow_client.get_run(parent_run_id)
+                self._check_server2server_lineage(run)
+
+        if not run_name:
+            import uuid
+
+            run_name = f"{uuid.uuid4()!s}"
+
+        if os.getenv("SLURM_JOB_ID"):
+            tags["SLURM_JOB_ID"] = os.getenv("SLURM_JOB_ID")
+
+        return run_id, run_name, tags
 
     @property
     def experiment(self) -> MLFlowLogger.experiment:
@@ -463,12 +495,14 @@ class AnemoiMLflowLogger(MLFlowLogger):
             params = _flatten_dict(params, delimiter=".")  # Flatten dict with '.' to not break API queries
             params = self._clean_params(params)
 
+            import mlflow
             from mlflow.entities import Param
 
-            # Truncate parameter values to 250 characters.
-            # TODO (Ana Prieto Nemesio): MLflow 1.28 allows up to 500 characters:
-            # https://github.com/mlflow/mlflow/releases/tag/v1.28.0
-            params_list = [Param(key=k, value=str(v)[:250]) for k, v in params.items()]
+            # Truncate parameter values.
+            truncation_length = 250
+            if Version(mlflow.VERSION) >= Version("1.28.0"):
+                truncation_length = 500
+            params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in params.items()]
 
             for idx in range(0, len(params_list), 100):
                 self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])
