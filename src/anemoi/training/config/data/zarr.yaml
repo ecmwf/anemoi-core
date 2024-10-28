@@ -43,7 +43,7 @@ normalizer:
   # zero value in the normalized space.
   std:
   - "tp"
-  - "cp"
+  # - "cp"
 
   min-max:
   max:
