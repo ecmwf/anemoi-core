@@ -10,6 +10,9 @@ Keep it human-readable, your future self will thank you!
 
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.2.1...HEAD)
 
+### Changed
+- Lock python version <3.13 [#107](https://github.com/ecmwf/anemoi-training/pull/107)
+
 ## [0.2.1 - Bugfix: resuming mlflow runs](https://github.com/ecmwf/anemoi-training/compare/0.2.0...0.2.1) - 2024-10-24
 
 ### Added
@@ -24,6 +27,7 @@ Keep it human-readable, your future self will thank you!
 - Mlflow-sync to handle creation of new experiments in the remote server [#83](https://github.com/ecmwf/anemoi-training/pull/83)
 - Fix for multi-gpu when using mlflow due to refactoring of _get_mlflow_run_params function [#99](https://github.com/ecmwf/anemoi-training/pull/99)
 - ci: fix pyshtools install error [#100](https://github.com/ecmwf/anemoi-training/pull/100)
+- Fix `__version__` import in init
 
 ### Changed
 
@@ -38,6 +42,7 @@ Keep it human-readable, your future self will thank you!
 - Add anemoi-transform link to documentation
 - Codeowners file (#56)
 - Changelog merge strategy (#56)
+- Contributors file (#106)
 
 #### Miscellaneous
 

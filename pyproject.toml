@@ -23,7 +23,7 @@ authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13" # Unable to use 3.13 until pyshtools updates
 
 classifiers = [
   "Development Status :: 4 - Beta",
