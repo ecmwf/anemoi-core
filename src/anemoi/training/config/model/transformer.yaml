@@ -62,7 +62,10 @@ bounding: #These are applied in order
 
   # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
   # This guarantees that cp is physically consistent with tp by restricting cp
-  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
+  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply. 
+  # NOTE: If this bounding strategy is used, the normalization of cp must be 
+  # changed to "std" normalization, and the "cp" statistics should be remapped 
+  # to those of tp to ensure consistency.
 
   # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
   #   variables:
