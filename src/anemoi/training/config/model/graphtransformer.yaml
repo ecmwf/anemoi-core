@@ -54,12 +54,20 @@ node_loss_weight: area_weight
 
 # Bounding configuration
 bounding: #These are applied in order
+
+  # Bound tp (total precipitation) with a Relu bounding layer
+  # ensuring a range of [0, infinity) to avoid negative precipitation values.
   - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
     variables:
     - tp
-  - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
-    variables:
-    - cp
-    min_val: 0
-    max_val: 1
-    total_var: tp
+
+  # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
+  # This guarantees that cp is physically consistent with tp by restricting cp
+  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
+
+  # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+  #   variables:
+  #   - cp
+  #   min_val: 0
+  #   max_val: 1
+  #   total_var: tp
