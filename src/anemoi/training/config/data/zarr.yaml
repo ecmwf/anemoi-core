@@ -37,9 +37,9 @@ normalizer:
   # remap:
   #   cp: tp
 
-  # Standardization applied to tp and cp variables. Ensure that if cp is bounded 
+  # Standardization applied to tp and cp variables. Ensure that if cp is bounded
   # as a fraction of tp, both variables are normalized using these shared statistics.
-  # "Std" normalization is preferred here over "mean-std" to avoid shifting of the 
+  # "Std" normalization is preferred here over "mean-std" to avoid shifting of the
   # zero value in the normalized space.
   std:
   - "tp"
