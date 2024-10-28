@@ -1,9 +1,12 @@
-# (C) Copyright 2024 European Centre for Medium-Range Weather Forecasts.
+# (C) Copyright 2024 Anemoi contributors.
+#
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 
 import argparse
 
@@ -45,6 +48,7 @@ class MlFlow(Command):
             "--source",
             "-s",
             help="The MLflow logs source directory.",
+            metavar="DIR",
             required=True,
             default=argparse.SUPPRESS,
         )
@@ -52,15 +56,30 @@ class MlFlow(Command):
             "--destination",
             "-d",
             help="The destination MLflow tracking URI.",
+            metavar="URI",
             required=True,
             default=argparse.SUPPRESS,
         )
-        sync.add_argument("--run-id", "-r", help="The run ID to sync.", required=True, default=argparse.SUPPRESS)
+        sync.add_argument(
+            "--run-id",
+            "-r",
+            help="The run ID to sync.",
+            metavar="ID",
+            required=True,
+            default=argparse.SUPPRESS,
+        )
         sync.add_argument(
             "--experiment-name",
             "-e",
             help="The experiment name to sync to.",
+            metavar="NAME",
             default="anemoi-debug",
+        )
+        sync.add_argument(
+            "--authentication",
+            "-a",
+            action="store_true",
+            help="The destination server requires authentication.",
         )
         sync.add_argument(
             "--export-deleted-runs",
@@ -88,7 +107,17 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "sync":
+            from anemoi.training.diagnostics.mlflow.utils import health_check
             from anemoi.training.utils.mlflow_sync import MlFlowSync
+
+            if args.authentication:
+                from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+
+                auth = TokenAuth(url=args.destination)
+                auth.login()
+                auth.authenticate()
+
+            health_check(args.destination)
 
             log_level = "DEBUG" if args.verbose else "INFO"
 
