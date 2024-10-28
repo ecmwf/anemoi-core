@@ -30,11 +30,21 @@ remapped:
 
 normalizer:
   default: "mean-std"
-  remap:
-    cp: tp
+
+  # Remap cp statistics to those of tp when using FractionBounding. This ensures
+  # that cp, as a fraction of tp, remains consistent with tp's scale and statistics.
+  # NOTE: This remap should only be applied if FractionBounding is enabled for cp.
+  # remap:
+  #   cp: tp
+
+  # Standardization applied to tp and cp variables. Ensure that if cp is bounded 
+  # as a fraction of tp, both variables are normalized using these shared statistics.
+  # "Std" normalization is preferred here over "mean-std" to avoid shifting of the 
+  # zero value in the normalized space.
   std:
   - "tp"
   - "cp"
+
   min-max:
   max:
   - "sdor"
