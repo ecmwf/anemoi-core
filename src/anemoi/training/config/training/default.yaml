@@ -70,10 +70,13 @@ rollout:
   # maximum rollout to use
   max: 1
 
-max_epochs: 200
+# Set max_epochs or max_steps. Training stops at the first limit reached.
+max_epochs: null
+max_steps: 150000
+
 lr:
   rate: 0.625e-4 #local_lr
-  iterations: 300000
+  iterations: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
   min: 3e-7 #Not scaled by #GPU
 
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
