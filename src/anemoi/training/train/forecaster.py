@@ -12,7 +12,9 @@ import logging
 import math
 import os
 from collections import defaultdict
+from collections.abc import Generator
 from collections.abc import Mapping
+from typing import Optional
 from typing import Union
 
 import numpy as np
@@ -138,8 +140,6 @@ class GraphForecaster(pl.LightningModule):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
         LOGGER.debug("Multistep: %d", self.multi_step)
-
-        self.enable_plot = config.diagnostics.plot.enabled
 
         self.model_comm_group_id = int(os.environ.get("SLURM_PROCID", "0")) // config.hardware.num_gpus_per_model
         self.model_comm_group_rank = int(os.environ.get("SLURM_PROCID", "0")) % config.hardware.num_gpus_per_model
@@ -322,17 +322,44 @@ class GraphForecaster(pl.LightningModule):
         ]
         return x
 
-    def _step(
+    def rollout_step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
+        rollout: Optional[int] = None,  # noqa: FA100
+        training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        del batch_idx
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+    ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:  # noqa: FA100
+        """
+        Rollout step for the forecaster.
+
+        Will run pre_processors on batch, but not post_processors on predictions.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to use for rollout
+        rollout : Optional[int], optional
+            Number of times to rollout for, by default None
+            If None, will use self.rollout
+        training_mode : bool, optional
+            Whether in training mode and to calculate the loss, by default True
+            If False, loss will be None
+        validation_mode : bool, optional
+            Whether in validation mode, and to calculate validation metrics, by default False
+            If False, metrics will be empty
+
+        Yields
+        ------
+        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+            Loss value, metrics, and predictions (per step)
+
+        Returns
+        -------
+        None
+            None
+        """
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
-        metrics = {}
 
         # start rollout of preprocessed batch
         x = batch[
@@ -341,29 +368,52 @@ class GraphForecaster(pl.LightningModule):
             ...,
             self.data_indices.internal_data.input.full,
         ]  # (bs, multi_step, latlon, nvar)
+        msg = (
+            "Batch length not sufficient for requested multi_step length!"
+            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+        )
+        assert batch.shape[1] >= rollout + self.multi_step, msg
 
-        y_preds = []
-        for rollout_step in range(self.rollout):
+        for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss += checkpoint(self.loss, y_pred, y, use_reentrant=False)
+            loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
+            metrics_next = {}
             if validation_mode:
-                metrics_next, y_preds_next = self.calculate_val_metrics(
+                metrics_next = self.calculate_val_metrics(
                     y_pred,
                     y,
                     rollout_step,
-                    enable_plot=self.enable_plot,
                 )
-                metrics.update(metrics_next)
-                y_preds.extend(y_preds_next)
+            yield loss, metrics_next, y_pred
 
-        # scale loss
+    def _step(
+        self,
+        batch: torch.Tensor,
+        batch_idx: int,
+        validation_mode: bool = False,
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        del batch_idx
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        metrics = {}
+        y_preds = []
+
+        for loss_next, metrics_next, y_preds_next in self.rollout_step(
+            batch,
+            rollout=self.rollout,
+            training_mode=True,
+            validation_mode=validation_mode,
+        ):
+            loss += loss_next
+            metrics.update(metrics_next)
+            y_preds.extend(y_preds_next)
+
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds
 
@@ -372,7 +422,6 @@ class GraphForecaster(pl.LightningModule):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         rollout_step: int,
-        enable_plot: bool = False,
     ) -> tuple[dict, list[torch.Tensor]]:
         """Calculate metrics on the validation output.
 
@@ -384,8 +433,6 @@ class GraphForecaster(pl.LightningModule):
                 Ground truth (target).
             rollout_step: int
                 Rollout step
-            enable_plot: bool, defaults to False
-                Generate plots
 
         Returns
         -------
@@ -393,7 +440,6 @@ class GraphForecaster(pl.LightningModule):
                 validation metrics and predictions
         """
         metrics = {}
-        y_preds = []
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
 
@@ -416,9 +462,7 @@ class GraphForecaster(pl.LightningModule):
                     feature_scale=mkey == "all",
                 )
 
-        if enable_plot:
-            y_preds.append(y_pred)
-        return metrics, y_preds
+        return metrics
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx)

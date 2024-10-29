@@ -45,6 +45,8 @@ training:
   frequency: ${data.frequency}
   drop:  []
 
+validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
+
 validation:
   dataset: ${dataloader.dataset}
   start: 2021

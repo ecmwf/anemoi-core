@@ -21,23 +21,94 @@ functionality to use both Weights & Biases and Tensorboard.
 
 The callbacks can also be used to evaluate forecasts over longer
 rollouts beyond the forecast time that the model is trained on. The
-number of rollout steps (or forecast iteration steps) is set using
-``config.eval.rollout = *num_of_rollout_steps*``.
+number of rollout steps for verification (or forecast iteration steps)
+is set using ``config.dataloader.validation_rollout =
+*num_of_rollout_steps*``.
 
-Note the user has the option to evaluate the callbacks asynchronously
-(using the following config option
-``config.diagnostics.plot.asynchronous``, which means that the model
-training doesn't stop whilst the callbacks are being evaluated).
-However, note that callbacks can still be slow, and therefore the
-plotting callbacks can be switched off by setting
-``config.diagnostics.plot.enabled`` to ``False`` or all the callbacks
-can be completely switched off by setting
-``config.diagnostics.eval.enabled`` to ``False``.
+Callbacks are configured in the config file under the
+``config.diagnostics`` key.
+
+For regular callbacks, they can be provided as a list of dictionaries
+underneath the ``config.diagnostics.callbacks`` key. Each dictionary
+must have a ``_target`` key which is used by hydra to instantiate the
+callback, any other kwarg is passed to the callback's constructor.
+
+.. code:: yaml
+
+   callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
+      rollout: ${dataloader.validation_rollout}
+      frequency: 20
+
+Plotting callbacks are configured in a similar way, but they are
+specified underneath the ``config.diagnostics.plot.callbacks`` key.
+
+This is done to ensure seperation and ease of configuration between
+experiments.
+
+``config.diagnostics.plot`` is a broader config file specifying the
+parameters to plot, as well as the plotting frequency, and
+asynchronosity.
+
+Setting ``config.diagnostics.plot.asynchronous``, means that the model
+training doesn't stop whilst the callbacks are being evaluated)
+
+.. code:: yaml
+
+   plot:
+      asynchronous: True # Whether to plot asynchronously
+      frequency: # Frequency of the plotting
+      batch: 750
+      epoch: 5
+
+      # Parameters to plot
+         parameters:
+         - z_500
+         - t_850
+         - u_850
+
+         # Sample index
+         sample_idx: 0
+
+         # Precipitation and related fields
+         precip_and_related_fields: [tp, cp]
+
+         callbacks:
+         - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+            # group parameters by categories when visualizing contributions to the loss
+            # one-parameter groups are possible to highlight individual parameters
+            parameter_groups:
+               moisture: [tp, cp, tcw]
+               sfc_wind: [10u, 10v]
+         - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+            sample_idx: ${diagnostics.plot.sample_idx}
+            per_sample : 6
+            parameters: ${diagnostics.plot.parameters}
 
 Below is the documentation for the default callbacks provided, but it is
 also possible for users to add callbacks using the same structure:
 
-.. automodule:: anemoi.training.diagnostics.callbacks
+.. automodule:: anemoi.training.diagnostics.callbacks.checkpoint
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.callbacks.evaluation
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.callbacks.optimiser
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.callbacks.plot
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.callbacks.provenance
    :members:
    :no-undoc-members:
    :show-inheritance:
