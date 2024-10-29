@@ -18,6 +18,7 @@ Keep it human-readable, your future self will thank you!
 ### Added
 - Included more loss functions and allowed configuration [#70](https://github.com/ecmwf/anemoi-training/pull/70)
 - Sub-hour datasets [#63](https://github.com/ecmwf/anemoi-training/pull/63)
+- Add synchronisation workflow [#92](https://github.com/ecmwf/anemoi-training/pull/92)
 
 ### Changed
 - Modified training configuration to support max_steps and tied lr iterations to max_steps by default [#67](https://github.com/ecmwf/anemoi-training/pull/67)
