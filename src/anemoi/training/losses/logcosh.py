@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
 import torch
 
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
@@ -19,10 +20,25 @@ from anemoi.training.losses.weightedloss import BaseWeightedLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELoss(BaseWeightedLoss):
-    """Node-weighted MSE loss."""
+class LogCosh(torch.autograd.Function):
+    """LogCosh custom autograd function."""
 
-    name = "wmse"
+    @staticmethod
+    def forward(ctx, inp: torch.Tensor) -> torch.Tensor:  # noqa: ANN001
+        ctx.save_for_backward(inp)
+        abs_input = torch.abs(inp)
+        return abs_input + torch.nn.functional.softplus(-2 * abs_input) - np.log(2)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:  # noqa: ANN001
+        (inp,) = ctx.saved_tensors
+        return grad_output * torch.tanh(inp)
+
+
+class WeightedLogCoshLoss(BaseWeightedLoss):
+    """Node-weighted LogCosh loss."""
+
+    name = "wlogcosh"
 
     def __init__(
         self,
@@ -30,7 +46,7 @@ class WeightedMSELoss(BaseWeightedLoss):
         ignore_nans: bool = False,
         **kwargs,
     ) -> None:
-        """Node- and feature weighted MSE Loss.
+        """Node- and feature weighted LogCosh Loss.
 
         Parameters
         ----------
@@ -54,7 +70,7 @@ class WeightedMSELoss(BaseWeightedLoss):
         feature_indices: torch.Tensor | None = None,
         feature_scale: bool = True,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted MSE loss.
+        """Calculates the lat-weighted LogCosh loss.
 
         Parameters
         ----------
@@ -72,9 +88,10 @@ class WeightedMSELoss(BaseWeightedLoss):
         Returns
         -------
         torch.Tensor
-            Weighted MSE loss
+            Weighted LogCosh loss
+
         """
-        out = torch.square(pred - target)
+        out = LogCosh.apply(pred - target)
 
         if feature_scale:
             out = self.scale(out, feature_indices)

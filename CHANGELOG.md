@@ -12,6 +12,9 @@ Keep it human-readable, your future self will thank you!
 
 ## [0.2.2 - Maintenance: pin python <3.13](https://github.com/ecmwf/anemoi-training/compare/0.2.1...0.2.2) - 2024-10-28
 
+### Added
+- Included more loss functions and allowed configuration [#70](https://github.com/ecmwf/anemoi-training/pull/70)
+
 ### Changed
 
 - Lock python version <3.13 [#107](https://github.com/ecmwf/anemoi-training/pull/107)

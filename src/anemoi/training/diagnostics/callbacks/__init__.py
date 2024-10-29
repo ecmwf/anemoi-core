@@ -44,6 +44,7 @@ from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
 
 if TYPE_CHECKING:
     import pytorch_lightning as pl
@@ -604,6 +605,11 @@ class PlotLoss(BasePlotCallback):
         parameter_positions = list(pl_module.data_indices.internal_model.output.name_to_index.values())
         # reorder parameter_names by position
         self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
+
+        if not isinstance(pl_module.loss, BaseWeightedLoss):
+            logging.warning(
+                "Loss function must be a subclass of BaseWeightedLoss, or provide `squash`.", RuntimeWarning
+            )
 
         batch = pl_module.model.pre_processors(batch, in_place=False)
         for rollout_step in range(pl_module.rollout):
