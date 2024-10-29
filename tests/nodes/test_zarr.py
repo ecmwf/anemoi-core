@@ -26,10 +26,11 @@ def test_init(mocker, mock_zarr_dataset):
     assert isinstance(node_builder, from_file.ZarrDatasetNodes)
 
 
-def test_fail_init():
-    """Test ZarrDatasetNodes initialization with invalid resolution."""
+def test_fail():
+    """Test ZarrDatasetNodes with invalid dataset."""
+    node_builder = from_file.ZarrDatasetNodes("invalid_path.zarr", name="test_nodes")
     with pytest.raises(zarr.errors.PathNotFoundError):
-        from_file.ZarrDatasetNodes("invalid_path.zarr", name="test_nodes")
+        node_builder.update_graph(HeteroData())
 
 
 def test_register_nodes(mocker, mock_zarr_dataset):
@@ -42,7 +43,7 @@ def test_register_nodes(mocker, mock_zarr_dataset):
 
     assert graph["test_nodes"].x is not None
     assert isinstance(graph["test_nodes"].x, torch.Tensor)
-    assert graph["test_nodes"].x.shape == (node_builder.dataset.num_nodes, 2)
+    assert graph["test_nodes"].x.shape == (mock_zarr_dataset.num_nodes, 2)
     assert graph["test_nodes"].node_type == "ZarrDatasetNodes"
 
 

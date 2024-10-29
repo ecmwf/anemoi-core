@@ -175,8 +175,8 @@ def add_edges_to_nx_graph(
 
         # Limit area of mesh points.
         if area_mask_builder is not None:
-            aoi_mask = area_mask_builder.get_mask(r_vertices_rad)
-            valid_nodes = np.where(aoi_mask)[0]
+            area_mask = area_mask_builder.get_mask(r_vertices_rad)
+            valid_nodes = np.where(area_mask)[0]
         else:
             valid_nodes = None
 

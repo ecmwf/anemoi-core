@@ -12,13 +12,6 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
-- fix: bug in color when plotting isolated nodes
-
-### Added
-
-- Add anemoi-transform link to documentation
-
-### Added
 - ci: hpc-config, CODEOWNERS (#49)
 - feat: New node builder class, CutOutZarrDatasetNodes, to create nodes from 2 datasets. (#30)
 - feat: New class, KNNAreaMaskBuilder, to specify Area of Interest (AOI) based on a set of nodes. (#30)
@@ -27,10 +20,20 @@ Keep it human-readable, your future self will thank you!
 - feat: New method update_graph(graph) in the GraphCreator class. (#60)
 - feat: New class StretchedTriNodes to create a stretched mesh. (#51)
 - feat: Expanded MultiScaleEdges to support multi-scale connections in stretched graphs. (#51)
+- fix: bug in color when plotting isolated nodes (#63)
+- Add anemoi-transform link to documentation (#59)
+- Added `CutOutMask` class to create a mask for a cutout. (#68)
+- Added `MissingZarrVariable` and `NotMissingZarrVariable` classes to create a mask for missing zarr variables. (#68)
 - feat: Add CONTRIBUTORS.md file. (#72)
 
 ### Changed
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)
+- Update CODEOWNERS (#61)
+- ci: extened python versions to include 3.11 and 3.12 (#66)
+- Update copyright notice (#67)
+
+### Removed
+- Remove `CutOutZarrDatasetNodes` class. (#68)
 - Update CODEOWNERS
 - Fix pre-commit regex
 - ci: extened python versions to include 3.11 and 3.12

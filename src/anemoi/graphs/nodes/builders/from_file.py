@@ -15,7 +15,8 @@ from pathlib import Path
 import numpy as np
 import torch
 from anemoi.datasets import open_dataset
-from anemoi.utils.config import DotDict
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
@@ -29,7 +30,7 @@ class ZarrDatasetNodes(BaseNodeBuilder):
 
     Attributes
     ----------
-    dataset : zarr.core.Array
+    dataset : str | DictConfig
         The dataset.
 
     Methods
@@ -44,10 +45,11 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: DotDict, name: str) -> None:
+    def __init__(self, dataset: DictConfig, name: str) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.dataset = open_dataset(dataset)
+        self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
         super().__init__(name)
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -57,28 +59,8 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
-        return self.reshape_coords(self.dataset.latitudes, self.dataset.longitudes)
-
-
-class CutOutZarrDatasetNodes(ZarrDatasetNodes):
-    """Nodes from Zarr dataset."""
-
-    def __init__(
-        self, name: str, lam_dataset: str, forcing_dataset: str, thinning: int = 1, adjust: str = "all"
-    ) -> None:
-        dataset_config = {
-            "cutout": [{"dataset": lam_dataset, "thinning": thinning}, {"dataset": forcing_dataset}],
-            "adjust": adjust,
-        }
-        super().__init__(dataset_config, name)
-        self.n_cutout, self.n_other = self.dataset.grids
-
-    def register_attributes(self, graph: HeteroData, config: DotDict) -> None:
-        # this is a mask to cutout the LAM area
-        graph[self.name]["cutout"] = torch.tensor([True] * self.n_cutout + [False] * self.n_other, dtype=bool).reshape(
-            (-1, 1)
-        )
-        return super().register_attributes(graph, config)
+        dataset = open_dataset(self.dataset)
+        return self.reshape_coords(dataset.latitudes, dataset.longitudes)
 
 
 class NPZFileNodes(BaseNodeBuilder):
