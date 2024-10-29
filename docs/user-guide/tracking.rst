@@ -33,7 +33,7 @@ the same experiment.
 Within the MLflow experiments tab, it is possible to define different
 namespaces. To create a new namespace, the user just needs to pass an
 'experiment_name'
-(``config.diagnostics.eval_rollout.log.mlflow.experiment_name``) to the
+(``config.diagnostics.evaluation.log.mlflow.experiment_name``) to the
 mlflow logger.
 
 **Parent-Child Runs**

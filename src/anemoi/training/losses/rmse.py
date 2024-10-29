@@ -14,15 +14,15 @@ import logging
 
 import torch
 
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.mse import BaseWeightedLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELoss(BaseWeightedLoss):
-    """Node-weighted MSE loss."""
+class WeightedRMSELoss(BaseWeightedLoss):
+    """Node-weighted RMSE loss."""
 
-    name = "wmse"
+    name = "wrmse"
 
     def __init__(
         self,
@@ -30,7 +30,7 @@ class WeightedMSELoss(BaseWeightedLoss):
         ignore_nans: bool = False,
         **kwargs,
     ) -> None:
-        """Node- and feature weighted MSE Loss.
+        """Node- and (inverse-)variance-weighted RMSE Loss.
 
         Parameters
         ----------
@@ -38,7 +38,6 @@ class WeightedMSELoss(BaseWeightedLoss):
             Weight of each node in the loss function
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-
         """
         super().__init__(
             node_weights=node_weights,
@@ -54,7 +53,7 @@ class WeightedMSELoss(BaseWeightedLoss):
         feature_indices: torch.Tensor | None = None,
         feature_scale: bool = True,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted MSE loss.
+        """Calculates the lat-weighted RMSE loss.
 
         Parameters
         ----------
@@ -72,10 +71,13 @@ class WeightedMSELoss(BaseWeightedLoss):
         Returns
         -------
         torch.Tensor
-            Weighted MSE loss
+            Weighted RMSE loss
         """
-        out = torch.square(pred - target)
-
-        if feature_scale:
-            out = self.scale(out, feature_indices)
-        return self.scale_by_node_weights(out, squash)
+        mse = super().forward(
+            pred=pred,
+            target=target,
+            squash=squash,
+            feature_indices=feature_indices,
+            feature_scale=feature_scale,
+        )
+        return torch.sqrt(mse)

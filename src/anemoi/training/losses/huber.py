@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 from __future__ import annotations
 
 import logging
@@ -19,32 +18,55 @@ from anemoi.training.losses.weightedloss import BaseWeightedLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELoss(BaseWeightedLoss):
-    """Node-weighted MSE loss."""
+class WeightedHuberLoss(BaseWeightedLoss):
+    """Node-weighted Huber loss."""
 
-    name = "wmse"
+    name = "whuber"
 
     def __init__(
         self,
         node_weights: torch.Tensor,
+        delta: float = 1.0,
         ignore_nans: bool = False,
         **kwargs,
     ) -> None:
-        """Node- and feature weighted MSE Loss.
+        """Node- and feature weighted Huber Loss.
+
+        See `Huber loss <https://en.wikipedia.org/wiki/Huber_loss>`_ for more information.
 
         Parameters
         ----------
         node_weights : torch.Tensor of shape (N, )
             Weight of each node in the loss function
+        delta : float, optional
+            Threshold for Huber loss, by default 1.0
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-
         """
         super().__init__(
             node_weights=node_weights,
             ignore_nans=ignore_nans,
             **kwargs,
         )
+        self.delta = delta
+
+    def huber(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calculate the Huber loss.
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+        target : torch.Tensor
+            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+
+        Returns
+        -------
+        torch.Tensor
+            Huber loss
+        """
+        diff = torch.abs(pred - target)
+        return torch.where(diff < self.delta, 0.5 * torch.square(diff), self.delta * (diff - 0.5 * self.delta))
 
     def forward(
         self,
@@ -54,7 +76,7 @@ class WeightedMSELoss(BaseWeightedLoss):
         feature_indices: torch.Tensor | None = None,
         feature_scale: bool = True,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted MSE loss.
+        """Calculates the lat-weighted Huber loss.
 
         Parameters
         ----------
@@ -72,10 +94,10 @@ class WeightedMSELoss(BaseWeightedLoss):
         Returns
         -------
         torch.Tensor
-            Weighted MSE loss
+            Weighted Huber loss
         """
-        out = torch.square(pred - target)
+        out = self.huber(pred, target)
 
         if feature_scale:
-            out = self.scale(out, feature_indices)
+            out = self.scale_by_variable_scaling(out, feature_indices)
         return self.scale_by_node_weights(out, squash)

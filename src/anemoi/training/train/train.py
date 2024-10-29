@@ -302,6 +302,16 @@ class AnemoiTrainer:
         LOGGER.debug("Effective learning rate: %.3e", total_number_of_model_instances * self.config.training.lr.rate)
         LOGGER.debug("Rollout window length: %d", self.config.training.rollout.start)
 
+        if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
+            LOGGER.info(
+                "Training limits: max_epochs=%d, max_steps=%d. "
+                "Training will stop when either limit is reached first. "
+                "Learning rate scheduler will run for %d steps.",
+                self.config.training.max_epochs,
+                self.config.training.max_steps,
+                self.config.training.lr.iterations,
+            )
+
     def _get_server2server_lineage(self) -> None:
         """Get the server2server lineage."""
         self.parent_run_server2server = None
@@ -350,6 +360,7 @@ class AnemoiTrainer:
             num_nodes=self.config.hardware.num_nodes,
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
+            max_steps=self.config.training.max_steps or -1,
             logger=self.loggers,
             log_every_n_steps=self.config.diagnostics.log.interval,
             # run a fixed no of batches per epoch (helpful when debugging)

@@ -131,7 +131,7 @@ expected_polynomial_scaling = torch.Tensor(
 def test_loss_scaling_vals(fake_data: tuple[DictConfig, IndexCollection], expected_scaling: torch.Tensor) -> None:
     config, data_indices = fake_data
 
-    _, _, loss_scaling = GraphForecaster.metrics_loss_scaling(config, data_indices)
+    loss_scaling = GraphForecaster.get_feature_weights(config, data_indices)
 
     assert torch.allclose(loss_scaling, expected_scaling)
 
@@ -140,7 +140,9 @@ def test_loss_scaling_vals(fake_data: tuple[DictConfig, IndexCollection], expect
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices = fake_data
 
-    metric_range, metric_ranges_validation, _ = GraphForecaster.metrics_loss_scaling(config, data_indices)
+    metric_range, metric_ranges_validation = GraphForecaster.get_val_metric_ranges(config, data_indices)
+
+    del metric_range["all"]
 
     expected_metric_range_validation = {
         "pl_y": [
@@ -161,5 +163,5 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     expected_metric_range["sfc_cos_d"] = [data_indices.internal_model.output.name_to_index["cos_d"]]
     expected_metric_range["sfc_sin_d"] = [data_indices.internal_model.output.name_to_index["sin_d"]]
 
-    assert dict(metric_ranges_validation) == expected_metric_range_validation
-    assert dict(metric_range) == expected_metric_range
+    assert metric_ranges_validation == expected_metric_range_validation
+    assert metric_range == expected_metric_range

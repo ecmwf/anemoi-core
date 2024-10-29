@@ -12,7 +12,10 @@ import logging
 import math
 import os
 from collections import defaultdict
+from collections.abc import Generator
 from collections.abc import Mapping
+from typing import Optional
+from typing import Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -29,8 +32,8 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.mse import WeightedMSELoss
 from anemoi.training.losses.utils import grad_scaler
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
@@ -83,22 +86,35 @@ class GraphForecaster(pl.LightningModule):
         self.save_hyperparameters()
 
         self.latlons_data = graph_data[config.graph.data].x
-        self.loss_weights = graph_data[config.graph.data][config.model.node_loss_weight].squeeze()
+        self.node_weights = graph_data[config.graph.data][config.model.node_loss_weight].squeeze()
 
         if config.model.get("output_mask", None) is not None:
             self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
         else:
             self.output_mask = NoOutputMask()
-        self.loss_weights = self.output_mask.apply(self.loss_weights, dim=0, fill_value=0.0)
+        self.node_weights = self.output_mask.apply(self.node_weights, dim=0, fill_value=0.0)
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
-        self.metric_ranges, self.metric_ranges_validation, loss_scaling = self.metrics_loss_scaling(
-            config,
-            data_indices,
-        )
-        self.loss = WeightedMSELoss(node_weights=self.loss_weights, data_variances=loss_scaling)
-        self.metrics = WeightedMSELoss(node_weights=self.loss_weights, ignore_nans=True)
+        variable_scaling = self.get_feature_weights(config, data_indices)
+
+        self.val_metric_ranges, _ = self.get_val_metric_ranges(config, data_indices)
+
+        # Kwargs to pass to the loss function
+        loss_kwargs = {"node_weights": self.node_weights}
+        # Scalars to include in the loss function, must be of form (dim, scalar)
+        scalars = {"variable": (-1, variable_scaling)}
+
+        self.loss = self.get_loss_function(config.training.training_loss, scalars=scalars, **loss_kwargs)
+
+        assert isinstance(self.loss, torch.nn.Module) and not isinstance(
+            self.loss,
+            torch.nn.ModuleList,
+        ), f"Loss function must be a `torch.nn.Module`, not a {type(self.loss).__name__!r}"
+
+        self.metrics = self.get_loss_function(config.training.validation_metrics, scalars=scalars, **loss_kwargs)
+        if not isinstance(self.metrics, torch.nn.ModuleList):
+            self.metrics = torch.nn.ModuleList([self.metrics])
 
         if config.training.loss_gradient_scaling:
             self.loss.register_full_backward_hook(grad_scaler, prepend=False)
@@ -125,8 +141,6 @@ class GraphForecaster(pl.LightningModule):
         LOGGER.debug("Rollout max : %d", self.rollout_max)
         LOGGER.debug("Multistep: %d", self.multi_step)
 
-        self.enable_plot = config.diagnostics.plot.enabled
-
         self.model_comm_group_id = int(os.environ.get("SLURM_PROCID", "0")) // config.hardware.num_gpus_per_model
         self.model_comm_group_rank = int(os.environ.get("SLURM_PROCID", "0")) % config.hardware.num_gpus_per_model
         self.model_comm_num_groups = math.ceil(
@@ -136,48 +150,95 @@ class GraphForecaster(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x, self.model_comm_group)
 
+    # Future import breaks other type hints TODO Harrison Cook
     @staticmethod
-    def metrics_loss_scaling(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, torch.Tensor]:
+    def get_loss_function(
+        config: DictConfig,
+        scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None] = None,  # noqa: FA100
+        **kwargs,
+    ) -> Union[torch.nn.Module, torch.nn.ModuleList]:  # noqa: FA100
+        """
+        Get loss functions from config.
+
+        Can be ModuleList if multiple losses are specified.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Loss function configuration, should include `scalars` if scalars are to be added to the loss function.
+        scalars : Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None], optional
+            Scalars which can be added to the loss function. Defaults to None., by default None
+            If a scalar is to be added to the loss, ensure it is in `scalars` in the loss config
+            E.g.
+                If `scalars: ['variable']` is set in the config, and `variable` in `scalars`
+                `variable` will be added to the scalar of the loss function.
+        kwargs : Any
+            Additional arguments to pass to the loss function
+
+        Returns
+        -------
+        Union[torch.nn.Module, torch.nn.ModuleList]
+            Loss function, or list of metrics
+
+        Raises
+        ------
+        TypeError
+            If not a subclass of `BaseWeightedLoss`
+        ValueError
+            If scalar is not found in valid scalars
+        """
+        config_container = OmegaConf.to_container(config, resolve=False)
+        if isinstance(config_container, list):
+            return torch.nn.ModuleList(
+                [
+                    GraphForecaster.get_loss_function(
+                        OmegaConf.create(loss_config),
+                        scalars=scalars,
+                        **kwargs,
+                    )
+                    for loss_config in config
+                ],
+            )
+
+        loss_config = OmegaConf.to_container(config, resolve=True)
+        scalars_to_include = loss_config.pop("scalars", [])
+
+        # Instantiate the loss function with the loss_init_config
+        loss_function = instantiate(loss_config, **kwargs)
+
+        if not isinstance(loss_function, BaseWeightedLoss):
+            error_msg = f"Loss must be a subclass of 'BaseWeightedLoss', not {type(loss_function)}"
+            raise TypeError(error_msg)
+
+        for key in scalars_to_include:
+            if key not in scalars or []:
+                error_msg = f"Scalar {key!r} not found in valid scalars: {list(scalars.keys())}"
+                raise ValueError(error_msg)
+            loss_function.add_scalar(*scalars[key], name=key)
+
+        return loss_function
+
+    @staticmethod
+    def get_val_metric_ranges(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, dict]:
+
         metric_ranges = defaultdict(list)
         metric_ranges_validation = defaultdict(list)
-        loss_scaling = (
-            np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
-            * config.training.loss_scaling.default
-        )
-
-        pressure_level = instantiate(config.training.pressure_level_scaler)
-
-        LOGGER.info(
-            "Pressure level scaling: use scaler %s with slope %.4f and minimum %.2f",
-            type(pressure_level).__name__,
-            pressure_level.slope,
-            pressure_level.minimum,
-        )
 
         for key, idx in data_indices.internal_model.output.name_to_index.items():
-            # Split pressure levels on "_" separator
             split = key.split("_")
             if len(split) > 1 and split[-1].isdigit():
-                # Create grouped metrics for pressure levels (e.g. Q, T, U, V, etc.) for logger
+                # Group metrics for pressure levels (e.g., Q, T, U, V, etc.)
                 metric_ranges[f"pl_{split[0]}"].append(idx)
-                # Create pressure levels in loss scaling vector
-                if split[0] in config.training.loss_scaling.pl:
-                    loss_scaling[idx] = config.training.loss_scaling.pl[split[0]] * pressure_level.scaler(
-                        int(split[-1]),
-                    )
-                else:
-                    LOGGER.debug("Parameter %s was not scaled.", key)
             else:
                 metric_ranges[f"sfc_{key}"].append(idx)
-                # Create surface variables in loss scaling vector
-                if key in config.training.loss_scaling.sfc:
-                    loss_scaling[idx] = config.training.loss_scaling.sfc[key]
-                else:
-                    LOGGER.debug("Parameter %s was not scaled.", key)
-            # Create specific metrics from hydra to log in logger
+
+            # Specific metrics from hydra to log in logger
             if key in config.training.metrics:
                 metric_ranges[key] = [idx]
-        loss_scaling = torch.from_numpy(loss_scaling)
+
+        # Add the full list of output indices
+        metric_ranges["all"] = data_indices.internal_model.output.full.tolist()
+
         # metric for validation, after postprocessing
         for key, idx in data_indices.model.output.name_to_index.items():
             # Split pressure levels on "_" separator
@@ -190,7 +251,45 @@ class GraphForecaster(pl.LightningModule):
             # Create specific metrics from hydra to log in logger
             if key in config.training.metrics:
                 metric_ranges_validation[key] = [idx]
-        return metric_ranges, metric_ranges_validation, loss_scaling
+
+        return metric_ranges, metric_ranges_validation
+
+    @staticmethod
+    def get_feature_weights(
+        config: DictConfig,
+        data_indices: IndexCollection,
+    ) -> torch.Tensor:
+        loss_scaling = (
+            np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
+            * config.training.loss_scaling.default
+        )
+        pressure_level = instantiate(config.training.pressure_level_scaler)
+
+        LOGGER.info(
+            "Pressure level scaling: use scaler %s with slope %.4f and minimum %.2f",
+            type(pressure_level).__name__,
+            pressure_level.slope,
+            pressure_level.minimum,
+        )
+
+        for key, idx in data_indices.internal_model.output.name_to_index.items():
+            split = key.split("_")
+            if len(split) > 1 and split[-1].isdigit():
+                # Apply pressure level scaling
+                if split[0] in config.training.loss_scaling.pl:
+                    loss_scaling[idx] = config.training.loss_scaling.pl[split[0]] * pressure_level.scaler(
+                        int(split[-1]),
+                    )
+                else:
+                    LOGGER.debug("Parameter %s was not scaled.", key)
+            else:
+                # Apply surface variable scaling
+                if key in config.training.loss_scaling.sfc:
+                    loss_scaling[idx] = config.training.loss_scaling.sfc[key]
+                else:
+                    LOGGER.debug("Parameter %s was not scaled.", key)
+
+        return torch.from_numpy(loss_scaling)
 
     def set_model_comm_group(self, model_comm_group: ProcessGroup) -> None:
         LOGGER.debug("set_model_comm_group: %s", model_comm_group)
@@ -223,17 +322,44 @@ class GraphForecaster(pl.LightningModule):
         ]
         return x
 
-    def _step(
+    def rollout_step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
+        rollout: Optional[int] = None,  # noqa: FA100
+        training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        del batch_idx
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+    ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:  # noqa: FA100
+        """
+        Rollout step for the forecaster.
+
+        Will run pre_processors on batch, but not post_processors on predictions.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to use for rollout
+        rollout : Optional[int], optional
+            Number of times to rollout for, by default None
+            If None, will use self.rollout
+        training_mode : bool, optional
+            Whether in training mode and to calculate the loss, by default True
+            If False, loss will be None
+        validation_mode : bool, optional
+            Whether in validation mode, and to calculate validation metrics, by default False
+            If False, metrics will be empty
+
+        Yields
+        ------
+        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+            Loss value, metrics, and predictions (per step)
+
+        Returns
+        -------
+        None
+            None
+        """
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
-        metrics = {}
 
         # start rollout of preprocessed batch
         x = batch[
@@ -242,29 +368,52 @@ class GraphForecaster(pl.LightningModule):
             ...,
             self.data_indices.internal_data.input.full,
         ]  # (bs, multi_step, latlon, nvar)
+        msg = (
+            "Batch length not sufficient for requested multi_step length!"
+            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+        )
+        assert batch.shape[1] >= rollout + self.multi_step, msg
 
-        y_preds = []
-        for rollout_step in range(self.rollout):
+        for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss += checkpoint(self.loss, y_pred, y, use_reentrant=False)
+            loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
+            metrics_next = {}
             if validation_mode:
-                metrics_next, y_preds_next = self.calculate_val_metrics(
+                metrics_next = self.calculate_val_metrics(
                     y_pred,
                     y,
                     rollout_step,
-                    enable_plot=self.enable_plot,
                 )
-                metrics.update(metrics_next)
-                y_preds.extend(y_preds_next)
+            yield loss, metrics_next, y_pred
 
-        # scale loss
+    def _step(
+        self,
+        batch: torch.Tensor,
+        batch_idx: int,
+        validation_mode: bool = False,
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        del batch_idx
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        metrics = {}
+        y_preds = []
+
+        for loss_next, metrics_next, y_preds_next in self.rollout_step(
+            batch,
+            rollout=self.rollout,
+            training_mode=True,
+            validation_mode=validation_mode,
+        ):
+            loss += loss_next
+            metrics.update(metrics_next)
+            y_preds.extend(y_preds_next)
+
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds
 
@@ -273,26 +422,52 @@ class GraphForecaster(pl.LightningModule):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         rollout_step: int,
-        enable_plot: bool = False,
-    ) -> tuple[dict, list]:
+    ) -> tuple[dict, list[torch.Tensor]]:
+        """Calculate metrics on the validation output.
+
+        Parameters
+        ----------
+            y_pred: torch.Tensor
+                Predicted ensemble
+            y: torch.Tensor
+                Ground truth (target).
+            rollout_step: int
+                Rollout step
+
+        Returns
+        -------
+            val_metrics, preds:
+                validation metrics and predictions
+        """
         metrics = {}
-        y_preds = []
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
-        for mkey, indices in self.metric_ranges_validation.items():
-            metrics[f"{mkey}_{rollout_step + 1}"] = self.metrics(
-                y_pred_postprocessed[..., indices],
-                y_postprocessed[..., indices],
-            )
 
-        if enable_plot:
-            y_preds.append(y_pred)
-        return metrics, y_preds
+        for metric in self.metrics:
+            metric_name = getattr(metric, "name", metric.__class__.__name__.lower())
+
+            if not isinstance(metric, BaseWeightedLoss):
+                # If not a weighted loss, we cannot feature scale, so call normally
+                metrics[f"{metric_name}/{rollout_step + 1}"] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                )
+                continue
+
+            for mkey, indices in self.val_metric_ranges.items():
+                metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
+                    y_pred_postprocessed[..., indices],
+                    y_postprocessed[..., indices],
+                    feature_indices=indices,
+                    feature_scale=mkey == "all",
+                )
+
+        return metrics
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
-            "train_wmse",
+            f"train_{getattr(self.loss, 'name', self.loss.__class__.__name__.lower())}",
             train_loss,
             on_epoch=True,
             on_step=True,
@@ -335,7 +510,7 @@ class GraphForecaster(pl.LightningModule):
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
         self.log(
-            "val_wmse",
+            f"val_{getattr(self.loss, 'name', self.loss.__class__.__name__.lower())}",
             val_loss,
             on_epoch=True,
             on_step=True,

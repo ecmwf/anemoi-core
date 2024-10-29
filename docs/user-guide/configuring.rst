@@ -21,7 +21,7 @@ settings at the top as follows:
    defaults:
    - data: zarr
    - dataloader: native_grid
-   - diagnostics: eval_rollout
+   - diagnostics: evaluation
    - hardware: example
    - graph: multi_scale
    - model: gnn
@@ -100,7 +100,7 @@ match the dataset you provide.
    defaults:
    - data: zarr
    - dataloader: native_grid
-   - diagnostics: eval_rollout
+   - diagnostics: evaluation
    - hardware: example
    - graph: multi_scale
    - model: transformer # Change from default group
