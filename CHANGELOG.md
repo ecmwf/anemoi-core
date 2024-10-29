@@ -66,6 +66,8 @@ Keep it human-readable, your future self will thank you!
 
 - Introduction of remapper to anemoi-models leads to changes in the data indices. Some preprocessors cannot be applied in-place anymore.
 
+- Variable Bounding as configurable model layers [#13](https://github.com/ecmwf/anemoi-models/issues/13)
+
 #### Functionality
 
 - Enable the callback for plotting a histogram for variables containing NaNs
