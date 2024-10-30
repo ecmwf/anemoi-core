@@ -98,7 +98,7 @@ class GraphForecaster(pl.LightningModule):
 
         variable_scaling = self.get_feature_weights(config, data_indices)
 
-        self.val_metric_ranges, _ = self.get_val_metric_ranges(config, data_indices)
+        _, self.val_metric_ranges = self.get_val_metric_ranges(config, data_indices)
 
         # Kwargs to pass to the loss function
         loss_kwargs = {"node_weights": self.node_weights}
