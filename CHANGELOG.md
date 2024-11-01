@@ -13,6 +13,7 @@ Keep it human-readable, your future self will thank you!
 ### Fixed
 - Refactored callbacks. [#60](https://github.com/ecmwf/anemoi-training/pulls/60)
     - Updated docs [#115](https://github.com/ecmwf/anemoi-training/pull/115)
+    - Fix enabling LearningRateMonitor [#119](https://github.com/ecmwf/anemoi-training/pull/119)
 - Refactored rollout [#87](https://github.com/ecmwf/anemoi-training/pulls/87)
     - Enable longer validation rollout than training
 ### Added
