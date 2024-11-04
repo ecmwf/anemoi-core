@@ -2,7 +2,7 @@
 defaults:
   - plot: detailed
   - callbacks: pretraining
-
+  - benchmark_profiler: detailed
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training

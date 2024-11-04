@@ -366,7 +366,7 @@ class AnemoiTrainer:
             # run a fixed no of batches per epoch (helpful when debugging)
             limit_train_batches=self.config.dataloader.limit_batches.training,
             limit_val_batches=self.config.dataloader.limit_batches.validation,
-            num_sanity_val_steps=4,
+            num_sanity_val_steps=self.config.training.num_sanity_val_steps,
             accumulate_grad_batches=self.config.training.accum_grad_batches,
             gradient_clip_val=self.config.training.gradient_clip.val,
             gradient_clip_algorithm=self.config.training.gradient_clip.algorithm,

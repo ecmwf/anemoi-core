@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from abc import ABC
+from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,29 +26,12 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class Train(Command):
-    """Commands to train Anemoi models."""
-
+class TrainBase(Command, ABC):
     accept_unknown_args = True
 
     @staticmethod
     def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         return parser
-
-    def run(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None:
-        # This will be picked up by the logger
-        os.environ["ANEMOI_TRAINING_CMD"] = f"{sys.argv[0]} {args.command}"
-        # Merge the known subcommands with a non-whitespace character for hydra
-        new_sysargv = self._merge_sysargv(args)
-
-        # Add the unknown arguments (belonging to hydra) to sys.argv
-        if unknown_args is not None:
-            sys.argv = [new_sysargv, *unknown_args]
-        else:
-            sys.argv = [new_sysargv]
-
-        LOGGER.info("Running anemoi training command with overrides: %s", sys.argv[1:])
-        main()
 
     def _merge_sysargv(self, args: argparse.Namespace) -> str:
         """Merge the sys.argv with the known subcommands to pass to hydra.
@@ -73,6 +58,31 @@ class Train(Command):
         if hasattr(args, "subcommand"):
             modified_sysargv += f"-{args.subcommand}"
         return str(modified_sysargv)
+
+    def prepare_sysargv(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None:
+        os.environ["ANEMOI_TRAINING_CMD"] = f"{sys.argv[0]} {args.command}"
+        # Merge the known subcommands with a non-whitespace character for hydra
+        new_sysargv = self._merge_sysargv(args)
+
+        # Add the unknown arguments (belonging to hydra) to sys.argv
+        if unknown_args is not None:
+            sys.argv = [new_sysargv, *unknown_args]
+        else:
+            sys.argv = [new_sysargv]
+
+    @abstractmethod
+    def run(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None: ...
+
+
+class Train(TrainBase):
+    """Commands to train Anemoi models."""
+
+    def run(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None:
+        # This will be picked up by the logger
+        self.prepare_sysargv(args, unknown_args)
+
+        LOGGER.info("Running anemoi training command with overrides: %s", sys.argv[1:])
+        main()
 
 
 def main() -> None:

@@ -19,6 +19,8 @@ multistep_input: 2
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
 
+num_sanity_val_steps: 6
+
 # clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
 gradient_clip:
   val: 32.
