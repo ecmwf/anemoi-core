@@ -10,10 +10,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import timedelta
 from typing import TYPE_CHECKING
+from typing import Any
 from typing import Callable
-from typing import Iterable
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
@@ -29,8 +30,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def nestedget(conf: DictConfig, key, default):
-    """Get a nested key from a DictConfig object
+def nestedget(conf: DictConfig, key: str, default: Any) -> Any:
+    """Get a nested key from a DictConfig object.
 
     E.g.
     >>> nestedget(config, "diagnostics.log.wandb.enabled", False)
@@ -56,7 +57,7 @@ CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bo
 
 
 def _get_checkpoint_callback(config: DictConfig) -> list[AnemoiCheckpoint] | None:
-    """Get checkpointing callback"""
+    """Get checkpointing callback."""
     if not config.diagnostics.get("enable_checkpointing", True):
         return []
 
@@ -114,8 +115,7 @@ def _get_checkpoint_callback(config: DictConfig) -> list[AnemoiCheckpoint] | Non
                         ),
                     ]
                 )
-            else:
-                LOGGER.debug("Not setting up a checkpoint callback with %s", save_key)
+            LOGGER.debug("Not setting up a checkpoint callback with %s", save_key)
     else:
         # the tensorboard logger + pytorch profiler cause pickling errors when writing checkpoints
         LOGGER.warning("Profiling is enabled - will not write any training or inference model checkpoints!")
@@ -123,19 +123,16 @@ def _get_checkpoint_callback(config: DictConfig) -> list[AnemoiCheckpoint] | Non
 
 
 def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
-    """Get callbacks that are enabled in the config as according to CONFIG_ENABLED_CALLBACKS
-
-    Provides backwards compatibility
-    """
+    """Get callbacks that are enabled in the config as according to CONFIG_ENABLED_CALLBACKS."""
     callbacks = []
 
-    def check_key(config, key: str | Iterable[str] | Callable[[DictConfig], bool]):
+    def check_key(config: dict, key: str | Iterable[str] | Callable[[DictConfig], bool]) -> bool:
         """Check key in config."""
         if isinstance(key, Callable):
             return key(config)
-        elif isinstance(key, str):
+        if isinstance(key, str):
             return nestedget(config, key, False)
-        elif isinstance(key, Iterable):
+        if isinstance(key, Iterable):
             return all(nestedget(config, k, False) for k in key)
         return nestedget(config, key, False)
 
@@ -146,7 +143,7 @@ def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
     return callbacks
 
 
-def get_callbacks(config: DictConfig) -> list[Callback]:  # noqa: C901
+def get_callbacks(config: DictConfig) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
     Set `config.diagnostics.callbacks` to a list of callback configurations
@@ -180,7 +177,6 @@ def get_callbacks(config: DictConfig) -> list[Callback]:  # noqa: C901
         A list of PyTorch Lightning callbacks
 
     """
-
     trainer_callbacks: list[Callback] = []
 
     # Get Checkpoint callback
@@ -189,14 +185,15 @@ def get_callbacks(config: DictConfig) -> list[Callback]:  # noqa: C901
         trainer_callbacks.extend(checkpoint_callback)
 
     # Base callbacks
-    for callback in config.diagnostics.get("callbacks", None) or []:
-        # Instantiate new callbacks
-        trainer_callbacks.append(instantiate(callback, config))
+    trainer_callbacks.extend(
+        instantiate(callback, config) for callback in config.diagnostics.get("callbacks", None) or []
+    )
 
     # Plotting callbacks
-    for callback in config.diagnostics.plot.get("callbacks", None) or []:
-        # Instantiate new callbacks
-        trainer_callbacks.append(instantiate(callback, config))
+
+    trainer_callbacks.extend(
+        instantiate(callback, config) for callback in config.diagnostics.plot.get("callbacks", None) or []
+    )
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(config))

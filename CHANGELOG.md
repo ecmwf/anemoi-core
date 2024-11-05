@@ -46,6 +46,8 @@ Keep it human-readable, your future self will thank you!
 - Feature: New `Boolean1DMask` class. Enables rollout training for limited area models. [#79](https://github.com/ecmwf/anemoi-training/pulls/79)
 
 ### Fixed
+
+- Fix pre-commit regex
 - Mlflow-sync to handle creation of new experiments in the remote server [#83] (https://github.com/ecmwf/anemoi-training/pull/83)
 - Fix for multi-gpu when using mlflow due to refactoring of _get_mlflow_run_params function [#99] (https://github.com/ecmwf/anemoi-training/pull/99)
 - ci: fix pyshtools install error (#100) https://github.com/ecmwf/anemoi-training/pull/100

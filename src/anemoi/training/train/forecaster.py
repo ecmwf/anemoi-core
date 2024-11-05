@@ -157,8 +157,7 @@ class GraphForecaster(pl.LightningModule):
         scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None] = None,  # noqa: FA100
         **kwargs,
     ) -> Union[torch.nn.Module, torch.nn.ModuleList]:  # noqa: FA100
-        """
-        Get loss functions from config.
+        """Get loss functions from config.
 
         Can be ModuleList if multiple losses are specified.
 
@@ -329,8 +328,7 @@ class GraphForecaster(pl.LightningModule):
         training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:  # noqa: FA100
-        """
-        Rollout step for the forecaster.
+        """Rollout step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
