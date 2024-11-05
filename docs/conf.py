@@ -30,12 +30,12 @@ html_logo = "_static/logo.png"
 
 project = "Anemoi Training"
 
-author = "ECMWF"
+author = "Anemoi contributors"
 
 year = datetime.datetime.now().year
 years = "2024" if year == 2024 else f"2024-{year}"
 
-copyright = f"{years}, ECMWF"
+copyright = f"{years}, Anemoi contributors"
 
 
 try:
