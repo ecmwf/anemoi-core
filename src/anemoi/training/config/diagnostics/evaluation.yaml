@@ -50,6 +50,8 @@ log:
     terminal: True
     run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True
+    expand_hyperparams: # Which keys in hyperparams to expand
+      - config
   interval: 100
 
 enable_progress_bar: True

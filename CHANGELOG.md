@@ -16,6 +16,8 @@ Keep it human-readable, your future self will thank you!
     - Fix enabling LearningRateMonitor [#119](https://github.com/ecmwf/anemoi-training/pull/119)
 - Refactored rollout [#87](https://github.com/ecmwf/anemoi-training/pulls/87)
     - Enable longer validation rollout than training
+- Expand iterables in logging [#91](https://github.com/ecmwf/anemoi-training/pull/91)
+    - Save entire config in mlflow
 ### Added
 - Included more loss functions and allowed configuration [#70](https://github.com/ecmwf/anemoi-training/pull/70)
    - Fix that applies the metric_ranges in the post-processed variable space [#116](https://github.com/ecmwf/anemoi-training/pull/116)
