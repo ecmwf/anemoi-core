@@ -8,7 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
-## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.3.0...HEAD)
+## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.4.0...HEAD)
+
+## [0.4.0 - LAM and stretched graphs](https://github.com/ecmwf/anemoi-graphs/compare/0.3.0...0.4.0) - 2024-11-08
 
 ### Added
 
@@ -27,12 +29,14 @@ Keep it human-readable, your future self will thank you!
 - feat: Add CONTRIBUTORS.md file. (#72)
 
 ### Changed
+
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)
 - Update CODEOWNERS (#61)
 - ci: extened python versions to include 3.11 and 3.12 (#66)
 - Update copyright notice (#67)
 
 ### Removed
+
 - Remove `CutOutZarrDatasetNodes` class. (#68)
 - Update CODEOWNERS
 - Fix pre-commit regex
