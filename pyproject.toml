@@ -10,20 +10,13 @@
 # https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
 
 [build-system]
-requires = [
-  "setuptools>=60",
-  "setuptools-scm>=8",
-]
+requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 
 [project]
 name = "anemoi-graphs"
 
 description = "A package to build graphs for data-driven forecasts."
-keywords = [
-  "ai",
-  "graphs",
-  "tools",
-]
+keywords = [ "ai", "graphs", "tools" ]
 
 license = { file = "LICENSE" }
 authors = [
@@ -46,9 +39,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
-dynamic = [
-  "version",
-]
+dynamic = [ "version" ]
 dependencies = [
   "anemoi-datasets[data]>=0.3.3",
   "anemoi-utils>=0.3.6",
@@ -63,20 +54,8 @@ dependencies = [
   "trimesh>=4.1",
 ]
 
-optional-dependencies.all = [
-]
-optional-dependencies.dev = [
-  "nbsphinx",
-  "pandoc",
-  "pytest",
-  "pytest-mock",
-  "requests",
-  "sphinx",
-  "sphinx-argparse",
-  "sphinx-rtd-theme",
-  "termcolor",
-  "tomli",
-]
+optional-dependencies.all = [  ]
+optional-dependencies.dev = [ "anemoi-graphs[docs,tests]" ]
 
 optional-dependencies.docs = [
   "nbsphinx",
@@ -89,10 +68,7 @@ optional-dependencies.docs = [
   "tomli",
 ]
 
-optional-dependencies.tests = [
-  "pytest",
-  "pytest-mock",
-]
+optional-dependencies.tests = [ "pytest", "pytest-mock" ]
 
 urls.Documentation = "https://anemoi-graphs.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-graphs/"

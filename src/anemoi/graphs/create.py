@@ -1,3 +1,12 @@
+# (C) Copyright 2024 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 from __future__ import annotations
 
 import logging
@@ -24,27 +33,35 @@ class GraphCreator:
         else:
             self.config = config
 
-    def generate_graph(self) -> HeteroData:
-        """Generate the graph.
+    def update_graph(self, graph: HeteroData) -> HeteroData:
+        """Update the graph.
 
         It instantiates the node builders and edge builders defined in the configuration
         file and applies them to the graph.
 
+        Parameters
+        ----------
+        graph : HeteroData
+            The input graph to be updated.
+
         Returns
         -------
-            HeteroData: The generated graph.
+        HeteroData
+            The updated graph with new nodes and edges added based on the configuration.
         """
-        graph = HeteroData()
-
-        for nodes_name, nodes_cfg in self.config.nodes.items():
+        for nodes_name, nodes_cfg in self.config.get("nodes", {}).items():
             graph = instantiate(nodes_cfg.node_builder, name=nodes_name).update_graph(
                 graph, nodes_cfg.get("attributes", {})
             )
 
-        for edges_cfg in self.config.edges:
-            graph = instantiate(edges_cfg.edge_builder, edges_cfg.source_name, edges_cfg.target_name).update_graph(
-                graph, edges_cfg.get("attributes", {})
-            )
+        for edges_cfg in self.config.get("edges", {}):
+            graph = instantiate(
+                edges_cfg.edge_builder,
+                edges_cfg.source_name,
+                edges_cfg.target_name,
+                source_mask_attr_name=edges_cfg.get("source_mask_attr_name", None),
+                target_mask_attr_name=edges_cfg.get("target_mask_attr_name", None),
+            ).update_graph(graph, edges_cfg.get("attributes", {}))
 
         return graph
 
@@ -54,12 +71,12 @@ class GraphCreator:
         Parameters
         ----------
         graph : HeteroData
-            generated graph
+            Generated graph
 
         Returns
         -------
         HeteroData
-            cleaned graph
+            Cleaned graph
         """
         LOGGER.info("Cleaning graph.")
         for type_name in chain(graph.node_types, graph.edge_types):
@@ -106,8 +123,8 @@ class GraphCreator:
         HeteroData
             created graph object
         """
-
-        graph = self.generate_graph()
+        graph = HeteroData()
+        graph = self.update_graph(graph)
         graph = self.clean(graph)
 
         if save_path is None:

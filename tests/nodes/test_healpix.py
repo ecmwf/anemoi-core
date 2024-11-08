@@ -1,11 +1,20 @@
+# (C) Copyright 2024 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import pytest
 import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import AreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
-from anemoi.graphs.nodes.builder import BaseNodeBuilder
-from anemoi.graphs.nodes.builder import HEALPixNodes
+from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
+from anemoi.graphs.nodes.builders.from_healpix import HEALPixNodes
 
 
 @pytest.mark.parametrize("resolution", [2, 5, 7])

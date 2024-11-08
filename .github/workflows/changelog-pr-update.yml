@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - develop
+    paths-ignore:
+      - .pre-commit-config.yaml
+      - .readthedocs.yaml
 jobs:
   Check-Changelog:
     name: Check Changelog Action

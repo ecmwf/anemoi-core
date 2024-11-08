@@ -1,3 +1,12 @@
+# (C) Copyright 2024 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 from __future__ import annotations
 
 from abc import ABC
@@ -8,11 +17,11 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges.directional import directional_edge_features
-from anemoi.graphs.normalizer import NormalizerMixin
+from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import haversine_distance
 
 
-class BaseEdgeAttribute(ABC, NormalizerMixin):
+class BaseEdgeAttribute(ABC, NormaliserMixin):
     """Base class for edge attributes."""
 
     def __init__(self, norm: str | None = None) -> None:
@@ -26,7 +35,7 @@ class BaseEdgeAttribute(ABC, NormalizerMixin):
         if values.ndim == 1:
             values = values[:, np.newaxis]
 
-        normed_values = self.normalize(values)
+        normed_values = self.normalise(values)
 
         return torch.tensor(normed_values, dtype=torch.float32)
 
@@ -57,7 +66,7 @@ class EdgeDirection(BaseEdgeAttribute):
     Attributes
     ----------
     norm : Optional[str]
-        Normalization method.
+        Normalisation method.
     luse_rotated_features : bool
         Whether to use rotated features.
 
@@ -101,7 +110,7 @@ class EdgeLength(BaseEdgeAttribute):
     Attributes
     ----------
     norm : str
-        Normalization method.
+        Normalisation method.
     invert : bool
         Whether to invert the edge lengths, i.e. 1 - edge_length.
 
@@ -140,6 +149,9 @@ class EdgeLength(BaseEdgeAttribute):
 
     def post_process(self, values: np.ndarray) -> torch.Tensor:
         """Post-process edge lengths."""
+        values = super().post_process(values)
+
         if self.invert:
             values = 1 - values
-        return super().post_process(values)
+
+        return values

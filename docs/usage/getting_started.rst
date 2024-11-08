@@ -54,7 +54,7 @@ following command:
 
 .. code:: console
 
-   $ anemoi-graphs inspect graph.pt
+   $ anemoi-graphs inspect graph.pt output_plots
 
 This will generate the following graph:
 
