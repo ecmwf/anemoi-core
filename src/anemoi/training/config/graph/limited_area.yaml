@@ -1,0 +1,60 @@
+---
+overwrite: True
+
+data: "data"
+hidden: "hidden"
+
+nodes:
+  # Data nodes
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      dataset: ${dataloader.training.dataset}
+    attributes: ${graph.attributes.nodes}
+  # Hidden nodes
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
+      resolution: 5 # grid resolution for npz (o32, o48, ...)
+      reference_node_name: ${graph.data}
+      mask_attr_name: cutout
+
+edges:
+# Encoder configuration
+- source_name: ${graph.data}
+  target_name: ${graph.hidden}
+  edge_builder:
+    _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 0.6 # only for cutoff method
+  attributes: ${graph.attributes.edges}
+# Processor configuration
+- source_name: ${graph.hidden}
+  target_name: ${graph.hidden}
+  edge_builder:
+    _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+  attributes: ${graph.attributes.edges}
+# Decoder configuration
+- source_name: ${graph.hidden}
+  target_name: ${graph.data}
+  target_mask_attr_name: cutout
+  edge_builder:
+    _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 3 # only for knn method
+  attributes: ${graph.attributes.edges}
+
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.AreaWeights # options: Area, Uniform
+      norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
+    cutout:
+      _target_: anemoi.graphs.nodes.attributes.CutOutMask
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
