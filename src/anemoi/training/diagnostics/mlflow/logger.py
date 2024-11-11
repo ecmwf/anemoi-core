@@ -433,10 +433,59 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def log_system_metrics(self) -> None:
         """Log system metrics (CPU, GPU, etc)."""
         import mlflow
+        import psutil
+        from mlflow.system_metrics.metrics.base_metrics_monitor import BaseMetricsMonitor
+        from mlflow.system_metrics.metrics.disk_monitor import DiskMonitor
+        from mlflow.system_metrics.metrics.gpu_monitor import GPUMonitor
+        from mlflow.system_metrics.metrics.network_monitor import NetworkMonitor
         from mlflow.system_metrics.system_metrics_monitor import SystemMetricsMonitor
 
+        class CustomCPUMonitor(BaseMetricsMonitor):
+            """Class for monitoring CPU stats.
+
+            Extends default CPUMonitor, to also measure total \
+                    memory and a different formula for calculating used memory.
+
+            """
+
+            def collect_metrics(self) -> None:
+                # Get CPU metrics.
+                cpu_percent = psutil.cpu_percent()
+                self._metrics["cpu_utilization_percentage"].append(cpu_percent)
+
+                system_memory = psutil.virtual_memory()
+                # Change the formula for measuring CPU memory usage
+                # By default Mlflow uses psutil.virtual_memory().used
+                # Tests have shown that "used" underreports memory usage by as much as a factor of 2,
+                #   "used" also misses increased memory usage from using a higher prefetch factor
+                self._metrics["system_memory_usage_megabytes"].append(
+                    (system_memory.total - system_memory.available) / 1e6,
+                )
+                self._metrics["system_memory_usage_percentage"].append(system_memory.percent)
+
+                # QOL: report the total system memory in raw numbers
+                self._metrics["system_memory_total_megabytes"].append(system_memory.total / 1e6)
+
+            def aggregate_metrics(self) -> dict[str, int]:
+                return {k: round(sum(v) / len(v), 1) for k, v in self._metrics.items()}
+
+        class CustomSystemMetricsMonitor(SystemMetricsMonitor):
+            def __init__(self, run_id: str, resume_logging: bool = False):
+                super().__init__(run_id, resume_logging=resume_logging)
+
+                # Replace the CPUMonitor with custom implementation
+                self.monitors = [CustomCPUMonitor(), DiskMonitor(), NetworkMonitor()]
+                try:
+                    gpu_monitor = GPUMonitor()
+                    self.monitors.append(gpu_monitor)
+                except ImportError:
+                    LOGGER.warning(
+                        "`pynvml` is not installed, to log GPU metrics please run `pip install pynvml` \
+                            to install it",
+                    )
+
         mlflow.enable_system_metrics_logging()
-        system_monitor = SystemMetricsMonitor(
+        system_monitor = CustomSystemMetricsMonitor(
             self.run_id,
             resume_logging=self.run_id is not None,
         )
