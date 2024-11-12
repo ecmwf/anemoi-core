@@ -429,8 +429,8 @@ class LongRolloutPlots(BasePlotCallback):
                 self._plot(trainer, pl_module, output, batch, batch_idx, trainer.current_epoch)
 
 
-class GraphNodeTrainableFeaturesPlot(BasePerEpochPlotCallback):
-    """Visualize the node trainable features defined."""
+class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
+    """Visualize the node & edge trainable features defined."""
 
     def __init__(self, config: OmegaConf, every_n_epochs: int | None = None) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback.
@@ -456,57 +456,22 @@ class GraphNodeTrainableFeaturesPlot(BasePerEpochPlotCallback):
 
         fig = plot_graph_node_features(model)
 
-        tag = "node_trainable_params"
-        exp_log_tag = "node_trainable_params"
-
         self._output_figure(
             trainer.logger,
             fig,
             epoch=trainer.current_epoch,
-            tag=tag,
-            exp_log_tag=exp_log_tag,
+            tag="node_trainable_params",
+            exp_log_tag="node_trainable_params",
         )
 
-
-class GraphEdgeTrainableFeaturesPlot(BasePerEpochPlotCallback):
-    """Trainable edge features plot.
-
-    Visualize the trainable features defined at the edges between meshes.
-    """
-
-    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None) -> None:
-        """Plot trainable edge features.
-
-        Parameters
-        ----------
-        config : OmegaConf
-            Config object
-        every_n_epochs : int | None, optional
-            Override for frequency to plot at, by default None
-        """
-        super().__init__(config, every_n_epochs=every_n_epochs)
-
-    @rank_zero_only
-    def _plot(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        epoch: int,
-    ) -> None:
-        _ = epoch
-
-        model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
         fig = plot_graph_edge_features(model)
-
-        tag = "edge_trainable_params"
-        exp_log_tag = "edge_trainable_params"
 
         self._output_figure(
             trainer.logger,
             fig,
             epoch=trainer.current_epoch,
-            tag=tag,
-            exp_log_tag=exp_log_tag,
+            tag="edge_trainable_params",
+            exp_log_tag="edge_trainable_params",
         )
 
 

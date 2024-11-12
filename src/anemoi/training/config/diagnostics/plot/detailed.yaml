@@ -24,8 +24,7 @@ precip_and_related_fields: [tp, cp]
 
 callbacks:
   # Add plot callbacks here
-  - _target_: anemoi.training.diagnostics.callbacks.plot.GraphNodeTrainableFeaturesPlot
-  - _target_: anemoi.training.diagnostics.callbacks.plot.GraphEdgeTrainableFeaturesPlot
+  - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
     every_n_epochs: 5
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
     # group parameters by categories when visualizing contributions to the loss

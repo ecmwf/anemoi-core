@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
-import torch
 from anemoi.models.layers.mapper import GraphEdgeMixin
 from matplotlib.collections import LineCollection
 from matplotlib.colors import BoundaryNorm
@@ -31,6 +30,7 @@ from anemoi.training.diagnostics.maps import EquirectangularProjection
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
+    from torch import nn
 
 from dataclasses import dataclass
 
@@ -680,25 +680,7 @@ def edge_plot(
     fig.colorbar(psc, ax=ax)
 
 
-def sincos_to_latlon(sincos_coords: torch.Tensor) -> torch.Tensor:
-    """Get the lat/lon coordinates from the model.
-
-    Parameters
-    ----------
-    sincos_coords: torch.Tensor of shape (N, 4)
-        Sine and cosine of latitude and longitude coordinates.
-
-    Returns
-    -------
-    torch.Tensor of shape (N, 2)
-        Lat/lon coordinates.
-    """
-    ndim = sincos_coords.shape[1] // 2
-    sin_y, cos_y = sincos_coords[:, :ndim], sincos_coords[:, ndim:]
-    return torch.atan2(sin_y, cos_y)
-
-
-def plot_graph_node_features(model: torch.nn.Module) -> Figure:
+def plot_graph_node_features(model: nn.Module) -> Figure:
     """Plot trainable graph node features.
 
     Parameters
@@ -712,14 +694,13 @@ def plot_graph_node_features(model: torch.nn.Module) -> Figure:
         Figure object handle
     """
     nrows = len(nodes_name := model._graph_data.node_types)
-    ncols = min(getattr(model, f"trainable_{m}").trainable.shape[1] for m in nodes_name)
+    ncols = min(model.node_attributes.trainable_tensors[m].trainable.shape[1] for m in nodes_name)
     figsize = (ncols * 4, nrows * 3)
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize)
 
-    for row, mesh in enumerate(nodes_name):
-        sincos_coords = getattr(model, f"latlons_{mesh}")
-        latlons = sincos_to_latlon(sincos_coords).cpu().numpy()
-        features = getattr(model, f"trainable_{mesh}").trainable.cpu().detach().numpy()
+    for row, (mesh, trainable_tensor) in enumerate(model.node_attributes.trainable_tensors.items()):
+        latlons = model.node_attributes.get_coordinates(mesh).cpu().numpy()
+        node_features = trainable_tensor.trainable.cpu().detach().numpy()
 
         lat, lon = latlons[:, 0], latlons[:, 1]
 
@@ -730,14 +711,14 @@ def plot_graph_node_features(model: torch.nn.Module) -> Figure:
                 ax_,
                 lon=lon,
                 lat=lat,
-                data=features[..., i],
+                data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
             )
 
     return fig
 
 
-def plot_graph_edge_features(model: torch.nn.Module, q_extreme_limit: float = 0.05) -> Figure:
+def plot_graph_edge_features(model: nn.Module, q_extreme_limit: float = 0.05) -> Figure:
     """Plot trainable graph edge features.
 
     Parameters
@@ -766,8 +747,8 @@ def plot_graph_edge_features(model: torch.nn.Module, q_extreme_limit: float = 0.
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize)
 
     for row, ((src, dst), graph_mapper) in enumerate(trainable_modules.items()):
-        src_coords = sincos_to_latlon(getattr(model, f"latlons_{src}")).cpu().numpy()
-        dst_coords = sincos_to_latlon(getattr(model, f"latlons_{dst}")).cpu().numpy()
+        src_coords = model.node_attributes.get_coordinates(src).cpu().numpy()
+        dst_coords = model.node_attributes.get_coordinates(dst).cpu().numpy()
         edge_index = graph_mapper.edge_index_base.cpu().numpy()
         edge_features = graph_mapper.trainable.trainable.cpu().detach().numpy()
 
