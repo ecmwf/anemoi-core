@@ -1,13 +1,15 @@
-# (C) Copyright 2024 ECMWF.
+# (C) Copyright 2024 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-#
+
 
 import logging
+import os
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
@@ -23,6 +25,7 @@ from torch_geometric.typing import Size
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
 from anemoi.models.layers.attention import MultiHeadSelfAttention
@@ -31,6 +34,9 @@ from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 
 LOGGER = logging.getLogger(__name__)
+
+# Number of Mapper chunks used during inference (https://github.com/ecmwf/anemoi-models/pull/46)
+NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 
 
 class BaseBlock(nn.Module, ABC):
@@ -498,14 +504,48 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             ), "Only batch size of 1 is supported when model is sharded across GPUs"
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
-        out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
+
+        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE
+
+        if num_chunks > 1:
+            # split 1-hop edges into chunks, compute self.conv chunk-wise and aggregate
+            edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
+                num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
+            )
+            for i in range(num_chunks):
+                out1 = self.conv(
+                    query=query,
+                    key=key,
+                    value=value,
+                    edge_attr=edge_attr_list[i],
+                    edge_index=edge_index_list[i],
+                    size=size,
+                )
+                if i == 0:
+                    out = torch.zeros_like(out1, device=out1.device)
+                out = out + out1
+        else:
+            out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
+
         out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
-        out = self.projection(out + x_r)
+
+        # compute out = self.projection(out + x_r) in chunks:
+        out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)
 
         out = out + x_skip[1]
-        nodes_new_dst = self.node_dst_mlp(out) + out
 
-        nodes_new_src = self.node_src_mlp(x_skip[0]) + x_skip[0] if self.update_src_nodes else x_skip[0]
+        # compute nodes_new_dst = self.node_dst_mlp(out) + out in chunks:
+        nodes_new_dst = torch.cat(
+            [self.node_dst_mlp(chunk) + chunk for chunk in out.tensor_split(num_chunks, dim=0)], dim=0
+        )
+
+        if self.update_src_nodes:
+            # compute nodes_new_src = self.node_src_mlp(out) + out in chunks:
+            nodes_new_src = torch.cat(
+                [self.node_src_mlp(chunk) + chunk for chunk in x_skip[0].tensor_split(num_chunks, dim=0)], dim=0
+            )
+        else:
+            nodes_new_src = x_skip[0]
 
         nodes_new = (nodes_new_src, nodes_new_dst)
 

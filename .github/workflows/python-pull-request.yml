@@ -18,7 +18,7 @@ jobs:
   checks:
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.x"]
+        python-version: ["3.9", "3.10", "3.10", "3.11"]
     uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
     with:
       python-version: ${{ matrix.python-version }}

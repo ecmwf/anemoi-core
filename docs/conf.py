@@ -29,7 +29,7 @@ html_logo = "_static/logo.png"
 
 project = "Anemoi Models"
 
-author = "ECMWF"
+author = "Anemoi contributors"
 
 year = datetime.datetime.now().year
 if year == 2024:
@@ -37,7 +37,7 @@ if year == 2024:
 else:
     years = "2024-%s" % (year,)
 
-copyright = "%s, ECMWF" % (years,)
+copyright = "%s, Anemoi contributors" % (years,)
 
 try:
     from anemoi.models._version import __version__
@@ -99,6 +99,10 @@ intersphinx_mapping = {
     "anemoi-registry": (
         "https://anemoi-registry.readthedocs.io/en/latest/",
         ("../../anemoi-registry/docs/_build/html/objects.inv", None),
+    ),
+    "anemoi-transform": (
+        "https://anemoi-transform.readthedocs.io/en/latest/",
+        ("../../anemoi-transform/docs/_build/html/objects.inv", None),
     ),
 }
 

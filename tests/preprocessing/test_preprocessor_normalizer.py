@@ -1,11 +1,12 @@
-# (C) Copyright 2024 ECMWF.
+# (C) Copyright 2024 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-#
+
 
 import numpy as np
 import pytest
@@ -68,7 +69,7 @@ def remap_normalizer():
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
-    return InputNormalizer(config=config.data.normalizer, statistics=statistics, data_indices=data_indices)
+    return InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics)
 
 
 def test_normalizer_not_inplace(input_normalizer) -> None:

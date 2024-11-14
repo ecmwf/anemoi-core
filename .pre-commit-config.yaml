@@ -5,12 +5,12 @@ repos:
   - id: clear-notebooks-output
     name: clear-notebooks-output
     files: tools/.*\.ipynb$
-    stages: [commit]
+    stages: [pre-commit]
     language: python
     entry: jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace
     additional_dependencies: [jupyter]
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v4.6.0
+  rev: v5.0.0
   hooks:
   - id: check-yaml # Check YAML files for syntax errors only
     args: [--unsafe, --allow-multiple-documents]
@@ -40,16 +40,15 @@ repos:
     - --force-single-line-imports
     - --profile black
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.6.4
+  rev: v0.6.9
   hooks:
   - id: ruff
-    # Next line if for documenation cod snippets
-    exclude: '^[^_].*_\.py$'
     args:
     - --line-length=120
     - --fix
     - --exit-non-zero-on-fix
     - --preview
+    - --exclude=docs/**/*_.py
 - repo: https://github.com/sphinx-contrib/sphinx-lint
   rev: v1.0.0
   hooks:
@@ -60,17 +59,12 @@ repos:
   hooks:
   - id: rstfmt
     exclude: 'cli/.*' # Because we use argparse
-- repo: https://github.com/b8raoult/pre-commit-docconvert
-  rev: "0.1.5"
-  hooks:
-  - id: docconvert
-    args: ["numpy"]
 - repo: https://github.com/tox-dev/pyproject-fmt
-  rev: "2.2.3"
+  rev: "2.2.4"
   hooks:
   - id: pyproject-fmt
 -   repo: https://github.com/jshwi/docsig # Check docstrings against function sig
-    rev: v0.60.1
+    rev: v0.64.0
     hooks:
     -   id: docsig
         args:

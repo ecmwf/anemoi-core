@@ -2,6 +2,20 @@
  Layers
 ########
 
+***********************
+ Environment Variables
+***********************
+
+``ANEMOI_INFERENCE_NUM_CHUNKS``
+===============================
+
+This environment variable controls the number of chunks used in the
+`Mapper` during inference. Setting this variable allows the model to
+split large computations into a specified number of smaller chunks,
+reducing memory overhead. If not set, it falls back to the default value
+of, 1 i.e. no chunking. See pull request `#46
+<https://github.com/ecmwf/anemoi-models/pull/46>`_.
+
 *********
  Mappers
 *********
