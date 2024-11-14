@@ -29,7 +29,7 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
                 },
             },
             "training": {
-                "loss_scaling": {
+                "variable_loss_scaling": {
                     "default": 1,
                     "sfc": {
                         "z": 0.1,
@@ -128,12 +128,15 @@ expected_polynomial_scaling = torch.Tensor(
     ],
     indirect=["fake_data"],
 )
-def test_loss_scaling_vals(fake_data: tuple[DictConfig, IndexCollection], expected_scaling: torch.Tensor) -> None:
+def test_variable_loss_scaling_vals(
+    fake_data: tuple[DictConfig, IndexCollection],
+    expected_scaling: torch.Tensor,
+) -> None:
     config, data_indices = fake_data
 
-    loss_scaling = GraphForecaster.get_feature_weights(config, data_indices)
+    variable_loss_scaling = GraphForecaster.get_variable_scaling(config, data_indices)
 
-    assert torch.allclose(loss_scaling, expected_scaling)
+    assert torch.allclose(variable_loss_scaling, expected_scaling)
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])

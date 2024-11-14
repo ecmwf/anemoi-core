@@ -96,7 +96,7 @@ class GraphForecaster(pl.LightningModule):
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
-        variable_scaling = self.get_feature_weights(config, data_indices)
+        variable_scaling = self.get_variable_scaling(config, data_indices)
 
         _, self.val_metric_ranges = self.get_val_metric_ranges(config, data_indices)
 
@@ -254,13 +254,13 @@ class GraphForecaster(pl.LightningModule):
         return metric_ranges, metric_ranges_validation
 
     @staticmethod
-    def get_feature_weights(
+    def get_variable_scaling(
         config: DictConfig,
         data_indices: IndexCollection,
     ) -> torch.Tensor:
-        loss_scaling = (
+        variable_loss_scaling = (
             np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
-            * config.training.loss_scaling.default
+            * config.training.variable_loss_scaling.default
         )
         pressure_level = instantiate(config.training.pressure_level_scaler)
 
@@ -275,20 +275,22 @@ class GraphForecaster(pl.LightningModule):
             split = key.split("_")
             if len(split) > 1 and split[-1].isdigit():
                 # Apply pressure level scaling
-                if split[0] in config.training.loss_scaling.pl:
-                    loss_scaling[idx] = config.training.loss_scaling.pl[split[0]] * pressure_level.scaler(
+                if split[0] in config.training.variable_loss_scaling.pl:
+                    variable_loss_scaling[idx] = config.training.variable_loss_scaling.pl[
+                        split[0]
+                    ] * pressure_level.scaler(
                         int(split[-1]),
                     )
                 else:
                     LOGGER.debug("Parameter %s was not scaled.", key)
             else:
                 # Apply surface variable scaling
-                if key in config.training.loss_scaling.sfc:
-                    loss_scaling[idx] = config.training.loss_scaling.sfc[key]
+                if key in config.training.variable_loss_scaling.sfc:
+                    variable_loss_scaling[idx] = config.training.variable_loss_scaling.sfc[key]
                 else:
                     LOGGER.debug("Parameter %s was not scaled.", key)
 
-        return torch.from_numpy(loss_scaling)
+        return torch.from_numpy(variable_loss_scaling)
 
     def set_model_comm_group(self, model_comm_group: ProcessGroup) -> None:
         LOGGER.debug("set_model_comm_group: %s", model_comm_group)

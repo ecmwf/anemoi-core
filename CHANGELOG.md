@@ -11,6 +11,7 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.2.2...HEAD)
 
 ### Fixed
+- Rename loss_scaling to variable_loss_scaling [#138](https://github.com/ecmwf/anemoi-training/pull/138)
 - Refactored callbacks. [#60](https://github.com/ecmwf/anemoi-training/pulls/60)
     - Updated docs [#115](https://github.com/ecmwf/anemoi-training/pull/115)
     - Fix enabling LearningRateMonitor [#119](https://github.com/ecmwf/anemoi-training/pull/119)

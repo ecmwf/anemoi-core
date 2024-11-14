@@ -46,7 +46,8 @@ training_loss:
   # loss class to initialise
   _target_: anemoi.training.losses.mse.WeightedMSELoss
   # Scalars to include in loss calculation
-  # Available scalars include, 'variable'
+  # Available scalars include:
+  # - 'variable': See `variable_loss_scaling` for more information
   scalars: ['variable']
   ignore_nans: False
 
@@ -85,7 +86,9 @@ lr:
 # in order to keep a constant global_lr
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
 
-loss_scaling:
+# Variable loss scaling
+# 'variable' must be included in `scalars` in the losses for this to be applied.
+variable_loss_scaling:
   default: 1
   pl:
     q: 0.6 #1

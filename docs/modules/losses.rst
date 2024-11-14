@@ -66,7 +66,7 @@ define whether to include them in the loss function by setting
 Currently, the following scalars are available for use:
 
 -  ``variable``: Scale by the feature/variable weights as defined in the
-   config ``config.training.loss_scaling``.
+   config ``config.training.variable_loss_scaling``.
 
 ********************
  Validation Metrics
