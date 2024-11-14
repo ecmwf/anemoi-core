@@ -48,6 +48,7 @@ dependencies = [
   "netcdf4",
   "networkx>=3.1",
   "plotly>=5.19",
+  "scikit-learn",
   "torch>=2.2",
   "torch-geometric>=2.3.1,<2.5",
   "trimesh>=4.1",
