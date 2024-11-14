@@ -16,6 +16,7 @@ from typing import Callable
 import pytorch_lightning as pl
 from anemoi.datasets.data import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.utils.dates import frequency_to_seconds
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -41,23 +42,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         super().__init__()
 
         self.config = config
-
-        # Determine the step size relative to the data frequency
-        frequency = self.config.data.frequency
-        timestep = self.config.data.timestep
-        assert (
-            isinstance(frequency, str) and isinstance(timestep, str) and frequency[-1] == "h" and timestep[-1] == "h"
-        ), f"Error in format of timestep, {timestep}, or data frequency, {frequency}"
-        assert (
-            int(timestep[:-1]) % int(frequency[:-1]) == 0
-        ), f"Timestep isn't a multiple of data frequency, {timestep}, or data frequency, {frequency}"
-        self.timeincrement = int(timestep[:-1]) // int(frequency[:-1])
-        LOGGER.info(
-            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
-            self.timeincrement,
-            frequency,
-            timestep,
-        )
 
         self.global_rank = int(os.environ.get("SLURM_PROCID", "0"))  # global rank
         self.model_comm_group_id = (
@@ -120,6 +104,34 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return IndexCollection(self.config, self.ds_train.name_to_index)
 
     @cached_property
+    def timeincrement(self) -> int:
+        """Determine the step size relative to the data frequency."""
+        try:
+            frequency = frequency_to_seconds(self.config.data.frequency)
+        except ValueError as e:
+            msg = f"Error in data frequency, {self.config.data.frequency}"
+            raise ValueError(msg) from e
+
+        try:
+            timestep = frequency_to_seconds(self.config.data.timestep)
+        except ValueError as e:
+            msg = f"Error in timestep, {self.config.data.timestep}"
+            raise ValueError(msg) from e
+
+        assert timestep % frequency == 0, (
+            f"Timestep ({self.config.data.timestep} == {timestep}) isn't a "
+            f"multiple of data frequency ({self.config.data.frequency} == {frequency})."
+        )
+
+        LOGGER.info(
+            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
+            timestep // frequency,
+            frequency,
+            timestep,
+        )
+        return timestep // frequency
+
+    @cached_property
     def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
             open_dataset(OmegaConf.to_container(self.config.dataloader.training, resolve=True)),
@@ -129,10 +141,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_valid(self) -> NativeGridDataset:
         r = self.rollout
-        if self.config.diagnostics.eval.enabled:
-            r = max(r, self.config.diagnostics.eval.rollout)
-        if self.config.diagnostics.plot.get("longrollout") and self.config.diagnostics.plot.longrollout.enabled:
-            r = max(r, max(self.config.diagnostics.plot.longrollout.rollout))
+        r = max(r, self.config.dataloader.get("validation_rollout", 1))
+
         assert self.config.dataloader.training.end < self.config.dataloader.validation.start, (
             f"Training end date {self.config.dataloader.training.end} is not before"
             f"validation start date {self.config.dataloader.validation.start}"

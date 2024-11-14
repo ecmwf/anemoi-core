@@ -43,6 +43,7 @@ This package provides the *Anemoi* training functionality.
    user-guide/training
    user-guide/models
    user-guide/tracking
+   user-guide/benchmarking
    user-guide/distributed
    user-guide/debugging
 

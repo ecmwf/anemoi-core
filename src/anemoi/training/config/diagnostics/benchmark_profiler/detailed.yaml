@@ -1,0 +1,20 @@
+# Use anemoi-profile to profile the training process
+memory:
+  enabled: True
+  steps: 5 # wait warmup steps and then do steps (too many steps would lead to a big file)
+  warmup: 2
+  extra_plots: False
+  trace_rank0_only: False #set to true and it will profile rank 0 only. Reads SLURM_PROC_ID so won't work when not running via Slurm
+time:
+  enabled: True
+  verbose: False #If true, output every action the profiler caputres, otherwise output a subset defined in PROFILER_ACTIONS at the top of aifs/diagnostics/profiler.py
+speed:
+  enabled: True
+system:
+  enabled: True
+model_summary:
+  enabled: True
+snapshot:
+  enabled: True
+  steps: 4 # wait warmup steps and then do steps
+  warmup: 0

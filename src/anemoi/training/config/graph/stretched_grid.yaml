@@ -1,0 +1,63 @@
+# Stretched grid graph config intended to be used with a cutout dataset.
+# The stretched mesh resolution used here is intended for o96 global resolution with 10km
+# limited area resolution.
+overwrite: False
+
+data: "data"
+hidden: "hidden"
+
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      dataset: ${dataloader.training.dataset}
+    attributes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.AreaWeights
+        norm: unit-max
+      cutout:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.StretchedTriNodes
+      lam_resolution: 8
+      global_resolution: 5
+      reference_node_name: ${graph.data}
+      mask_attr_name: cutout
+      margin_radius_km: 11
+    attributes:
+      area_weights:
+        _target_: anemoi.graphs.nodes.attributes.AreaWeights
+        norm: unit-max
+
+edges:
+# Encoder
+- source_name: ${graph.data}
+  target_name: ${graph.hidden}
+  edge_builder:
+    _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 12
+  attributes: ${graph.attributes.edges}
+# Processor
+- source_name: ${graph.hidden}
+  target_name: ${graph.hidden}
+  edge_builder:
+    _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+  attributes: ${graph.attributes.edges}
+# Decoder
+- source_name: ${graph.hidden}
+  target_name: ${graph.data}
+  edge_builder:
+    _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+  attributes: ${graph.attributes.edges}
+
+attributes:
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-max
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std

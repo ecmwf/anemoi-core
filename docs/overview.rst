@@ -91,6 +91,18 @@ and resolve issues during the training process, including:
 -  Debug configurations for quick error identification
 -  Guidance on isolating and addressing common problems
 
+8. Benchmarking and HPC Profiling
+=================================
+
+Anemoi Training offers tools and configurations to support benchmarking
+and High-Performance Computing (HPC) profiling, allowing users to
+optimize training performance. This includes:
+
+-  Benchmarking configurations for evaluating training efficiency across
+   different hardware setups.
+-  Profiling tools for monitoring resource utilization (CPU, GPU,
+   memory) and identifying performance bottlenecks.
+
 **************************
  Components and Structure
 **************************

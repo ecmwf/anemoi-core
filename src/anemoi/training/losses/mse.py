@@ -13,80 +13,68 @@ from __future__ import annotations
 import logging
 
 import torch
-from torch import nn
+
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELoss(nn.Module):
-    """Latitude-weighted MSE loss."""
+class WeightedMSELoss(BaseWeightedLoss):
+    """Node-weighted MSE loss."""
+
+    name = "wmse"
 
     def __init__(
         self,
         node_weights: torch.Tensor,
-        data_variances: torch.Tensor | None = None,
-        ignore_nans: bool | None = False,
+        ignore_nans: bool = False,
+        **kwargs,
     ) -> None:
-        """Latitude- and (inverse-)variance-weighted MSE Loss.
+        """Node- and feature weighted MSE Loss.
 
         Parameters
         ----------
         node_weights : torch.Tensor of shape (N, )
             Weight of each node in the loss function
-        data_variances : Optional[torch.Tensor], optional
-            precomputed, per-variable stepwise variance estimate, by default None
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
 
         """
-        super().__init__()
-
-        self.avg_function = torch.nanmean if ignore_nans else torch.mean
-        self.sum_function = torch.nansum if ignore_nans else torch.sum
-
-        self.register_buffer("weights", node_weights, persistent=True)
-        if data_variances is not None:
-            self.register_buffer("ivar", data_variances, persistent=True)
+        super().__init__(
+            node_weights=node_weights,
+            ignore_nans=ignore_nans,
+            **kwargs,
+        )
 
     def forward(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
         squash: bool = True,
+        scalar_indices: tuple[int, ...] | None = None,
+        without_scalars: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
         """Calculates the lat-weighted MSE loss.
 
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
+        scalar_indices: tuple[int,...], optional
+            Indices to subset the calculated scalar with, by default None
+        without_scalars: list[str] | list[int] | None, optional
+            list of scalars to exclude from scaling. Can be list of names or dimensions to exclude.
+            By default None
 
         Returns
         -------
         torch.Tensor
             Weighted MSE loss
-
         """
         out = torch.square(pred - target)
-
-        # Use variances if available
-        if hasattr(self, "ivar"):
-            out *= self.ivar
-
-        # Squash by last dimension
-        if squash:
-            out = self.avg_function(out, dim=-1)
-            # Weight by area
-            out *= self.weights.expand_as(out)
-            out /= self.sum_function(self.weights.expand_as(out))
-            return self.sum_function(out)
-
-        # Weight by area
-        out *= self.weights[..., None].expand_as(out)
-        # keep last dimension (variables) when summing weights
-        out /= self.sum_function(self.weights[..., None].expand_as(out), axis=(0, 1, 2))
-        return self.sum_function(out, axis=(0, 1, 2))
+        out = self.scale(out, scalar_indices, without_scalars=without_scalars)
+        return self.scale_by_node_weights(out, squash)

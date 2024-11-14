@@ -30,6 +30,7 @@ from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.training.diagnostics.mlflow.utils import health_check
 from anemoi.training.utils.jsonify import map_config_to_primitives
 
@@ -432,10 +433,59 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def log_system_metrics(self) -> None:
         """Log system metrics (CPU, GPU, etc)."""
         import mlflow
+        import psutil
+        from mlflow.system_metrics.metrics.base_metrics_monitor import BaseMetricsMonitor
+        from mlflow.system_metrics.metrics.disk_monitor import DiskMonitor
+        from mlflow.system_metrics.metrics.gpu_monitor import GPUMonitor
+        from mlflow.system_metrics.metrics.network_monitor import NetworkMonitor
         from mlflow.system_metrics.system_metrics_monitor import SystemMetricsMonitor
 
+        class CustomCPUMonitor(BaseMetricsMonitor):
+            """Class for monitoring CPU stats.
+
+            Extends default CPUMonitor, to also measure total \
+                    memory and a different formula for calculating used memory.
+
+            """
+
+            def collect_metrics(self) -> None:
+                # Get CPU metrics.
+                cpu_percent = psutil.cpu_percent()
+                self._metrics["cpu_utilization_percentage"].append(cpu_percent)
+
+                system_memory = psutil.virtual_memory()
+                # Change the formula for measuring CPU memory usage
+                # By default Mlflow uses psutil.virtual_memory().used
+                # Tests have shown that "used" underreports memory usage by as much as a factor of 2,
+                #   "used" also misses increased memory usage from using a higher prefetch factor
+                self._metrics["system_memory_usage_megabytes"].append(
+                    (system_memory.total - system_memory.available) / 1e6,
+                )
+                self._metrics["system_memory_usage_percentage"].append(system_memory.percent)
+
+                # QOL: report the total system memory in raw numbers
+                self._metrics["system_memory_total_megabytes"].append(system_memory.total / 1e6)
+
+            def aggregate_metrics(self) -> dict[str, int]:
+                return {k: round(sum(v) / len(v), 1) for k, v in self._metrics.items()}
+
+        class CustomSystemMetricsMonitor(SystemMetricsMonitor):
+            def __init__(self, run_id: str, resume_logging: bool = False):
+                super().__init__(run_id, resume_logging=resume_logging)
+
+                # Replace the CPUMonitor with custom implementation
+                self.monitors = [CustomCPUMonitor(), DiskMonitor(), NetworkMonitor()]
+                try:
+                    gpu_monitor = GPUMonitor()
+                    self.monitors.append(gpu_monitor)
+                except ImportError:
+                    LOGGER.warning(
+                        "`pynvml` is not installed, to log GPU metrics please run `pip install pynvml` \
+                            to install it",
+                    )
+
         mlflow.enable_system_metrics_logging()
-        system_monitor = SystemMetricsMonitor(
+        system_monitor = CustomSystemMetricsMonitor(
             self.run_id,
             resume_logging=self.run_id is not None,
         )
@@ -483,8 +533,39 @@ class AnemoiMLflowLogger(MLFlowLogger):
         return params
 
     @rank_zero_only
-    def log_hyperparams(self, params: dict[str, Any] | Namespace) -> None:
-        """Overwrite the log_hyperparams method to flatten config params using '.'."""
+    def log_hyperparams_as_artifact(self, params: dict[str, Any] | Namespace) -> None:
+        """Log hyperparameters as an artifact."""
+        import json
+        import tempfile
+        from json import JSONEncoder
+
+        class StrEncoder(JSONEncoder):
+            def default(self, o: Any) -> str:
+                return str(o)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            with Path.open(path, "w") as f:
+                json.dump(params, f, cls=StrEncoder)
+            self.experiment.log_artifact(run_id=self.run_id, local_path=path)
+
+    @rank_zero_only
+    def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:
+        """Overwrite the log_hyperparams method.
+
+        - flatten config params using '.'.
+        - expand keys within params to avoid truncation.
+        - log hyperparameters as an artifact.
+
+        Parameters
+        ----------
+        params : dict[str, Any] | Namespace
+            params to log
+        expand_keys : list[str] | None, optional
+            keys to expand within params. Any key being expanded will
+            have lists converted according to `expand_iterables`,
+            by default None.
+        """
         if self._flag_log_hparams:
             params = _convert_params(params)
 
@@ -492,17 +573,34 @@ class AnemoiMLflowLogger(MLFlowLogger):
             if config := params.get("config"):
                 params["config"] = map_config_to_primitives(config)
 
-            params = _flatten_dict(params, delimiter=".")  # Flatten dict with '.' to not break API queries
-            params = self._clean_params(params)
-
             import mlflow
             from mlflow.entities import Param
 
-            # Truncate parameter values.
             truncation_length = 250
+
             if Version(mlflow.VERSION) >= Version("1.28.0"):
                 truncation_length = 500
-            params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in params.items()]
+
+            self.log_hyperparams_as_artifact(params)
+
+            expanded_params = {}
+            params = params.copy()
+
+            for key in expand_keys or []:
+                if key in params:
+                    expanded_params.update(
+                        expand_iterables(params.pop(key), size_threshold=None, delimiter="."),
+                    )
+            expanded_params.update(params)
+
+            expanded_params = _flatten_dict(
+                expanded_params,
+                delimiter=".",
+            )  # Flatten dict with '.' to not break API queries
+            expanded_params = self._clean_params(expanded_params)
+
+            # Truncate parameter values.
+            params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
 
             for idx in range(0, len(params_list), 100):
                 self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])

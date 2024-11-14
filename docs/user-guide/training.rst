@@ -172,8 +172,8 @@ by setting ``config.data.normaliser``, such that:
 
 It is possible to change the weighting given to each of the variables in
 the loss function by changing
-``config.training.loss_scaling.pl.<pressure level variable>`` and
-``config.training.loss_scaling.sfc.<surface variable>``.
+``config.training.variable_loss_scaling.pl.<pressure level variable>``
+and ``config.training.variable_loss_scaling.sfc.<surface variable>``.
 
 It is also possible to change the scaling given to the pressure levels
 using ``config.training.pressure_level_scaler``. For almost all

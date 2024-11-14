@@ -1,7 +1,7 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
-- diagnostics: eval_rollout
+- diagnostics: evaluation
 - hardware: example
 - graph: multi_scale
 - model: gnn
@@ -18,7 +18,7 @@ defaults:
 
 diagnostics:
   plot:
-    enabled: False
+    callbacks: []
 hardware:
   files:
     graph: ???
