@@ -7,13 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# ruff: noqa: ANN001
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
-import sys
+import threading
 import time
 import traceback
 from abc import ABC
@@ -23,8 +23,6 @@ from contextlib import nullcontext
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Any
-from typing import Callable
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -43,31 +41,12 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 
 if TYPE_CHECKING:
+    from typing import Any
+
     import pytorch_lightning as pl
     from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
-
-
-class ParallelExecutor(ThreadPoolExecutor):
-    """Wraps parallel execution and provides accurate information about errors.
-
-    Extends ThreadPoolExecutor to preserve the original traceback and line number.
-
-    Reference: https://stackoverflow.com/questions/19309514/getting-original-line-
-    number-for-exception-in-concurrent-futures/24457608#24457608
-    """
-
-    def submit(self, fn: Any, *args, **kwargs) -> Callable:
-        """Submits the wrapped function instead of `fn`."""
-        return super().submit(self._function_wrapper, fn, *args, **kwargs)
-
-    def _function_wrapper(self, fn: Any, *args: list, **kwargs: dict) -> Callable:
-        """Wraps `fn` in order to preserve the traceback of any kind of."""
-        try:
-            return fn(*args, **kwargs)
-        except Exception as exc:
-            raise sys.exc_info()[0](traceback.format_exc()) from exc
 
 
 class BasePlotCallback(Callback, ABC):
@@ -93,11 +72,21 @@ class BasePlotCallback(Callback, ABC):
 
         self.plot = self._plot
         self._executor = None
+        self._error: BaseException = None
+        self.datashader_plotting = config.diagnostics.plot.datashader
 
         if self.config.diagnostics.plot.asynchronous:
-            self._executor = ParallelExecutor(max_workers=1)
-            self._error: BaseException | None = None
+            LOGGER.info("Setting up asynchronous plotting ...")
             self.plot = self._async_plot
+            self._executor = ThreadPoolExecutor(max_workers=1)
+            self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
+            self.loop_thread.start()
+
+    def start_event_loop(self) -> None:
+        """Start the event loop in a separate thread."""
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
 
     @rank_zero_only
     def _output_figure(
@@ -113,27 +102,48 @@ class BasePlotCallback(Callback, ABC):
             save_path = Path(
                 self.save_basedir,
                 "plots",
-                f"{tag}_epoch{epoch:03d}.png",
+                f"{tag}_epoch{epoch:03d}.jpg",
             )
 
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(save_path, dpi=100, bbox_inches="tight")
+            fig.canvas.draw()
+            image_array = np.array(fig.canvas.renderer.buffer_rgba())
+            plt.imsave(save_path, image_array, dpi=100)
             if self.config.diagnostics.log.wandb.enabled:
                 import wandb
 
                 logger.experiment.log({exp_log_tag: wandb.Image(fig)})
-
             if self.config.diagnostics.log.mlflow.enabled:
                 run_id = logger.run_id
                 logger.experiment.log_artifact(run_id, str(save_path))
 
         plt.close(fig)  # cleanup
 
+    @rank_zero_only
+    def _plot_with_error_catching(self, trainer: pl.Trainer, args: Any, kwargs: Any) -> None:
+        """To execute the plot function but ensuring we catch any errors."""
+        try:
+            self._plot(trainer, *args, **kwargs)
+        except BaseException:
+            import os
+
+            LOGGER.exception(traceback.format_exc())
+            os._exit(1)  # to force exit when sanity val steps are used
+
     def teardown(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
-        """Method is called to close the threads."""
+        """Teardown the callback."""
         del trainer, pl_module, stage  # unused
+        LOGGER.info("Teardown of the Plot Callback ...")
+
         if self._executor is not None:
-            self._executor.shutdown(wait=True)
+            LOGGER.info("waiting and shutting down the executor ...")
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.loop_thread.join()
+            # Step 3: Close the asyncio event loop
+            self.loop_thread._stop()
+            self.loop_thread._delete()
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
@@ -147,31 +157,39 @@ class BasePlotCallback(Callback, ABC):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """Plotting function to be implemented by subclasses."""
+
+    # Async function to run the plot function in the background thread
+    async def submit_plot(self, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
+        """Async function or coroutine to schedule the plot function."""
+        loop = asyncio.get_running_loop()
+        # run_in_executor doesn't support keyword arguments,
+        await loop.run_in_executor(
+            self._executor,
+            self._plot_with_error_catching,
+            trainer,
+            args,
+            kwargs,
+        )  # because loop.run_in_executor expects positional arguments, not keyword arguments
 
     @rank_zero_only
     def _async_plot(
         self,
         trainer: pl.Trainer,
-        *args: list,
-        **kwargs: dict,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
-        """To execute the plot function but ensuring we catch any errors."""
-        future = self._executor.submit(
-            self._plot,
-            trainer,
-            *args,
-            **kwargs,
-        )
-        # otherwise the error won't be thrown till the validation epoch is finished
-        try:
-            future.result()
-        except Exception:
-            LOGGER.exception("Critical error occurred in asynchronous plots.")
-            sys.exit(1)
+        """Run the plot function asynchronously.
+
+        This is the function that is called by the callback. It schedules the plot
+        function to run in the background thread. Since we have an event loop running in
+        the background thread, we need to schedule the plot function to run in that
+        loop.
+        """
+        asyncio.run_coroutine_threadsafe(self.submit_plot(trainer, *args, **kwargs), self.loop)
 
 
 class BasePerBatchPlotCallback(BasePlotCallback):
@@ -192,26 +210,12 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(config)
         self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
 
-    @abstractmethod
-    @rank_zero_only
-    def _plot(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
-        batch_idx: int,
-        epoch: int,
-        **kwargs,
-    ) -> None:
-        """Plotting function to be implemented by subclasses."""
-
     @rank_zero_only
     def on_validation_batch_end(
         self,
-        trainer,
-        pl_module,
-        output,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        output: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
         **kwargs,
@@ -310,12 +314,12 @@ class LongRolloutPlots(BasePlotCallback):
     @rank_zero_only
     def _plot(
         self,
-        trainer,
+        trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         output: list[torch.Tensor],
         batch: torch.Tensor,
-        batch_idx,
-        epoch,
+        batch_idx: int,
+        epoch: int,
     ) -> None:
         _ = output
 
@@ -406,9 +410,9 @@ class LongRolloutPlots(BasePlotCallback):
     @rank_zero_only
     def on_validation_batch_end(
         self,
-        trainer,
-        pl_module,
-        output,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        output: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
     ) -> None:
@@ -454,7 +458,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
 
-        fig = plot_graph_node_features(model)
+        fig = plot_graph_node_features(model, datashader=self.datashader_plotting)
 
         self._output_figure(
             trainer.logger,
@@ -750,6 +754,7 @@ class PlotSample(BasePerBatchPlotCallback):
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
+                datashader=self.datashader_plotting,
                 precip_and_related_fields=self.precip_and_related_fields,
             )
 
@@ -839,7 +844,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list,
+        outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
@@ -921,7 +926,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list,
+        outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,

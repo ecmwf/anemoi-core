@@ -51,12 +51,32 @@ parameters to plot, as well as the plotting frequency, and
 asynchronosity.
 
 Setting ``config.diagnostics.plot.asynchronous``, means that the model
-training doesn't stop whilst the callbacks are being evaluated)
+training doesn't stop whilst the callbacks are being evaluated. This is
+useful for large models where the plotting can take a long time. The
+plotting module uses asynchronous callbacks via `asyncio` and
+`concurrent.futures.ThreadPoolExecutor` to handle plotting tasks without
+blocking the main application. A dedicated event loop runs in a separate
+background thread, allowing plotting tasks to be offloaded to worker
+threads. This setup keeps the main thread responsive, handling
+plot-related tasks asynchronously and efficiently in the background.
+
+There is an additional flag in the plotting callbacks to control the
+rendering method for geospatial plots, offering a trade-off between
+performance and detail. When `datashader` is set to True, Datashader is
+used for rendering, which accelerates plotting through efficient
+hexbining, particularly useful for large datasets. This approach can
+produce smoother-looking plots due to the aggregation of data points. If
+`datashader` is set to False, matplotlib.scatter is used, which provides
+sharper and more detailed visuals but may be slower for large datasets.
+
+**Note** - this asynchronous behaviour is only available for the
+plotting callbacks.
 
 .. code:: yaml
 
    plot:
       asynchronous: True # Whether to plot asynchronously
+      datashader: True # Whether to use datashader for plotting (faster)
       frequency: # Frequency of the plotting
       batch: 750
       epoch: 5

@@ -32,7 +32,7 @@ class EquirectangularProjection:
     def __call__(self, lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         lon_rad = np.radians(lon)
         lat_rad = np.radians(lat)
-        x = [v - 2 * np.pi if v > np.pi else v for v in lon_rad]
+        x = np.array([v - 2 * np.pi if v > np.pi else v for v in lon_rad], dtype=lon_rad.dtype)
         y = lat_rad
         return x, y
 
