@@ -43,8 +43,13 @@ def get_mlflow_logger(config: DictConfig) -> None:
     forked = config.training.fork_run_id is not None
 
     save_dir = config.hardware.paths.logs.mlflow
-    tracking_uri = config.diagnostics.log.mlflow.tracking_uri
+
     offline = config.diagnostics.log.mlflow.offline
+    if not offline:
+        tracking_uri = config.diagnostics.log.mlflow.tracking_uri
+        LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
+    else:
+        tracking_uri = None
 
     if (resumed or forked) and (offline):  # when resuming or forking offline -
         # tracking_uri = ${hardware.paths.logs.mlflow}
@@ -64,7 +69,6 @@ def get_mlflow_logger(config: DictConfig) -> None:
         )
         log_hyperparams = False
 
-    LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
     logger = AnemoiMLflowLogger(
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
         project_name=config.diagnostics.log.mlflow.project_name,
