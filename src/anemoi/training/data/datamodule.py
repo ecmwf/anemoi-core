@@ -140,8 +140,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def ds_valid(self) -> NativeGridDataset:
-        r = self.rollout
-        r = max(r, self.config.dataloader.get("validation_rollout", 1))
+        r = max(self.rollout, self.config.dataloader.get("validation_rollout", 1))
 
         assert self.config.dataloader.training.end < self.config.dataloader.validation.start, (
             f"Training end date {self.config.dataloader.training.end} is not before"
