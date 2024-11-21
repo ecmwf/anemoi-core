@@ -514,7 +514,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             )
             out=torch.zeros((x[1].shape[0], self.num_heads, self.out_channels_conv), device=x[1].device)
             for i in range(num_chunks):
-                out = self.conv(
+                out += self.conv(
                     query=query,
                     key=key,
                     value=value,
