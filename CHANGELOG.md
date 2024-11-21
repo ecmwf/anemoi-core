@@ -28,6 +28,7 @@ Keep it human-readable, your future self will thank you!
 - Added `CutOutMask` class to create a mask for a cutout. (#68)
 - Added `MissingZarrVariable` and `NotMissingZarrVariable` classes to create a mask for missing zarr variables. (#68)
 - feat: Add CONTRIBUTORS.md file. (#72)
+- Fixed issue when computing area weights with scipy.Voronoi. (#79)
 
 ### Changed
 
