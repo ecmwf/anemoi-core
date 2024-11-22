@@ -1,10 +1,8 @@
 nodes:
   data:
-    node_builder:
-      _target_: anemoi.graphs.nodes.nodes.ZarrDatasetNodeBuilder
-      dataset: /path/to/dataset.zarr
+    node_builder: ...
     attributes:
       weights:
-        _target_: anemoi.graphs.nodes.weights.Area
-        norm: unit-max
+        _target_: anemoi.graphs.nodes.attributes.AreaWeights # options: AreaWeights, UniformWeights
+        norm: unit-max # options: unit-max, unit-range, unit-std
   hidden: ...

@@ -6,6 +6,6 @@
 
 .. automodule:: anemoi.graphs.nodes.attributes
    :members:
-   :exclude-members: BaseWeights
+   :exclude-members: BaseWeights,BooleanBaseNodeAttribute,BooleanOperation
    :no-undoc-members:
    :show-inheritance:

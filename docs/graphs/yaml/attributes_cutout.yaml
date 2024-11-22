@@ -1,0 +1,10 @@
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      dataset:
+        cutout: ...
+    attributes:
+      cutout_mask:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+  hidden: ...

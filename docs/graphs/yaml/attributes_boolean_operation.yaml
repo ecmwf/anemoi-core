@@ -1,0 +1,14 @@
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      # ...
+    attributes:
+      mask:
+        _target_: anemoi.graphs.nodes.attributes.BooleanAndMask
+        masks:
+        - _target_: anemoi.graphs.nodes.attributes.NonmissingZarrVariable
+          variable: var1
+        - _target_: anemoi.graphs.nodes.attributes.NonmissingZarrVariable
+          variable: var2
+  hidden: ...

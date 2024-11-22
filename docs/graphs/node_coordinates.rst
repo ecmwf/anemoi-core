@@ -24,6 +24,7 @@ a file:
 
    node_coordinates/zarr_dataset
    node_coordinates/npz_file
+   node_coordinates/icon_mesh
 
 or based on other algorithms. A commonn approach is to use an
 icosahedron to project the earth's surface, and refine it iteratively to

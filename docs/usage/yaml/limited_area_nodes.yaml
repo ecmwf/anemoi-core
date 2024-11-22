@@ -1,0 +1,10 @@
+nodes:
+  data: ...
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes
+      resolution: 5
+      reference_node_name: data
+      mask_attr_name: cutout_mask
+
+edges: ...

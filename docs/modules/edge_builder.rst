@@ -6,6 +6,6 @@
 
 .. automodule:: anemoi.graphs.edges.builder
    :members:
-   :exclude-members: BaseEdgeBuilder
+   :exclude-members: BaseEdgeBuilder,NodeMaskingMixin
    :no-undoc-members:
    :show-inheritance:

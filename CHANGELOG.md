@@ -36,6 +36,8 @@ Keep it human-readable, your future self will thank you!
 - feat: Add CONTRIBUTORS.md file. (#72)
 - Fixed issue when computing area weights with scipy.Voronoi. (#79)
 
+- Create package documentation.
+
 ### Changed
 
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)

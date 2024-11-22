@@ -47,7 +47,6 @@ following YAML example:
        node_builder:
          _target_: anemoi.graphs.nodes.ICONCellGridNodes
          icon_mesh: "icon_mesh"
-       attributes: ${graph.attributes.nodes}
      # Hidden nodes
      hidden:
        node_builder:
@@ -56,9 +55,8 @@ following YAML example:
 
    edges:
      # Processor configuration
-     - source_name: ${graph.hidden}
-       target_name: ${graph.hidden}
-       edge_builder:
-         _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
+     - source_name: "hidden"
+       target_name: "hidden"
+       edge_builders:
+       - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
          icon_mesh: "icon_mesh"
-       attributes: ${graph.attributes.edges}
