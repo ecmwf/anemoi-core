@@ -171,15 +171,13 @@ def plot_power_spectrum(
 
     pc_lon = np.array(pc_lon)
     pc_lat = np.array(pc_lat)
-    # Calculate delta_lon and delta_lat on the projected grid
-    delta_lon = abs(np.diff(pc_lon))
-    non_zero_delta_lon = delta_lon[delta_lon != 0]
+    # Calculate delta_lat on the projected grid
     delta_lat = abs(np.diff(pc_lat))
     non_zero_delta_lat = delta_lat[delta_lat != 0]
 
     # Define a regular grid for interpolation
-    n_pix_lon = int(np.floor(abs(pc_lon.max() - pc_lon.min()) / abs(np.min(non_zero_delta_lon))))  # around 400 for O96
-    n_pix_lat = int(np.floor(abs(pc_lat.max() - pc_lat.min()) / abs(np.min(non_zero_delta_lat))))  # around 192 for O96
+    n_pix_lat = int(np.floor(abs(pc_lat.max() - pc_lat.min()) / abs(np.min(non_zero_delta_lat))))
+    n_pix_lon = (n_pix_lat - 1) * 2 + 1  # 2*lmax + 1
     regular_pc_lon = np.linspace(pc_lon.min(), pc_lon.max(), n_pix_lon)
     regular_pc_lat = np.linspace(pc_lat.min(), pc_lat.max(), n_pix_lat)
     grid_pc_lon, grid_pc_lat = np.meshgrid(regular_pc_lon, regular_pc_lat)
