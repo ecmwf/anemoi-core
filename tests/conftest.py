@@ -100,10 +100,9 @@ def config_file(tmp_path) -> tuple[str, str]:
             {
                 "source_name": "test_nodes",
                 "target_name": "test_nodes",
-                "edge_builder": {
-                    "_target_": "anemoi.graphs.edges.KNNEdges",
-                    "num_nearest_neighbours": 3,
-                },
+                "edge_builders": [
+                    {"_target_": "anemoi.graphs.edges.KNNEdges", "num_nearest_neighbours": 3},
+                ],
                 "attributes": {
                     "dist_norm": {"_target_": "anemoi.graphs.edges.attributes.EdgeLength"},
                     "edge_dirs": {"_target_": "anemoi.graphs.edges.attributes.EdgeDirection"},
