@@ -15,6 +15,8 @@ Fixed bug in power spectra plotting for the n320 resolution.
 
 ### Added
 
+- Add reader groups to reduce CPU memory usage and increase dataloader throughput [#76](https://github.com/ecmwf/anemoi-training/pull/76)
+
 ### Changed
 ## [0.3.0 - Loss & Callback Refactors](https://github.com/ecmwf/anemoi-training/compare/0.2.2...0.3.0) - 2024-11-14
 

@@ -1,6 +1,17 @@
 prefetch_factor: 2
 pin_memory: True
 
+# ============
+# read_group_size:
+#   Form subgroups of model comm groups that read data together.
+#   Each reader in the group only reads 1/read_group_size of the data
+#   which is then all-gathered between the group.
+#   This can reduce CPU memory usage as well as increase dataloader throughput.
+#   The number of GPUs per model must be divisible by read_group_size.
+#   To disable, set to 1.
+# ============
+read_group_size: ${hardware.num_gpus_per_model}
+
 num_workers:
   training: 8
   validation: 8

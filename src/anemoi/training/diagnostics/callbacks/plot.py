@@ -241,7 +241,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(config)
         self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
 
-    @rank_zero_only
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -251,7 +250,16 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         batch_idx: int,
         **kwargs,
     ) -> None:
+        if (
+            self.config.diagnostics.plot.asynchronous
+            and self.config.dataloader.read_group_size > 1
+            and pl_module.local_rank == 0
+        ):
+            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
+
         if batch_idx % self.every_n_batches == 0:
+            batch = pl_module.allgather_batch(batch)
+
             self.plot(
                 trainer,
                 pl_module,
@@ -383,7 +391,6 @@ class LongRolloutPlots(BasePlotCallback):
             every_n_epochs,
         )
 
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -480,6 +487,7 @@ class LongRolloutPlots(BasePlotCallback):
 
         LOGGER.info("Time taken to plot/animate samples for longer rollout: %d seconds", int(time.time() - start_time))
 
+    @rank_zero_only
     def _plot_rollout_step(
         self,
         pl_module: pl.LightningModule,
@@ -539,6 +547,7 @@ class LongRolloutPlots(BasePlotCallback):
         vmax[:] = np.maximum(vmax, np.nanmax(data_over_time[-1], axis=1))
         return data_over_time, vmin, vmax
 
+    @rank_zero_only
     def _generate_video_rollout(
         self,
         data_0: np.ndarray,
@@ -595,7 +604,6 @@ class LongRolloutPlots(BasePlotCallback):
                 tag=f"gnn_pred_val_animation_{variable_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
             )
 
-    @rank_zero_only
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -605,6 +613,8 @@ class LongRolloutPlots(BasePlotCallback):
         batch_idx: int,
     ) -> None:
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
+            batch = pl_module.allgather_batch(batch)
+
             precision_mapping = {
                 "16-mixed": torch.float16,
                 "bf16-mixed": torch.bfloat16,

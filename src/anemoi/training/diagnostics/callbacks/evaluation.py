@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 
 import torch
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.utilities import rank_zero_only
 
 if TYPE_CHECKING:
     import pytorch_lightning as pl
@@ -103,7 +102,6 @@ class RolloutEval(Callback):
                 rank_zero_only=True,
             )
 
-    @rank_zero_only
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -114,6 +112,8 @@ class RolloutEval(Callback):
     ) -> None:
         del outputs  # outputs are not used
         if batch_idx % self.every_n_batches == 0:
+            batch = pl_module.allgather_batch(batch)
+
             precision_mapping = {
                 "16-mixed": torch.float16,
                 "bf16-mixed": torch.bfloat16,

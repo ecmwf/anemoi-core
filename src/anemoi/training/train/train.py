@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -106,7 +105,7 @@ class AnemoiTrainer:
         (torch.rand(1), np_rng.random())
         LOGGER.debug(
             "Initial seed: Rank %d, initial seed %d, running with random seed: %d",
-            int(os.environ.get("SLURM_PROCID", "0")),
+            self.strategy.global_rank,
             initial_seed,
             rnd_seed,
         )
@@ -345,6 +344,7 @@ class AnemoiTrainer:
         """Training strategy."""
         return DDPGroupStrategy(
             self.config.hardware.num_gpus_per_model,
+            self.config.dataloader.get("read_group_size", self.config.hardware.num_gpus_per_model),
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
