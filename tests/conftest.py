@@ -64,6 +64,15 @@ def graph_with_nodes() -> HeteroData:
 
 
 @pytest.fixture
+def graph_with_isolated_nodes() -> HeteroData:
+    graph = HeteroData()
+    graph["test_nodes"].x = torch.tensor([[1], [2], [3], [4], [5], [6]])
+    graph["test_nodes"]["mask_attr"] = torch.tensor([[1], [1], [1], [0], [0], [0]], dtype=torch.bool)
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[2, 3, 4], [1, 2, 3]])
+    return graph
+
+
+@pytest.fixture
 def graph_nodes_and_edges() -> HeteroData:
     """Graph with 1 set of nodes and edges."""
     coords = np.array([[lat, lon] for lat in lats for lon in lons])

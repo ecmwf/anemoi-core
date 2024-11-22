@@ -87,6 +87,32 @@ class GraphCreator:
 
         return graph
 
+    def post_process(self, graph: HeteroData) -> HeteroData:
+        """Allow post-processing of the resulting graph.
+
+        This method applies any configured post-processors to the graph,
+        which can modify or enhance the graph structure or attributes.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            The graph to be post-processed.
+
+        Returns
+        -------
+        HeteroData
+            The post-processed graph.
+
+        Notes
+        -----
+        Post-processors are applied in the order they are specified in the configuration.
+        Each post-processor should implement an `update_graph` method that takes and returns a HeteroData object.
+        """
+        for processor in self.config.get("post_processors", []):
+            graph = instantiate(processor).update_graph(graph)
+
+        return graph
+
     def save(self, graph: HeteroData, save_path: Path, overwrite: bool = False) -> None:
         """Save the generated graph to the output path.
 
@@ -126,6 +152,7 @@ class GraphCreator:
         graph = HeteroData()
         graph = self.update_graph(graph)
         graph = self.clean(graph)
+        graph = self.post_process(graph)
 
         if save_path is None:
             LOGGER.warning("No output path specified. The graph will not be saved.")
