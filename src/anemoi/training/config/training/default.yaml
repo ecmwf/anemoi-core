@@ -48,7 +48,9 @@ training_loss:
   # Scalars to include in loss calculation
   # Available scalars include:
   # - 'variable': See `variable_loss_scaling` for more information
-  scalars: ['variable']
+  # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
+  scalars: ['variable', 'loss_weights_mask']
+
   ignore_nans: False
 
 loss_gradient_scaling: False

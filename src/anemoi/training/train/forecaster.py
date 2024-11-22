@@ -103,7 +103,10 @@ class GraphForecaster(pl.LightningModule):
         # Kwargs to pass to the loss function
         loss_kwargs = {"node_weights": self.node_weights}
         # Scalars to include in the loss function, must be of form (dim, scalar)
-        scalars = {"variable": (-1, variable_scaling)}
+        # Add mask multiplying NaN locations with zero. At this stage at [[1]].
+        # Filled after first application of preprocessor. dimension=[-2, -1] (latlon, n_outputs).
+        scalars = {"variable": (-1, variable_scaling), "loss_weights_mask": ((-2, -1), torch.ones((1, 1)))}
+        self.updated_loss_mask = False
 
         self.loss = self.get_loss_function(config.training.training_loss, scalars=scalars, **loss_kwargs)
 
@@ -216,6 +219,24 @@ class GraphForecaster(pl.LightningModule):
             loss_function.add_scalar(*scalars[key], name=key)
 
         return loss_function
+
+    def training_weights_for_imputed_variables(
+        self,
+        batch: torch.Tensor,
+    ) -> None:
+        """Update the loss weights mask for imputed variables."""
+        if "loss_weights_mask" in self.loss.scalar:
+            loss_weights_mask = torch.ones((1, 1), device=batch.device)
+            # iterate over all pre-processors and check if they have a loss_mask_training attribute
+            for pre_processor in self.model.pre_processors.processors.values():
+                if hasattr(pre_processor, "loss_mask_training"):
+                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
+                # if transform_loss_mask function exists for preprocessor apply it
+                if hasattr(pre_processor, "transform_loss_mask"):
+                    loss_weights_mask = pre_processor.transform_loss_mask(loss_weights_mask)
+            # update scaler with loss_weights_mask retrieved from preprocessors
+            self.loss.update_scalar(scalar=loss_weights_mask.cpu(), name="loss_weights_mask")
+        self.updated_loss_mask = True
 
     @staticmethod
     def get_val_metric_ranges(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, dict]:
@@ -360,6 +381,10 @@ class GraphForecaster(pl.LightningModule):
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
+
+        if not self.updated_loss_mask:
+            # update loss scalar after first application and initialization of preprocessors
+            self.training_weights_for_imputed_variables(batch)
 
         # start rollout of preprocessed batch
         x = batch[
