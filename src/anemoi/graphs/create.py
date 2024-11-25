@@ -17,6 +17,7 @@ from warnings import warn
 import torch
 from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
@@ -25,14 +26,38 @@ LOGGER = logging.getLogger(__name__)
 class GraphCreator:
     """Graph creator."""
 
+    config: DotDict
+
     def __init__(
         self,
-        config: str | Path | DotDict,
+        config: str | Path | DotDict | DictConfig,
     ):
         if isinstance(config, Path) or isinstance(config, str):
             self.config = DotDict.from_file(config)
+        elif isinstance(config, DictConfig):
+            self.config = DotDict(config)
         else:
             self.config = config
+
+        # Support previous version. This will be deprecated in a future release
+        edges = []
+        for edges_cfg in self.config.get("edges", []):
+            if "edge_builder" in edges_cfg:
+                warn(
+                    "This format will be deprecated. The key 'edge_builder' is renamed to 'edge_builders' and takes a list of edge builders. In addition, the source_mask_attr_name & target_mask_attr_name fields are moved under the each edge builder.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
+                edge_builder_cfg = edges_cfg.get("edge_builder")
+                if edge_builder_cfg is not None:
+                    edge_builder_cfg = DotDict(edge_builder_cfg)
+                    edge_builder_cfg.source_mask_attr_name = edges_cfg.get("source_mask_attr_name", None)
+                    edge_builder_cfg.target_mask_attr_name = edges_cfg.get("target_mask_attr_name", None)
+                    edges_cfg["edge_builders"] = [edge_builder_cfg]
+
+            edges.append(edges_cfg)
+        self.config.edges = edges
 
     def update_graph(self, graph: HeteroData) -> HeteroData:
         """Update the graph.
@@ -56,20 +81,6 @@ class GraphCreator:
             )
 
         for edges_cfg in self.config.get("edges", {}):
-
-            if "edge_builder" in edges_cfg:
-                warn(
-                    "This format will be deprecated. The key 'edge_builder' is renamed to 'edge_builders' and takes a list of edge builders. In addition, the source_mask_attr_name & target_mask_attr_name fields are moved under the each edge builder.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
-                edge_builder_cfg = edges_cfg.get("edge_builder")
-                if edge_builder_cfg is not None:
-                    edge_builder_cfg.source_mask_attr_name = edges_cfg.get("source_mask_attr_name")
-                    edge_builder_cfg.target_mask_attr_name = edges_cfg.get("target_mask_attr_name")
-                    edges_cfg.edge_builders = [edge_builder_cfg]
-
             for edge_builder_cfg in edges_cfg.edge_builders:
                 edge_builder = instantiate(
                     edge_builder_cfg, source_name=edges_cfg.source_name, target_name=edges_cfg.target_name

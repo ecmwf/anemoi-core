@@ -155,7 +155,7 @@ class AreaWeights(BaseNodeAttribute):
         sv.regions = [region for region in sv.regions if region]
         # compute the area weight without empty regions
         area_weights = sv.calculate_areas()
-        if (null_nodes := mask.sum()) > 0:
+        if (null_nodes := (~mask).sum()) > 0:
             LOGGER.warning(
                 "%s is filling %d (%.2f%%) nodes with value %f",
                 self.__class__.__name__,
