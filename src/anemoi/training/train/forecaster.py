@@ -547,7 +547,7 @@ class GraphForecaster(pl.LightningModule):
                 metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
                     y_pred_postprocessed[..., indices],
                     y_postprocessed[..., indices],
-                    scalar_indices=[..., indices],
+                    scalar_indices=[..., indices] if -1 in metric.scalar else None,
                 )
 
         return metrics
