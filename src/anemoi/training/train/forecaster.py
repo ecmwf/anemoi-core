@@ -127,6 +127,7 @@ class GraphForecaster(pl.LightningModule):
             * config.training.lr.rate
             / config.hardware.num_gpus_per_model
         )
+        self.warmup_t = getattr(config.training.lr, "warmup_t", 1000)
         self.lr_iterations = config.training.lr.iterations
         self.lr_min = config.training.lr.min
         self.rollout = config.training.rollout.start
@@ -638,6 +639,6 @@ class GraphForecaster(pl.LightningModule):
             optimizer,
             lr_min=self.lr_min,
             t_initial=self.lr_iterations,
-            warmup_t=1000,
+            warmup_t=self.warmup_t,
         )
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]

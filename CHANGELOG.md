@@ -14,6 +14,8 @@ Keep it human-readable, your future self will thank you!
 Fixed bug in power spectra plotting for the n320 resolution.
 
 ### Added
+- Introduce variable to configure (Cosine Annealing) optimizer warm up [#155](https://github.com/ecmwf/anemoi-training/pull/155)
+
 
 - Add reader groups to reduce CPU memory usage and increase dataloader throughput [#76](https://github.com/ecmwf/anemoi-training/pull/76)
 
