@@ -11,7 +11,8 @@ Keep it human-readable, your future self will thank you!
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.3.0...HEAD)
 ### Fixed
 
-Fixed bug in power spectra plotting for the n320 resolution.
+- Fixed bug in power spectra plotting for the n320 resolution.
+- Allow histogram and spectrum plot for one variable [#165](https://github.com/ecmwf/anemoi-training/pull/165)
 
 ### Added
 - Introduce variable to configure (Cosine Annealing) optimizer warm up [#155](https://github.com/ecmwf/anemoi-training/pull/155)
