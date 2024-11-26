@@ -77,7 +77,7 @@ class GraphCreator:
         """
         for nodes_name, nodes_cfg in self.config.get("nodes", {}).items():
             graph = instantiate(nodes_cfg.node_builder, name=nodes_name).update_graph(
-                graph, nodes_cfg.get("attributes", {})
+                graph, attrs_config=nodes_cfg.get("attributes", {})
             )
 
         for edges_cfg in self.config.get("edges", {}):
@@ -85,7 +85,7 @@ class GraphCreator:
                 edge_builder = instantiate(
                     edge_builder_cfg, source_name=edges_cfg.source_name, target_name=edges_cfg.target_name
                 )
-                graph = edge_builder.register_edges(graph)
+                graph = edge_builder.update_graph(graph, attrs_config=None)
 
             graph = edge_builder.register_attributes(graph, edges_cfg.get("attributes", {}))
 

@@ -55,10 +55,10 @@ class ICONTopologicalBaseNodeBuilder(BaseNodeBuilder):
         self.icon_mesh = icon_mesh
         super().__init__(name)
 
-    def update_graph(self, graph: HeteroData, attr_config: DotDict | None = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
         """Update the graph with new nodes."""
         self.icon_sub_graph = graph[self.icon_mesh][self.sub_graph_address]
-        return super().update_graph(graph, attr_config)
+        return super().update_graph(graph, attrs_config)
 
 
 class ICONMultimeshNodes(ICONTopologicalBaseNodeBuilder):

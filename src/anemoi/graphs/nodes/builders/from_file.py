@@ -41,7 +41,7 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         Register the nodes in the graph.
     register_attributes(graph, name, config)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attr_config)
+    update_graph(graph, name, attrs_config)
         Update the graph with new nodes and attributes.
     """
 
@@ -83,7 +83,7 @@ class NPZFileNodes(BaseNodeBuilder):
         Register the nodes in the graph.
     register_attributes(graph, name, config)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attr_config)
+    update_graph(graph, name, attrs_config)
         Update the graph with new nodes and attributes.
     """
 

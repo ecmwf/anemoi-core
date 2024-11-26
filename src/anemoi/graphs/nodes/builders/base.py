@@ -100,14 +100,14 @@ class BaseNodeBuilder(ABC):
         coords = np.deg2rad(coords)
         return torch.tensor(coords, dtype=torch.float32)
 
-    def update_graph(self, graph: HeteroData, attr_config: DotDict | None = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
         """Update the graph with new nodes.
 
         Parameters
         ----------
         graph : HeteroData
             Input graph.
-        attr_config : DotDict
+        attrs_config : DotDict
             The configuration of the attributes.
 
         Returns
@@ -117,9 +117,9 @@ class BaseNodeBuilder(ABC):
         """
         graph = self.register_nodes(graph)
 
-        if attr_config is None:
+        if attrs_config is None:
             return graph
 
-        graph = self.register_attributes(graph, attr_config)
+        graph = self.register_attributes(graph, attrs_config)
 
         return graph
