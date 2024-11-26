@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
-## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.4.0...HEAD)
+## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.4.1...HEAD)
+
+## [0.4.1 - ICON graphs, multiple edge builders and post processors](https://github.com/ecmwf/anemoi-graphs/compare/0.4.0...0.4.1) - 2024-11-26
 
 ### Added
+
 - feat: Define node sets and edges based on an ICON icosahedral mesh (#53)
 - feat: Add support for `post_processors` in the recipe. (#71)
 - feat: Add `RemoveUnconnectedNodes` post processor to clean unconnected nodes in LAM. (#71)
@@ -18,6 +21,7 @@ Keep it human-readable, your future self will thank you!
 - feat: Support for multiple edge builders between two sets of nodes (#70)
 
 # Changed
+
 - fix: bug when computing area weights with scipy.Voronoi. (#79)
 
 ## [0.4.0 - LAM and stretched graphs](https://github.com/ecmwf/anemoi-graphs/compare/0.3.0...0.4.0) - 2024-11-08
@@ -62,19 +66,19 @@ Keep it human-readable, your future self will thank you!
 ### Added
 
 - HEALPixNodes - nodebuilder based on Hierarchical Equal Area isoLatitude Pixelation of a sphere
-
+  
 - Inspection tools: interactive plots, and distribution plots of edge & node attributes.
-
+  
 - Graph description print in the console.
-
+  
 - CLI entry point: 'anemoi-graphs inspect ...'.
-
+  
 - added downstream-ci pipeline and cd-pypi reusable workflow
-
+  
 - Changelog release updater
-
+  
 - Create package documentation.
-
+  
 
 ### Changed
 
