@@ -10,6 +10,16 @@ Keep it human-readable, your future self will thank you!
 
 ## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.4.0...HEAD)
 
+### Added
+- feat: Define node sets and edges based on an ICON icosahedral mesh (#53)
+- feat: Add support for `post_processors` in the recipe. (#71)
+- feat: Add `RemoveUnconnectedNodes` post processor to clean unconnected nodes in LAM. (#71)
+- feat: Define node sets and edges based on an ICON icosahedral mesh (#53)
+- feat: Support for multiple edge builders between two sets of nodes (#70)
+
+# Changed
+- fix: bug when computing area weights with scipy.Voronoi. (#79)
+
 ## [0.4.0 - LAM and stretched graphs](https://github.com/ecmwf/anemoi-graphs/compare/0.3.0...0.4.0) - 2024-11-08
 
 ### Added
@@ -27,6 +37,7 @@ Keep it human-readable, your future self will thank you!
 - Added `CutOutMask` class to create a mask for a cutout. (#68)
 - Added `MissingZarrVariable` and `NotMissingZarrVariable` classes to create a mask for missing zarr variables. (#68)
 - feat: Add CONTRIBUTORS.md file. (#72)
+- Create package documentation.
 
 ### Changed
 
@@ -43,6 +54,8 @@ Keep it human-readable, your future self will thank you!
 - ci: extened python versions to include 3.11 and 3.12
 - Update copyright notice
 - Fix `__version__` import in init
+- The `edge_builder` field in the recipe is renamed to `edge_builders`. It now receives a list of edge builders. (#70)
+- The `{source|target}_mask_attr_name` field is moved to inside the edge builder definition. (#70)
 
 ## [0.3.0 Anemoi-graphs, minor release](https://github.com/ecmwf/anemoi-graphs/compare/0.2.1...0.3.0) - 2024-09-03
 

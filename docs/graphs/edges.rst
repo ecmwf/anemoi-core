@@ -14,8 +14,8 @@ for each (`source name`, `target name`) pair specified.
    edges:
      - source_name: data
        target_name: hidden
-       edge_builder:
-         _target_: anemoi.graphs.edges.CutOff
+       edge_builders:
+       - _target_: anemoi.graphs.edges.CutOff
          cutoff_factor: 0.7
 
 Below are the available methods for defining the edges:
@@ -26,3 +26,19 @@ Below are the available methods for defining the edges:
    edges/cutoff
    edges/knn
    edges/multi_scale
+
+Additionally, there are 2 extra arguments (``source_mask_attr_name`` and
+``target_mask_attr_name``) that can be used in the edge configuration to
+mask source and/or target nodes. This can be useful to different use
+cases, such as Limited Area Modeling (LAM) where your decoder edges
+should only connect to the nodes in the limited area.
+
+.. code:: yaml
+
+   edges:
+     - source_name: hidden
+       target_name: data
+       edge_builders:
+       - _target_: anemoi.graphs.edges.KNNEdges
+         num_nearest_neighbours: 5
+         target_mask_attr_name: cutout

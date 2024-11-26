@@ -10,7 +10,7 @@ to the number of refinements of the sphere.
 .. code:: yaml
 
    nodes:
-     data:
+     data:  # name of the nodes
        node_builder:
          _target_: anemoi.graphs.nodes.HEALPixNodes
          resolution: 3

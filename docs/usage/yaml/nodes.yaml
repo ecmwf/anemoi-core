@@ -5,6 +5,5 @@ nodes:
       dataset: /path/to/dataset.zarr
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.NPZFileNodes
-      grid_definition_path: /path/to/grids/
-      resolution: o48
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5

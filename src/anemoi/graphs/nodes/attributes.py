@@ -13,6 +13,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Type
+from typing import Union
 
 import numpy as np
 import torch
@@ -25,6 +26,8 @@ from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.normalise import NormaliserMixin
 
 LOGGER = logging.getLogger(__name__)
+
+MaskAttributeType = Union[str, Type["BooleanBaseNodeAttribute"]]
 
 
 class BaseNodeAttribute(ABC, NormaliserMixin):
@@ -106,6 +109,8 @@ class AreaWeights(BaseNodeAttribute):
         Radius of the sphere.
     centre : np.ndarray
         Centre of the sphere.
+    fill_value : float
+        Value to fill the empty regions.
 
     Methods
     -------
@@ -118,11 +123,13 @@ class AreaWeights(BaseNodeAttribute):
         norm: str | None = None,
         radius: float = 1.0,
         centre: np.ndarray = np.array([0, 0, 0]),
+        fill_value: float = 0.0,
         dtype: str = "float32",
     ) -> None:
         super().__init__(norm, dtype)
         self.radius = radius
         self.centre = centre
+        self.fill_value = fill_value
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         """Compute the area associated to each node.
@@ -144,13 +151,26 @@ class AreaWeights(BaseNodeAttribute):
         latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
         points = latlon_rad_to_cartesian((np.asarray(latitudes), np.asarray(longitudes)))
         sv = SphericalVoronoi(points, self.radius, self.centre)
+        mask = np.array([bool(i) for i in sv.regions])
+        sv.regions = [region for region in sv.regions if region]
+        # compute the area weight without empty regions
         area_weights = sv.calculate_areas()
+        if (null_nodes := (~mask).sum()) > 0:
+            LOGGER.warning(
+                "%s is filling %d (%.2f%%) nodes with value %f",
+                self.__class__.__name__,
+                null_nodes,
+                100 * null_nodes / len(mask),
+                self.fill_value,
+            )
+        result = np.ones(points.shape[0]) * self.fill_value
+        result[mask] = area_weights
         LOGGER.debug(
             "There are %d of weights, which (unscaled) add up a total weight of %.2f.",
-            len(area_weights),
-            np.array(area_weights).sum(),
+            len(result),
+            np.array(result).sum(),
         )
-        return area_weights
+        return result
 
 
 class BooleanBaseNodeAttribute(BaseNodeAttribute, ABC):
@@ -203,12 +223,12 @@ class CutOutMask(BooleanBaseNodeAttribute):
 class BooleanOperation(BooleanBaseNodeAttribute, ABC):
     """Base class for boolean operations."""
 
-    def __init__(self, masks: list[str | Type[BooleanBaseNodeAttribute]]) -> None:
+    def __init__(self, masks: MaskAttributeType | list[MaskAttributeType]) -> None:
         super().__init__()
-        self.masks = masks
+        self.masks = masks if isinstance(masks, list) else [masks]
 
     @staticmethod
-    def get_mask_values(mask: str | Type[BaseNodeAttribute], nodes: NodeStorage, **kwargs) -> np.array:
+    def get_mask_values(mask: MaskAttributeType, nodes: NodeStorage, **kwargs) -> np.array:
         if isinstance(mask, str):
             attributes = nodes[mask]
             assert (
@@ -218,16 +238,31 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
 
         return mask.get_raw_values(nodes, **kwargs)
 
+    @abstractmethod
+    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray: ...
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+        mask_values = [BooleanOperation.get_mask_values(mask, nodes, **kwargs) for mask in self.masks]
+        return self.reduce_op(mask_values)
+
+
+class BooleanNot(BooleanOperation):
+    """Boolean NOT mask."""
+
+    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray:
+        assert len(self.masks) == 1, f"The {self.__class__.__name__} can only be aplied to one mask."
+        return ~masks[0]
+
 
 class BooleanAndMask(BooleanOperation):
     """Boolean AND mask."""
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        return np.logical_and.reduce([BooleanOperation.get_mask_values(mask, nodes, **kwargs) for mask in self.masks])
+    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray:
+        return np.logical_and.reduce(masks)
 
 
 class BooleanOrMask(BooleanOperation):
     """Boolean OR mask."""
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        return np.logical_or.reduce([BooleanOperation.get_mask_values(mask, nodes, **kwargs) for mask in self.masks])
+    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray:
+        return np.logical_or.reduce(masks)

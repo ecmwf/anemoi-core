@@ -8,13 +8,13 @@ following YAML configuration:
 .. code:: yaml
 
    nodes:
-     data:
+     data: # name of the nodes
        node_builder:
          _target_: anemoi.graphs.nodes.NPZFileNodes
-         grids_definition_path: /path/to/folder/with/grids/
+         grid_definition_path: /path/to/folder/with/grids/
          resolution: o48
 
-where `grids_definition_path` is the path to the folder containing the
+where `grid_definition_path` is the path to the folder containing the
 grid definition files and `resolution` is the resolution of the grid to
 be used.
 

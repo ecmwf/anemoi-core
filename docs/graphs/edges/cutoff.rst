@@ -39,13 +39,13 @@ YAML configuration:
    edges:
       -  source_name: source
          target_name: destination
-         edge_builder:
-            _target_: anemoi.graphs.edges.CutOffEdges
+         edge_builders:
+         -  _target_: anemoi.graphs.edges.CutOffEdges
             cutoff_factor: 0.6
 
 .. note::
 
-   The cut-off method is recommended for the encoder edges, to connect
+   The cut-off method is recommended for the encoder edge, to connect
    all data nodes to hidden nodes. The optimal ``cutoff_factor`` value
    will be the lowest value without orphan nodes. This optimal value
    depends on the node distribution, so it is recommended to tune it for

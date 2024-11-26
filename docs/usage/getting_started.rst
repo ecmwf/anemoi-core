@@ -4,17 +4,19 @@
  Getting started
 #################
 
+The simplest use case is to build an encoder-processor-decoder graph for
+a global weather model.
+
 **************
  First recipe
 **************
 
-The simplest use case is to build an encoder-processor-decoder graph for
-a global weather model. In this case, the recipe must contain a
-``nodes`` section where the keys will be the names of the sets of
-`nodes`, that will later be used to build the connections. Each `nodes`
-configuration must include a ``node_builder`` section describing how to
-generate the `nodes`, and it may include an optional ``attributes``
-section to define additional attributes (weights, mask, ...).
+In this case, the recipe must contain a ``nodes`` section where the keys
+will be the names of the sets of `nodes`, that will later be used to
+build the connections. Each `nodes` configuration must include a
+``node_builder`` section describing how to generate the `nodes`, and it
+may include an optional ``attributes`` section to define additional
+attributes (weights, mask, ...).
 
 .. literalinclude:: yaml/nodes.yaml
    :language: yaml
@@ -54,7 +56,7 @@ following command:
 
 .. code:: console
 
-   $ anemoi-graphs inspect graph.pt output_plots
+   $ anemoi-graphs inspect graph.pt
 
 This will generate the following graph:
 
@@ -65,7 +67,8 @@ This will generate the following graph:
 
    Note that that the resulting graph will only work with a Transformer
    processor because there are no connections between the `hidden
-   nodes`.
+   nodes`. This is the default behaviour for :ref:`anemoi-training
+   <anemoi-training:index-page>`.
 
 ******************************
  Adding processor connections

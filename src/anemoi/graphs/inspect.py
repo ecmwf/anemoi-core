@@ -26,7 +26,19 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GraphInspector:
-    """Inspect the graph."""
+    """Inspect the graph.
+
+    Attributes
+    ----------
+    path: Union[str, Path]
+        Path to the graph file.
+    output_path: Path
+        Path to the output directory where the plots will be saved.
+    show_attribute_distributions: Optional[bool]
+        Whether to show the distribution of the node and edge attributes.
+    show_nodes: Optional[bool]
+        Whether to show the interactive plots of the nodes.
+    """
 
     def __init__(
         self,

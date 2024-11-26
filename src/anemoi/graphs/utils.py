@@ -63,61 +63,22 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
     return dists[dists > 0].max()
 
 
-def add_margin(lats: np.ndarray, lons: np.ndarray, margin: float) -> tuple[np.ndarray, np.ndarray]:
-    """Add a margin to the convex hull of the points considered.
-
-    For each point (lat, lon) add 8 points around it, each at a distance of `margin` from the original point.
-
-    Arguments
-    ---------
-    lats : np.ndarray
-        Latitudes of the points considered.
-    lons : np.ndarray
-        Longitudes of the points considered.
-    margin : float
-        The margin to add to the convex hull.
-
-    Returns
-    -------
-    latitudes : np.ndarray
-        Latitudes of the points considered, including the margin.
-    longitudes : np.ndarray
-        Longitudes of the points considered, including the margin.
-    """
-    assert margin >= 0, "Margin must be non-negative"
-    if margin == 0:
-        return lats, lons
-
-    latitudes, longitudes = [], []
-    for lat_sign in [-1, 0, 1]:
-        for lon_sign in [-1, 0, 1]:
-            latitudes.append(lats + lat_sign * margin)
-            longitudes.append(lons + lon_sign * margin)
-
-    return np.concatenate(latitudes), np.concatenate(longitudes)
-
-
-def get_index_in_outer_join(vector: torch.Tensor, tensor: torch.Tensor) -> int:
-    """Index position of vector.
-
-    Get the index position of a vector in a matrix.
+def concat_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> torch.Tensor:
+    """Concat edges
 
     Parameters
     ----------
-    vector : torch.Tensor of shape (N, )
-        Vector to get its position in the matrix.
-    tensor : torch.Tensor of shape (M, N,)
-        Tensor in which the position is searched.
+    edge_indices1: torch.Tensor
+        Edge indices of the first set of edges. Shape: (2, num_edges1)
+    edge_indices2: torch.Tensor
+        Edge indices of the second set of edges. Shape: (2, num_edges2)
 
     Returns
     -------
-    int
-        Index position of `vector` in `tensor`. -1 if `vector` is not in `tensor`.
+    torch.Tensor
+        Concatenated edge indices.
     """
-    mask = torch.all(tensor == vector, axis=1)
-    if mask.any():
-        return int(torch.where(mask)[0])
-    return -1
+    return torch.unique(torch.cat([edge_indices1, edge_indices2], axis=1), dim=1)
 
 
 def haversine_distance(source_coords: np.ndarray, target_coords: np.ndarray) -> np.ndarray:

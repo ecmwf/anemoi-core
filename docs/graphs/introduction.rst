@@ -65,6 +65,7 @@ following classes define different behaviour:
 
 -  :doc:`node_coordinates/zarr_dataset`
 -  :doc:`node_coordinates/npz_file`
+-  :doc:`node_coordinates/icon_mesh`
 -  :doc:`node_coordinates/tri_refined_icosahedron`
 -  :doc:`node_coordinates/hex_refined_icosahedron`
 -  :doc:`node_coordinates/healpix`
