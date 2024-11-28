@@ -224,6 +224,35 @@ class BaseRemapperVariable(BasePreprocessor, ABC):
 
         return x_remapped
 
+    def transform_loss_mask(self, mask: torch.Tensor) -> torch.Tensor:
+        """Remap the loss mask.
+
+        ```
+        x : torch.Tensor
+            Loss mask
+        ```
+        """
+        # use indices at model output level
+        index = self.index_inference_backmapped_output
+        indices_remapped = self.index_inference_output
+        indices_keep = self.indices_keep_inference_output
+
+        # create new loss mask with target number of columns
+        mask_remapped = torch.zeros(
+            mask.shape[:-1] + (mask.shape[-1] + len(indices_remapped),), dtype=mask.dtype, device=mask.device
+        )
+
+        # copy loss mask for variables that are not remapped
+        mask_remapped[..., : len(indices_keep)] = mask[..., indices_keep]
+
+        # remap loss mask for rest of variables
+        for idx_src, idx_dst in zip(indices_remapped, index):
+            if idx_dst is not None:
+                for ii in idx_dst:
+                    mask_remapped[..., ii] = mask[..., idx_src]
+
+        return mask_remapped
+
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Convert and remap the output tensor.
 

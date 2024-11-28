@@ -306,6 +306,26 @@ def test_mask_saving(imputer_fixture, data_fixture, request):
         ("non_default_input_imputer", "non_default_input_data"),
     ],
 )
+def test_loss_nan_mask(imputer_fixture, data_fixture, request):
+    """Check that the imputer correctly transforms a tensor with NaNs."""
+    x, _ = request.getfixturevalue(data_fixture)
+    expected = torch.tensor([[1.0, 1.0, 1.0], [1.0, 0.0, 1.0]])  # only prognostic and diagnostic variables
+    imputer = request.getfixturevalue(imputer_fixture)
+    imputer.transform(x)
+    assert torch.allclose(
+        imputer.loss_mask_training, expected
+    ), "Transform does not calculate NaN-mask for loss function scaling correctly."
+
+
+@pytest.mark.parametrize(
+    ("imputer_fixture", "data_fixture"),
+    [
+        ("default_constant_imputer", "default_constant_data"),
+        ("non_default_constant_imputer", "non_default_constant_data"),
+        ("default_input_imputer", "default_input_data"),
+        ("non_default_input_imputer", "non_default_input_data"),
+    ],
+)
 def test_reuse_imputer(imputer_fixture, data_fixture, request):
     """Check that the imputer reuses the mask correctly on subsequent runs."""
     x, expected = request.getfixturevalue(data_fixture)
