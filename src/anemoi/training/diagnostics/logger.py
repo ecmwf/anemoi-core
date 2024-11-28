@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,14 +28,28 @@ def get_mlflow_logger(config: DictConfig) -> None:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
+    # 35 retries allow for 1 hour of server downtime
+    http_max_retries = config.diagnostics.log.mlflow.get("http_max_retries", 35)
+
+    os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(http_max_retries)
+    os.environ["_MLFLOW_HTTP_REQUEST_MAX_RETRIES_LIMIT"] = str(http_max_retries + 1)
+    # these are the default values, but set them explicitly in case they change
+    os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR"] = "2"
+    os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_JITTER"] = "1"
+
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
     resumed = config.training.run_id is not None
     forked = config.training.fork_run_id is not None
 
     save_dir = config.hardware.paths.logs.mlflow
-    tracking_uri = config.diagnostics.log.mlflow.tracking_uri
+
     offline = config.diagnostics.log.mlflow.offline
+    if not offline:
+        tracking_uri = config.diagnostics.log.mlflow.tracking_uri
+        LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
+    else:
+        tracking_uri = None
 
     if (resumed or forked) and (offline):  # when resuming or forking offline -
         # tracking_uri = ${hardware.paths.logs.mlflow}
@@ -54,7 +69,6 @@ def get_mlflow_logger(config: DictConfig) -> None:
         )
         log_hyperparams = False
 
-    LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
     logger = AnemoiMLflowLogger(
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
         project_name=config.diagnostics.log.mlflow.project_name,

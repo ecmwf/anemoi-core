@@ -7,13 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# ruff: noqa: ANN001
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
-import sys
+import threading
 import time
 import traceback
 from abc import ABC
@@ -23,9 +23,8 @@ from contextlib import nullcontext
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Any
-from typing import Callable
 
+import matplotlib.animation as animation
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,6 +32,7 @@ import torch
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
 from anemoi.training.diagnostics.plots import plot_graph_edge_features
 from anemoi.training.diagnostics.plots import plot_graph_node_features
@@ -43,31 +43,12 @@ from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sam
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 
 if TYPE_CHECKING:
+    from typing import Any
+
     import pytorch_lightning as pl
     from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
-
-
-class ParallelExecutor(ThreadPoolExecutor):
-    """Wraps parallel execution and provides accurate information about errors.
-
-    Extends ThreadPoolExecutor to preserve the original traceback and line number.
-
-    Reference: https://stackoverflow.com/questions/19309514/getting-original-line-
-    number-for-exception-in-concurrent-futures/24457608#24457608
-    """
-
-    def submit(self, fn: Any, *args, **kwargs) -> Callable:
-        """Submits the wrapped function instead of `fn`."""
-        return super().submit(self._function_wrapper, fn, *args, **kwargs)
-
-    def _function_wrapper(self, fn: Any, *args: list, **kwargs: dict) -> Callable:
-        """Wraps `fn` in order to preserve the traceback of any kind of."""
-        try:
-            return fn(*args, **kwargs)
-        except Exception as exc:
-            raise sys.exc_info()[0](traceback.format_exc()) from exc
 
 
 class BasePlotCallback(Callback, ABC):
@@ -93,11 +74,21 @@ class BasePlotCallback(Callback, ABC):
 
         self.plot = self._plot
         self._executor = None
+        self._error: BaseException = None
+        self.datashader_plotting = config.diagnostics.plot.datashader
 
         if self.config.diagnostics.plot.asynchronous:
-            self._executor = ParallelExecutor(max_workers=1)
-            self._error: BaseException | None = None
+            LOGGER.info("Setting up asynchronous plotting ...")
             self.plot = self._async_plot
+            self._executor = ThreadPoolExecutor(max_workers=1)
+            self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
+            self.loop_thread.start()
+
+    def start_event_loop(self) -> None:
+        """Start the event loop in a separate thread."""
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
 
     @rank_zero_only
     def _output_figure(
@@ -113,15 +104,45 @@ class BasePlotCallback(Callback, ABC):
             save_path = Path(
                 self.save_basedir,
                 "plots",
-                f"{tag}_epoch{epoch:03d}.png",
+                f"{tag}_epoch{epoch:03d}.jpg",
             )
 
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(save_path, dpi=100, bbox_inches="tight")
+            fig.canvas.draw()
+            image_array = np.array(fig.canvas.renderer.buffer_rgba())
+            plt.imsave(save_path, image_array, dpi=100)
             if self.config.diagnostics.log.wandb.enabled:
                 import wandb
 
                 logger.experiment.log({exp_log_tag: wandb.Image(fig)})
+            if self.config.diagnostics.log.mlflow.enabled:
+                run_id = logger.run_id
+                logger.experiment.log_artifact(run_id, str(save_path))
+
+        plt.close(fig)  # cleanup
+
+    @rank_zero_only
+    def _output_gif(
+        self,
+        logger: pl.loggers.base.LightningLoggerBase,
+        fig: plt.Figure,
+        anim: animation.ArtistAnimation,
+        epoch: int,
+        tag: str = "gnn",
+    ) -> None:
+        """Animation output: save to file and/or display in notebook."""
+        if self.save_basedir is not None:
+            save_path = Path(
+                self.save_basedir,
+                "plots",
+                f"{tag}_epoch{epoch:03d}.gif",
+            )
+
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            anim.save(save_path, writer="pillow", fps=8)
+
+            if self.config.diagnostics.log.wandb.enabled:
+                LOGGER.warning("Saving gif animations not tested for wandb.")
 
             if self.config.diagnostics.log.mlflow.enabled:
                 run_id = logger.run_id
@@ -129,11 +150,31 @@ class BasePlotCallback(Callback, ABC):
 
         plt.close(fig)  # cleanup
 
+    @rank_zero_only
+    def _plot_with_error_catching(self, trainer: pl.Trainer, args: Any, kwargs: Any) -> None:
+        """To execute the plot function but ensuring we catch any errors."""
+        try:
+            self._plot(trainer, *args, **kwargs)
+        except BaseException:
+            import os
+
+            LOGGER.exception(traceback.format_exc())
+            os._exit(1)  # to force exit when sanity val steps are used
+
     def teardown(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
-        """Method is called to close the threads."""
+        """Teardown the callback."""
         del trainer, pl_module, stage  # unused
+        LOGGER.info("Teardown of the Plot Callback ...")
+
         if self._executor is not None:
-            self._executor.shutdown(wait=True)
+            LOGGER.info("waiting and shutting down the executor ...")
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.loop_thread.join()
+            # Step 3: Close the asyncio event loop
+            self.loop_thread._stop()
+            self.loop_thread._delete()
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
@@ -147,31 +188,39 @@ class BasePlotCallback(Callback, ABC):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """Plotting function to be implemented by subclasses."""
+
+    # Async function to run the plot function in the background thread
+    async def submit_plot(self, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
+        """Async function or coroutine to schedule the plot function."""
+        loop = asyncio.get_running_loop()
+        # run_in_executor doesn't support keyword arguments,
+        await loop.run_in_executor(
+            self._executor,
+            self._plot_with_error_catching,
+            trainer,
+            args,
+            kwargs,
+        )  # because loop.run_in_executor expects positional arguments, not keyword arguments
 
     @rank_zero_only
     def _async_plot(
         self,
         trainer: pl.Trainer,
-        *args: list,
-        **kwargs: dict,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
-        """To execute the plot function but ensuring we catch any errors."""
-        future = self._executor.submit(
-            self._plot,
-            trainer,
-            *args,
-            **kwargs,
-        )
-        # otherwise the error won't be thrown till the validation epoch is finished
-        try:
-            future.result()
-        except Exception:
-            LOGGER.exception("Critical error occurred in asynchronous plots.")
-            sys.exit(1)
+        """Run the plot function asynchronously.
+
+        This is the function that is called by the callback. It schedules the plot
+        function to run in the background thread. Since we have an event loop running in
+        the background thread, we need to schedule the plot function to run in that
+        loop.
+        """
+        asyncio.run_coroutine_threadsafe(self.submit_plot(trainer, *args, **kwargs), self.loop)
 
 
 class BasePerBatchPlotCallback(BasePlotCallback):
@@ -192,31 +241,25 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(config)
         self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
 
-    @abstractmethod
-    @rank_zero_only
-    def _plot(
+    def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
+        output: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
-        epoch: int,
         **kwargs,
     ) -> None:
-        """Plotting function to be implemented by subclasses."""
+        if (
+            self.config.diagnostics.plot.asynchronous
+            and self.config.dataloader.read_group_size > 1
+            and pl_module.local_rank == 0
+        ):
+            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
-    @rank_zero_only
-    def on_validation_batch_end(
-        self,
-        trainer,
-        pl_module,
-        output,
-        batch: torch.Tensor,
-        batch_idx: int,
-        **kwargs,
-    ) -> None:
         if batch_idx % self.every_n_batches == 0:
+            batch = pl_module.allgather_batch(batch)
+
             self.plot(
                 trainer,
                 pl_module,
@@ -257,7 +300,27 @@ class BasePerEpochPlotCallback(BasePlotCallback):
 
 
 class LongRolloutPlots(BasePlotCallback):
-    """Evaluates the model performance over a (longer) rollout window."""
+    """Evaluates the model performance over a (longer) rollout window.
+
+    This function allows evaluating the performance of the model over an extended number
+    of rollout steps to observe long-term behavior.
+    Add the callback to the configuration file as follows:
+    ```
+      - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
+        rollout:
+            - ${dataloader.validation_rollout}
+        video_rollout: ${dataloader.validation_rollout}
+        every_n_epochs: 1
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+    ```
+    The selected rollout steps for plots and video need to be lower or equal to dataloader.validation_rollout.
+    Increasing dataloader.validation_rollout has no effect on the rollout steps during training.
+    It ensures, that enough time steps are available for the plots and video in the validation batches.
+
+    The runtime of creating one animation of one variable for 56 rollout steps is about 1 minute.
+    Recommended use for video generation: Fork the run using fork_run_id for 1 additional epochs and enabled videos.
+    """
 
     def __init__(
         self,
@@ -265,10 +328,12 @@ class LongRolloutPlots(BasePlotCallback):
         rollout: list[int],
         sample_idx: int,
         parameters: list[str],
+        video_rollout: int = 0,
         accumulation_levels_plot: list[float] | None = None,
         cmap_accumulation: list[str] | None = None,
         per_sample: int = 6,
         every_n_epochs: int = 1,
+        animation_interval: int = 400,
     ) -> None:
         """Initialise LongRolloutPlots callback.
 
@@ -282,6 +347,8 @@ class LongRolloutPlots(BasePlotCallback):
             Sample to plot
         parameters : list[str]
             Parameters to plot
+        video_rollout : int, optional
+            Number of rollout steps for video, by default 0 (no video)
         accumulation_levels_plot : list[float] | None
             Accumulation levels to plot, by default None
         cmap_accumulation : list[str] | None
@@ -290,40 +357,54 @@ class LongRolloutPlots(BasePlotCallback):
             Number of plots per sample, by default 6
         every_n_epochs : int, optional
             Epoch frequency to plot at, by default 1
+        animation_interval : int, optional
+            Delay between frames in the animation in milliseconds, by default 400
         """
         super().__init__(config)
 
         self.every_n_epochs = every_n_epochs
 
-        LOGGER.debug(
-            "Setting up callback for plots with long rollout: rollout = %d, frequency = every %d epoch ...",
-            rollout,
-            every_n_epochs,
-        )
         self.rollout = rollout
+        self.video_rollout = video_rollout
+        self.max_rollout = 0
+        if self.rollout:
+            self.max_rollout = max(self.rollout)
+        else:
+            self.rollout = []
+        if self.video_rollout:
+            self.max_rollout = max(self.max_rollout, self.video_rollout)
+
         self.sample_idx = sample_idx
         self.accumulation_levels_plot = accumulation_levels_plot
         self.cmap_accumulation = cmap_accumulation
         self.per_sample = per_sample
         self.parameters = parameters
+        self.animation_interval = animation_interval
 
-    @rank_zero_only
+        LOGGER.info(
+            (
+                "Setting up callback for plots with long rollout: rollout for plots = %s, ",
+                "rollout for video = %s, frequency = every %d epoch.",
+            ),
+            self.rollout,
+            self.video_rollout,
+            every_n_epochs,
+        )
+
     def _plot(
         self,
-        trainer,
+        trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         output: list[torch.Tensor],
         batch: torch.Tensor,
-        batch_idx,
-        epoch,
+        batch_idx: int,
+        epoch: int,
     ) -> None:
         _ = output
-
         start_time = time.time()
-
         logger = trainer.logger
 
-        # Build dictionary of inidicies and parameters to be plotted
+        # Initialize required variables for plotting
         plot_parameters_dict = {
             pl_module.data_indices.model.output.name_to_index[name]: (
                 name,
@@ -331,15 +412,12 @@ class LongRolloutPlots(BasePlotCallback):
             )
             for name in self.parameters
         }
-
         if self.post_processors is None:
-            # Copy to be used across all the training cycle
             self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
-        local_rank = pl_module.local_rank
 
-        assert batch.shape[1] >= max(self.rollout) + pl_module.multi_step, (
+        assert batch.shape[1] >= self.max_rollout + pl_module.multi_step, (
             "Batch length not sufficient for requested validation rollout length! "
             f"Set `dataloader.validation_rollout` to at least {max(self.rollout)}"
         )
@@ -354,65 +432,189 @@ class LongRolloutPlots(BasePlotCallback):
         ].cpu()
         data_0 = self.post_processors(input_tensor_0).numpy()
 
-        # start rollout
+        if self.video_rollout:
+            data_over_time = []
+            # collect min and max values for each variable for the colorbar
+            vmin, vmax = (np.inf * np.ones(len(plot_parameters_dict)), -np.inf * np.ones(len(plot_parameters_dict)))
+
+        # Plot for each rollout step# Plot for each rollout step
         with torch.no_grad():
             for rollout_step, (_, _, y_pred) in enumerate(
                 pl_module.rollout_step(
                     batch,
-                    rollout=max(self.rollout),
+                    rollout=self.max_rollout,
                     validation_mode=False,
                     training_mode=False,
                 ),
             ):
-
+                # plot only if the current rollout step is in the list of rollout steps
                 if (rollout_step + 1) in self.rollout:
-                    # prepare true output tensor for plotting
-                    input_tensor_rollout_step = input_batch[
-                        self.sample_idx,
-                        pl_module.multi_step + rollout_step,  # (pl_module.multi_step - 1) + (rollout_step + 1)
-                        ...,
-                        pl_module.data_indices.internal_data.output.full,
-                    ].cpu()
-                    data_rollout_step = self.post_processors(input_tensor_rollout_step).numpy()
-
-                    # prepare predicted output tensor for plotting
-                    output_tensor = self.post_processors(
-                        y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu(),
-                    ).numpy()
-
-                    fig = plot_predicted_multilevel_flat_sample(
+                    self._plot_rollout_step(
+                        pl_module,
                         plot_parameters_dict,
-                        self.per_sample,
-                        self.latlons,
-                        self.accumulation_levels_plot,
-                        self.cmap_accumulation,
-                        data_0.squeeze(),
-                        data_rollout_step.squeeze(),
-                        output_tensor[0, 0, :, :],  # rolloutstep, first member
+                        input_batch,
+                        data_0,
+                        rollout_step,
+                        y_pred,
+                        batch_idx,
+                        epoch,
+                        logger,
                     )
 
-                    self._output_figure(
-                        logger,
-                        fig,
-                        epoch=epoch,
-                        tag=f"gnn_pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank0",
-                        exp_log_tag=f"val_pred_sample_rstep{rollout_step + 1:03d}_rank{local_rank:01d}",
+                if self.video_rollout and rollout_step < self.video_rollout:
+                    data_over_time, vmin, vmax = self._store_video_frame_data(
+                        data_over_time,
+                        y_pred,
+                        plot_parameters_dict,
+                        vmin,
+                        vmax,
                     )
-        LOGGER.info(
-            "Time taken to plot samples after longer rollout: %s seconds",
-            int(time.time() - start_time),
-        )
+
+            # Generate and save video rollout animation if enabled
+            if self.video_rollout:
+                self._generate_video_rollout(
+                    data_0,
+                    data_over_time,
+                    plot_parameters_dict,
+                    vmin,
+                    vmax,
+                    self.video_rollout,
+                    batch_idx,
+                    epoch,
+                    logger,
+                    animation_interval=self.animation_interval,
+                )
+
+        LOGGER.info("Time taken to plot/animate samples for longer rollout: %d seconds", int(time.time() - start_time))
 
     @rank_zero_only
+    def _plot_rollout_step(
+        self,
+        pl_module: pl.LightningModule,
+        plot_parameters_dict: dict,
+        input_batch: torch.Tensor,
+        data_0: np.ndarray,
+        rollout_step: int,
+        y_pred: torch.Tensor,
+        batch_idx: int,
+        epoch: int,
+        logger: pl.loggers.base.LightningLoggerBase,
+    ) -> None:
+        """Plot the predicted output, input, true target and error plots for a given rollout step."""
+        # prepare true output tensor for plotting
+        input_tensor_rollout_step = input_batch[
+            self.sample_idx,
+            pl_module.multi_step + rollout_step,  # (pl_module.multi_step - 1) + (rollout_step + 1)
+            ...,
+            pl_module.data_indices.internal_data.output.full,
+        ].cpu()
+        data_rollout_step = self.post_processors(input_tensor_rollout_step).numpy()
+        # predicted output tensor
+        output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
+
+        fig = plot_predicted_multilevel_flat_sample(
+            plot_parameters_dict,
+            self.per_sample,
+            self.latlons,
+            self.accumulation_levels_plot,
+            self.cmap_accumulation,
+            data_0.squeeze(),
+            data_rollout_step.squeeze(),
+            output_tensor[0, 0, :, :],  # rolloutstep, first member
+        )
+        self._output_figure(
+            logger,
+            fig,
+            epoch=epoch,
+            tag=f"gnn_pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank0",
+            exp_log_tag=f"val_pred_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
+        )
+
+    def _store_video_frame_data(
+        self,
+        data_over_time: list,
+        y_pred: torch.Tensor,
+        plot_parameters_dict: dict,
+        vmin: np.ndarray,
+        vmax: np.ndarray,
+    ) -> tuple[list, np.ndarray, np.ndarray]:
+        """Store the data for each frame of the video."""
+        # prepare predicted output tensors for video
+        output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
+        data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
+        # update min and max values for each variable for the colorbar
+        vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=1))
+        vmax[:] = np.maximum(vmax, np.nanmax(data_over_time[-1], axis=1))
+        return data_over_time, vmin, vmax
+
+    @rank_zero_only
+    def _generate_video_rollout(
+        self,
+        data_0: np.ndarray,
+        data_over_time: list,
+        plot_parameters_dict: dict,
+        vmin: np.ndarray,
+        vmax: np.ndarray,
+        rollout_step: int,
+        batch_idx: int,
+        epoch: int,
+        logger: pl.loggers.base.LightningLoggerBase,
+        animation_interval: int = 400,
+    ) -> None:
+        """Generate the video animation for the rollout."""
+        for idx, (variable_idx, (variable_name, _)) in enumerate(plot_parameters_dict.items()):
+            # Create the animation and list to store the frames (artists)
+            frames = []
+            # Prepare the figure
+            fig, ax = plt.subplots(figsize=(10, 6), dpi=72)
+            cmap = "twilight" if variable_name == "mwd" else "viridis"
+
+            # Create initial data and colorbar
+            ax, scatter_frame = get_scatter_frame(
+                ax,
+                data_0[0, :, variable_idx],
+                self.latlons,
+                cmap=cmap,
+                vmin=vmin[idx],
+                vmax=vmax[idx],
+            )
+            ax.set_title(f"{variable_name}")
+            fig.colorbar(scatter_frame, ax=ax)
+            frames.append([scatter_frame])
+
+            # Loop through the data and create the scatter plot for each frame
+            for frame_data in data_over_time:
+                ax, scatter_frame = get_scatter_frame(
+                    ax,
+                    frame_data[idx],
+                    self.latlons,
+                    cmap=cmap,
+                    vmin=vmin[idx],
+                    vmax=vmax[idx],
+                )
+                frames.append([scatter_frame])  # Each frame contains a list of artists (images)
+
+            # Create the animation using ArtistAnimation
+            anim = animation.ArtistAnimation(fig, frames, interval=animation_interval, blit=True)
+            self._output_gif(
+                logger,
+                fig,
+                anim,
+                epoch=epoch,
+                tag=f"gnn_pred_val_animation_{variable_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
+            )
+
     def on_validation_batch_end(
         self,
-        trainer,
-        pl_module,
-        output,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        output: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
     ) -> None:
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
+            batch = pl_module.allgather_batch(batch)
+
             precision_mapping = {
                 "16-mixed": torch.float16,
                 "bf16-mixed": torch.bfloat16,
@@ -454,7 +656,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
 
-        fig = plot_graph_node_features(model)
+        fig = plot_graph_node_features(model, datashader=self.datashader_plotting)
 
         self._output_figure(
             trainer.logger,
@@ -736,7 +938,7 @@ class PlotSample(BasePerBatchPlotCallback):
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
@@ -750,6 +952,7 @@ class PlotSample(BasePerBatchPlotCallback):
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
+                datashader=self.datashader_plotting,
                 precip_and_related_fields=self.precip_and_related_fields,
             )
 
@@ -796,7 +999,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
         return data, output_tensor
@@ -839,7 +1042,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list,
+        outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
@@ -921,7 +1124,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list,
+        outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,

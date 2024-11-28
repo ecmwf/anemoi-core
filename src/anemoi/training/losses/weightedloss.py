@@ -107,6 +107,8 @@ class BaseWeightedLoss(nn.Module, ABC):
 
         if scalar_indices is None:
             return x * scalar
+
+        scalar = scalar.expand_as(x)
         return x * scalar[scalar_indices]
 
     def scale_by_node_weights(self, x: torch.Tensor, squash: bool = True) -> torch.Tensor:

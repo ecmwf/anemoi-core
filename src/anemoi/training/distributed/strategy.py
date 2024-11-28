@@ -9,7 +9,6 @@
 
 
 import logging
-import os
 
 import numpy as np
 import pytorch_lightning as pl
@@ -27,19 +26,22 @@ LOGGER = logging.getLogger(__name__)
 class DDPGroupStrategy(DDPStrategy):
     """Distributed Data Parallel strategy with group communication."""
 
-    def __init__(self, num_gpus_per_model: int, **kwargs: dict) -> None:
+    def __init__(self, num_gpus_per_model: int, read_group_size: int, **kwargs: dict) -> None:
         """Initialize the distributed strategy.
 
         Parameters
         ----------
         num_gpus_per_model : int
             Number of GPUs per model to shard over.
+        read_group_size : int
+            Number of GPUs per reader group.
         **kwargs : dict
             Additional keyword arguments.
 
         """
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
+        self.read_group_size = read_group_size
 
     def setup(self, trainer: pl.Trainer) -> None:
         assert self.accelerator is not None, "Accelerator is not initialized for distributed strategy"
@@ -60,18 +62,56 @@ class DDPGroupStrategy(DDPStrategy):
             torch.distributed.new_group(x) for x in model_comm_group_ranks
         ]  # every rank has to create all of these
 
-        model_comm_group_id, model_comm_group_nr, model_comm_group_rank = self.get_my_model_comm_group(
+        model_comm_group_id, model_comm_group_rank, model_comm_num_groups = self.get_my_model_comm_group(
             self.model_comm_group_size,
         )
         model_comm_group = model_comm_groups[model_comm_group_id]
-        self.model.set_model_comm_group(model_comm_group)
-        LOGGER.debug(
-            "Rank %d model_comm_group is %s, group number %d, with local group rank %d and comms_group_ranks %s",
-            self.global_rank,
-            str(model_comm_group_nr),
+        self.model.set_model_comm_group(
+            model_comm_group,
             model_comm_group_id,
             model_comm_group_rank,
+            model_comm_num_groups,
+            self.model_comm_group_size,
+        )
+
+        # set up reader groups by further splitting model_comm_group_ranks with read_group_size:
+
+        assert self.model_comm_group_size % self.read_group_size == 0, (
+            f"Number of GPUs per model ({self.model_comm_group_size}) must be divisible by read_group_size "
+            f"({self.read_group_size})."
+        )
+
+        reader_group_ranks = np.array(
+            [
+                np.split(group_ranks, int(self.model_comm_group_size / self.read_group_size))
+                for group_ranks in model_comm_group_ranks
+            ],
+        )  # Shape: (num_model_comm_groups, model_comm_grp_size/read_group_size, read_group_size)
+        reader_groups = [[torch.distributed.new_group(x) for x in group_ranks] for group_ranks in reader_group_ranks]
+        reader_group_id, reader_group_rank, reader_group_size, reader_group_root = self.get_my_reader_group(
+            model_comm_group_rank,
+            self.read_group_size,
+        )
+        # get all reader groups of the current model group
+        model_reader_groups = reader_groups[model_comm_group_id]
+        self.model.set_reader_groups(
+            model_reader_groups,
+            reader_group_id,
+            reader_group_rank,
+            reader_group_size,
+        )
+
+        LOGGER.debug(
+            "Rank %d model_comm_group_id: %d model_comm_group: %s model_comm_group_rank: %d "
+            "reader_group_id: %d reader_group: %s reader_group_rank: %d reader_group_root (global): %d",
+            self.global_rank,
+            model_comm_group_id,
             str(model_comm_group_ranks[model_comm_group_id]),
+            model_comm_group_rank,
+            reader_group_id,
+            reader_group_ranks[model_comm_group_id, reader_group_id],
+            reader_group_rank,
+            reader_group_root,
         )
 
         # register hooks for correct gradient reduction
@@ -109,7 +149,7 @@ class DDPGroupStrategy(DDPStrategy):
         # seed ranks
         self.seed_rnd(model_comm_group_id)
 
-    def get_my_model_comm_group(self, num_gpus_per_model: int) -> tuple[int, np.ndarray, int]:
+    def get_my_model_comm_group(self, num_gpus_per_model: int) -> tuple[int, int, int]:
         """Determine tasks that work together and from a model group.
 
         Parameters
@@ -119,19 +159,69 @@ class DDPGroupStrategy(DDPStrategy):
 
         Returns
         -------
-        tuple[int, np.ndarray, int]
-            Model_comm_group id, Model_comm_group Nr, Model_comm_group rank
+        tuple[int, int, int]
+            Model_comm_group id, Model_comm_group rank, Number of model_comm_groups
         """
-        model_comm_groups = np.arange(0, self.world_size, dtype=np.int32)
-        model_comm_groups = np.split(model_comm_groups, self.world_size / num_gpus_per_model)
+        model_comm_group_id = self.global_rank // num_gpus_per_model
+        model_comm_group_rank = self.global_rank % num_gpus_per_model
+        model_comm_num_groups = self.world_size // num_gpus_per_model
 
-        model_comm_group_id = None
-        for i, model_comm_group in enumerate(model_comm_groups):
-            if self.global_rank in model_comm_group:
-                model_comm_group_id = i
-                model_comm_group_nr = model_comm_group
-                model_comm_group_rank = np.ravel(np.asarray(model_comm_group == self.global_rank).nonzero())[0]
-        return model_comm_group_id, model_comm_group_nr, model_comm_group_rank
+        return model_comm_group_id, model_comm_group_rank, model_comm_num_groups
+
+    def get_my_reader_group(self, model_comm_group_rank: int, read_group_size: int) -> tuple[int, int, int]:
+        """Determine tasks that work together and from a reader group.
+
+        Parameters
+        ----------
+        model_comm_group_rank : int
+            Rank within the model communication group.
+        read_group_size : int
+            Number of dataloader readers per model group.
+
+        Returns
+        -------
+        tuple[int, int, int]
+            Reader_group id, Reader_group rank, Reader_group root (global rank)
+        """
+        reader_group_id = model_comm_group_rank // read_group_size
+        reader_group_rank = model_comm_group_rank % read_group_size
+        reader_group_size = read_group_size
+        reader_group_root = (self.global_rank // read_group_size) * read_group_size
+
+        return reader_group_id, reader_group_rank, reader_group_size, reader_group_root
+
+    def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
+        """Pass communication group information to the dataloader for distributed training.
+
+        Parameters
+        ----------
+        dataloader : torch.utils.data.DataLoader
+            Dataloader to process.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Processed dataloader.
+
+        """
+        dataloader = super().process_dataloader(dataloader)
+
+        # pass model and reader group information to the dataloaders dataset
+        model_comm_group_id, model_comm_group_rank, model_comm_num_groups = self.get_my_model_comm_group(
+            self.model_comm_group_size,
+        )
+        _, reader_group_rank, _, _ = self.get_my_reader_group(model_comm_group_rank, self.read_group_size)
+
+        dataloader.dataset.set_comm_group_info(
+            self.global_rank,
+            model_comm_group_id,
+            model_comm_group_rank,
+            model_comm_num_groups,
+            reader_group_rank,
+            self.read_group_size,
+        )
+
+        return dataloader
 
     def seed_rnd(self, model_comm_group_id: int) -> None:
         """Seed the random number generators for the rank."""
@@ -145,7 +235,7 @@ class DDPGroupStrategy(DDPStrategy):
                 "Strategy: Rank %d, model comm group id %d, base seed %d, seeded with %d, "
                 "running with random seed: %d, sanity rnd: %s"
             ),
-            int(os.environ.get("SLURM_PROCID", "0")),
+            self.global_rank,
             model_comm_group_id,
             base_seed,
             initial_seed,

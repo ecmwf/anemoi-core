@@ -433,56 +433,31 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def log_system_metrics(self) -> None:
         """Log system metrics (CPU, GPU, etc)."""
         import mlflow
-        import psutil
-        from mlflow.system_metrics.metrics.base_metrics_monitor import BaseMetricsMonitor
         from mlflow.system_metrics.metrics.disk_monitor import DiskMonitor
-        from mlflow.system_metrics.metrics.gpu_monitor import GPUMonitor
         from mlflow.system_metrics.metrics.network_monitor import NetworkMonitor
         from mlflow.system_metrics.system_metrics_monitor import SystemMetricsMonitor
 
-        class CustomCPUMonitor(BaseMetricsMonitor):
-            """Class for monitoring CPU stats.
-
-            Extends default CPUMonitor, to also measure total \
-                    memory and a different formula for calculating used memory.
-
-            """
-
-            def collect_metrics(self) -> None:
-                # Get CPU metrics.
-                cpu_percent = psutil.cpu_percent()
-                self._metrics["cpu_utilization_percentage"].append(cpu_percent)
-
-                system_memory = psutil.virtual_memory()
-                # Change the formula for measuring CPU memory usage
-                # By default Mlflow uses psutil.virtual_memory().used
-                # Tests have shown that "used" underreports memory usage by as much as a factor of 2,
-                #   "used" also misses increased memory usage from using a higher prefetch factor
-                self._metrics["system_memory_usage_megabytes"].append(
-                    (system_memory.total - system_memory.available) / 1e6,
-                )
-                self._metrics["system_memory_usage_percentage"].append(system_memory.percent)
-
-                # QOL: report the total system memory in raw numbers
-                self._metrics["system_memory_total_megabytes"].append(system_memory.total / 1e6)
-
-            def aggregate_metrics(self) -> dict[str, int]:
-                return {k: round(sum(v) / len(v), 1) for k, v in self._metrics.items()}
+        from anemoi.training.diagnostics.mlflow.system_metrics.cpu_monitor import CPUMonitor
+        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import GreenGPUMonitor
+        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import RedGPUMonitor
 
         class CustomSystemMetricsMonitor(SystemMetricsMonitor):
             def __init__(self, run_id: str, resume_logging: bool = False):
                 super().__init__(run_id, resume_logging=resume_logging)
 
-                # Replace the CPUMonitor with custom implementation
-                self.monitors = [CustomCPUMonitor(), DiskMonitor(), NetworkMonitor()]
+                self.monitors = [CPUMonitor(), DiskMonitor(), NetworkMonitor()]
+
+                # Try init both and catch the error when one init fails
                 try:
-                    gpu_monitor = GPUMonitor()
+                    gpu_monitor = GreenGPUMonitor()
                     self.monitors.append(gpu_monitor)
-                except ImportError:
-                    LOGGER.warning(
-                        "`pynvml` is not installed, to log GPU metrics please run `pip install pynvml` \
-                            to install it",
-                    )
+                except (ImportError, RuntimeError) as e:
+                    LOGGER.warning("Failed to init Nvidia GPU Monitor: %s", e)
+                try:
+                    gpu_monitor = RedGPUMonitor()
+                    self.monitors.append(gpu_monitor)
+                except (ImportError, RuntimeError) as e:
+                    LOGGER.warning("Failed to init AMD GPU Monitor: %s", e)
 
         mlflow.enable_system_metrics_logging()
         system_monitor = CustomSystemMetricsMonitor(
@@ -526,7 +501,16 @@ class AnemoiMLflowLogger(MLFlowLogger):
         dict[str, Any]
             Cleaned up params ready for MlFlow.
         """
-        prefixes_to_remove = ["hardware", "data", "dataloader", "model", "training", "diagnostics", "metadata.config"]
+        prefixes_to_remove = [
+            "hardware",
+            "data",
+            "dataloader",
+            "model",
+            "training",
+            "diagnostics",
+            "metadata.config",
+            "metadata.dataset.variables_metadata",
+        ]
         keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
         for key in keys_to_remove:
             del params[key]

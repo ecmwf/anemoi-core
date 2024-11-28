@@ -34,22 +34,22 @@ edges:
 # Encoder
 - source_name: ${graph.data}
   target_name: ${graph.hidden}
-  edge_builder:
-    _target_: anemoi.graphs.edges.KNNEdges
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 12
   attributes: ${graph.attributes.edges}
 # Processor
 - source_name: ${graph.hidden}
   target_name: ${graph.hidden}
-  edge_builder:
-    _target_: anemoi.graphs.edges.MultiScaleEdges
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
   attributes: ${graph.attributes.edges}
 # Decoder
 - source_name: ${graph.hidden}
   target_name: ${graph.data}
-  edge_builder:
-    _target_: anemoi.graphs.edges.KNNEdges
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 3
   attributes: ${graph.attributes.edges}
 

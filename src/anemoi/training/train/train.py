@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +20,7 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from anemoi.utils.config import DotDict
 from anemoi.utils.provenance import gather_provenance_info
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -106,7 +106,7 @@ class AnemoiTrainer:
         (torch.rand(1), np_rng.random())
         LOGGER.debug(
             "Initial seed: Rank %d, initial seed %d, running with random seed: %d",
-            int(os.environ.get("SLURM_PROCID", "0")),
+            self.strategy.global_rank,
             initial_seed,
             rnd_seed,
         )
@@ -129,7 +129,8 @@ class AnemoiTrainer:
 
         from anemoi.graphs.create import GraphCreator
 
-        return GraphCreator(config=self.config.graph).create(
+        graph_config = DotDict(OmegaConf.to_container(self.config.graph, resolve=True))
+        return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,
         )
@@ -345,6 +346,7 @@ class AnemoiTrainer:
         """Training strategy."""
         return DDPGroupStrategy(
             self.config.hardware.num_gpus_per_model,
+            self.config.dataloader.get("read_group_size", self.config.hardware.num_gpus_per_model),
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 

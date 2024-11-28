@@ -45,6 +45,10 @@ number of GPUs you wish to shard the model across. It is recommended to
 only shard if the model does not fit in GPU memory, as data distribution
 is a much more efficient way to parallelise the training.
 
+When using model sharding, ``config.dataloader.read_group_size`` allows
+for sharded data loading in subgroups. This should be set to the number
+of GPUs per model for optimal performance.
+
 *********
  Example
 *********
