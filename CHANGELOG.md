@@ -35,6 +35,7 @@ Keep it human-readable, your future self will thank you!
 - Update copyright notice
 - Fix `__version__` import in init
 - Fix missing copyrights [#71](https://github.com/ecmwf/anemoi-models/pull/71)
+- Reduced memory usage when using chunking in the mapper [#84](https://github.com/ecmwf/anemoi-models/pull/84)
 
 ### Removed
 
