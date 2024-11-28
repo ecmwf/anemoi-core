@@ -40,8 +40,8 @@ classifiers = [
 dynamic = [ "version" ]
 
 dependencies = [
-  "anemoi-datasets>=0.4",
-  "anemoi-graphs>=0.4",
+  "anemoi-datasets>=0.5.2",
+  "anemoi-graphs>=0.4.1",
   "anemoi-models>=0.3",
   "anemoi-utils[provenance]>=0.4.4",
   "datashader>=0.16.3",
