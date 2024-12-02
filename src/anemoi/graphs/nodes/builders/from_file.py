@@ -41,7 +41,7 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         Register the nodes in the graph.
     register_attributes(graph, name, config)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attr_config)
         Update the graph with new nodes and attributes.
     """
 
@@ -62,6 +62,22 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         dataset = open_dataset(self.dataset)
         return self.reshape_coords(dataset.latitudes, dataset.longitudes)
 
+class TextNodes(BaseNodeBuilder):
+    def __init__(self, dataset, name: str) -> None:
+        LOGGER.info("Reading the dataset from %s.", dataset)
+        self.dataset = np.loadtxt(dataset)
+        super().__init__(name)
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
+
+    def get_coordinates(self) -> torch.Tensor:
+        """Get the coordinates of the nodes.
+
+        Returns
+        -------
+        torch.Tensor of shape (num_nodes, 2)
+            A 2D tensor with the coordinates, in radians.
+        """
+        return self.reshape_coords(self.dataset[1, :], self.dataset[0, :])
 
 class NPZFileNodes(BaseNodeBuilder):
     """Nodes from NPZ defined grids.
@@ -83,7 +99,7 @@ class NPZFileNodes(BaseNodeBuilder):
         Register the nodes in the graph.
     register_attributes(graph, name, config)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attr_config)
         Update the graph with new nodes and attributes.
     """
 
