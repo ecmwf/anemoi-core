@@ -14,6 +14,7 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
+- New AnemoiModelEncProcDecHierarchical class available in models [#37](https://github.com/ecmwf/anemoi-models/pull/37)
 - Add anemoi-transform link to documentation
 - Codeowners file
 - Pygrep precommit hooks

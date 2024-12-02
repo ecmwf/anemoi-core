@@ -323,6 +323,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         *args,
         **kwargs,
     ) -> Tensor:
+
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         edge_attr = self.trainable(self.edge_attr, batch_size)
 
