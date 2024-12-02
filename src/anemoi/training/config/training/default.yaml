@@ -118,3 +118,8 @@ pressure_level_scaler:
   _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
   minimum: 0.2
   slope: 0.001
+
+node_loss_weights:
+  _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
+  target_nodes: ${graph.data}
+  node_attribute: area_weight

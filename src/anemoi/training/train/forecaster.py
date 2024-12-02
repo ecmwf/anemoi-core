@@ -84,7 +84,7 @@ class GraphForecaster(pl.LightningModule):
         self.save_hyperparameters()
 
         self.latlons_data = graph_data[config.graph.data].x
-        self.node_weights = graph_data[config.graph.data][config.model.node_loss_weight].squeeze()
+        self.node_weights = self.get_node_weights(config, graph_data)
 
         if config.model.get("output_mask", None) is not None:
             self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
@@ -314,6 +314,12 @@ class GraphForecaster(pl.LightningModule):
                     LOGGER.debug("Parameter %s was not scaled.", key)
 
         return torch.from_numpy(variable_loss_scaling)
+
+    @staticmethod
+    def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
+        node_weighting = instantiate(config.training.node_loss_weights)
+
+        return node_weighting.weights(graph_data)
 
     def set_model_comm_group(
         self,

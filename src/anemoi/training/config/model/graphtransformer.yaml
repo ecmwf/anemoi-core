@@ -50,8 +50,6 @@ attributes:
   - edge_dirs
   nodes: []
 
-node_loss_weight: area_weight
-
 # Bounding configuration
 bounding: #These are applied in order
 

@@ -183,6 +183,28 @@ levels nearer to the surface). By default anemoi-training uses a ReLU
 Pressure Level scaler with a minimum weighting of 0.2 (i.e. no pressure
 level has a weighting less than 0.2).
 
+The loss is also scaled by assigning a weight to each node on the output
+grid. These weights are calculated during graph-creation and stored as
+an attribute in the graph object. The configuration option
+``config.training.node_loss_weights`` is used to specify the node
+attribute used as weights in the loss function. By default
+anemoi-training uses area weighting, where each node is weighted
+according to the size of the geographical area it represents.
+
+It is also possible to rescale the weight of a subset of nodes after
+they are loaded from the graph. For instance, for a stretched grid setup
+we can rescale the weight of nodes in the limited area such that their
+sum equals 0.25 of the sum of all node weights with the following config
+setup
+
+.. code:: yaml
+
+   node_loss_weights:
+      _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
+      target_nodes: data
+      scaled_attribute: cutout
+      weight_frac_of_total: 0.25
+
 ***************
  Learning rate
 ***************
