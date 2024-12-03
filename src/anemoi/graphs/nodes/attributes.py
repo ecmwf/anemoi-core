@@ -18,7 +18,7 @@ from typing import Union
 import numpy as np
 import torch
 from anemoi.datasets import open_dataset
-from scipy.spatial import SphericalVoronoi
+from scipy.spatial import SphericalVoronoi, Voronoi, ConvexHull
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
@@ -125,11 +125,13 @@ class AreaWeights(BaseNodeAttribute):
         centre: np.ndarray = np.array([0, 0, 0]),
         fill_value: float = 0.0,
         dtype: str = "float32",
+        flat: bool = False,
     ) -> None:
         super().__init__(norm, dtype)
         self.radius = radius
         self.centre = centre
         self.fill_value = fill_value
+        self.flat = flat
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         """Compute the area associated to each node.
@@ -149,22 +151,31 @@ class AreaWeights(BaseNodeAttribute):
             Attributes.
         """
         latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
-        points = latlon_rad_to_cartesian((np.asarray(latitudes), np.asarray(longitudes)))
-        sv = SphericalVoronoi(points, self.radius, self.centre)
-        mask = np.array([bool(i) for i in sv.regions])
-        sv.regions = [region for region in sv.regions if region]
-        # compute the area weight without empty regions
-        area_weights = sv.calculate_areas()
-        if (null_nodes := (~mask).sum()) > 0:
-            LOGGER.warning(
-                "%s is filling %d (%.2f%%) nodes with value %f",
-                self.__class__.__name__,
-                null_nodes,
-                100 * null_nodes / len(mask),
-                self.fill_value,
-            )
-        result = np.ones(points.shape[0]) * self.fill_value
-        result[mask] = area_weights
+        if self.flat:
+            points = np.stack([latitudes, longitudes], -1)
+            v = Voronoi(points, qhull_options="QJ Pp")
+            areas = []
+            for r in v.regions:
+                area = ConvexHull(v.vertices[r, :]).volume 
+                areas.append(area) 
+            result = np.asarray(areas)
+        else:
+            points = latlon_rad_to_cartesian((np.asarray(latitudes), np.asarray(longitudes)))
+            sv = SphericalVoronoi(points, self.radius, self.centre)
+            mask = np.array([bool(i) for i in sv.regions])
+            sv.regions = [region for region in sv.regions if region]
+            # compute the area weight without empty regions
+            area_weights = sv.calculate_areas()
+            if (null_nodes := (~mask).sum()) > 0:
+                LOGGER.warning(
+                    "%s is filling %d (%.2f%%) nodes with value %f",
+                    self.__class__.__name__,
+                    null_nodes,
+                    100 * null_nodes / len(mask),
+                    self.fill_value,
+                )
+            result = np.ones(points.shape[0]) * self.fill_value
+            result[mask] = area_weights
         LOGGER.debug(
             "There are %d of weights, which (unscaled) add up a total weight of %.2f.",
             len(result),
