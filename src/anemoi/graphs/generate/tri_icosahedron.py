@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 
 import networkx as nx
@@ -19,6 +20,8 @@ from sklearn.neighbors import BallTree
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.utils import get_coordinates_ordering
+
+LOGGER = logging.getLogger(__name__)
 
 
 def create_tri_nodes(
@@ -167,8 +170,11 @@ def add_edges_to_nx_graph(
     graph_vertices = np.array([graph.nodes[i]["hcoords_rad"] for i in sorted(graph.nodes)])
     tree = BallTree(graph_vertices, metric="haversine")
 
+    LOGGER.info("Starting add_edges_to_nx_graph")
+
     # Build the multi-scale connections
     for resolution in resolutions:
+        LOGGER.info(f"Resolution: {resolution}")
         # Define the coordinates of the isophere vertices at specified 'resolution' level
         r_sphere = trimesh.creation.icosphere(subdivisions=resolution, radius=1.0)
         r_vertices_rad = cartesian_to_latlon_rad(r_sphere.vertices)
@@ -180,12 +186,17 @@ def add_edges_to_nx_graph(
         else:
             valid_nodes = None
 
+        LOGGER.info("Starting get_neighbors_within_x_hops")
         node_neighbours = get_neighbours_within_hops(r_sphere, x_hops, valid_nodes=valid_nodes)
+        LOGGER.info("Finished get_neighbors_within_x_hops")
 
         _, vertex_mapping_index = tree.query(r_vertices_rad, k=1)
-        for idx_node, idx_neighbours in node_neighbours.items():
-            graph = add_neigbours_edges(graph, idx_node, idx_neighbours, vertex_mapping_index=vertex_mapping_index)
-
+        LOGGER.info("Starting add_neighbours_edges loop")
+        neighbor_pairs = create_node_neighbors_list(graph, node_neighbours, vertex_mapping_index)
+        graph.add_edges_from(neighbor_pairs)
+        #        for idx_node, idx_neighbours in node_neighbours.items():
+        #            graph = add_neigbours_edges(graph, idx_node, idx_neighbours, vertex_mapping_index=vertex_mapping_index)
+        LOGGER.info("Finished add_neighbours_edges loop")
     return graph
 
 
@@ -270,3 +281,24 @@ def add_neigbours_edges(
             graph.add_edge(node_neighbour, node)
 
     return graph
+
+
+def create_node_neighbors_list(
+    graph: nx.Graph,
+    node_neighbors: dict[int, set[int]],
+    vertex_mapping_index: np.ndarray | None = None,
+    self_loops: bool = False,
+):
+    graph_nodes_idx = list(sorted(graph.nodes))
+
+    if vertex_mapping_index is None:
+        vertex_mapping_index = np.arange(len(graph.nodes)).reshape(len(graph.nodes), 1)
+
+    neighbor_pairs = [
+        (graph_nodes_idx[vertex_mapping_index[node_neighbor][0]], graph_nodes_idx[vertex_mapping_index[node][0]])
+        for node, neighbors in node_neighbors.items()
+        for node_neighbor in neighbors
+        if node != node_neighbor or (self_loops and node != node_neighbor)
+    ]
+
+    return neighbor_pairs
