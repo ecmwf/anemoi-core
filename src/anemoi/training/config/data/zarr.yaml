@@ -1,5 +1,4 @@
 format: zarr
-resolution: o96
 # Time frequency requested from dataset
 frequency: 6h
 # Time step of model (must be multiple of frequency)
@@ -82,5 +81,5 @@ processors:
   #   _convert_: all
   #   config: ${data.remapper}
 
-# Values set in the code
+  # Values set in the code
 num_features: null # number of features in the forecast state
