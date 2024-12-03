@@ -816,7 +816,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         # reorder parameter_names by position
         self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
         if not isinstance(pl_module.loss, BaseWeightedLoss):
-            logging.warning(
+            LOGGER.warning(
                 "Loss function must be a subclass of BaseWeightedLoss, or provide `squash`.",
                 RuntimeWarning,
             )

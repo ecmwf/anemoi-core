@@ -207,7 +207,7 @@ class LogsMonitor:
         # split lines and keep \n at the end of each line
         lines = [e + b"\n" for e in data.split(b"\n") if e]
 
-        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")
+        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")  # noqa: RUF039
 
         def _handle_csi(line: bytes) -> bytes:
             # removes the cursor up and down symbols from the line
@@ -252,7 +252,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         run_name: str | None = None,
         tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
         save_dir: str | None = "./mlruns",
-        log_model: Literal[True, False, "all"] = False,
+        log_model: Literal["all"] | bool = False,
         prefix: str = "",
         resumed: bool | None = False,
         forked: bool | None = False,
