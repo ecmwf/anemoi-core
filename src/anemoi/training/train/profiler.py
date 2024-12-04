@@ -57,8 +57,8 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @staticmethod
     def print_metadata() -> None:
-        console.print(f"[bold blue] SLURM NODE(s) {os.environ['HOST']} [/bold blue]!")
-        console.print(f"[bold blue] SLURM JOB ID {os.environ['SLURM_JOB_ID']} [/bold blue]!")
+        console.print(f"[bold blue] SLURM NODE(s) {os.getenv('SLURM_JOB_NODELIST', '')} [/bold blue]!")
+        console.print(f"[bold blue] SLURM JOB ID {os.getenv('SLURM_JOB_ID', '')} [/bold blue]!")
         console.print(f"[bold blue] TIMESTAMP {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M:%S')} [/bold blue]!")
 
     @rank_zero_only
