@@ -9,6 +9,7 @@
 
 
 import logging
+import warnings
 from abc import ABC
 from typing import Optional
 
@@ -106,6 +107,12 @@ class BaseImputer(BasePreprocessor, ABC):
         """Expand the subset of the mask to the correct shape."""
         return self.nan_locations[:, idx_src].expand(*x.shape[:-2], -1)
 
+    def get_nans(self, x: torch.Tensor) -> torch.Tensor:
+        """get NaN mask from data"""
+        # The mask is only saved for the last two dimensions (grid, variable)
+        idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
+        return torch.isnan(x[idx].squeeze())
+
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
@@ -113,9 +120,9 @@ class BaseImputer(BasePreprocessor, ABC):
 
         # Initialize nan mask once
         if self.nan_locations is None:
-            # The mask is only saved for the last two dimensions (grid, variable)
-            idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
-            self.nan_locations = torch.isnan(x[idx].squeeze())
+
+            # Get NaN locations
+            self.nan_locations = self.get_nans(x)
 
             # Initialize training loss mask to weigh imputed values with zeroes once
             self.loss_mask_training = torch.ones(
@@ -222,3 +229,77 @@ class ConstantImputer(BaseImputer):
         self._create_imputation_indices()
 
         self._validate_indices()
+
+
+class DynamicMixin:
+    """Mixin to add dynamic imputation behavior."""
+
+    def get_nans(self, x: torch.Tensor) -> torch.Tensor:
+        """Override to calculate NaN locations dynamically."""
+        return torch.isnan(x)
+
+    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+        """Impute missing values in the input tensor."""
+        if not in_place:
+            x = x.clone()
+
+        # Initilialize mask every time
+        nan_locations = self.get_nans(x)
+
+        self.loss_mask_training = torch.ones(
+            (x.shape[-2], len(self.data_indices.model.output.name_to_index)), device=x.device
+        )
+
+        # Choose correct index based on number of variables
+        if x.shape[-1] == self.num_training_input_vars:
+            index = self.index_training_input
+        elif x.shape[-1] == self.num_inference_input_vars:
+            index = self.index_inference_input
+        else:
+            raise ValueError(
+                f"Input tensor ({x.shape[-1]}) does not match the training "
+                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
+            )
+
+        # Replace values
+        for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
+            if idx_dst is not None:
+                x[..., idx_dst][nan_locations[..., idx_src]] = value
+
+        return x
+
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+        """Impute missing values in the input tensor."""
+        return x
+
+
+class DynamicInputImputer(DynamicMixin, InputImputer):
+    "Imputes missing values using the statistics supplied and a dynamic NaN map."
+
+    def __init__(
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
+    ) -> None:
+        super().__init__(config, data_indices, statistics)
+        warnings.warn(
+            "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
+                      The model will be trained to predict imputed values. This might deteriorate performances."
+        )
+
+
+class DynamicConstantImputer(DynamicMixin, ConstantImputer):
+    "Imputes missing values using the constant value and a dynamic NaN map."
+
+    def __init__(
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
+    ) -> None:
+        super().__init__(config, data_indices, statistics)
+        warnings.warn(
+            "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
+                      The model will be trained to predict imputed values. This might deteriorate performances."
+        )
