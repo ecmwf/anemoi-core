@@ -10,13 +10,17 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
-from typing import Type, Union
+from abc import ABC
+from abc import abstractmethod
+from typing import Type
+from typing import Union
 
 import numpy as np
 import torch
 from anemoi.datasets import open_dataset
-from scipy.spatial import ConvexHull, SphericalVoronoi, Voronoi
+from scipy.spatial import ConvexHull
+from scipy.spatial import SphericalVoronoi
+from scipy.spatial import Voronoi
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
@@ -114,6 +118,7 @@ class AreaWeights(BaseNodeAttribute):
     """
 
     def __new__(cls, flat: bool = False, **kwargs):
+        logging.warning("Creating %s with flat=%s and kwargs=%s. In a future release, AreaWeights will be deprecated: please use directly PlanarAreaWeights or SphericalAreaWeights.", cls.__name__, flat, kwargs)
         if flat:
             return PlanarAreaWeights(**kwargs)
         return SphericalAreaWeights(**kwargs)
@@ -187,9 +192,7 @@ class SphericalAreaWeights(BaseNodeAttribute):
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
-        points = latlon_rad_to_cartesian(
-            (np.asarray(latitudes), np.asarray(longitudes))
-        )
+        points = latlon_rad_to_cartesian((np.asarray(latitudes), np.asarray(longitudes)))
         sv = SphericalVoronoi(points, self.radius, self.centre)
         mask = np.array([bool(i) for i in sv.regions])
         sv.regions = [region for region in sv.regions if region]
@@ -254,12 +257,8 @@ class CutOutMask(BooleanBaseNodeAttribute):
     """Cut out mask."""
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        assert isinstance(
-            nodes["_dataset"], dict
-        ), "The 'dataset' attribute must be a dictionary."
-        assert (
-            "cutout" in nodes["_dataset"]
-        ), "The 'dataset' attribute must contain a 'cutout' key."
+        assert isinstance(nodes["_dataset"], dict), "The 'dataset' attribute must be a dictionary."
+        assert "cutout" in nodes["_dataset"], "The 'dataset' attribute must contain a 'cutout' key."
         num_lam, num_other = open_dataset(nodes["_dataset"]).grids
         return np.array([True] * num_lam + [False] * num_other, dtype=bool)
 
@@ -272,9 +271,7 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
         self.masks = masks if isinstance(masks, list) else [masks]
 
     @staticmethod
-    def get_mask_values(
-        mask: MaskAttributeType, nodes: NodeStorage, **kwargs
-    ) -> np.array:
+    def get_mask_values(mask: MaskAttributeType, nodes: NodeStorage, **kwargs) -> np.array:
         if isinstance(mask, str):
             attributes = nodes[mask]
             assert (
@@ -288,10 +285,7 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
     def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray: ...
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        mask_values = [
-            BooleanOperation.get_mask_values(mask, nodes, **kwargs)
-            for mask in self.masks
-        ]
+        mask_values = [BooleanOperation.get_mask_values(mask, nodes, **kwargs) for mask in self.masks]
         return self.reduce_op(mask_values)
 
 
@@ -299,9 +293,7 @@ class BooleanNot(BooleanOperation):
     """Boolean NOT mask."""
 
     def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray:
-        assert (
-            len(self.masks) == 1
-        ), f"The {self.__class__.__name__} can only be aplied to one mask."
+        assert len(self.masks) == 1, f"The {self.__class__.__name__} can only be aplied to one mask."
         return ~masks[0]
 
 
