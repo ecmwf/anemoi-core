@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
-from typing import Self
 from typing import Type
 from typing import Union
 
@@ -118,7 +117,7 @@ class AreaWeights(BaseNodeAttribute):
         Compute the area attributes for each node.
     """
 
-    def __new__(cls, flat: bool = True, **kwargs) -> Self:
+    def __new__(cls, flat: bool = True, **kwargs):
         if flat:
             return PlanarAreaWeights(**kwargs)
         return SphericalAreaWeights(**kwargs)
