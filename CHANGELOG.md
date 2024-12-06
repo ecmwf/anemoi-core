@@ -12,6 +12,7 @@ Keep it human-readable, your future self will thank you!
 ### Fixed
 - Not update NaN-weight-mask for loss function when using remapper and no imputer [#178](https://github.com/ecmwf/anemoi-training/pull/178)
 - Dont crash when using the profiler if certain env vars arent set [#180](https://github.com/ecmwf/anemoi-training/pull/180)
+- Remove saving of metadata to training checkpoint [#57](https://github.com/ecmwf/anemoi-training/pull/190)
 
 ### Added
 - Introduce variable to configure: transfer_learning -> bool, True if loading checkpoint in a transfer learning setting.
