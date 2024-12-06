@@ -40,7 +40,7 @@ repos:
     - --force-single-line-imports
     - --profile black
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.7.2
+  rev: v0.8.1
   hooks:
   - id: ruff
     args:
@@ -64,7 +64,7 @@ repos:
   hooks:
   - id: pyproject-fmt
 -   repo: https://github.com/jshwi/docsig # Check docstrings against function sig
-    rev: v0.64.0
+    rev: v0.65.0
     hooks:
     -   id: docsig
         args:
@@ -74,6 +74,5 @@ repos:
         - --check-protected  # Check protected methods
         - --check-class      # Check class docstrings
         - --disable=E113     # Disable empty docstrings
-        - --summary          # Print a summary
 ci:
   autoupdate_schedule: monthly
