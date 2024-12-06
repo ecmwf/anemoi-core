@@ -304,7 +304,7 @@ def create_node_neighbours_list(
         (graph_nodes_idx[vertex_mapping_index[node_neighbour][0]], graph_nodes_idx[vertex_mapping_index[node][0]])
         for node, neighbours in node_neighbours.items()
         for node_neighbour in neighbours
-        if node != node_neighbour or (self_loops and node != node_neighbour)
+        if node != node_neighbour or (self_loops and node == node_neighbour)
     ]
 
     return neighbour_pairs
