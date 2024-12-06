@@ -118,7 +118,12 @@ class AreaWeights(BaseNodeAttribute):
     """
 
     def __new__(cls, flat: bool = False, **kwargs):
-        logging.warning("Creating %s with flat=%s and kwargs=%s. In a future release, AreaWeights will be deprecated: please use directly PlanarAreaWeights or SphericalAreaWeights.", cls.__name__, flat, kwargs)
+        logging.warning(
+            "Creating %s with flat=%s and kwargs=%s. In a future release, AreaWeights will be deprecated: please use directly PlanarAreaWeights or SphericalAreaWeights.",
+            cls.__name__,
+            flat,
+            kwargs,
+        )
         if flat:
             return PlanarAreaWeights(**kwargs)
         return SphericalAreaWeights(**kwargs)
