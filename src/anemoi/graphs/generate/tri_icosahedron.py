@@ -183,8 +183,8 @@ def add_edges_to_nx_graph(
         node_neighbours = get_neighbours_within_hops(r_sphere, x_hops, valid_nodes=valid_nodes)
 
         _, vertex_mapping_index = tree.query(r_vertices_rad, k=1)
-        neighbor_pairs = create_node_neighbours_list(graph, node_neighbours, vertex_mapping_index)
-        graph.add_edges_from(neighbor_pairs)
+        neighbour_pairs = create_node_neighbours_list(graph, node_neighbours, vertex_mapping_index)
+        graph.add_edges_from(neighbour_pairs)
     return graph
 
 
@@ -273,17 +273,17 @@ def add_neigbours_edges(
 
 def create_node_neighbours_list(
     graph: nx.Graph,
-    node_neighbors: dict[int, set[int]],
+    node_neighbours: dict[int, set[int]],
     vertex_mapping_index: np.ndarray | None = None,
     self_loops: bool = False,
 ) -> list[tuple]:
-    """Preprocesses the dict of node neighbors.
+    """Preprocesses the dict of node neighbours.
 
     Parameters:
     -----------
     graph: nx.Graph
         The graph.
-    node_neighbors: dict[int, set[int]]
+    node_neighbours: dict[int, set[int]]
         dictionairy with key: node index and value: set of neighbour node indices
     vertex_mapping_index: np.ndarry
         Index to map the vertices from the refined sphere to the original one, by default None.
@@ -293,18 +293,18 @@ def create_node_neighbours_list(
     Returns:
     --------
     list: tuple
-        A list with containing node neighbor pairs in tuples
+        A list with containing node neighbour pairs in tuples
     """
     graph_nodes_idx = list(sorted(graph.nodes))
 
     if vertex_mapping_index is None:
         vertex_mapping_index = np.arange(len(graph.nodes)).reshape(len(graph.nodes), 1)
 
-    neighbor_pairs = [
-        (graph_nodes_idx[vertex_mapping_index[node_neighbor][0]], graph_nodes_idx[vertex_mapping_index[node][0]])
-        for node, neighbors in node_neighbors.items()
-        for node_neighbor in neighbors
-        if node != node_neighbor or (self_loops and node != node_neighbor)
+    neighbour_pairs = [
+        (graph_nodes_idx[vertex_mapping_index[node_neighbour][0]], graph_nodes_idx[vertex_mapping_index[node][0]])
+        for node, neighbours in node_neighbours.items()
+        for node_neighbour in neighbours
+        if node != node_neighbour or (self_loops and node != node_neighbour)
     ]
 
-    return neighbor_pairs
+    return neighbour_pairs
