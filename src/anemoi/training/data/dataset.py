@@ -38,6 +38,7 @@ class NativeGridDataset(IterableDataset):
         timeincrement: int = 1,
         shuffle: bool = True,
         label: str = "generic",
+        effective_bs: int = 1,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -55,9 +56,11 @@ class NativeGridDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
-
+        effective_bs : int, default 1
+            effective batch size useful to compute the lenght of the dataset
         """
         self.label = label
+        self.effective_bs = effective_bs
 
         self.data = data_reader
 

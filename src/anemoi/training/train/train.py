@@ -34,6 +34,7 @@ from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 
@@ -62,9 +63,8 @@ class AnemoiTrainer:
         OmegaConf.resolve(config)
         self.config = config
 
-        # Default to not warm-starting from a checkpoint
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
-        self.load_weights_only = config.training.load_weights_only
+        self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id
@@ -83,6 +83,8 @@ class AnemoiTrainer:
         """DataModule instance and DataSets."""
         datamodule = AnemoiDatasetsDataModule(self.config)
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
+        LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
+        LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
         return datamodule
 
     @cached_property
@@ -145,10 +147,21 @@ class AnemoiTrainer:
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
         }
+
+        model = GraphForecaster(**kwargs)
+
         if self.load_weights_only:
+            # Sanify the checkpoint for transfer learning
+            if self.config.training.transfer_learning:
+                LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
+                return transfer_learning_loading(model, self.last_checkpoint)
+
             LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-            return GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs)
-        return GraphForecaster(**kwargs)
+
+            return model.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+
+        LOGGER.info("Model initialised from scratch.")
+        return model
 
     @rank_zero_only
     def _get_mlflow_run_id(self) -> str:
@@ -200,6 +213,7 @@ class AnemoiTrainer:
             fork_id or self.lineage_run,
             self.config.hardware.files.warm_start or "last.ckpt",
         )
+
         # Check if the last checkpoint exists
         if Path(checkpoint).exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
@@ -296,11 +310,15 @@ class AnemoiTrainer:
             * self.config.hardware.num_gpus_per_node
             / self.config.hardware.num_gpus_per_model
         )
+
         LOGGER.debug(
             "Total GPU count / model group size: %d - NB: the learning rate will be scaled by this factor!",
             total_number_of_model_instances,
         )
-        LOGGER.debug("Effective learning rate: %.3e", total_number_of_model_instances * self.config.training.lr.rate)
+        LOGGER.debug(
+            "Effective learning rate: %.3e",
+            int(total_number_of_model_instances) * self.config.training.lr.rate,
+        )
         LOGGER.debug("Rollout window length: %d", self.config.training.rollout.start)
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
@@ -352,6 +370,8 @@ class AnemoiTrainer:
 
     def train(self) -> None:
         """Training entry point."""
+        LOGGER.debug("Setting up trainer..")
+
         trainer = pl.Trainer(
             accelerator=self.accelerator,
             callbacks=self.callbacks,
@@ -377,6 +397,8 @@ class AnemoiTrainer:
             profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
         )
+
+        LOGGER.debug("Starting training..")
 
         trainer.fit(
             self.model,
