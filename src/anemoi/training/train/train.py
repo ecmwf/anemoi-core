@@ -162,7 +162,7 @@ class AnemoiTrainer:
 
             LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
 
-            return model.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+            return GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
         LOGGER.info("Model initialised from scratch.")
         return model
