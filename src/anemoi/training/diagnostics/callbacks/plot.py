@@ -1018,6 +1018,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         config: OmegaConf,
         sample_idx: int,
         parameters: list[str],
+        min_delta: float | None = None,
         every_n_batches: int | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback.
@@ -1036,6 +1037,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         super().__init__(config, every_n_batches=every_n_batches)
         self.sample_idx = sample_idx
         self.parameters = parameters
+        self.min_delta = min_delta
 
     @rank_zero_only
     def _plot(
@@ -1070,6 +1072,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
+                min_delta=self.min_delta,
             )
 
             self._output_figure(

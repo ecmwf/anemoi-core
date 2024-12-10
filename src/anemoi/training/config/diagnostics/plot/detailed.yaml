@@ -44,6 +44,7 @@ callbacks:
 
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
     # every_n_batches: 100 # Override for batch frequency
+    # min_delta: 0.01 # Minimum distance between two consecutive points
     sample_idx: ${diagnostics.plot.sample_idx}
     parameters:
     - z_500
