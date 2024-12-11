@@ -18,7 +18,9 @@ from typing import Union
 import numpy as np
 import torch
 from anemoi.datasets import open_dataset
+from scipy.spatial import ConvexHull
 from scipy.spatial import SphericalVoronoi
+from scipy.spatial import Voronoi
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
@@ -103,6 +105,68 @@ class AreaWeights(BaseNodeAttribute):
 
     Attributes
     ----------
+    flat: bool
+        If True, the area is computed in 2D, otherwise in 3D.
+    **other: Any
+        Additional keyword arguments, see PlanarAreaWeights and SphericalAreaWeights
+        for details.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def __new__(cls, flat: bool = False, **kwargs):
+        logging.warning(
+            "Creating %s with flat=%s and kwargs=%s. In a future release, AreaWeights will be deprecated: please use directly PlanarAreaWeights or SphericalAreaWeights.",
+            cls.__name__,
+            flat,
+            kwargs,
+        )
+        if flat:
+            return PlanarAreaWeights(**kwargs)
+        return SphericalAreaWeights(**kwargs)
+
+
+class PlanarAreaWeights(BaseNodeAttribute):
+    """Implements the 2D area of the nodes as the weights.
+
+    Attributes
+    ----------
+    norm : str
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def __init__(
+        self,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm, dtype)
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+        latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
+        points = np.stack([latitudes, longitudes], -1)
+        v = Voronoi(points, qhull_options="QJ Pp")
+        areas = []
+        for r in v.regions:
+            area = ConvexHull(v.vertices[r, :]).volume
+            areas.append(area)
+        result = np.asarray(areas)
+        return result
+
+
+class SphericalAreaWeights(BaseNodeAttribute):
+    """Implements the 3D area of the nodes as the weights.
+
+    Attributes
+    ----------
     norm : str
         Normalisation of the weights.
     radius : float
@@ -132,22 +196,6 @@ class AreaWeights(BaseNodeAttribute):
         self.fill_value = fill_value
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        """Compute the area associated to each node.
-
-        It uses Voronoi diagrams to compute the area of each node.
-
-        Parameters
-        ----------
-        nodes : NodeStorage
-            Nodes of the graph.
-        kwargs : dict
-            Additional keyword arguments.
-
-        Returns
-        -------
-        np.ndarray
-            Attributes.
-        """
         latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
         points = latlon_rad_to_cartesian((np.asarray(latitudes), np.asarray(longitudes)))
         sv = SphericalVoronoi(points, self.radius, self.centre)

@@ -9,6 +9,7 @@
 
 from .builders.from_file import LimitedAreaNPZFileNodes
 from .builders.from_file import NPZFileNodes
+from .builders.from_file import TextNodes
 from .builders.from_file import ZarrDatasetNodes
 from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
@@ -35,4 +36,5 @@ __all__ = [
     "ICONMultimeshNodes",
     "ICONCellGridNodes",
     "ICONNodes",
+    "TextNodes",
 ]
