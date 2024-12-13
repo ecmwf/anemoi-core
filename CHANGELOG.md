@@ -8,13 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
-## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.3.0...HEAD)
-
-- Add synchronisation workflow
+## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.4.0...HEAD)
 
 ### Added
 
 - New AnemoiModelEncProcDecHierarchical class available in models [#37](https://github.com/ecmwf/anemoi-models/pull/37)
+- Mask NaN values in training loss function [#56](https://github.com/ecmwf/anemoi-models/pull/56)
+- Added dynamic NaN masking for the imputer class with two new classes: DynamicInputImputer, DynamicConstantImputer [#89](https://github.com/ecmwf/anemoi-models/pull/89)
+- Reduced memory usage when using chunking in the mapper [#84](https://github.com/ecmwf/anemoi-models/pull/84)
+
+## [0.4.0](https://github.com/ecmwf/anemoi-models/compare/0.3.0...0.4.0) - Improvements to Model Design
+
+### Added
+
+- Add synchronisation workflow [#60](https://github.com/ecmwf/anemoi-models/pull/60)
 - Add anemoi-transform link to documentation
 - Codeowners file
 - Pygrep precommit hooks
@@ -23,8 +30,6 @@ Keep it human-readable, your future self will thank you!
 - configurabilty of the dropout probability in the the MultiHeadSelfAttention module
 - Variable Bounding as configurable model layers [#13](https://github.com/ecmwf/anemoi-models/issues/13)
 - GraphTransformerMapperBlock chunking to reduce memory usage during inference [#46](https://github.com/ecmwf/anemoi-models/pull/46)
-- Mask NaN values in training loss function [#271](https://github.com/ecmwf-lab/aifs-mono/issues/271)
-- Added dynamic NaN masking for the imputer class with two new classes: DynamicInputImputer, DynamicConstantImputer [#89](https://github.com/ecmwf/anemoi-models/pull/89)
 - New `NamedNodesAttributes` class to handle node attributes in a more flexible way [#64](https://github.com/ecmwf/anemoi-models/pull/64)
 - Contributors file [#69](https://github.com/ecmwf/anemoi-models/pull/69)
 
@@ -38,7 +43,6 @@ Keep it human-readable, your future self will thank you!
 - Update copyright notice
 - Fix `__version__` import in init
 - Fix missing copyrights [#71](https://github.com/ecmwf/anemoi-models/pull/71)
-- Reduced memory usage when using chunking in the mapper [#84](https://github.com/ecmwf/anemoi-models/pull/84)
 
 ### Removed
 
