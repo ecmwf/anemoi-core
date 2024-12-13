@@ -32,6 +32,7 @@ Keep it human-readable, your future self will thank you!
 - GraphTransformerMapperBlock chunking to reduce memory usage during inference [#46](https://github.com/ecmwf/anemoi-models/pull/46)
 - New `NamedNodesAttributes` class to handle node attributes in a more flexible way [#64](https://github.com/ecmwf/anemoi-models/pull/64)
 - Contributors file [#69](https://github.com/ecmwf/anemoi-models/pull/69)
+- Added `supporting_arrays` argument, which contains arrays to store in checkpoints. [#97](https://github.com/ecmwf/anemoi-models/pull/97)
 
 ### Changed
 - Bugfixes for CI
