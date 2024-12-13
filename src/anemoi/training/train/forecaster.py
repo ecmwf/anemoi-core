@@ -98,12 +98,23 @@ class GraphForecaster(pl.LightningModule):
 
         _, self.val_metric_ranges = self.get_val_metric_ranges(config, data_indices)
 
+        # Check if the model is a stretched grid
+        if "lam_resolution" in getattr(config.graph.nodes.hidden, "node_builder", []):
+            mask_name = config.graph.nodes.hidden.node_builder.mask_attr_name
+            limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
+        else:
+            limited_area_mask = torch.ones((1,))
+
         # Kwargs to pass to the loss function
         loss_kwargs = {"node_weights": self.node_weights}
         # Scalars to include in the loss function, must be of form (dim, scalar)
         # Add mask multiplying NaN locations with zero. At this stage at [[1]].
         # Filled after first application of preprocessor. dimension=[-2, -1] (latlon, n_outputs).
-        scalars = {"variable": (-1, variable_scaling), "loss_weights_mask": ((-2, -1), torch.ones((1, 1)))}
+        scalars = {
+            "variable": (-1, variable_scaling),
+            "loss_weights_mask": ((-2, -1), torch.ones((1, 1))),
+            "limited_area_mask": (2, limited_area_mask),
+        }
         self.updated_loss_mask = False
 
         self.loss = self.get_loss_function(config.training.training_loss, scalars=scalars, **loss_kwargs)
@@ -275,6 +286,9 @@ class GraphForecaster(pl.LightningModule):
             # Create specific metrics from hydra to log in logger
             if key in config.training.metrics:
                 metric_ranges_validation[key] = [idx]
+
+        # Add the full list of output indices
+        metric_ranges_validation["all"] = data_indices.internal_model.output.full.tolist()
 
         return metric_ranges, metric_ranges_validation
 

@@ -146,6 +146,7 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     metric_range, metric_ranges_validation = GraphForecaster.get_val_metric_ranges(config, data_indices)
 
     del metric_range["all"]
+    del metric_ranges_validation["all"]
 
     expected_metric_range_validation = {
         "pl_y": [
