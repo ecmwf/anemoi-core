@@ -30,6 +30,7 @@ Keep it human-readable, your future self will thank you!
 
 ### Added
 
+- Add supporting arrrays (numpy) to checkpoint
 - Support for masking out unconnected nodes in LAM [#171](https://github.com/ecmwf/anemoi-training/pull/171)
 
 ## [0.3.1 - AIFS v0.3 Compatibility](https://github.com/ecmwf/anemoi-training/compare/0.3.0...0.3.1) - 2024-11-28

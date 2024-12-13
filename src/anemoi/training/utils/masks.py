@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 class BaseMask:
     """Base class for masking model output."""
 
+    @property
+    def supporting_arrays(self) -> dict:
+        return {}
+
     @abstractmethod
     def apply(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         error_message = "Method `apply` must be implemented in subclass."
@@ -38,6 +42,10 @@ class Boolean1DMask(BaseMask):
 
     def __init__(self, values: torch.Tensor) -> None:
         self.mask = values.bool().squeeze()
+
+    @property
+    def supporting_arrays(self) -> dict:
+        return {"output_mask": self.mask.numpy()}
 
     def broadcast_like(self, x: torch.Tensor, dim: int) -> torch.Tensor:
         assert x.shape[dim] == len(

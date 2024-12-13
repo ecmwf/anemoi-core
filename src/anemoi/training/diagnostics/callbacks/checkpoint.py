@@ -149,16 +149,22 @@ class AnemoiCheckpoint(ModelCheckpoint):
             tmp_metadata = model.metadata
             model.metadata = None
 
-            metadata = dict(**tmp_metadata)
+            tmp_supporting_arrays = model.supporting_arrays
+            model.supporting_arrays = None
+
+            # Make sure we don't accidentally modidy these
+            metadata = tmp_metadata.copy()
+            supporting_arrays = tmp_supporting_arrays.copy()
 
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             torch.save(model, inference_checkpoint_filepath)
 
-            save_metadata(inference_checkpoint_filepath, metadata)
+            save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
 
             model.config = save_config
             model.metadata = tmp_metadata
+            model.supporting_arrays = tmp_supporting_arrays
 
             self._last_global_step_saved = trainer.global_step
 

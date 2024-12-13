@@ -78,6 +78,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.metadata
 
     @cached_property
+    def supporting_arrays(self) -> dict:
+        return self.ds_train.supporting_arrays | self.grid_indices.supporting_arrays
+
+    @cached_property
     def data_indices(self) -> IndexCollection:
         return IndexCollection(self.config, self.ds_train.name_to_index)
 

@@ -36,6 +36,7 @@ class DummyModel(torch.nn.Module):
 
         self.config = config
         self.metadata = metadata
+        self.supporting_arrays = {}
         self.fc1 = nn.Linear(32, 5)
         self.fc2 = nn.Linear(5, 1)
         self.relu = nn.ReLU()

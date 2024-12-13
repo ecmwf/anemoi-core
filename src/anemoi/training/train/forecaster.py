@@ -50,6 +50,7 @@ class GraphForecaster(pl.LightningModule):
         statistics: dict,
         data_indices: IndexCollection,
         metadata: dict,
+        supporting_arrays: dict,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -65,16 +66,24 @@ class GraphForecaster(pl.LightningModule):
             Indices of the training data,
         metadata : dict
             Provenance information
+        supporting_arrays : dict
+            Supporting NumPy arrays to store in the checkpoint
 
         """
         super().__init__()
 
         graph_data = graph_data.to(self.device)
 
+        if config.model.get("output_mask", None) is not None:
+            self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
+        else:
+            self.output_mask = NoOutputMask()
+
         self.model = AnemoiModelInterface(
             statistics=statistics,
             data_indices=data_indices,
             metadata=metadata,
+            supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
             graph_data=graph_data,
             config=DotDict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True))),
         )
@@ -85,11 +94,6 @@ class GraphForecaster(pl.LightningModule):
 
         self.latlons_data = graph_data[config.graph.data].x
         self.node_weights = self.get_node_weights(config, graph_data)
-
-        if config.model.get("output_mask", None) is not None:
-            self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
-        else:
-            self.output_mask = NoOutputMask()
         self.node_weights = self.output_mask.apply(self.node_weights, dim=0, fill_value=0.0)
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
@@ -334,7 +338,6 @@ class GraphForecaster(pl.LightningModule):
     @staticmethod
     def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
         node_weighting = instantiate(config.training.node_loss_weights)
-
         return node_weighting.weights(graph_data)
 
     def set_model_comm_group(

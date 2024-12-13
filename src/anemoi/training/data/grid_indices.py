@@ -16,6 +16,8 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from typing import Union
 
+import numpy as np
+
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
@@ -44,6 +46,10 @@ class BaseGridIndices(ABC):
             grid_end = (reader_group_rank + 1) * grid_shard_size
 
         return slice(grid_start, grid_end)
+
+    @property
+    def supporting_arrays(self) -> dict:
+        return {}
 
     @abstractmethod
     def compute_grid_size(self, graph: HeteroData) -> int: ...
@@ -75,12 +81,16 @@ class MaskedGrid(BaseGridIndices):
             self.node_attribute_name,
             self.nodes_name,
         )
-        self.spatial_indices = graph[self.nodes_name][self.node_attribute_name].squeeze().tolist()
+        self.grid_indices = graph[self.nodes_name][self.node_attribute_name].squeeze().tolist()
         super().setup(graph)
 
+    @property
+    def supporting_arrays(self) -> dict:
+        return {"grid_indices": np.array(self.grid_indices, dtype=np.int64)}
+
     def compute_grid_size(self, _graph: HeteroData) -> int:
-        return len(self.spatial_indices)
+        return len(self.grid_indices)
 
     def get_shard_indices(self, reader_group_rank: int) -> ArrayIndex:
         sequence_indices = self.split_seq_in_shards(reader_group_rank)
-        return self.spatial_indices[sequence_indices]
+        return self.grid_indices[sequence_indices]

@@ -110,6 +110,11 @@ class NativeGridDataset(IterableDataset):
         return self.data.metadata()
 
     @cached_property
+    def supporting_arrays(self) -> dict:
+        """Return dataset supporting_arrays."""
+        return self.data.supporting_arrays()
+
+    @cached_property
     def name_to_index(self) -> dict:
         """Return dataset statistics."""
         return self.data.name_to_index
