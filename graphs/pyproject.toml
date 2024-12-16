@@ -1,0 +1,82 @@
+# (C) Copyright 2024 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+[build-system]
+requires = [ "setuptools>=60", "setuptools-scm>=8" ]
+
+[project]
+name = "anemoi-graphs"
+
+description = "A package to build graphs for data-driven forecasts."
+keywords = [ "ai", "graphs", "tools" ]
+
+license = { file = "LICENSE" }
+authors = [
+  { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
+]
+
+requires-python = ">=3.9"
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+dynamic = [ "version" ]
+dependencies = [
+  "anemoi-datasets[data]>=0.3.3",
+  "anemoi-utils>=0.3.6",
+  "h3>=3.7.6,<4",
+  "healpy>=1.17",
+  "hydra-core>=1.3",
+  "matplotlib>=3.4",
+  "netcdf4",
+  "networkx>=3.1",
+  "plotly>=5.19",
+  "scikit-learn",
+  "torch>=2.2",
+  "torch-geometric>=2.3.1,<2.5",
+  "trimesh>=4.1",
+  "typeguard",
+]
+
+optional-dependencies.all = [  ]
+optional-dependencies.dev = [ "anemoi-graphs[docs,tests]" ]
+
+optional-dependencies.docs = [
+  "nbsphinx",
+  "pandoc",
+  "requests",
+  "sphinx",
+  "sphinx-argparse",
+  "sphinx-rtd-theme",
+  "termcolor",
+  "tomli",
+]
+
+optional-dependencies.tests = [ "pytest", "pytest-mock" ]
+
+urls.Documentation = "https://anemoi-graphs.readthedocs.io/"
+urls.Homepage = "https://github.com/ecmwf/anemoi-graphs/"
+urls.Issues = "https://github.com/ecmwf/anemoi-graphs/issues"
+urls.Repository = "https://github.com/ecmwf/anemoi-graphs/"
+scripts.anemoi-graphs = "anemoi.graphs.__main__:main"
+
+[tool.setuptools_scm]
+version_file = "src/anemoi/graphs/_version.py"

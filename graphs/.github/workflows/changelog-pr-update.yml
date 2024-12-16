@@ -1,0 +1,18 @@
+name: Check Changelog Update on PR
+on:
+  pull_request:
+    types: [assigned, opened, synchronize, reopened, labeled, unlabeled]
+    branches:
+      - main
+      - develop
+    paths-ignore:
+      - .pre-commit-config.yaml
+      - .readthedocs.yaml
+jobs:
+  Check-Changelog:
+    name: Check Changelog Action
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: tarides/changelog-check-action@v2
+        with:
+          changelog: CHANGELOG.md

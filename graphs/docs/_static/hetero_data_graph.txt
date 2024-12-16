@@ -1,0 +1,30 @@
+HeteroData(
+  data={
+    x=[40320, 2],  # coordinates in radians (lat in [-pi/2, pi/2], lon in [0, 2pi])
+    node_type='ZarrDatasetNodes',
+    area_weight=[40320, 1],
+  },
+  hidden={
+    x=[10242, 2],  # coordinates in radians (lat in [-pi/2, pi/2], lon in [0, 2pi])
+    node_type='TriNodes',
+    area_weight=[10242, 1],
+  },
+  (data, to, hidden)={
+    edge_index=[2, 62980],
+    edge_type='CutOffEdges',
+    edge_length=[62980, 1],
+    edge_dirs=[62980, 2],
+  },
+  (hidden, to, hidden)={
+    edge_index=[2, 81900],
+    edge_type='MultiScaleEdges',
+    edge_length=[81900, 1],
+    edge_dirs=[81900, 2],
+  },
+  (hidden, to, data)={
+    edge_index=[2, 120960],
+    edge_type='KNNEdges',
+    edge_length=[120960, 1],
+    edge_dirs=[120960, 2],
+  }
+)
