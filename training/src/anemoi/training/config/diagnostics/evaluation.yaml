@@ -1,0 +1,58 @@
+---
+defaults:
+  - plot: detailed
+  - callbacks: pretraining
+  - benchmark_profiler: detailed
+
+debug:
+  # this will detect and trace back NaNs / Infs etc. but will slow down training
+  anomaly_detection: False
+
+# activate the pytorch profiler (disable this in production)
+# remember to also activate the tensorboard logger (below)
+profiler: False
+
+enable_checkpointing: True
+checkpoint:
+  every_n_minutes:
+    save_frequency: 30 # Approximate, as this is checked at the end of training steps
+    num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
+
+  every_n_epochs:
+    save_frequency: 1
+    num_models_saved: -1 # If set to -1, all checkpoints are kept ensuring runs can be continued/forked at any point in the training process
+
+  every_n_train_steps:
+    save_frequency: null # Does not scale with rollout
+    num_models_saved: 0
+
+log:
+  wandb:
+    enabled: False
+    offline: False
+    log_model: False
+    project: 'Anemoi'
+    entity: ???
+    # logger options (these probably come with some overhead)
+    gradients: False
+    parameters: False
+  tensorboard:
+    enabled: False
+  mlflow:
+    enabled: False
+    offline: False
+    authentication: False
+    log_model: False
+    tracking_uri: ???
+    experiment_name: 'anemoi-debug'
+    project_name: 'Anemoi'
+    system: True
+    terminal: True
+    run_name: null # If set to null, the run name will be the a random UUID
+    on_resume_create_child: True
+    expand_hyperparams: # Which keys in hyperparams to expand
+      - config
+  interval: 100
+
+enable_progress_bar: True
+print_memory_summary: False

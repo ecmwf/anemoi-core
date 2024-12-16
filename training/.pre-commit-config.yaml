@@ -1,0 +1,78 @@
+repos:
+# Empty notebookds
+- repo: local
+  hooks:
+  - id: clear-notebooks-output
+    name: clear-notebooks-output
+    files: tools/.*\.ipynb$
+    stages: [pre-commit]
+    language: python
+    entry: jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace
+    additional_dependencies: [jupyter]
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: check-yaml # Check YAML files for syntax errors only
+    args: [--unsafe, --allow-multiple-documents]
+  - id: debug-statements # Check for debugger imports and py37+ breakpoint()
+  - id: end-of-file-fixer # Ensure files end in a newline
+  - id: trailing-whitespace # Trailing whitespace checker
+  - id: no-commit-to-branch # Prevent committing to main / master
+  - id: check-added-large-files # Check for large files added to git
+  - id: check-merge-conflict # Check for files that contain merge conflict
+-   repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0  # Use the ref you want to point at
+    hooks:
+    -   id: python-use-type-annotations # Check for missing type annotations
+    -   id: python-check-blanket-noqa # Check for # noqa: all
+    -   id: python-no-log-warn # Check for log.warn
+- repo: https://github.com/psf/black-pre-commit-mirror
+  rev: 24.10.0
+  hooks:
+  - id: black
+    args: [--line-length=120]
+- repo: https://github.com/pycqa/isort
+  rev: 5.13.2
+  hooks:
+  - id: isort
+    args:
+    - -l 120
+    - --force-single-line-imports
+    - --profile black
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.8.1
+  hooks:
+  - id: ruff
+    args:
+    - --line-length=120
+    - --fix
+    - --exit-non-zero-on-fix
+    - --preview
+    - --exclude=docs/**/*_.py
+- repo: https://github.com/sphinx-contrib/sphinx-lint
+  rev: v1.0.0
+  hooks:
+  - id: sphinx-lint
+# For now, we use it. But it does not support a lot of sphinx features
+- repo: https://github.com/dzhu/rstfmt
+  rev: v0.0.14
+  hooks:
+  - id: rstfmt
+    exclude: 'cli/.*' # Because we use argparse
+- repo: https://github.com/tox-dev/pyproject-fmt
+  rev: "v2.5.0"
+  hooks:
+  - id: pyproject-fmt
+-   repo: https://github.com/jshwi/docsig # Check docstrings against function sig
+    rev: v0.65.0
+    hooks:
+    -   id: docsig
+        args:
+        - --ignore-no-params # Allow docstrings without parameters
+        - --check-dunders    # Check dunder methods
+        - --check-overridden # Check overridden methods
+        - --check-protected  # Check protected methods
+        - --check-class      # Check class docstrings
+        - --disable=E113     # Disable empty docstrings
+ci:
+  autoupdate_schedule: monthly

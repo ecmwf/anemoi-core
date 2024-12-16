@@ -1,0 +1,73 @@
+activation: GELU
+num_channels: 1024
+
+model:
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+
+processor:
+  _target_: anemoi.models.layers.processor.TransformerProcessor
+  _convert_: all
+  activation: ${model.activation}
+  num_layers: 16
+  num_chunks: 2
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  window_size: 512
+  dropout_p: 0.0 # GraphTransformer
+
+encoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  _convert_: all
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+
+
+decoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  _convert_: all
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+
+trainable_parameters:
+  data: 8
+  hidden: 8
+  data2hidden: 8
+  hidden2data: 8
+
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+# Bounding configuration
+bounding: #These are applied in order
+
+  # Bound tp (total precipitation) with a Relu bounding layer
+  # ensuring a range of [0, infinity) to avoid negative precipitation values.
+  - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+    variables:
+    - tp
+
+  # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
+  # This guarantees that cp is physically consistent with tp by restricting cp
+  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
+  # NOTE: If this bounding strategy is used, the normalization of cp must be
+  # changed to "std" normalization, and the "cp" statistics should be remapped
+  # to those of tp to ensure consistency.
+
+  # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+  #   variables:
+  #   - cp
+  #   min_val: 0
+  #   max_val: 1
+  #   total_var: tp
