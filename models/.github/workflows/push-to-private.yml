@@ -1,0 +1,33 @@
+name: Push to private repository
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  push_changes:
+    if: ${{ !contains(github.repository, 'private') }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout source repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+
+    - name: Set up Git configuration
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Setup SSH key
+      uses: webfactory/ssh-agent@v0.5.0
+      with:
+        ssh-private-key: ${{ secrets.KEY_TO_PRIVATE }}
+
+    - name: Push changes to private repository
+      run: |
+        git remote add private git@github.com:${{ github.repository }}-private.git
+        git push --set-upstream private develop

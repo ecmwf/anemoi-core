@@ -1,0 +1,44 @@
+# .github/workflows/update-changelog.yaml
+name: "Update Changelog"
+
+on:
+  workflow_run:
+    workflows:
+      - Upload Python Package
+    types:
+      - completed
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.release.target_commitish }}
+
+    - name: Update Changelog
+      uses: stefanzweifel/changelog-updater-action@v1
+      with:
+        latest-version: ${{ github.event.release.tag_name }}
+        heading-text: ${{ github.event.release.name }}
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v6
+      with:
+        branch: docs/changelog-update-${{ github.event.release.tag_name }}
+        base: develop
+        title: '[Changelog] Update to ${{ github.event.release.tag_name }}'
+        body: |
+          This PR updates the changelog to include the changes in the latest release.
+
+          > [!CAUTION]
+          > Merge DO NOT squash to correctly update the tag version of `develop` branch.
+        add-paths: |
+          CHANGELOG.md

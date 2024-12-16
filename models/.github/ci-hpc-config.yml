@@ -1,0 +1,10 @@
+build:
+  python: '3.10'
+  modules:
+    - ninja
+  python_dependencies:
+    - ecmwf/anemoi-utils@develop
+  parallel: 64
+
+  pytest_cmd: |
+    python -m pytest -vv -m 'not notebook and not no_cache_init' --cov=. --cov-report=xml
