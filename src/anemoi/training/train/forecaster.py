@@ -103,7 +103,7 @@ class GraphForecaster(pl.LightningModule):
         _, self.val_metric_ranges = self.get_val_metric_ranges(config, data_indices)
 
         # Check if the model is a stretched grid
-        if "lam_resolution" in getattr(config.graph.nodes.hidden, "node_builder", []):
+        if graph_data["hidden"].node_type == "StretchedTriNodes":
             mask_name = config.graph.nodes.hidden.node_builder.mask_attr_name
             limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
         else:

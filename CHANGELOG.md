@@ -14,6 +14,7 @@ Keep it human-readable, your future self will thank you!
 - Dont crash when using the profiler if certain env vars arent set [#180](https://github.com/ecmwf/anemoi-training/pull/180)
 - Remove saving of metadata to training checkpoint [#57](https://github.com/ecmwf/anemoi-training/pull/190)
 - Fixes to callback plots [#182] (power spectrum large numpy array error + precip cmap for cases where precip is prognostic).
+- Identify stretched grid models based on graph rather than configuration file [#204](https://github.com/ecmwf/anemoi-training/pull/204)
 
 ### Added
 - Introduce variable to configure: transfer_learning -> bool, True if loading checkpoint in a transfer learning setting.
