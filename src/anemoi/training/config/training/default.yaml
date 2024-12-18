@@ -58,15 +58,31 @@ loss_gradient_scaling: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
-# and logged according to their name
+# and logged according to their name.
+# These metrics are calculated in the output model space, and thus
+# have undergone postprocessing.
 validation_metrics:
   # loss class to initialise
   - _target_: anemoi.training.losses.mse.WeightedMSELoss
     # Scalars to include in loss calculation
-    # Available scalars include, 'variable'
+    # Cannot scale over the variable dimension due to possible remappings.
+    # Available scalars include:
+    # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
+    # Use the `scale_validation_metrics` section to variable scale.
     scalars: []
     # other kwargs
     ignore_nans: True
+
+# List of validation metrics to keep in normalised space, and scalars to be applied
+# Use '*' in reference all metrics, or a list of metric names.
+# Unlike above, variable scaling is possible due to these metrics being
+# calculated in the same way as the training loss, within the internal model space.
+scale_validation_metrics:
+  scalars_to_apply: ['variable']
+  metrics:
+    - 'all'
+    # - "*"
+
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
