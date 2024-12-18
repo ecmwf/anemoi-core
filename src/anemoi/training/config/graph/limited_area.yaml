@@ -10,7 +10,7 @@ nodes:
     node_builder:
       _target_: anemoi.graphs.nodes.ZarrDatasetNodes
       dataset: ${dataloader.training.dataset}
-    attributes: ${graph.attributes.data_nodes}
+    attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
     node_builder:
@@ -26,8 +26,8 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
     cutoff_factor: 0.6 # only for cutoff method
-  - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
-    cutoff_factor: 2 # only for cutoff method
+  - _target_: anemoi.graphs.edges.CutOffEdges # connects only boundary nodes
+    cutoff_factor: 1.5 # only for cutoff method
     source_mask_attr_name: boundary_mask
   attributes: ${graph.attributes.edges}
 # Processor configuration
@@ -46,16 +46,15 @@ edges:
     num_nearest_neighbours: 3 # only for knn method
   attributes: ${graph.attributes.edges}
 
-
 post_processors:
   - _target_: anemoi.graphs.processors.RemoveUnconnectedNodes
     nodes_name: data
     ignore: cutout_mask # optional
     save_mask_indices_to_attr: indices_connected_nodes # optional
 
-
 attributes:
-  data_nodes:
+  nodes:
+    # Attributes for data nodes
     area_weight:
       _target_: anemoi.graphs.nodes.attributes.AreaWeights # options: Area, Uniform
       norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std

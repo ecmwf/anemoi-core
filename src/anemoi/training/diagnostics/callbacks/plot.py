@@ -29,6 +29,7 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from anemoi.models.layers.mapper import GraphEdgeMixin
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     import pytorch_lightning as pl
+    from anemoi.models.layers.graph import NamedNodesAttributes
     from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
@@ -100,7 +102,7 @@ class BasePlotCallback(Callback, ABC):
         exp_log_tag: str = "val_pred_sample",
     ) -> None:
         """Figure output: save to file and/or display in notebook."""
-        if self.save_basedir is not None:
+        if self.save_basedir is not None and fig is not None:
             save_path = Path(
                 self.save_basedir,
                 "plots",
@@ -645,6 +647,23 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             Override for frequency to plot at, by default None
         """
         super().__init__(config, every_n_epochs=every_n_epochs)
+        self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
+
+    def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
+        return {
+            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
+        }
+
+    def get_edge_trainable_modules(self, model: torch.nn.Module) -> dict[tuple[str, str], torch.Tensor]:
+        trainable_modules = {
+            (model._graph_name_data, model._graph_name_hidden): model.encoder,
+            (model._graph_name_hidden, model._graph_name_data): model.decoder,
+        }
+
+        if isinstance(model.processor, GraphEdgeMixin):
+            trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
+
+        return {name: module for name, module in trainable_modules.items() if module.trainable.trainable is not None}
 
     @rank_zero_only
     def _plot(
@@ -656,25 +675,31 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
 
-        fig = plot_graph_node_features(model, datashader=self.datashader_plotting)
+        if len(node_trainable_tensors := self.get_node_trainable_tensors(model.node_attributes)):
+            fig = plot_graph_node_features(model, node_trainable_tensors, datashader=self.datashader_plotting)
 
-        self._output_figure(
-            trainer.logger,
-            fig,
-            epoch=trainer.current_epoch,
-            tag="node_trainable_params",
-            exp_log_tag="node_trainable_params",
-        )
+            self._output_figure(
+                trainer.logger,
+                fig,
+                epoch=trainer.current_epoch,
+                tag="node_trainable_params",
+                exp_log_tag="node_trainable_params",
+            )
+        else:
+            LOGGER.warning("There are no trainable node attributes to plot.")
 
-        fig = plot_graph_edge_features(model)
+        if len(edge_trainable_modules := self.get_edge_trainable_modules(model)):
+            fig = plot_graph_edge_features(model, edge_trainable_modules, q_extreme_limit=self.q_extreme_limit)
 
-        self._output_figure(
-            trainer.logger,
-            fig,
-            epoch=trainer.current_epoch,
-            tag="edge_trainable_params",
-            exp_log_tag="edge_trainable_params",
-        )
+            self._output_figure(
+                trainer.logger,
+                fig,
+                epoch=trainer.current_epoch,
+                tag="edge_trainable_params",
+                exp_log_tag="edge_trainable_params",
+            )
+        else:
+            LOGGER.warning("There are no trainable edge attributes to plot.")
 
 
 class PlotLoss(BasePerBatchPlotCallback):

@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
 import pandas as pd
-from anemoi.models.layers.mapper import GraphEdgeMixin
 from datashader.mpl_ext import dsshow
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
@@ -35,7 +34,7 @@ from anemoi.training.diagnostics.maps import EquirectangularProjection
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
-    from torch import nn
+    from torch import nn, Tensor
 
 from dataclasses import dataclass
 
@@ -874,13 +873,19 @@ def edge_plot(
     fig.colorbar(psc, ax=ax)
 
 
-def plot_graph_node_features(model: nn.Module, datashader: bool = False) -> Figure:
+def plot_graph_node_features(
+    model: nn.Module,
+    trainable_tensors: dict[str, Tensor],
+    datashader: bool = False,
+) -> Figure:
     """Plot trainable graph node features.
 
     Parameters
     ----------
     model: AneomiModelEncProcDec
         Model object
+    trainable_tensors: dict[str, torch.Tensor]
+        Node trainable tensors
     datashader: bool, optional
         Scatter plot, by default False
 
@@ -889,14 +894,15 @@ def plot_graph_node_features(model: nn.Module, datashader: bool = False) -> Figu
     Figure
         Figure object handle
     """
-    nrows = len(nodes_name := model._graph_data.node_types)
-    ncols = min(model.node_attributes.trainable_tensors[m].trainable.shape[1] for m in nodes_name)
+    nrows = len(trainable_tensors)
+    ncols = max(tt.shape[1] for tt in trainable_tensors.values())
+
     figsize = (ncols * 4, nrows * 3)
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
-    for row, (mesh, trainable_tensor) in enumerate(model.node_attributes.trainable_tensors.items()):
+    for row, (mesh, trainable_tensor) in enumerate(trainable_tensors.items()):
         latlons = model.node_attributes.get_coordinates(mesh).cpu().numpy()
-        node_features = trainable_tensor.trainable.cpu().detach().numpy()
+        node_features = trainable_tensor.cpu().detach().numpy()
 
         lat, lon = latlons[:, 0], latlons[:, 1]
 
@@ -915,13 +921,19 @@ def plot_graph_node_features(model: nn.Module, datashader: bool = False) -> Figu
     return fig
 
 
-def plot_graph_edge_features(model: nn.Module, q_extreme_limit: float = 0.05) -> Figure:
+def plot_graph_edge_features(
+    model: nn.Module,
+    trainable_modules: dict[tuple[str, str], Tensor],
+    q_extreme_limit: float = 0.05,
+) -> Figure:
     """Plot trainable graph edge features.
 
     Parameters
     ----------
     model: AneomiModelEncProcDec
         Model object
+    trainable_modules: dict[tuple[str, str], torch.Tensor]
+        Edge trainable tensors.
     q_extreme_limit : float, optional
         Plot top & bottom quantile of edges trainable values, by default 0.05 (5%).
 
@@ -930,16 +942,8 @@ def plot_graph_edge_features(model: nn.Module, q_extreme_limit: float = 0.05) ->
     Figure
         Figure object handle
     """
-    trainable_modules = {
-        (model._graph_name_data, model._graph_name_hidden): model.encoder,
-        (model._graph_name_hidden, model._graph_name_data): model.decoder,
-    }
-
-    if isinstance(model.processor, GraphEdgeMixin):
-        trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
-
-    ncols = min(module.trainable.trainable.shape[1] for module in trainable_modules.values())
     nrows = len(trainable_modules)
+    ncols = max(tt.trainable.trainable.shape[1] for tt in trainable_modules.values())
     figsize = (ncols * 4, nrows * 3)
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
