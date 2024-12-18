@@ -43,6 +43,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         """
         super().__init__(**kwargs)
+
         self.config = config
         self.start = time.time()
         self._model_metadata = None
@@ -75,6 +76,34 @@ class AnemoiCheckpoint(ModelCheckpoint):
         }
 
         return self._model_metadata
+
+    def _adjust_epoch_progress(self, trainer: pl.Trainer) -> None:
+        """
+        Adjust the epoch progress when saving a mid-epoch checkpoint.
+
+        Since Pytorch Lightning advances one epoch at end of training (on_train-end),
+        we need to correct the checkpoint epoch progress to avoid inconsistencies.
+        """
+        trainer.fit_loop.epoch_progress.current.processed = trainer.fit_loop.epoch_progress.current.processed - 1
+        trainer.fit_loop.epoch_progress.current.completed = trainer.fit_loop.epoch_progress.current.completed - 1
+        trainer.fit_loop.epoch_progress.total.processed = trainer.fit_loop.epoch_progress.total.processed - 1
+        trainer.fit_loop.epoch_progress.total.completed = trainer.fit_loop.epoch_progress.total.completed - 1
+
+    def on_train_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """
+        Save the last checkpoint at the end of training.
+
+        If the candidates aren't better than the last checkpoint, then no checkpoints are saved.
+        Note - this method if triggered when using max_epochs, it won't save any checkpoints
+        since the monitor candidates won't show any changes with regard the the 'on_train_epoch_end' hook.
+        """
+        del pl_module
+        if not self._should_skip_saving_checkpoint(trainer) and not self._should_save_on_train_epoch_end(trainer):
+            if trainer.fit_loop.epoch_progress.current.completed == trainer.fit_loop.epoch_progress.current.ready:
+                self._adjust_epoch_progress(trainer)
+            monitor_candidates = self._monitor_candidates(trainer)
+            self._save_topk_checkpoint(trainer, monitor_candidates)
+            self._save_last_checkpoint(trainer, monitor_candidates)
 
     def tracker_metadata(self, trainer: pl.Trainer) -> dict:
         if self._tracker_metadata is not None:
@@ -169,7 +198,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
             self._last_global_step_saved = trainer.global_step
 
         trainer.strategy.barrier()
-
         # saving checkpoint used for pytorch-lightning based training
         trainer.save_checkpoint(lightning_checkpoint_filepath, self.save_weights_only)
 
