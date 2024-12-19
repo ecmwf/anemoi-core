@@ -52,6 +52,42 @@ def cartesian_to_latlon_rad(xyz: np.ndarray) -> np.ndarray:
     return np.array((lat, lon), dtype=np.float32).transpose()
 
 
+def sincos_to_latlon_rad(sincos: np.ndarray) -> np.ndarray:
+    """Sine & cosine components to lat-lon coordinates.
+
+    Parameters
+    ----------
+    sincos : np.ndarray
+        The sine and cosine componenets of the latitude and longitude. Shape: (N, 4).
+        The dimensions correspond to: sin(lat), cos(lat), sin(lon) and cos(lon).
+
+    Returns
+    -------
+    np.ndarray
+        A 2D array of the coordinates of shape (N, 2) in radians.
+    """
+    latitudes = np.arctan2(sincos[:, 0], sincos[:, 1])
+    longitudes = np.arctan2(sincos[:, 2], sincos[:, 3])
+    return np.stack([latitudes, longitudes], axis=-1)
+
+
+def sincos_to_latlon_degrees(sincos: np.ndarray) -> np.ndarray:
+    """Sine & cosine components to lat-lon coordinates.
+
+    Parameters
+    ----------
+    sincos : np.ndarray
+        The sine and cosine componenets of the latitude and longitude. Shape: (N, 4).
+        The dimensions correspond to: sin(lat), cos(lat), sin(lon) and cos(lon).
+
+    Returns
+    -------
+    np.ndarray
+        A 2D array of the coordinates of shape (N, 2) in degrees.
+    """
+    return np.rad2deg(sincos_to_latlon_rad(sincos))
+
+
 def latlon_rad_to_cartesian(loc: tuple[np.ndarray, np.ndarray], radius: float = 1) -> np.ndarray:
     """Convert planar coordinates to 3D coordinates in a sphere.
 

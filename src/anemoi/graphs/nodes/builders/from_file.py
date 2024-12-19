@@ -63,6 +63,37 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         return self.reshape_coords(dataset.latitudes, dataset.longitudes)
 
 
+class TextNodes(BaseNodeBuilder):
+    """Nodes from text file.
+
+    Attributes
+    ----------
+    dataset : str | DictConfig
+        The path to txt file containing the coordinates of the nodes.
+    idx_lon : int
+        The index of the longitude in the dataset.
+    idx_lat : int
+        The index of the latitude in the dataset.
+    """
+
+    def __init__(self, dataset, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
+        LOGGER.info("Reading the dataset from %s.", dataset)
+        self.dataset = np.loadtxt(dataset)
+        self.idx_lon = idx_lon
+        self.idx_lat = idx_lat
+        super().__init__(name)
+
+    def get_coordinates(self) -> torch.Tensor:
+        """Get the coordinates of the nodes.
+
+        Returns
+        -------
+        torch.Tensor of shape (num_nodes, 2)
+            A 2D tensor with the coordinates, in radians.
+        """
+        return self.reshape_coords(self.dataset[self.idx_lat, :], self.dataset[self.idx_lon, :])
+
+
 class NPZFileNodes(BaseNodeBuilder):
     """Nodes from NPZ defined grids.
 
@@ -146,7 +177,10 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         )
         area_mask = self.area_mask_builder.get_mask(coords)
 
-        LOGGER.info("Dropping %d nodes from the processor mesh.", len(area_mask) - area_mask.sum())
+        LOGGER.info(
+            "Dropping %d nodes from the processor mesh.",
+            len(area_mask) - area_mask.sum(),
+        )
         coords = coords[area_mask]
 
         return coords
