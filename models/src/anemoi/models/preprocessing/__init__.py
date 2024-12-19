@@ -57,25 +57,32 @@ class BasePreprocessor(nn.Module):
 
         super().__init__()
 
-        self.default, self.method_config = self._process_config(config)
+        self.default, self.remap, self.method_config = self._process_config(config)
         self.methods = self._invert_key_value_list(self.method_config)
 
         self.data_indices = data_indices
 
-    def _process_config(self, config):
+    @classmethod
+    def _process_config(cls, config):
         _special_keys = ["default", "remap"]  # Keys that do not contain a list of variables in a preprocessing method.
         default = config.get("default", "none")
-        self.remap = config.get("remap", {})
+        remap = config.get("remap", {})
         method_config = {k: v for k, v in config.items() if k not in _special_keys and v is not None and v != "none"}
 
         if not method_config:
             LOGGER.warning(
-                f"{self.__class__.__name__}: Using default method {default} for all variables not specified in the config.",
+                f"{cls.__name__}: Using default method {default} for all variables not specified in the config.",
             )
+        for m in method_config:
+            if isinstance(method_config[m], str):
+                method_config[m] = {method_config[m]: f"{m}_{method_config[m]}"}
+            elif isinstance(method_config[m], list):
+                method_config[m] = {method: f"{m}_{method}" for method in method_config[m]}
 
-        return default, method_config
+        return default, remap, method_config
 
-    def _invert_key_value_list(self, method_config: dict[str, list[str]]) -> dict[str, str]:
+    @staticmethod
+    def _invert_key_value_list(method_config: dict[str, list[str]]) -> dict[str, str]:
         """Invert a dictionary of methods with lists of variables.
 
         Parameters
