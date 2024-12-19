@@ -8,12 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
-## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.3.0...HEAD)
-
-- Add synchronisation workflow
+## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.4.0...HEAD)
 
 ### Added
 
+- New AnemoiModelEncProcDecHierarchical class available in models [#37](https://github.com/ecmwf/anemoi-models/pull/37)
+- Mask NaN values in training loss function [#56](https://github.com/ecmwf/anemoi-models/pull/56)
+- Added dynamic NaN masking for the imputer class with two new classes: DynamicInputImputer, DynamicConstantImputer [#89](https://github.com/ecmwf/anemoi-models/pull/89)
+- Reduced memory usage when using chunking in the mapper [#84](https://github.com/ecmwf/anemoi-models/pull/84)
+- Added `supporting_arrays` argument, which contains arrays to store in checkpoints. [#97](https://github.com/ecmwf/anemoi-models/pull/97)
+- Add remappers, e.g. link functions to apply during training to facilitate learning of variables with a difficult distribution [#88](https://github.com/ecmwf/anemoi-models/pull/88)
+
+## [0.4.0](https://github.com/ecmwf/anemoi-models/compare/0.3.0...0.4.0) - Improvements to Model Design
+
+### Added
+
+- Add synchronisation workflow [#60](https://github.com/ecmwf/anemoi-models/pull/60)
 - Add anemoi-transform link to documentation
 - Codeowners file
 - Pygrep precommit hooks

@@ -512,8 +512,9 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
                 num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
             )
+            out = torch.zeros((x[1].shape[0], self.num_heads, self.out_channels_conv), device=x[1].device)
             for i in range(num_chunks):
-                out1 = self.conv(
+                out += self.conv(
                     query=query,
                     key=key,
                     value=value,
@@ -521,9 +522,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
                     edge_index=edge_index_list[i],
                     size=size,
                 )
-                if i == 0:
-                    out = torch.zeros_like(out1, device=out1.device)
-                out = out + out1
         else:
             out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
 
