@@ -1,3 +1,10 @@
+> [!IMPORTANT]
+> **Repository Migration Notice**
+> >
+> This repository has been migrated to our new consolidated Anemoi Core mono-repository. All future development, including new features and bug fixes, will take place in the new repository. Please update your references to use the new location:
+> 
+> 🔗 [@ecmwf/anemoi-core](https://github.com/ecmwf/anemoi-core)
+
 # anemoi-training
 
 [![Documentation Status](https://readthedocs.org/projects/anemoi-training/badge/?version=latest)](https://anemoi-training.readthedocs.io/en/latest/?badge=latest)
