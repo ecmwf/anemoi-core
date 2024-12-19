@@ -25,7 +25,7 @@ Keep it human-readable, your future self will thank you!
 ### Added
 
 - Introduce variable to configure: transfer_learning -> bool, True if loading checkpoint in a transfer learning setting.
-- 
+-
 <b> TRANSFER LEARNING</b>: enabled new functionality. You can now load checkpoints from different models and different training runs.
 - Effective batch size: `(config.dataloader.batch_size["training"] * config.hardware.num_gpus_per_node * config.hardware.num_nodes) // config.hardware.num_gpus_per_model`.
   Used for experiment reproducibility across different computing configurations.
@@ -68,23 +68,23 @@ Keep it human-readable, your future self will thank you!
 - Refactored callbacks. [#60](https://github.com/ecmwf/anemoi-training/pulls/60)
   - Updated docs [#115](https://github.com/ecmwf/anemoi-training/pull/115)
   - Fix enabling LearningRateMonitor [#119](https://github.com/ecmwf/anemoi-training/pull/119)
-  
+
 - Refactored rollout [#87](https://github.com/ecmwf/anemoi-training/pulls/87)
   - Enable longer validation rollout than training
-  
+
 - Expand iterables in logging [#91](https://github.com/ecmwf/anemoi-training/pull/91)
   - Save entire config in mlflow
-  
+
 
 ### Added
 
 - Included more loss functions and allowed configuration [#70](https://github.com/ecmwf/anemoi-training/pull/70)
 - Include option to use datashader and optimised asyncronohous callbacks [#102](https://github.com/ecmwf/anemoi-training/pull/102)
   - Fix that applies the metric_ranges in the post-processed variable space [#116](https://github.com/ecmwf/anemoi-training/pull/116)
-  
+
 - Allow updates to scalars [#137](https://github.com/ecmwf/anemoi-training/pulls/137)
   - Add without subsetting in ScaleTensor
-  
+
 - Sub-hour datasets [#63](https://github.com/ecmwf/anemoi-training/pull/63)
 - Add synchronisation workflow [#92](https://github.com/ecmwf/anemoi-training/pull/92)
 - Feat: Anemoi Profiler compatible with mlflow and using Pytorch (Kineto) Profiler for memory report [38](https://github.com/ecmwf/anemoi-training/pull/38/)
@@ -147,9 +147,9 @@ Keep it human-readable, your future self will thank you!
 #### Miscellaneous
 
 - Introduction of remapper to anemoi-models leads to changes in the data indices. Some preprocessors cannot be applied in-place anymore.
-  
+
 - Variable Bounding as configurable model layers [#13](https://github.com/ecmwf/anemoi-models/issues/13)
-  
+
 
 #### Functionality
 
