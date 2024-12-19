@@ -72,7 +72,7 @@ class BaseWeightedLoss(nn.Module, ABC):
     def scale(
         self,
         x: torch.Tensor,
-        scalar_indices: tuple[int, ...] | None = None,
+        subset_indices: tuple[int, ...] | None = None,
         *,
         without_scalars: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
@@ -82,8 +82,8 @@ class BaseWeightedLoss(nn.Module, ABC):
         ----------
         x : torch.Tensor
             Tensor to be scaled, shape (bs, ensemble, lat*lon, n_outputs)
-        scalar_indices: tuple[int,...], optional
-            Indices to subset the calculated scalar with, by default None.
+        subset_indices: tuple[int,...], optional
+            Indices to subset the calculated scalar and `x` tensor with, by default None.
         without_scalars: list[str] | list[int] | None, optional
             list of scalars to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
@@ -93,8 +93,11 @@ class BaseWeightedLoss(nn.Module, ABC):
         torch.Tensor
             Scaled error tensor
         """
+        if subset_indices is None:
+            subset_indices = [Ellipsis]
+
         if len(self.scalar) == 0:
-            return x
+            return x[subset_indices]
 
         scale_tensor = self.scalar
         if without_scalars is not None and len(without_scalars) > 0:
@@ -105,11 +108,8 @@ class BaseWeightedLoss(nn.Module, ABC):
 
         scalar = scale_tensor.get_scalar(x.ndim).to(x)
 
-        if scalar_indices is None:
-            return x * scalar
-
         scalar = scalar.expand_as(x)
-        return x * scalar[scalar_indices]
+        return x[subset_indices] * scalar[subset_indices]
 
     def scale_by_node_weights(self, x: torch.Tensor, squash: bool = True) -> torch.Tensor:
         """Scale a tensor by the node_weights.
