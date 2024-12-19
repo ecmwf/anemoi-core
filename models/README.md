@@ -1,5 +1,7 @@
 # anemoi-models
 
+[![Documentation Status](https://readthedocs.org/projects/anemoi-models/badge/?version=latest)](https://anemoi-models.readthedocs.io/en/latest/?badge=latest)
+
 **DISCLAIMER**
 This project is **BETA** and will be **Experimental** for the foreseeable future.
 Interfaces and functionality are likely to change, and the project itself may be scrapped.
