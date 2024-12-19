@@ -21,6 +21,7 @@ from .builders.from_refined_icosahedron import LimitedAreaHexNodes
 from .builders.from_refined_icosahedron import LimitedAreaTriNodes
 from .builders.from_refined_icosahedron import StretchedTriNodes
 from .builders.from_refined_icosahedron import TriNodes
+from .builders.from_vectors import LatLonNodes
 
 __all__ = [
     "ZarrDatasetNodes",
@@ -28,6 +29,7 @@ __all__ = [
     "TriNodes",
     "HexNodes",
     "HEALPixNodes",
+    "LatLonNodes",
     "LimitedAreaHEALPixNodes",
     "LimitedAreaNPZFileNodes",
     "LimitedAreaTriNodes",
