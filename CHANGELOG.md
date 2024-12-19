@@ -8,11 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
-## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.3.0...HEAD)
+## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.3.1...HEAD)
 ### Fixed
-- Update `n_pixel` used by datashader to better adapt across resolutions #152
+- Not update NaN-weight-mask for loss function when using remapper and no imputer [#178](https://github.com/ecmwf/anemoi-training/pull/178)
+- Dont crash when using the profiler if certain env vars arent set [#180](https://github.com/ecmwf/anemoi-training/pull/180)
+- Remove saving of metadata to training checkpoint [#57](https://github.com/ecmwf/anemoi-training/pull/190)
+- Fixes to callback plots [#182] (power spectrum large numpy array error + precip cmap for cases where precip is prognostic).
+- GraphTrainableParameters callback will log a warning when no trainable parameters are specified  [#173](https://github.com/ecmwf/anemoi-training/pull/173)
+- Fixes to checkpoint saving - ensure last checkpoint if saving when using max_steps [#191] (https://github.com/ecmwf/anemoi-training/pull/191)
+- Identify stretched grid models based on graph rather than configuration file [#204](https://github.com/ecmwf/anemoi-training/pull/204)
 
+### Added
+- Introduce variable to configure: transfer_learning -> bool, True if loading checkpoint in a transfer learning setting.
+- <b> TRANSFER LEARNING</b>: enabled new functionality. You can now load checkpoints from different models and different training runs.
+- Effective batch size: `(config.dataloader.batch_size["training"] * config.hardware.num_gpus_per_node * config.hardware.num_nodes) // config.hardware.num_gpus_per_model`.
+  Used for experiment reproducibility across different computing configurations.
+- Added a check for the variable sorting on pre-trained/finetuned models [#120](https://github.com/ecmwf/anemoi-training/pull/120)
+- Added default configuration files for stretched grid and limited area model experiments [173](https://github.com/ecmwf/anemoi-training/pull/173)
+- Added new metrics for stretched grid models to track losses inside/outside the regional domain [#199](https://github.com/ecmwf/anemoi-training/pull/199)
+- Add supporting arrrays (numpy) to checkpoint
+- Support for masking out unconnected nodes in LAM [#171](https://github.com/ecmwf/anemoi-training/pull/171)
+- Improved validation metrics, allow 'all' to be scaled [#202](https://github.com/ecmwf/anemoi-training/pull/202)
 
+### Changed
+
+### Removed
+- Removed the resolution config entry [#120](https://github.com/ecmwf/anemoi-training/pull/120)
+
+## [0.3.1 - AIFS v0.3 Compatibility](https://github.com/ecmwf/anemoi-training/compare/0.3.0...0.3.1) - 2024-11-28
+
+### Changed
+- Perform full shuffle of training dataset [#153](https://github.com/ecmwf/anemoi-training/pull/153)
+
+### Fixed
+
+- Update `n_pixel` used by datashader to better adapt across resolutions [#152](https://github.com/ecmwf/anemoi-training/pull/152)
 - Fixed bug in power spectra plotting for the n320 resolution.
 - Allow histogram and spectrum plot for one variable [#165](https://github.com/ecmwf/anemoi-training/pull/165)
 
@@ -21,11 +51,8 @@ Keep it human-readable, your future self will thank you!
 - Add reader groups to reduce CPU memory usage and increase dataloader throughput [#76](https://github.com/ecmwf/anemoi-training/pull/76)
 - Bump `anemoi-graphs` version to 0.4.1 [#159](https://github.com/ecmwf/anemoi-training/pull/159)
 
-### Changed
-## [0.3.0 - Loss & Callback Refactors](https://github.com/ecmwf/anemoi-training/compare/0.2.2...0.3.0) - 2024-11-14
 
-### Changed
-- Increase the default MlFlow HTTP max retries [#111](https://github.com/ecmwf/anemoi-training/pull/111)
+## [0.3.0 - Loss & Callback Refactors](https://github.com/ecmwf/anemoi-training/compare/0.2.2...0.3.0) - 2024-11-14
 
 ### Fixed
 
@@ -33,10 +60,8 @@ Keep it human-readable, your future self will thank you!
 - Refactored callbacks. [#60](https://github.com/ecmwf/anemoi-training/pulls/60)
   - Updated docs [#115](https://github.com/ecmwf/anemoi-training/pull/115)
   - Fix enabling LearningRateMonitor [#119](https://github.com/ecmwf/anemoi-training/pull/119)
-
 - Refactored rollout [#87](https://github.com/ecmwf/anemoi-training/pulls/87)
   - Enable longer validation rollout than training
-
 - Expand iterables in logging [#91](https://github.com/ecmwf/anemoi-training/pull/91)
   - Save entire config in mlflow
 
@@ -45,23 +70,27 @@ Keep it human-readable, your future self will thank you!
 
 - Included more loss functions and allowed configuration [#70](https://github.com/ecmwf/anemoi-training/pull/70)
 - Include option to use datashader and optimised asyncronohous callbacks [#102](https://github.com/ecmwf/anemoi-training/pull/102)
-   - Fix that applies the metric_ranges in the post-processed variable space [#116](https://github.com/ecmwf/anemoi-training/pull/116)
+  - Fix that applies the metric_ranges in the post-processed variable space [#116](https://github.com/ecmwf/anemoi-training/pull/116)
 - Allow updates to scalars [#137](https://github.com/ecmwf/anemoi-training/pulls/137)
   - Add without subsetting in ScaleTensor
-
 - Sub-hour datasets [#63](https://github.com/ecmwf/anemoi-training/pull/63)
 - Add synchronisation workflow [#92](https://github.com/ecmwf/anemoi-training/pull/92)
 - Feat: Anemoi Profiler compatible with mlflow and using Pytorch (Kineto) Profiler for memory report [38](https://github.com/ecmwf/anemoi-training/pull/38/)
 - Feat: Save a gif for longer rollouts in validation [#65](https://github.com/ecmwf/anemoi-training/pull/65)
 - New limited area config file added, limited_area.yaml. [#134](https://github.com/ecmwf/anemoi-training/pull/134/)
 - New stretched grid config added, stretched_grid.yaml [#133](https://github.com/ecmwf/anemoi-training/pull/133)
+- Functionality to change the weight attribute of nodes in the graph at the start of training without re-generating the graph. [#136] (https://github.com/ecmwf/anemoi-training/pull/136)
 - Custom System monitor for Nvidia and AMD GPUs [#147](https://github.com/ecmwf/anemoi-training/pull/147)
+
 
 ### Changed
 
 - Renamed frequency keys in callbacks configuration. [#118](https://github.com/ecmwf/anemoi-training/pull/118)
 - Modified training configuration to support max_steps and tied lr iterations to max_steps by default [#67](https://github.com/ecmwf/anemoi-training/pull/67)
 - Merged node & edge trainable feature callbacks into one. [#135](https://github.com/ecmwf/anemoi-training/pull/135)
+- Increase the default MlFlow HTTP max retries [#111](https://github.com/ecmwf/anemoi-training/pull/111)
+
+### Removed
 
 ## [0.2.2 - Maintenance: pin python <3.13](https://github.com/ecmwf/anemoi-training/compare/0.2.1...0.2.2) - 2024-10-28
 

@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
 import pandas as pd
-from anemoi.models.layers.mapper import GraphEdgeMixin
 from datashader.mpl_ext import dsshow
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
@@ -35,7 +34,7 @@ from anemoi.training.diagnostics.maps import EquirectangularProjection
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
-    from torch import nn
+    from torch import nn, Tensor
 
 from dataclasses import dataclass
 
@@ -138,6 +137,7 @@ def plot_power_spectrum(
     x: np.ndarray,
     y_true: np.ndarray,
     y_pred: np.ndarray,
+    min_delta: float | None = None,
 ) -> Figure:
     """Plots power spectrum.
 
@@ -156,6 +156,8 @@ def plot_power_spectrum(
         Expected data of shape (lat*lon, nvar*level)
     y_pred : np.ndarray
         Predicted data of shape (lat*lon, nvar*level)
+    min_delta: float, optional
+        Minimum distance between lat/lon points, if None defaulted to 1km
 
     Returns
     -------
@@ -163,6 +165,7 @@ def plot_power_spectrum(
         The figure object handle.
 
     """
+    min_delta = min_delta or 0.0003
     n_plots_x, n_plots_y = len(parameters), 1
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
@@ -177,9 +180,17 @@ def plot_power_spectrum(
     # Calculate delta_lat on the projected grid
     delta_lat = abs(np.diff(pc_lat))
     non_zero_delta_lat = delta_lat[delta_lat != 0]
+    min_delta_lat = np.min(abs(non_zero_delta_lat))
+
+    if min_delta_lat < min_delta:
+        LOGGER.warning(
+            "Min. distance between lat/lon points is < specified minimum distance. Defaulting to min_delta=%s.",
+            min_delta,
+        )
+        min_delta_lat = min_delta
 
     # Define a regular grid for interpolation
-    n_pix_lat = int(np.floor(abs(pc_lat.max() - pc_lat.min()) / abs(np.min(non_zero_delta_lat))))
+    n_pix_lat = int(np.floor(abs(pc_lat.max() - pc_lat.min()) / min_delta_lat))
     n_pix_lon = (n_pix_lat - 1) * 2 + 1  # 2*lmax + 1
     regular_pc_lon = np.linspace(pc_lon.min(), pc_lon.max(), n_pix_lon)
     regular_pc_lat = np.linspace(pc_lat.min(), pc_lat.max(), n_pix_lat)
@@ -313,14 +324,14 @@ def plot_histogram(
             # enforce the same binning for both histograms
             bin_min = min(np.nanmin(yt_xt), np.nanmin(yp_xt))
             bin_max = max(np.nanmax(yt_xt), np.nanmax(yp_xt))
-            hist_yt, bins_yt = np.histogram(yt_xt[~np.isnan(yt_xt)], bins=100, range=[bin_min, bin_max])
-            hist_yp, bins_yp = np.histogram(yp_xt[~np.isnan(yp_xt)], bins=100, range=[bin_min, bin_max])
+            hist_yt, bins_yt = np.histogram(yt_xt[~np.isnan(yt_xt)], bins=100, density=True, range=[bin_min, bin_max])
+            hist_yp, bins_yp = np.histogram(yp_xt[~np.isnan(yp_xt)], bins=100, density=True, range=[bin_min, bin_max])
         else:
             # enforce the same binning for both histograms
             bin_min = min(np.nanmin(yt), np.nanmin(yp))
             bin_max = max(np.nanmax(yt), np.nanmax(yp))
-            hist_yt, bins_yt = np.histogram(yt[~np.isnan(yt)], bins=100, range=[bin_min, bin_max])
-            hist_yp, bins_yp = np.histogram(yp[~np.isnan(yp)], bins=100, range=[bin_min, bin_max])
+            hist_yt, bins_yt = np.histogram(yt[~np.isnan(yt)], bins=100, density=True, range=[bin_min, bin_max])
+            hist_yp, bins_yp = np.histogram(yp[~np.isnan(yp)], bins=100, density=True, range=[bin_min, bin_max])
 
         # Visualization trick for tp
         if variable_name in precip_and_related_fields:
@@ -623,6 +634,51 @@ def plot_flat_sample(
                 title=f"{vname} persist err: {np.nanmean(np.abs(err_plot)):.{4}f} deg.",
                 datashader=datashader,
             )
+        elif vname in precip_and_related_fields:
+            # Create a custom colormap for precipitation
+            nws_precip_colors = cmap_precip
+            precip_colormap = ListedColormap(nws_precip_colors)
+
+            # Defining the actual precipitation accumulation levels in mm
+            cummulation_lvls = clevels
+            norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
+
+            # converting to mm from m
+            input_ *= 1000.0
+            truth *= 1000.0
+            pred *= 1000.0
+            single_plot(
+                fig,
+                ax[0],
+                lon=lon,
+                lat=lat,
+                data=input_,
+                cmap=precip_colormap,
+                title=f"{vname} input",
+                datashader=datashader,
+            )
+            single_plot(
+                fig,
+                ax[4],
+                lon=lon,
+                lat=lat,
+                data=pred - input_,
+                cmap="bwr",
+                norm=TwoSlopeNorm(vcenter=0.0),
+                title=f"{vname} increment [pred - input]",
+                datashader=datashader,
+            )
+            single_plot(
+                fig,
+                ax[5],
+                lon=lon,
+                lat=lat,
+                data=truth - input_,
+                cmap="bwr",
+                norm=TwoSlopeNorm(vcenter=0.0),
+                title=f"{vname} persist err",
+                datashader=datashader,
+            )
         else:
             single_plot(fig, ax[0], lon, lat, input_, norm=norm, title=f"{vname} input", datashader=datashader)
             single_plot(
@@ -817,13 +873,19 @@ def edge_plot(
     fig.colorbar(psc, ax=ax)
 
 
-def plot_graph_node_features(model: nn.Module, datashader: bool = False) -> Figure:
+def plot_graph_node_features(
+    model: nn.Module,
+    trainable_tensors: dict[str, Tensor],
+    datashader: bool = False,
+) -> Figure:
     """Plot trainable graph node features.
 
     Parameters
     ----------
     model: AneomiModelEncProcDec
         Model object
+    trainable_tensors: dict[str, torch.Tensor]
+        Node trainable tensors
     datashader: bool, optional
         Scatter plot, by default False
 
@@ -832,14 +894,15 @@ def plot_graph_node_features(model: nn.Module, datashader: bool = False) -> Figu
     Figure
         Figure object handle
     """
-    nrows = len(nodes_name := model._graph_data.node_types)
-    ncols = min(model.node_attributes.trainable_tensors[m].trainable.shape[1] for m in nodes_name)
+    nrows = len(trainable_tensors)
+    ncols = max(tt.shape[1] for tt in trainable_tensors.values())
+
     figsize = (ncols * 4, nrows * 3)
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
-    for row, (mesh, trainable_tensor) in enumerate(model.node_attributes.trainable_tensors.items()):
+    for row, (mesh, trainable_tensor) in enumerate(trainable_tensors.items()):
         latlons = model.node_attributes.get_coordinates(mesh).cpu().numpy()
-        node_features = trainable_tensor.trainable.cpu().detach().numpy()
+        node_features = trainable_tensor.cpu().detach().numpy()
 
         lat, lon = latlons[:, 0], latlons[:, 1]
 
@@ -858,13 +921,19 @@ def plot_graph_node_features(model: nn.Module, datashader: bool = False) -> Figu
     return fig
 
 
-def plot_graph_edge_features(model: nn.Module, q_extreme_limit: float = 0.05) -> Figure:
+def plot_graph_edge_features(
+    model: nn.Module,
+    trainable_modules: dict[tuple[str, str], Tensor],
+    q_extreme_limit: float = 0.05,
+) -> Figure:
     """Plot trainable graph edge features.
 
     Parameters
     ----------
     model: AneomiModelEncProcDec
         Model object
+    trainable_modules: dict[tuple[str, str], torch.Tensor]
+        Edge trainable tensors.
     q_extreme_limit : float, optional
         Plot top & bottom quantile of edges trainable values, by default 0.05 (5%).
 
@@ -873,16 +942,8 @@ def plot_graph_edge_features(model: nn.Module, q_extreme_limit: float = 0.05) ->
     Figure
         Figure object handle
     """
-    trainable_modules = {
-        (model._graph_name_data, model._graph_name_hidden): model.encoder,
-        (model._graph_name_hidden, model._graph_name_data): model.decoder,
-    }
-
-    if isinstance(model.processor, GraphEdgeMixin):
-        trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
-
-    ncols = min(module.trainable.trainable.shape[1] for module in trainable_modules.values())
     nrows = len(trainable_modules)
+    ncols = max(tt.trainable.trainable.shape[1] for tt in trainable_modules.values())
     figsize = (ncols * 4, nrows * 3)
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 

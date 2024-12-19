@@ -42,7 +42,7 @@ project = "Anemoi Training"
 
 author = "Anemoi contributors"
 
-year = datetime.datetime.now(tz="UTC").year
+year = datetime.datetime.now(tz=datetime.timezone.utc).year
 years = "2024" if year == 2024 else f"2024-{year}"
 
 copyright = f"{years}, Anemoi contributors"  # noqa: A001

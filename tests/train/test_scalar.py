@@ -168,33 +168,72 @@ def test_scale_tensor_two_dim(
     torch.testing.assert_close(scale.scale(input_tensor), output)
 
 
-def test_scalar_subset() -> None:
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(0, torch.tensor([3.0])))
-    subset = scale.subset("test")
+@pytest.mark.parametrize("subset_id", ["test", 0])
+def test_scalar_subset(subset_id) -> None:  # noqa: ANN001
+    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+    subset = scale.subset(subset_id)
     assert "test" in subset
     assert "wow" not in subset
     assert 0 in subset
+    assert 1 not in subset
 
 
-def test_scalar_subset_without() -> None:
+@pytest.mark.parametrize("without_id", ["test", 0])
+def test_scalar_subset_without(without_id) -> None:  # noqa: ANN001
+    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+    subset = scale.without(without_id)
+    assert "test" not in subset
+    assert "wow" in subset
+    assert 1 in subset
+
+
+@pytest.mark.parametrize("without_id", ["test"])
+def test_scalar_subset_without_overlap(without_id) -> None:  # noqa: ANN001
     scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(0, torch.tensor([3.0])))
-    subset = scale.without("test")
+    subset = scale.without(without_id)
     assert "test" not in subset
     assert "wow" in subset
     assert 0 in subset
 
 
-def test_scalar_subset_by_dim() -> None:
+def test_scalar_remove_str() -> None:
     scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
-    subset = scale.subset_by_dim(0)
+    subset = scale.remove_scalar("wow")
     assert "test" in subset
     assert "wow" not in subset
     assert 0 in subset
 
 
-def test_scalar_subset_by_dim_without() -> None:
+def test_scalar_remove_int() -> None:
     scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
-    subset = scale.without_by_dim(0)
-    assert "test" not in subset
+    subset = scale.remove_scalar(1)
+    assert "test" in subset
+    assert "wow" not in subset
+    assert 0 in subset
+    assert 1 not in subset
+
+
+def test_scalar_freeze_str() -> None:
+    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+    with scale.freeze_state():
+        subset = scale.remove_scalar("wow")
+        assert "test" in subset
+        assert "wow" not in subset
+        assert 0 in subset
+        assert 1 not in subset
+
     assert "wow" in subset
-    assert 0 not in subset
+    assert 1 in subset
+
+
+def test_scalar_freeze_int() -> None:
+    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+    with scale.freeze_state():
+        subset = scale.remove_scalar(1)
+        assert "test" in subset
+        assert "wow" not in subset
+        assert 0 in subset
+        assert 1 not in subset
+
+    assert "wow" in subset
+    assert 1 in subset

@@ -13,6 +13,7 @@ import logging
 import os
 import random
 from functools import cached_property
+from typing import TYPE_CHECKING
 from typing import Callable
 
 import numpy as np
@@ -26,6 +27,9 @@ from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from anemoi.training.data.grid_indices import BaseGridIndices
+
 
 class NativeGridDataset(IterableDataset):
     """Iterable dataset for AnemoI data on the arbitrary grids."""
@@ -33,11 +37,13 @@ class NativeGridDataset(IterableDataset):
     def __init__(
         self,
         data_reader: Callable,
+        grid_indices: type[BaseGridIndices],
         rollout: int = 1,
         multistep: int = 1,
         timeincrement: int = 1,
         shuffle: bool = True,
         label: str = "generic",
+        effective_bs: int = 1,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -45,6 +51,8 @@ class NativeGridDataset(IterableDataset):
         ----------
         data_reader : Callable
             user function that opens and returns the zarr array data
+        grid_indices : Type[BaseGridIndices]
+            indices of the grid to keep. Defaults to None, which keeps all spatial indices.
         rollout : int, optional
             length of rollout window, by default 12
         timeincrement : int, optional
@@ -55,14 +63,17 @@ class NativeGridDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
-
+        effective_bs : int, default 1
+            effective batch size useful to compute the lenght of the dataset
         """
         self.label = label
+        self.effective_bs = effective_bs
 
         self.data = data_reader
 
         self.rollout = rollout
         self.timeincrement = timeincrement
+        self.grid_indices = grid_indices
 
         # lazy init
         self.n_samples_per_epoch_total: int = 0
@@ -87,8 +98,6 @@ class NativeGridDataset(IterableDataset):
         assert self.multi_step > 0, "Multistep value must be greater than zero."
         self.ensemble_dim: int = 2
         self.ensemble_size = self.data.shape[self.ensemble_dim]
-        self.grid_dim: int = -1
-        self.grid_size = self.data.shape[self.grid_dim]
 
     @cached_property
     def statistics(self) -> dict:
@@ -99,6 +108,11 @@ class NativeGridDataset(IterableDataset):
     def metadata(self) -> dict:
         """Return dataset metadata."""
         return self.data.metadata()
+
+    @cached_property
+    def supporting_arrays(self) -> dict:
+        """Return dataset supporting_arrays."""
+        return self.data.supporting_arrays()
 
     @cached_property
     def name_to_index(self) -> dict:
@@ -157,14 +171,7 @@ class NativeGridDataset(IterableDataset):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
-        if self.reader_group_size > 1:
-            # get the grid shard size and start/end indices
-            grid_shard_size = self.grid_size // self.reader_group_size
-            self.grid_start = self.reader_group_rank * grid_shard_size
-            if self.reader_group_rank == self.reader_group_size - 1:
-                self.grid_end = self.grid_size
-            else:
-                self.grid_end = (self.reader_group_rank + 1) * grid_shard_size
+        assert self.reader_group_size >= 1, "reader_group_size must be positive"
 
         LOGGER.debug(
             "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
@@ -201,6 +208,7 @@ class NativeGridDataset(IterableDataset):
 
         low = shard_start + worker_id * self.n_samples_per_worker
         high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
+        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
         LOGGER.debug(
             "Worker %d (pid %d, global_rank %d, model comm group %d) has low/high range %d / %d",
@@ -212,27 +220,17 @@ class NativeGridDataset(IterableDataset):
             high,
         )
 
-        self.chunk_index_range = self.valid_date_indices[np.arange(low, high, dtype=np.uint32)]
-
-        # each worker must have a different seed for its random number generator,
-        # otherwise all the workers will output exactly the same data
-        # should we check lightning env variable "PL_SEED_WORKERS" here?
-        # but we alwyas want to seed these anyways ...
-
         base_seed = get_base_seed()
 
-        seed = (
-            base_seed * (self.model_comm_group_id + 1) - worker_id
-        )  # note that test, validation etc. datasets get same seed
-        torch.manual_seed(seed)
-        random.seed(seed)
-        self.rng = np.random.default_rng(seed=seed)
+        torch.manual_seed(base_seed)
+        random.seed(base_seed)
+        self.rng = np.random.default_rng(seed=base_seed)
         sanity_rnd = self.rng.random(1)
 
         LOGGER.debug(
             (
                 "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                "group_rank %d, base_seed %d) using seed %d, sanity rnd %f"
+                "group_rank %d, base_seed %d), sanity rnd %f"
             ),
             worker_id,
             self.label,
@@ -241,7 +239,6 @@ class NativeGridDataset(IterableDataset):
             self.model_comm_group_id,
             self.model_comm_group_rank,
             base_seed,
-            seed,
             sanity_rnd,
         )
 
@@ -256,12 +253,12 @@ class NativeGridDataset(IterableDataset):
         """
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
-                self.chunk_index_range,
-                size=self.n_samples_per_worker,
+                self.valid_date_indices,
+                size=len(self.valid_date_indices),
                 replace=False,
-            )
+            )[self.chunk_index_range]
         else:
-            shuffled_chunk_indices = self.chunk_index_range
+            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
 
         LOGGER.debug(
             (
@@ -281,11 +278,9 @@ class NativeGridDataset(IterableDataset):
             start = i - (self.multi_step - 1) * self.timeincrement
             end = i + (self.rollout + 1) * self.timeincrement
 
-            if self.reader_group_size > 1:  # read only a subset of the grid
-                x = self.data[start : end : self.timeincrement, :, :, self.grid_start : self.grid_end]
-            else:  # read the full grid
-                x = self.data[start : end : self.timeincrement, :, :, :]
-
+            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+            x = self.data[start : end : self.timeincrement, :, :, :]
+            x = x[..., grid_shard_indices]  # select the grid shard
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
 

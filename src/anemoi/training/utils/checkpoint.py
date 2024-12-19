@@ -7,15 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import torch
+import torch.nn as nn
 from anemoi.utils.checkpoints import save_metadata
 
 from anemoi.training.train.forecaster import GraphForecaster
+
+LOGGER = logging.getLogger(__name__)
 
 
 def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
@@ -65,3 +68,26 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata)
     return inference_filepath
+
+
+def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
+
+    # Load the checkpoint
+    checkpoint = torch.load(ckpt_path, map_location=model.device)
+
+    # Filter out layers with size mismatch
+    state_dict = checkpoint["state_dict"]
+
+    model_state_dict = model.state_dict()
+
+    for key in state_dict.copy():
+        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
+            LOGGER.info("Skipping loading parameter: %s", key)
+            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
+            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
+
+            del state_dict[key]  # Remove the mismatched key
+
+    # Load the filtered st-ate_dict into the model
+    model.load_state_dict(state_dict, strict=False)
+    return model

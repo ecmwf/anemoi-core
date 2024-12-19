@@ -7,15 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 import logging
 from functools import cached_property
+from typing import TYPE_CHECKING
 from typing import Callable
 
 import pytorch_lightning as pl
 from anemoi.datasets.data import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.utils.dates import frequency_to_seconds
+from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -25,11 +28,16 @@ from anemoi.training.data.dataset import worker_init_func
 
 LOGGER = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from torch_geometric.data import HeteroData
+
+    from anemoi.training.data.grid_indices import BaseGridIndices
+
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: DictConfig) -> None:
+    def __init__(self, config: DictConfig, graph_data: HeteroData) -> None:
         """Initialize Anemoi Datasets data module.
 
         Parameters
@@ -41,6 +49,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         super().__init__()
 
         self.config = config
+        self.graph_data = graph_data
 
         # Set the maximum rollout to be expected
         self.rollout = (
@@ -60,11 +69,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not self.config.dataloader.get("pin_memory", True):
             LOGGER.info("Data loader memory pinning disabled.")
 
-    def _check_resolution(self, resolution: str) -> None:
-        assert (
-            self.config.data.resolution.lower() == resolution.lower()
-        ), f"Network resolution {self.config.data.resolution=} does not match dataset resolution {resolution=}"
-
     @cached_property
     def statistics(self) -> dict:
         return self.ds_train.statistics
@@ -74,8 +78,19 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self.ds_train.metadata
 
     @cached_property
+    def supporting_arrays(self) -> dict:
+        return self.ds_train.supporting_arrays | self.grid_indices.supporting_arrays
+
+    @cached_property
     def data_indices(self) -> IndexCollection:
         return IndexCollection(self.config, self.ds_train.name_to_index)
+
+    @cached_property
+    def grid_indices(self) -> type[BaseGridIndices]:
+        reader_group_size = self.config.dataloader.get("read_group_size", self.config.hardware.num_gpus_per_model)
+        grid_indices = instantiate(self.config.dataloader.grid_indices, reader_group_size=reader_group_size)
+        grid_indices.setup(self.graph_data)
+        return grid_indices
 
     @cached_property
     def timeincrement(self) -> int:
@@ -152,17 +167,27 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout: int = 1,
         label: str = "generic",
     ) -> NativeGridDataset:
+
         r = max(rollout, self.rollout)
-        data = NativeGridDataset(
+
+        # Compute effective batch size
+        effective_bs = (
+            self.config.dataloader.batch_size["training"]
+            * self.config.hardware.num_gpus_per_node
+            * self.config.hardware.num_nodes
+            // self.config.hardware.num_gpus_per_model
+        )
+
+        return NativeGridDataset(
             data_reader=data_reader,
             rollout=r,
             multistep=self.config.training.multistep_input,
             timeincrement=self.timeincrement,
             shuffle=shuffle,
+            grid_indices=self.grid_indices,
             label=label,
+            effective_bs=effective_bs,
         )
-        self._check_resolution(data.resolution)
-        return data
 
     def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:
         assert stage in {"training", "validation", "test"}

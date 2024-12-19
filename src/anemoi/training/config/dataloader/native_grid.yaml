@@ -40,6 +40,12 @@ limit_batches:
   test: 20
   predict: 20
 
+# set a custom mask for grid points.
+# Useful for LAM (dropping unconnected nodes from forcing dataset)
+grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.data}
+
 # ============
 # Dataloader definitions
 # These follow the anemoi-datasets patterns

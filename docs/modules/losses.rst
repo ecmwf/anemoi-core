@@ -73,10 +73,35 @@ Currently, the following scalars are available for use:
 ********************
 
 Validation metrics as defined in the config file at
-``config.training.validation_metrics`` follow the same initialise
+``config.training.validation_metrics`` follow the same initialisation
 behaviour as the loss function, but can be a list. In this case all
 losses are calculated and logged as a dictionary with the corresponding
 name
+
+Scaling Validation Losses
+=========================
+
+Validation metrics can **not** by default be scaled by scalars across
+the variable dimension, but can be by all other scalars. If you want to
+scale a validation metric by the variable weights, it must be added to
+`config.training.scale_validation_metrics`.
+
+These metrics are then kept in the normalised, preprocessed space, and
+thus the indexing of scalars aligns with the indexing of the tensors.
+
+By default, only `all` is kept in the normalised space and scaled.
+
+.. code:: yaml
+
+   # List of validation metrics to keep in normalised space, and scalars to be applied
+   # Use '*' in reference all metrics, or a list of metric names.
+   # Unlike above, variable scaling is possible due to these metrics being
+   # calculated in the same way as the training loss, within the internal model space.
+   scale_validation_metrics:
+   scalars_to_apply: ['variable']
+   metrics:
+      - 'all'
+      # - "*"
 
 ***********************
  Custom Loss Functions
