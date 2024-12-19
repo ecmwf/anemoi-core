@@ -79,19 +79,19 @@ Keep it human-readable, your future self will thank you!
 ### Added
 
 - HEALPixNodes - nodebuilder based on Hierarchical Equal Area isoLatitude Pixelation of a sphere
-  
+
 - Inspection tools: interactive plots, and distribution plots of edge & node attributes.
-  
+
 - Graph description print in the console.
-  
+
 - CLI entry point: 'anemoi-graphs inspect ...'.
-  
+
 - added downstream-ci pipeline and cd-pypi reusable workflow
-  
+
 - Changelog release updater
-  
+
 - Create package documentation.
-  
+
 
 ### Changed
 
