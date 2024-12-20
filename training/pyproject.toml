@@ -98,7 +98,13 @@ scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
 scripts.anemoi-training = "anemoi.training.__main__:main"
 
 [tool.setuptools_scm]
+root = ".."  # Points to the root of the monorepo
+version_scheme = "post-release"
+local_scheme = "no-local-version"
+git_describe_command = "git describe --dirty --tags --long --match 'training-*[0-9]*'"
+tag_regex = "^training-(?P<version>[vV]?[0-9]+[^-]*)"
 version_file = "src/anemoi/training/_version.py"
+fallback_version = "0.0.0"
 
 [tool.ruff]
 target-version = "py39"

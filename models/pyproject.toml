@@ -72,4 +72,11 @@ urls.Repository = "https://github.com/ecmwf/anemoi-models/"
 scripts.anemoi-models = "anemoi.models.__main__:main"
 
 [tool.setuptools_scm]
+
+root = ".."
+version_scheme = "post-release"
+local_scheme = "no-local-version"
+git_describe_command = "git describe --dirty --tags --long --match 'models-*[0-9]*'"
+tag_regex = "^models-(?P<version>[vV]?[0-9]+[^-]*)"
 version_file = "src/anemoi/models/_version.py"
+fallback_version = "0.0.0"
