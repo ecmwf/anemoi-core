@@ -50,8 +50,10 @@ dependencies = [
 ]
 optional-dependencies.all = [  ]
 
-optional-dependencies.dev = [ "anemoi-models[all,docs,tests]" ]
-
+optional-dependencies.dev = [
+  "anemoi-models[all,docs,tests]",
+  "pre-commit>=3.3.3",
+]
 optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
