@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING
 
 import torch
 import torchinfo
-from anemoi.utils.checkpoints import save_metadata
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
+
+from anemoi.utils.checkpoints import save_metadata
 
 if TYPE_CHECKING:
     import pytorch_lightning as pl

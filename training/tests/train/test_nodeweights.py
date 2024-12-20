@@ -10,9 +10,9 @@
 
 import pytest
 import torch
-from anemoi.graphs.nodes.attributes import AreaWeights
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.nodes.attributes import AreaWeights
 from anemoi.training.losses.nodeweights import GraphNodeAttribute
 from anemoi.training.losses.nodeweights import ReweightedGraphNodeAttribute
 

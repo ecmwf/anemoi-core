@@ -9,12 +9,12 @@
 
 import pytest
 import torch
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 
 from anemoi.models.layers.bounding import FractionBounding
 from anemoi.models.layers.bounding import HardtanhBounding
 from anemoi.models.layers.bounding import ReluBounding
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture

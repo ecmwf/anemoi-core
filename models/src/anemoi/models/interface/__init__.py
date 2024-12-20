@@ -10,11 +10,11 @@
 import uuid
 
 import torch
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
+from anemoi.utils.config import DotDict
 
 
 class AnemoiModelInterface(torch.nn.Module):

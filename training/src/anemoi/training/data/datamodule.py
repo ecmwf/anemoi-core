@@ -15,16 +15,16 @@ from typing import TYPE_CHECKING
 from typing import Callable
 
 import pytorch_lightning as pl
-from anemoi.datasets.data import open_dataset
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.utils.dates import frequency_to_seconds
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
+from anemoi.datasets.data import open_dataset
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.data.dataset import worker_init_func
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 

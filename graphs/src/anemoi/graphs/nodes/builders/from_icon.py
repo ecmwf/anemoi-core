@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from anemoi.utils.config import DotDict
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
 from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
+from anemoi.utils.config import DotDict
 
 
 class ICONNodes(BaseNodeBuilder):

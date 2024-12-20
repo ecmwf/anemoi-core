@@ -16,8 +16,6 @@ from pathlib import Path
 
 import pytest
 import torch
-from anemoi.utils.checkpoints import load_metadata
-from anemoi.utils.config import DotDict
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
@@ -26,6 +24,8 @@ from torch import nn
 
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
 from anemoi.training.utils.jsonify import map_config_to_primitives
+from anemoi.utils.checkpoints import load_metadata
+from anemoi.utils.config import DotDict
 
 
 class DummyModel(torch.nn.Module):

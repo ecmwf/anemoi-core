@@ -29,10 +29,10 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from anemoi.models.layers.mapper import GraphEdgeMixin
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
 from anemoi.training.diagnostics.plots import plot_graph_edge_features
@@ -47,8 +47,9 @@ if TYPE_CHECKING:
     from typing import Any
 
     import pytorch_lightning as pl
-    from anemoi.models.layers.graph import NamedNodesAttributes
     from omegaconf import OmegaConf
+
+    from anemoi.models.layers.graph import NamedNodesAttributes
 
 LOGGER = logging.getLogger(__name__)
 

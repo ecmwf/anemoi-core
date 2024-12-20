@@ -39,6 +39,7 @@ repos:
     - -l 120
     - --force-single-line-imports
     - --profile black
+    - --project anemoi
 - repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.8.1
   hooks:

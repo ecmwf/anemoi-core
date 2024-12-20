@@ -14,9 +14,10 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
+
+from anemoi.utils.config import DotDict
 
 
 class BaseNodeBuilder(ABC):

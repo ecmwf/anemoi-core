@@ -10,8 +10,8 @@
 from typing import Any
 
 import pytest
-from anemoi.models.data_indices.collection import IndexCollection
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.train.train import AnemoiTrainer
 

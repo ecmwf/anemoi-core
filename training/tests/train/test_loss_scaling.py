@@ -11,9 +11,9 @@
 import pytest
 import torch
 from _pytest.fixtures import SubRequest
-from anemoi.models.data_indices.collection import IndexCollection
 from omegaconf import DictConfig
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.forecaster import GraphForecaster
 
 

@@ -17,13 +17,13 @@ from typing import Union
 
 import numpy as np
 import torch
-from anemoi.datasets import open_dataset
 from scipy.spatial import ConvexHull
 from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.datasets import open_dataset
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.normalise import NormaliserMixin
 

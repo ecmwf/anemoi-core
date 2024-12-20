@@ -14,9 +14,9 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from anemoi.utils.checkpoints import save_metadata
 
 from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
 

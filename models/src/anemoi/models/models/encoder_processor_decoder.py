@@ -13,7 +13,6 @@ from typing import Optional
 
 import einops
 import torch
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
@@ -23,6 +22,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 

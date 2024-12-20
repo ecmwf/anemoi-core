@@ -20,10 +20,11 @@ from getpass import getpass
 from typing import Callable
 
 import requests
+from requests.exceptions import HTTPError
+
 from anemoi.utils.config import load_config
 from anemoi.utils.config import save_config
 from anemoi.utils.timer import Timer
-from requests.exceptions import HTTPError
 
 REFRESH_EXPIRE_DAYS = 29
 

@@ -12,7 +12,6 @@ from hydra import initialize
 from hydra.core.global_hydra import GlobalHydra
 from hydra.core.plugins import Plugins
 from hydra.plugins.search_path_plugin import SearchPathPlugin
-
 from hydra_plugins.anemoi_searchpath.anemoi_searchpath_plugin import AnemoiSearchPathPlugin
 
 

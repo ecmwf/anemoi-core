@@ -17,7 +17,6 @@ import networkx as nx
 import numpy as np
 import scipy
 import torch
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
@@ -35,6 +34,7 @@ from anemoi.graphs.nodes.builders.from_refined_icosahedron import StretchedTriNo
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import TriNodes
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import get_grid_reference_distance
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 

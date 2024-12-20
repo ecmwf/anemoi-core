@@ -14,6 +14,7 @@ from typing import Optional
 from typing import Union
 
 import torch
+
 from anemoi.utils.humanize import bytes
 from anemoi.utils.text import table
 

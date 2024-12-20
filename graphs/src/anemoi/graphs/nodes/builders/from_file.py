@@ -14,11 +14,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from anemoi.datasets import open_dataset
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
+from anemoi.datasets import open_dataset
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
