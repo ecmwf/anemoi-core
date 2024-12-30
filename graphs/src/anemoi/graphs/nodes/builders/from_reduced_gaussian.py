@@ -56,6 +56,10 @@ class ReducedGaussianGridNodes(NPZFileNodes):
             r"^[oOnN]\d+$", grid
         ), f"{self.__class__.__name__}.grid must match the format [n|N|o|O]XXX with XXX latitude lines between the pole and equator."
         self.file_name = f"grid-{grid.upper()}.npz"
+        if not self.is_downloaded():
+            print(f"File {self.file_name} not found locally. Downloading...")
+            self.download_file()
+        
         super().__init__(self.local_dir + "/" + self.file_name, name, lat_key="latitudes", lon_key="longitudes")
 
     def is_downloaded(self) -> bool:
@@ -86,17 +90,3 @@ class ReducedGaussianGridNodes(NPZFileNodes):
             LOGGER.info(f"File downloaded and saved to {self.local_dir}/.")
         else:
             raise FileNotFoundError(f"Failed to download file from {url}. HTTP status code: {response.status_code}")
-
-    def get_coordinates(self) -> torch.Tensor:
-        """Get the coordinates of the nodes.
-
-        Returns
-        -------
-        torch.Tensor of shape (num_nodes, 2)
-            Coordinates of the nodes, in radians.
-        """
-        if not self.is_downloaded():
-            print(f"File {self.file_name} not found locally. Downloading...")
-            self.download_file()
-
-        return self.get_coordinates()
