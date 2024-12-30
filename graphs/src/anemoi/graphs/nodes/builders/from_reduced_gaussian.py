@@ -66,7 +66,7 @@ class ReducedGaussianGridNodes(NPZFileNodes):
     @cached_property
     def download_url(self) -> str:
         config = load_config(defaults={"graphs": {"named": {}}})
-        return config["graphs"]["named"]["grids"]
+        return config["graphs"]["named"]["grids"].rstrip("/")
 
     def download_file(self):
         """Downloads the grid file if it is not already downloaded."""

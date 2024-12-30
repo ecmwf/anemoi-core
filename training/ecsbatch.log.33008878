@@ -1,0 +1,41 @@
+[ECMWF-INFO -sbatch] - -------------------------------------------------------------------------------------
+[ECMWF-INFO -sbatch] -  This is the ECMWF jobfilter
+[ECMWF-INFO -sbatch] -  +++ Please report issues using the Support portal +++
+[ECMWF-INFO -sbatch] -  +++ https://support.ecmwf.int                     +++
+[ECMWF-INFO -sbatch] -  /usr/local/bin/ecsbatch: size: 52065, mtime: Tue Nov 12 09:54:58 2024
+[ECMWF-INFO -sbatch] - -------------------------------------------------------------------------------------
+[ECMWF-INFO -sbatch] - Time at submit: Mon Dec 30 11:21:03 2024 (1735557663.55575) on ac6-100.bullx:/etc/ecmwf/nfs/dh2_home_a/ecm1924/GitRepos/anemoi/anemoi-core/training
+[ECMWF-INFO -sbatch] - --- SLURM VARIABLES ---
+[ECMWF-INFO -sbatch] - EC_CLUSTER=ac
+[ECMWF-INFO -sbatch] - SLURM_EXPORT_ENV=ALL
+[ECMWF-INFO -sbatch] - SBATCH_EXPORT=NONE
+[ECMWF-INFO -sbatch] - -----------------------
+[ECMWF-INFO -sbatch] - jobscript: /etc/ecmwf/nfs/dh2_home_a/ecm1924/GitRepos/anemoi/anemoi-core/training/jobscript.sh
+[ECMWF-INFO -sbatch] - --- SCRIPT OPTIONS ---
+[ECMWF-INFO -sbatch] - #SBATCH --qos=ng
+[ECMWF-INFO -sbatch] - #SBATCH --nodes=1
+[ECMWF-INFO -sbatch] - #SBATCH --ntasks-per-node=4
+[ECMWF-INFO -sbatch] - #SBATCH --gpus-per-node=4
+[ECMWF-INFO -sbatch] - #SBATCH --cpus-per-task=32
+[ECMWF-INFO -sbatch] - #SBATCH --mem=128G
+[ECMWF-INFO -sbatch] - #SBATCH --time=48:00:00
+[ECMWF-INFO -sbatch] - #SBATCH --account=ecaifs
+[ECMWF-INFO -sbatch] - #SBATCH --output=outputs/aifsobs_train.out.%j
+[ECMWF-INFO -sbatch] - -----------------------
+[ECMWF-INFO -sbatch] - --- POST-PROCESSED OPTIONS ---
+[ECMWF-INFO -sbatch] - ARG --positional=['jobscript.sh']
+[ECMWF-INFO -sbatch] - ARG --account=ecaifs
+[ECMWF-INFO -sbatch] - ARG --cpus_per_task=32
+[ECMWF-INFO -sbatch] - ARG --ntasks_per_node=4
+[ECMWF-INFO -sbatch] - ARG --nodes=1
+[ECMWF-INFO -sbatch] - ARG --output=outputs/aifsobs_train.out.%j
+[ECMWF-INFO -sbatch] - ARG --qos=ng
+[ECMWF-INFO -sbatch] - ARG --time=48:00:00
+[ECMWF-INFO -sbatch] - ARG --mem=128G
+[ECMWF-INFO -sbatch] - ARG --gpus_per_node=4
+[ECMWF-INFO -sbatch] - ------------------------------
+[ECMWF-INFO -sbatch] - jobtag: ecm1924-jobscript.sh-1x128-/etc/ecmwf/nfs/dh2_home_a/ecm1924/GitRepos/anemoi/anemoi-core/training/outputs/aifsobs_train.out._JOBID_
+[ECMWF-INFO -sbatch] - ['/usr/bin/sbatch', '--account=ecaifs', '--cpus-per-task=32', '--ntasks-per-node=4', '--nodes=1', '--output=outputs/aifsobs_train.out.%j', '--qos=ng', '--time=48:00:00', '--mem=128G', '--gpus-per-node=4', '--licenses=h2resw01', '--export=EC_user_time_limit=48:00:00', '/etc/ecmwf/nfs/dh2_home_a/ecm1924/GitRepos/anemoi/anemoi-core/training/jobscript.sh']
+[ECMWF-INFO -sbatch] - sbatch executed on ac
+[ECMWF-INFO -sbatch] - Job queued on ac using method local
+[ECMWF-INFO -sbatch] - Submitted batch job 33008878

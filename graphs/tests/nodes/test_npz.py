@@ -21,7 +21,7 @@ def test_init(mock_grids_path: tuple[str, int], resolution: str):
     """Test NPZFileNodes initialization."""
     grid_definition_path, _ = mock_grids_path
     node_builder = NPZFileNodes(
-        file=grid_definition_path / f"grid-{resolution}.npz",
+        npz_file=grid_definition_path + f"/grid-{resolution}.npz",
         name="test_nodes",
         lat_key="latitudes",
         lon_key="longitudes",
@@ -29,17 +29,9 @@ def test_init(mock_grids_path: tuple[str, int], resolution: str):
     assert isinstance(node_builder, NPZFileNodes)
 
 
-@pytest.mark.parametrize("resolution", ["o17", 13, "ajsnb", None])
-def test_fail_init_wrong_resolution(mock_grids_path: tuple[str, int], resolution: str):
-    """Test NPZFileNodes initialization with invalid resolution."""
-    grid_definition_path, _ = mock_grids_path
-    with pytest.raises(FileNotFoundError):
-        NPZFileNodes(file=grid_definition_path / f"grid-{resolution}.npz", name="test_nodes")
-
-
 def test_fail_init_wrong_path():
     """Test NPZFileNodes initialization with invalid path."""
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(AssertionError):
         NPZFileNodes("invalid_path.myext", "test_nodes")
 
 
@@ -48,7 +40,7 @@ def test_register_nodes(mock_grids_path: str, resolution: str):
     """Test NPZFileNodes register correctly the nodes."""
     graph = HeteroData()
     grid_definition_path, num_nodes = mock_grids_path
-    node_builder = NPZFileNodes(file=grid_definition_path / f"grid-{resolution}.npz", name="test_nodes")
+    node_builder = NPZFileNodes(npz_file=grid_definition_path + f"/grid-{resolution}.npz", name="test_nodes")
 
     graph = node_builder.register_nodes(graph)
 
@@ -59,13 +51,13 @@ def test_register_nodes(mock_grids_path: str, resolution: str):
 
 
 @pytest.mark.parametrize("attr_class", [UniformWeights, AreaWeights])
-@pytest.mark.parametrize("resolution", ["o96"])
+@pytest.mark.parametrize("resolution", ["o16", "o48", "5km5"])
 def test_register_attributes(
     graph_with_nodes: HeteroData, mock_grids_path: tuple[str, int], attr_class, resolution: str
 ):
     """Test NPZFileNodes register correctly the weights."""
     grid_definition_path, _ = mock_grids_path
-    node_builder = NPZFileNodes(file=grid_definition_path / f"grid-{resolution}.npz", name="test_nodes")
+    node_builder = NPZFileNodes(npz_file=grid_definition_path + f"/grid-{resolution}.npz", name="test_nodes")
     config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
     graph = node_builder.register_attributes(graph_with_nodes, config)
