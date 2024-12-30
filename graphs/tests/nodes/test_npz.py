@@ -11,7 +11,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import AreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders.from_file import NPZFileNodes
 
@@ -50,7 +50,7 @@ def test_register_nodes(mock_grids_path: str, resolution: str):
     assert graph["test_nodes"].node_type == "NPZFileNodes"
 
 
-@pytest.mark.parametrize("attr_class", [UniformWeights, AreaWeights])
+@pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])
 @pytest.mark.parametrize("resolution", ["o16", "o48", "5km5"])
 def test_register_attributes(
     graph_with_nodes: HeteroData, mock_grids_path: tuple[str, int], attr_class, resolution: str

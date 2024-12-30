@@ -11,13 +11,13 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import AreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.nodes.builders.from_reduced_gaussian import ReducedGaussianGridNodes
 
 
-@pytest.mark.parametrize("grid", ["o96", "n320", "N4"])
+@pytest.mark.parametrize("grid", ["o16", "o48", "o96"])
 def test_init(grid: str):
     """Test HEALPixNodes initialization."""
     node_builder = ReducedGaussianGridNodes(grid, "test_nodes")
@@ -32,7 +32,7 @@ def test_fail_init(grid: str):
         ReducedGaussianGridNodes(grid, "test_nodes")
 
 
-@pytest.mark.parametrize("grid", ["o16", "o48"])
+@pytest.mark.parametrize("grid", ["o16", "o48", "o96"])
 def test_register_nodes(grid: str):
     """Test ReducedGaussianGridNodes register correctly the nodes."""
     node_builder = ReducedGaussianGridNodes(grid, "test_nodes")
@@ -46,8 +46,8 @@ def test_register_nodes(grid: str):
     assert graph["test_nodes"].node_type == "ReducedGaussianGridNodes"
 
 
-@pytest.mark.parametrize("attr_class", [UniformWeights, AreaWeights])
-@pytest.mark.parametrize("grid", ["o16", "o48"])
+@pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])
+@pytest.mark.parametrize("grid", ["o16", "o48", "o96"])
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class, grid: str):
     """Test ReducedGaussianGridNodes register correctly the weights."""
     node_builder = ReducedGaussianGridNodes(grid, "test_nodes")
