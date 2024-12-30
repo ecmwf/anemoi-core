@@ -78,7 +78,7 @@ class TextNodes(BaseNodeBuilder):
 
     def __init__(self, dataset, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.dataset = np.loadtxt(dataset)
+        self.dataset = dataset
         self.idx_lon = idx_lon
         self.idx_lat = idx_lat
         super().__init__(name)
@@ -91,7 +91,8 @@ class TextNodes(BaseNodeBuilder):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
-        return self.reshape_coords(self.dataset[self.idx_lat, :], self.dataset[self.idx_lon, :])
+        dataset = np.loadtxt(self.dataset)
+        return self.reshape_coords(dataset[self.idx_lat, :], dataset[self.idx_lon, :])
 
 
 class NPZFileNodes(BaseNodeBuilder):
@@ -101,10 +102,8 @@ class NPZFileNodes(BaseNodeBuilder):
     ----------
     resolution : str
         The resolution of the grid.
-    grid_definition_path : str
-        Path to the folder containing the grid definition files.
-    grid_definition : dict[str, np.ndarray]
-        The grid definition.
+    npz_file : str
+        Path to the file.
 
     Methods
     -------
@@ -118,21 +117,22 @@ class NPZFileNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, resolution: str, grid_definition_path: str, name: str) -> None:
+    def __init__(self, npz_file: str, name: str, lat_key: str = "latitudes", lon_key: str = "longitudes") -> None:
         """Initialize the NPZFileNodes builder.
 
         The builder suppose the grids are stored in files with the name `grid-{resolution}.npz`.
 
         Parameters
         ----------
-        resolution : str
-            The resolution of the grid.
+        npz_file : str
+            The path to the file.
         grid_definition_path : str
             Path to the folder containing the grid definition files.
         """
-        self.resolution = resolution
-        self.grid_definition_path = grid_definition_path
-        self.grid_definition = np.load(Path(self.grid_definition_path) / f"grid-{self.resolution}.npz")
+        self.npz_file = Path(npz_file)
+        self.lat_key = lat_key
+        self.lon_key = lon_key
+        assert self.npz_file.exists(), f"{self.__class__.__name__}.file does not exists: {self.npz_file}"
         super().__init__(name)
 
     def get_coordinates(self) -> torch.Tensor:
@@ -143,7 +143,8 @@ class NPZFileNodes(BaseNodeBuilder):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
-        coords = self.reshape_coords(self.grid_definition["latitudes"], self.grid_definition["longitudes"])
+        grid_data = np.load(self.npz_file)
+        coords = self.reshape_coords(grid_data[self.lat_key], grid_data[self.lon_key])
         return coords
 
 
@@ -152,17 +153,17 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
 
     def __init__(
         self,
-        resolution: str,
-        grid_definition_path: str,
+        npz_file: str,
         reference_node_name: str,
         name: str,
+        lat_key: str = "latitudes",
+        lon_key: str = "longiutdes",
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
     ) -> None:
-
         self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
-        super().__init__(resolution, grid_definition_path, name)
+        super().__init__(npz_file, name, lat_key, lon_key)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
@@ -177,10 +178,7 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         )
         area_mask = self.area_mask_builder.get_mask(coords)
 
-        LOGGER.info(
-            "Dropping %d nodes from the processor mesh.",
-            len(area_mask) - area_mask.sum(),
-        )
+        LOGGER.info("Dropping %d nodes from the processor mesh.", len(area_mask) - area_mask.sum())
         coords = coords[area_mask]
 
         return coords
