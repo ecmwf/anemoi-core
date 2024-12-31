@@ -29,7 +29,7 @@ class ReducedGaussianGridNodes(NPZFileNodes):
 
     A gaussian grid is a latitude/longitude grid. The spacing of the latitudes is not regular. However, the spacing of
     the lines of latitude is symmetrical about the Equator. A grid is usually referred to by its 'number' N/O, which
-    is the number of lines of latitude between a Pole and the Equator. The N code refers t othe original ECMWF reduced
+    is the number of lines of latitude between a Pole and the Equator. The N code refers to the original ECMWF reduced
     Gaussian grid, whereas the code O refers to the octahedral ECMWF reduced Gaussian grid.
 
     Attributes

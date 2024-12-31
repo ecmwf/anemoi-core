@@ -100,10 +100,12 @@ class NPZFileNodes(BaseNodeBuilder):
 
     Attributes
     ----------
-    resolution : str
-        The resolution of the grid.
     npz_file : str
         Path to the file.
+    lat_key : str
+        Name of the key of the latitude arrays.
+    lon_key : str
+        Name of the key of the latitude arrays.
 
     Methods
     -------
@@ -126,8 +128,12 @@ class NPZFileNodes(BaseNodeBuilder):
         ----------
         npz_file : str
             The path to the file.
-        grid_definition_path : str
-            Path to the folder containing the grid definition files.
+        name : str
+            Name of the nodes to be added.
+        lat_key : str, optional
+            Name of the key of the latitude arrays. Defaults to "latitudes".
+        lon_key : str, optional
+            Name of the key of the latitude arrays. Defaults to "longitudes".
         """
         self.npz_file = Path(npz_file)
         self.lat_key = lat_key
