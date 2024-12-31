@@ -19,9 +19,8 @@ import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
-from anemoi.utils.config import DotDict
-
 from anemoi.graphs.utils import get_grid_reference_distance
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
