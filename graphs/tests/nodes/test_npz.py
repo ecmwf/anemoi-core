@@ -31,8 +31,9 @@ def test_init(mock_grids_path: tuple[str, int], resolution: str):
 
 def test_fail_init_wrong_path():
     """Test NPZFileNodes initialization with invalid path."""
+    node_builder = NPZFileNodes("invalid_path.myext", "test_nodes")
     with pytest.raises(AssertionError):
-        NPZFileNodes("invalid_path.myext", "test_nodes")
+        node_builder.get_coordinates()
 
 
 @pytest.mark.parametrize("resolution", ["o16", "o48", "5km5"])

@@ -25,10 +25,17 @@ def test_init(grid: str):
     assert isinstance(node_builder, ReducedGaussianGridNodes)
 
 
-@pytest.mark.parametrize("grid", ["x123", 4.3, -7, "O"])
-def test_fail_init(grid: str):
+@pytest.mark.parametrize("grid", ["x123", "O"])
+def test_fail_init1(grid: str):
     """Test ReducedGaussianGridNodes initialization with invalid grids."""
     with pytest.raises(AssertionError):
+        ReducedGaussianGridNodes(grid, "test_nodes")
+
+
+@pytest.mark.parametrize("grid", [4.3, -7])
+def test_fail_init2(grid: str):
+    """Test ReducedGaussianGridNodes initialization with invalid grids."""
+    with pytest.raises(TypeError):
         ReducedGaussianGridNodes(grid, "test_nodes")
 
 

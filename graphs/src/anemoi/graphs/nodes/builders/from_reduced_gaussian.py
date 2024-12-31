@@ -55,16 +55,11 @@ class ReducedGaussianGridNodes(NPZFileNodes):
         assert re.fullmatch(
             r"^[oOnN]\d+$", grid
         ), f"{self.__class__.__name__}.grid must match the format [n|N|o|O]XXX with XXX latitude lines between the pole and equator."
-        self.file_name = f"grid-{grid.upper()}.npz"
+        self.file_name = f"grid-{grid.lower()}.npz"        
+        super().__init__(self.local_dir + "/" + self.file_name, name, lat_key="latitudes", lon_key="longitudes")
         if not self.is_downloaded():
             print(f"File {self.file_name} not found locally. Downloading...")
             self.download_file()
-        
-        super().__init__(self.local_dir + "/" + self.file_name, name, lat_key="latitudes", lon_key="longitudes")
-
-    def is_downloaded(self) -> bool:
-        """Checks if the grid file is already downloaded."""
-        return os.path.exists(self.npz_file)
 
     @cached_property
     def local_dir(self) -> str:
@@ -77,6 +72,10 @@ class ReducedGaussianGridNodes(NPZFileNodes):
     def download_url(self) -> str:
         config = load_config(defaults={"graphs": {"named": {}}})
         return config["graphs"]["named"]["grids"].rstrip("/")
+
+    def is_downloaded(self) -> bool:
+        """Checks if the grid file is already downloaded."""
+        return os.path.exists(self.npz_file)
 
     def download_file(self):
         """Downloads the grid file if it is not already downloaded."""

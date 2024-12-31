@@ -132,7 +132,6 @@ class NPZFileNodes(BaseNodeBuilder):
         self.npz_file = Path(npz_file)
         self.lat_key = lat_key
         self.lon_key = lon_key
-        assert self.npz_file.exists(), f"{self.__class__.__name__}.file does not exists: {self.npz_file}"
         super().__init__(name)
 
     def get_coordinates(self) -> torch.Tensor:
@@ -143,6 +142,7 @@ class NPZFileNodes(BaseNodeBuilder):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
+        assert self.npz_file.exists(), f"{self.__class__.__name__}.file does not exists: {self.npz_file}"
         grid_data = np.load(self.npz_file)
         coords = self.reshape_coords(grid_data[self.lat_key], grid_data[self.lon_key])
         return coords
