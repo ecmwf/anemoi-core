@@ -584,6 +584,7 @@ def plot_flat_sample(
         # For 'errors', only persistence and increments need identical colorbar-limits
         combined_error = np.concatenate(((pred - input_), (truth - input_)))
         norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
+        norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=0.0, vmax=np.nanmax(combined_error))
         single_plot(fig, ax[1], lon, lat, truth, norm=norm, title=f"{vname} target", datashader=datashader)
         single_plot(fig, ax[2], lon, lat, pred, norm=norm, title=f"{vname} pred", datashader=datashader)
         single_plot(
@@ -688,7 +689,7 @@ def plot_flat_sample(
                 lat,
                 pred - input_,
                 cmap="bwr",
-                norm=TwoSlopeNorm(vmin=combined_error.min(), vcenter=0.0, vmax=combined_error.max()),
+                norm=norm_error,
                 title=f"{vname} increment [pred - input]",
                 datashader=datashader,
             )
@@ -699,7 +700,7 @@ def plot_flat_sample(
                 lat,
                 truth - input_,
                 cmap="bwr",
-                norm=TwoSlopeNorm(vmin=combined_error.min(), vcenter=0.0, vmax=combined_error.max()),
+                norm=norm_error,
                 title=f"{vname} persist err",
                 datashader=datashader,
             )
