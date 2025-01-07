@@ -1,8 +1,8 @@
 .. _cli-introduction:
 
-=================
+##################
 Command line tool
-=================
+##################
 
 When you install the `anemoi-graphs` package, a command line tool will also be installed
 called ``anemoi-graphs``, which can be used to build graphs based on YAML recipe files,
