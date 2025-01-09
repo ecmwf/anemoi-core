@@ -74,6 +74,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
+        positional_encoding_hidden: Optional[Tensor] = None,
         dropout_p: float = 0.0,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -102,6 +103,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             num_heads=num_heads,
             activation=activation,
             window_size=window_size,
+            positional_encoding_hidden=positional_encoding_hidden,
             dropout_p=dropout_p,
         )
 
