@@ -247,7 +247,7 @@ class GraphForecaster(pl.LightningModule):
             loss_weights_mask = torch.ones((1, 1), device=batch.device)
             found_loss_mask_training = False
             # iterate over all pre-processors and check if they have a loss_mask_training attribute
-            for pre_processor in self.model.pre_processors.processors.values():
+            for pre_processor in self.model.pre_processors["main"].processors.values():
                 if hasattr(pre_processor, "loss_mask_training"):
                     loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
                     found_loss_mask_training = True
@@ -432,7 +432,7 @@ class GraphForecaster(pl.LightningModule):
             None
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
+        batch = self.model.pre_processors["main"](batch, in_place=not validation_mode)
 
         if not self.updated_loss_mask:
             # update loss scalar after first application and initialization of preprocessors
@@ -557,8 +557,8 @@ class GraphForecaster(pl.LightningModule):
                 validation metrics and predictions
         """
         metrics = {}
-        y_postprocessed = self.model.post_processors(y, in_place=False)
-        y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
+        y_postprocessed = self.model.post_processors["main"](y, in_place=False)
+        y_pred_postprocessed = self.model.post_processors["main"](y_pred, in_place=False)
 
         for metric in self.metrics:
             metric_name = getattr(metric, "name", metric.__class__.__name__.lower())

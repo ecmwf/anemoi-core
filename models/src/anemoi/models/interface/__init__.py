@@ -13,7 +13,7 @@ import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
-from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import DictOfProcessors
 from anemoi.utils.config import DotDict
 
 
@@ -79,8 +79,8 @@ class AnemoiModelInterface(torch.nn.Module):
         ]
 
         # Assign the processor list pre- and post-processors
-        self.pre_processors = Processors(processors)
-        self.post_processors = Processors(processors, inverse=True)
+        self.pre_processors = DictOfProcessors(main=processors)
+        self.post_processors = DictOfProcessors(main=processors, inverse=True)
 
         # Instantiate the model
         self.model = instantiate(
@@ -107,7 +107,7 @@ class AnemoiModelInterface(torch.nn.Module):
         torch.Tensor
             Predicted data.
         """
-        batch = self.pre_processors(batch, in_place=False)
+        batch = self.pre_processors["main"](batch, in_place=False)
 
         with torch.no_grad():
 
@@ -120,4 +120,4 @@ class AnemoiModelInterface(torch.nn.Module):
 
             y_hat = self(x)
 
-        return self.post_processors(y_hat, in_place=False)
+        return self.post_processors["main"](y_hat, in_place=False)

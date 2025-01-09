@@ -426,14 +426,14 @@ class LongRolloutPlots(BasePlotCallback):
         )
 
         # prepare input tensor for plotting
-        input_batch = pl_module.model.pre_processors(batch, in_place=False)
+        input_batch = pl_module.model.pre_processors["main"](batch, in_place=False)
         input_tensor_0 = input_batch[
             self.sample_idx,
             pl_module.multi_step - 1,
             ...,
             pl_module.data_indices.internal_data.output.full,
         ].cpu()
-        data_0 = self.post_processors(input_tensor_0).numpy()
+        data_0 = self.post_processors["main"](input_tensor_0).numpy()
 
         if self.video_rollout:
             data_over_time = []
@@ -511,9 +511,9 @@ class LongRolloutPlots(BasePlotCallback):
             ...,
             pl_module.data_indices.internal_data.output.full,
         ].cpu()
-        data_rollout_step = self.post_processors(input_tensor_rollout_step).numpy()
+        data_rollout_step = self.post_processors["main"](input_tensor_rollout_step).numpy()
         # predicted output tensor
-        output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
+        output_tensor = self.post_processors["main"](y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
 
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
@@ -543,7 +543,7 @@ class LongRolloutPlots(BasePlotCallback):
     ) -> tuple[list, np.ndarray, np.ndarray]:
         """Store the data for each frame of the video."""
         # prepare predicted output tensors for video
-        output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
+        output_tensor = self.post_processors["main"](y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
         data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
         # update min and max values for each variable for the colorbar
         vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=1))
@@ -847,7 +847,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 RuntimeWarning,
             )
 
-        batch = pl_module.model.pre_processors(batch, in_place=False)
+        batch = pl_module.model.pre_processors["main"](batch, in_place=False)
         for rollout_step in range(pl_module.rollout):
             y_hat = outputs[1][rollout_step]
             y_true = batch[
@@ -951,16 +951,16 @@ class PlotSample(BasePerBatchPlotCallback):
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
         local_rank = pl_module.local_rank
 
-        batch = pl_module.model.pre_processors(batch, in_place=False)
+        batch = pl_module.model.pre_processors["main"](batch, in_place=False)
         input_tensor = batch[
             self.sample_idx,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
             pl_module.data_indices.internal_data.output.full,
         ].cpu()
-        data = self.post_processors(input_tensor)
+        data = self.post_processors["main"](input_tensor)
 
-        output_tensor = self.post_processors(
+        output_tensor = self.post_processors["main"](
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )
@@ -1012,7 +1012,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
 
-        batch = pl_module.model.pre_processors(batch, in_place=False)
+        batch = pl_module.model.pre_processors["main"](batch, in_place=False)
         input_tensor = batch[
             self.sample_idx,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
@@ -1020,8 +1020,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             pl_module.data_indices.internal_data.output.full,
         ].cpu()
 
-        data = self.post_processors(input_tensor)
-        output_tensor = self.post_processors(
+        data = self.post_processors["main"](input_tensor)
+        output_tensor = self.post_processors["main"](
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )

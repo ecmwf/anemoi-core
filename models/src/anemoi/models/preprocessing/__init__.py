@@ -192,3 +192,12 @@ class Processors(nn.Module):
             assert not torch.isnan(
                 x
             ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+
+
+class DictOfProcessors(dict):
+    def __init__(self, args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        for key, processors in self.items():
+            if not isinstance(processors, Processors):
+                self[key] = Processors(**processors)
