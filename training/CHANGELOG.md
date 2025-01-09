@@ -10,6 +10,10 @@ Keep it human-readable, your future self will thank you!
 
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.3.2...HEAD)
 
+### Add
+
+- Order parameters in loss-plot by pressure/model level if possible [#55](https://github.com/ecmwf/anemoi-core/pull/55)
+
 ## [0.3.2 - Multiple Fixes, Checkpoint updates, Stretched-grid/LAM updates](https://github.com/ecmwf/anemoi-training/compare/0.3.1...0.3.2) - 2024-12-19
 
 ### Fixed
