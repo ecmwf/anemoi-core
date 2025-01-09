@@ -326,7 +326,9 @@ class CopyImputer(BaseImputer):
         # Replace values
         for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
             if idx_dst is not None:
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = x[..., self.data_indices[value]][
+                assert not torch.isnan(x[..., self.data_indices.data.input.name_to_index[value]][self._expand_subset_mask(x, idx_src)]).any(), \
+                       f"NaNs found in {value}."
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = x[..., self.data_indices.data.input.name_to_index[value]][
                     self._expand_subset_mask(x, idx_src)
                 ]
 
@@ -440,7 +442,10 @@ class DynamicCopyImputer(CopyImputer):
         # Replace values
         for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
             if idx_dst is not None:
-                x[..., idx_dst][nan_locations[..., idx_src]] = x[..., self.data_indices[value]][
+                print(value)
+                assert not torch.isnan(x[..., self.data_indices.data.input.name_to_index[value]][nan_locations[..., idx_src]]).any(), \
+                       f"NaNs found in {value}."
+                x[..., idx_dst][nan_locations[..., idx_src]] = x[..., self.data_indices.data.input.name_to_index[value]][
                     nan_locations[..., idx_src]
                 ]
 
