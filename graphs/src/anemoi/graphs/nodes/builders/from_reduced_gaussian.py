@@ -16,7 +16,6 @@ import tempfile
 from functools import cached_property
 
 import requests
-import torch
 
 from anemoi.graphs.nodes.builders.from_file import NPZFileNodes
 from anemoi.utils.config import load_config
