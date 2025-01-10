@@ -16,26 +16,16 @@ permissions:
   pull-requests: write
 
 jobs:
-  graphs-documentation:
-    if: contains(github.event.pull_request.files.*.path, 'graphs/docs/')
+  documentation:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project:
+          - { path: 'graphs/docs/', slug: 'anemoi-graphs' }
+          - { path: 'models/docs/', slug: 'anemoi-models' }
+          - { path: 'training/docs/', slug: 'anemoi-training' }
+    if: contains(github.event.pull_request.files.*.path, matrix.project.path) || github.event_name == 'push'
     steps:
       - uses: readthedocs/actions/preview@v1
         with:
-          project-slug: "anemoi-graphs"
-
-  models-documentation:
-    if: contains(github.event.pull_request.files.*.path, 'models/docs/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: readthedocs/actions/preview@v1
-        with:
-          project-slug: "anemoi-models"
-
-  training-documentation:
-    if: contains(github.event.pull_request.files.*.path, 'training/docs/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: readthedocs/actions/preview@v1
-        with:
-          project-slug: "anemoi-training"
+          project-slug: ${{ matrix.project.slug }}
