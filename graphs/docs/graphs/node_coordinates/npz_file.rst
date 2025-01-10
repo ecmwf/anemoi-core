@@ -18,7 +18,8 @@ where `grid_definition_path` is the path to the folder containing the
 grid definition files and `resolution` is the resolution of the grid to
 be used.
 
-By default, the grid definition files are expected to be named `"grid_{resolution}.npz"`.
+By default, the grid definition files are expected to be named
+`"grid_{resolution}.npz"`.
 
 .. note::
 
