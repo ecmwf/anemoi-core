@@ -40,9 +40,9 @@ classifiers = [
 dynamic = [ "version" ]
 
 dependencies = [
-  "anemoi-datasets>=0.5.2",
-  "anemoi-graphs>=0.4.1",
-  "anemoi-models>=0.4.1",
+  "anemoi-datasets>=0.4",
+  {git="https://github.com/ecmwf/anemoi-models.git", branch="feature/include_forcing" },
+  "anemoi-graphs>=0.4",
   "anemoi-utils[provenance]>=0.4.4",
   "datashader>=0.16.3",
   "einops>=0.6.1",
@@ -66,6 +66,8 @@ optional-dependencies.all = [  ]
 optional-dependencies.dev = [
   "anemoi-training[docs,tests,all]",
   "pre-commit>=3.3.3",
+  "anemoi-inference==0.3.1",
+  {git="https://github.com/ecmwf/earthkit-data.git", branch="bugfix/grib-encoding" }
 ]
 
 optional-dependencies.docs = [
