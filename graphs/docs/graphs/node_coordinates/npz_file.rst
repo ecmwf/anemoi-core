@@ -15,5 +15,6 @@ following YAML configuration:
          lat_key: latitudes
          lon_key: longitudes
 
-where `npz_file` is the path to the NPZ file and `lat_key` and `lon_key` are 
-optional arguments with the key names of the latitude and longitude arrays.
+where `npz_file` is the path to the NPZ file and `lat_key` and `lon_key`
+are optional arguments with the key names of the latitude and longitude
+arrays.

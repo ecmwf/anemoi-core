@@ -54,7 +54,7 @@ class ReducedGaussianGridNodes(NPZFileNodes):
         assert re.fullmatch(
             r"^[oOnN]\d+$", grid
         ), f"{self.__class__.__name__}.grid must match the format [n|N|o|O]XXX with XXX latitude lines between the pole and equator."
-        self.file_name = f"grid-{grid.lower()}.npz"        
+        self.file_name = f"grid-{grid.lower()}.npz"
         super().__init__(self.local_dir + "/" + self.file_name, name, lat_key="latitudes", lon_key="longitudes")
         if not self.is_downloaded():
             print(f"File {self.file_name} not found locally. Downloading...")
@@ -62,7 +62,7 @@ class ReducedGaussianGridNodes(NPZFileNodes):
 
     @cached_property
     def local_dir(self) -> str:
-        tmp_dir = tempfile.gettempdir().rstrip("/") 
+        tmp_dir = tempfile.gettempdir().rstrip("/")
         grids_dir = tmp_dir + "/.anemoi-gaussian_grids"
         os.makedirs(grids_dir, exist_ok=True)
         return grids_dir
