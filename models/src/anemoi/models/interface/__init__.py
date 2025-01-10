@@ -87,6 +87,7 @@ class AnemoiModelInterface(torch.nn.Module):
             self.config.model.model,
             model_config=self.config,
             data_indices=self.data_indices,
+            statistics=self.statistics,
             graph_data=self.graph_data,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
