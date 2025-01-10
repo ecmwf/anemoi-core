@@ -1,0 +1,41 @@
+name: Read the Docs PR Preview
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    # Execute this action only on PRs that touch
+    # documentation files.
+    paths:
+      - "graphs/docs/**"
+      - "models/docs/**"
+      - "training/docs/**"
+
+permissions:
+  pull-requests: write
+
+jobs:
+  graphs-documentation:
+    if: contains(github.event.pull_request.files.*.path, 'graphs/docs/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: readthedocs/actions/preview@v1
+        with:
+          project-slug: "anemoi-graphs"
+
+  models-documentation:
+    if: contains(github.event.pull_request.files.*.path, 'models/docs/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: readthedocs/actions/preview@v1
+        with:
+          project-slug: "anemoi-models"
+
+  training-documentation:
+    if: contains(github.event.pull_request.files.*.path, 'training/docs/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: readthedocs/actions/preview@v1
+        with:
+          project-slug: "anemoi-training"
