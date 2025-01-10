@@ -443,7 +443,6 @@ class DynamicCopyImputer(CopyImputer):
         # Replace values
         for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
             if idx_dst is not None:
-                print(value)
                 assert not torch.isnan(
                     x[..., self.data_indices.data.input.name_to_index[value]][nan_locations[..., idx_src]]
                 ).any(), f"NaNs found in {value}."
