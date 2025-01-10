@@ -195,9 +195,8 @@ class Processors(nn.Module):
 
 
 class DictOfProcessors(dict):
-    def __init__(self, args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        for key, processors in self.items():
-            if not isinstance(processors, Processors):
-                self[key] = Processors(**processors)
+    def __init__(self, dic, **kwargs):
+        for k, v in dic:
+            if not isinstance(v, Processors):
+                v = Processors(v, **kwargs)
+            self[k] = v
