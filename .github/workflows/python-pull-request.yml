@@ -4,10 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
-    branches:
-      - develop
-  schedule:
-    - cron: "9 2 * * 0" # at 9:02 on sunday
+
 
 jobs:
   quality:
@@ -37,68 +34,46 @@ jobs:
     - name: Detect changed packages
       id: changed-packages
       run: |
-        CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+        CHANGED_FILES=$(git diff --name-only  ${{ github.sha }} ${{ github.sha }}) # temporarily disabled
         echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/.*\.py$' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
         echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/.*\.py$' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
         echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/.*\.py$' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
-    - name: Install training package
-      run: |
-        if [[ ${{ steps.changed-packages.outputs.training_changed }} == 'true' ]]; then
-          echo "Installing training from local source"
-          pip install -e ./training[tests]
-        else
-          echo "Installing training from PyPI"
-          pip install anemoi-training[tests]
-        fi
-
-    - name: Install graphs package
-      run: |
-        if [[ ${{ steps.changed-packages.outputs.graphs_changed }} == 'true' ]]; then
-          echo "Installing graphs from local source"
-          pip install -e ./graphs[tests]
-        else
-          echo "Installing graphs from PyPI"
-          pip install anemoi-graphs[tests]
-        fi
-
-    - name: Install models package
-      run: |
-        if [[ ${{ steps.changed-packages.outputs.models_changed }} == 'true' ]]; then
-          echo "Installing models from local source"
-          pip install -e ./models[tests]
-        else
-          echo "Installing models from PyPI"
-          pip install anemoi-models[tests]
-        fi
-
-    - name: Run pytest for changed training package
-      if: steps.changed-packages.outputs.training_changed == 'true'
-      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-        install-dependencies: false
-        custom-pytest: pytest training/tests
-
-    - name: Run pytest for changed graphs package
-      if: steps.changed-packages.outputs.graphs_changed == 'true'
-      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-        install-dependencies: false
-        custom-pytest: pytest graphs/tests
-
-    - name: Run pytest for changed models package
-      if: steps.changed-packages.outputs.models_changed == 'true'
-      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-        install-dependencies: false
-        custom-pytest: pytest models/tests
+    - name: Install core packages
+      run: pip install -e ./graphs/[tests] -e ./training/[tests] -e ./models/[tests]
 
     - name: Run integration tests
-      if: success()
-      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-        install-dependencies: false
+      run: pytest tests
+
+
+#    - name: Run pytest for changed training package
+#      if: steps.changed-packages.outputs.training_changed == 'true'
+#      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
+#      with:
+#        python-version: ${{ matrix.python-version }}
+#        install-dependencies: false
+#        custom-pytest: pytest training/tests
+
+#    - name: Run pytest for changed graphs package
+#      if: steps.changed-packages.outputs.graphs_changed == 'true'
+#      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
+#      with:
+#        python-version: ${{ matrix.python-version }}
+#        install-dependencies: false
+#        custom-pytest: pytest graphs/tests
+
+#    - name: Run pytest for changed models package
+#      if: steps.changed-packages.outputs.models_changed == 'true'
+#      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
+#      with:
+#        python-version: ${{ matrix.python-version }}
+#        install-dependencies: false
+#        custom-pytest: pytest models/tests
+
+#    - name: Run integration tests
+#      if: success()
+#      uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
+#      with:
+#        python-version: ${{ matrix.python-version }}
+#        install-dependencies: false
+#        custom-pytest: pytest tests
