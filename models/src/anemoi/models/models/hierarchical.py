@@ -261,7 +261,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             src_hidden_name = self._graph_hidden_names[i]
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
-            # Process to next level
+            # Decode to next level
             curr_latent = self._run_mapper(
                 self.upscale[src_hidden_name],
                 (curr_latent, x_encoded_latents[dst_hidden_name]),
