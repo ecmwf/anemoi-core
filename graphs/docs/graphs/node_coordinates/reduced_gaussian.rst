@@ -9,13 +9,13 @@ original ECMWF reduced Gaussian grid or `o/O` for the octahedral ECMWF
 reduced Gaussian grid) and the resolution. The resolution is defined by
 the number of latitude lines (`XXX`) between the pole and the Equator.
 
-To enable retrieval of these grids, include the following lines in your `.config/anemoi/settings.toml` file:
+To enable retrieval of these grids, include the following lines in your
+`.config/anemoi/settings.toml` file:
 
 .. code:: toml
 
-  [graphs.named]
-  grids = "https://get.ecmwf.int/repository/anemoi/grids"
-
+   [graphs.named]
+   grids = "https://get.ecmwf.int/repository/anemoi/grids"
 
 To define `node coordinates` based on a reduced gaussian grid, you can
 use the following YAML configuration:
