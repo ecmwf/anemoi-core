@@ -10,15 +10,20 @@
 from __future__ import annotations
 
 import functools
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
 
-import torch
+from omegaconf import DictConfig
 
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.losses.utils import ScaleTensor
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
+
+if TYPE_CHECKING:
+    import torch
 
 
-class CombinedLoss(torch.nn.Module):
+class CombinedLoss(BaseWeightedLoss):
     """Combined Loss function."""
 
     def __init__(
@@ -74,17 +79,25 @@ class CombinedLoss(torch.nn.Module):
             loss_weights: [1.0,0.5]
         ```
         """
-        super().__init__()
+        self.losses: list[BaseWeightedLoss] = []
+        super().__init__(node_weights=None)
 
         losses = (*(losses or []), *extra_losses)
 
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
-        self.losses = [
-            GraphForecaster.get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
-            for loss in losses
-        ]
+        from anemoi.training.train.forecaster import GraphForecaster
+
+        for i, loss in enumerate(losses):
+            self.losses.append(
+                (
+                    GraphForecaster.get_loss_function(loss, **kwargs)
+                    if isinstance(loss, (DictConfig, dict))
+                    else loss(**kwargs)
+                ),
+            )
+            self.add_module(self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
 
     def forward(
@@ -122,7 +135,39 @@ class CombinedLoss(torch.nn.Module):
     def name(self) -> str:
         return "combined_" + "_".join(getattr(loss, "name", loss.__class__.__name__.lower()) for loss in self.losses)
 
-    def __getattr__(self, name: str) -> Callable:
+    @property
+    def scalar(self) -> ScaleTensor:
+        """Get union of underlying scalars."""
+        scalars = {}
+        for loss in self.losses:
+            scalars.update(loss.scalar.tensors)
+        return ScaleTensor(scalars)
+
+    @scalar.setter
+    def scalar(self, value: Any) -> None:
+        """Set underlying loss scalars."""
+        for loss_fn in self.losses:
+            loss_fn.scalar = value
+
+    def wrap_around_losses(func: Callable) -> Callable:  # noqa: N805
+        """Wrap function to return result from underlying losses."""
+
+        def wrapper(self: CombinedLoss, *args, **kwargs) -> Any:
+            return self.__getattribute_from_losses__(func.__name__)(*args, **kwargs)
+
+        return wrapper
+
+    @functools.wraps(ScaleTensor.add_scalar, assigned=("__doc__", "__annotations__"))
+    @wrap_around_losses
+    def add_scalar(self, dimension: int | tuple[int], scalar: torch.Tensor, *, name: str | None = None) -> None:
+        pass
+
+    @functools.wraps(ScaleTensor.update_scalar, assigned=("__doc__", "__annotations__"))
+    @wrap_around_losses
+    def update_scalar(self, name: str, scalar: torch.Tensor, *, override: bool = False) -> None:
+        pass
+
+    def __getattribute_from_losses__(self, name: str) -> Callable:
         """Allow access to underlying attributes of the loss functions."""
         if not all(hasattr(loss, name) for loss in self.losses):
             error_msg = f"Attribute {name} not found in all loss functions"

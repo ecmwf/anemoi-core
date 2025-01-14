@@ -224,10 +224,11 @@ class GraphForecaster(pl.LightningModule):
         scalars_to_include = loss_config.pop("scalars", [])
 
         # Instantiate the loss function with the loss_init_config
+        kwargs["_recursive_"] = kwargs.get("_recursive_", False)
         loss_function = instantiate(loss_config, **kwargs)
 
         if not isinstance(loss_function, BaseWeightedLoss):
-            error_msg = f"Loss must be a subclass of 'BaseWeightedLoss', not {type(loss_function)}"
+            error_msg = f"Loss must be a subclass of `BaseWeightedLoss`, not {type(loss_function)}"
             raise TypeError(error_msg)
 
         for key in scalars_to_include:
