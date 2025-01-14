@@ -52,7 +52,7 @@ class CombinedLoss(torch.nn.Module):
         Examples
         --------
         >>> CombinedLoss(
-                {"__target__": "anemoi.training.losses.mse.WeightedMSELoss"},
+                {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
                 loss_weights=(1.0,),
                 node_weights=node_weights
             )
@@ -66,10 +66,10 @@ class CombinedLoss(torch.nn.Module):
 
         ```
         training_loss:
-            __target__: anemoi.training.losses.combined.CombinedLoss
+            _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-                - __target__: anemoi.training.losses.mse.WeightedMSELoss
-                - __target__: anemoi.training.losses.mae.WeightedMAELoss
+                - _target_: anemoi.training.losses.mse.WeightedMSELoss
+                - _target_: anemoi.training.losses.mae.WeightedMAELoss
             scalars: ['variable']
             loss_weights: [1.0,0.5]
         ```
