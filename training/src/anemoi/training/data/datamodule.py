@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.training.data.grid_indices import BaseGridIndices
+    from anemoi.training.schedulers.rollout import RolloutScheduler
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -52,11 +53,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self.graph_data = graph_data
 
         # Set the maximum rollout to be expected
-        self.rollout = (
-            self.config.training.rollout.max
-            if self.config.training.rollout.epoch_increment > 0
-            else self.config.training.rollout.start
-        )
+        rollout_scheduler: RolloutScheduler = instantiate(self.config.training.rollout)
+        self.starting_rollout = rollout_scheduler.current_maximum
 
         # Set the training end date if not specified
         if self.config.dataloader.training.end is None:
@@ -129,7 +127,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def ds_valid(self) -> NativeGridDataset:
-        r = max(self.rollout, self.config.dataloader.get("validation_rollout", 1))
+        r = max(self.starting_rollout, self.config.dataloader.get("validation_rollout", 1))
 
         if not self.config.dataloader.training.end < self.config.dataloader.validation.start:
             LOGGER.warning(
@@ -160,6 +158,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             label="test",
         )
 
+    def update_rollout(self, rollout: int) -> None:
+        """
+        Update the rollout values in the datamodule.
+
+        Parameters
+        ----------
+        rollout : int
+            Rollout value
+        """
+        for ds in [self.ds_train, self.ds_test]:
+            ds.update_rollout(rollout)
+
+        self.ds_valid.update_rollout(max(rollout, self.config.dataloader.get("validation_rollout", 1)))
+
     def _get_dataset(
         self,
         data_reader: Callable,
@@ -168,7 +180,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> NativeGridDataset:
 
-        r = max(rollout, self.rollout)
+        r = max(rollout, self.starting_rollout)
 
         # Compute effective batch size
         effective_bs = (
