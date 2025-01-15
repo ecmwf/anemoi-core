@@ -18,9 +18,9 @@ where `grid_definition_path` is the path to the folder containing the
 grid definition files and `resolution` is the resolution of the grid to
 be used.
 
-By default, the grid files are supposed to be in the `grids` folder in
+By default, the grid files are assumed to be in the `grids` folder in
 the same directory as the recipe file. The grid definition files are
-expected to be name `"grid_{resolution}.npz"`.
+expected to be named `"grid_{resolution}.npz"`.
 
 .. note::
 
