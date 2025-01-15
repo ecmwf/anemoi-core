@@ -2,7 +2,7 @@ activation: GELU
 num_channels: 1024
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
