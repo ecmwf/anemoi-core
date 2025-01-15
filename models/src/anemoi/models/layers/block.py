@@ -69,6 +69,9 @@ class TransformerProcessorBlock(BaseBlock):
         activation: str,
         window_size: int,
         dropout_p: float = 0.0,
+        attention_implementation: str = "flash_attention",
+        softcap: float = None,
+        use_alibi_slopes: bool = None,
     ):
         super().__init__()
 
@@ -87,6 +90,9 @@ class TransformerProcessorBlock(BaseBlock):
             bias=False,
             is_causal=False,
             dropout_p=dropout_p,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
         )
 
         self.mlp = nn.Sequential(
