@@ -75,6 +75,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
         dropout_p: float = 0.0,
+        shard_strategy: str = "shard_heads",
     ) -> None:
         """Initialize TransformerProcessor.
 
@@ -92,6 +93,8 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             Activation function, by default "GELU"
         dropout_p: float
             Dropout probability used for multi-head self attention, default 0.0
+        shard_strategy: str
+            Strategy for sharding either "shard_sequence" or "shard_heads", by default "shard_sequence"
         """
         super().__init__(num_channels=num_channels, num_layers=num_layers)
 
@@ -103,6 +106,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             activation=activation,
             window_size=window_size,
             dropout_p=dropout_p,
+            shard_strategy=shard_strategy,
         )
 
     def forward(

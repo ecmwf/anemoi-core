@@ -69,6 +69,7 @@ class TransformerProcessorBlock(BaseBlock):
         activation: str,
         window_size: int,
         dropout_p: float = 0.0,
+        shard_strategy: str = "shard_heads",
     ):
         super().__init__()
 
@@ -87,6 +88,7 @@ class TransformerProcessorBlock(BaseBlock):
             bias=False,
             is_causal=False,
             dropout_p=dropout_p,
+            shard_strategy=shard_strategy,
         )
 
         self.mlp = nn.Sequential(

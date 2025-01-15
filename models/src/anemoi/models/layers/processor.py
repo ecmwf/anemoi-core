@@ -97,6 +97,7 @@ class TransformerProcessor(BaseProcessor):
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         dropout_p: float = 0.1,
+        shard_strategy: str = "shard_sequence",
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -117,6 +118,8 @@ class TransformerProcessor(BaseProcessor):
             Activation function, by default "GELU"
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.0
+        shard_strategy: str, optional
+            Strategy for sharding either "shard_sequence" or "shard_heads", by default "shard_sequence"
         """
         super().__init__(
             num_channels=num_channels,
@@ -138,6 +141,7 @@ class TransformerProcessor(BaseProcessor):
             window_size=window_size,
             activation=activation,
             dropout_p=dropout_p,
+            shard_strategy=shard_strategy,
         )
 
         self.offload_layers(cpu_offload)

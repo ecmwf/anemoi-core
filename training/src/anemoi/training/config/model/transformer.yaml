@@ -14,6 +14,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0 # GraphTransformer
+  shard_strategy: shard_sequence # Options: shard_sequence, shard_heads
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
