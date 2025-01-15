@@ -263,7 +263,7 @@ class CutOutMask(BooleanBaseNodeAttribute):
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         assert isinstance(nodes["_dataset"], dict), "The 'dataset' attribute must be a dictionary."
-        assert "cutout" in nodes["_dataset"], "The 'dataset' attribute must contain a 'cutout' key."
+        assert "cutout" in nodes["_dataset"] or "multivariablecutout" in nodes["_dataset"], "The 'dataset' attribute must contain a 'cutout' key."
         num_lam, num_other = open_dataset(nodes["_dataset"]).grids
         return np.array([True] * num_lam + [False] * num_other, dtype=bool)
 
