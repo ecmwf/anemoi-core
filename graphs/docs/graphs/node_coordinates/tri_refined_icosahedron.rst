@@ -1,3 +1,5 @@
+.. _trinodes:
+
 ################################
  Triangular refined Icosahedron
 ################################
