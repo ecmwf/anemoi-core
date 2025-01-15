@@ -50,7 +50,8 @@ training_loss:
   # Available scalars include:
   # - 'variable': See `variable_loss_scaling` for more information
   # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
-  scalars: ['variable', 'loss_weights_mask']
+  # - 'tendency': See `additional_scalars` for more information
+  scalars: ['variable', 'variable_pressure_level', 'loss_weights_mask']
 
   ignore_nans: False
 
@@ -109,32 +110,48 @@ lr:
 # Variable loss scaling
 # 'variable' must be included in `scalars` in the losses for this to be applied.
 variable_loss_scaling:
+  variable_groups:
+    default: sfc
+    pl: [q, t, u, v, w, z]
   default: 1
-  pl:
-    q: 0.6 #1
-    t: 6   #1
-    u: 0.8 #0.5
-    v: 0.5 #0.33
-    w: 0.001
-    z: 12  #1
-  sfc:
-    sp: 10
-    10u: 0.1
-    10v: 0.1
-    2d: 0.5
-    tp: 0.025
-    cp: 0.0025
+  q: 0.6 #1
+  t: 6   #1
+  u: 0.8 #0.5
+  v: 0.5 #0.33
+  w: 0.001
+  z: 12  #1
+  sp: 10
+  10u: 0.1
+  10v: 0.1
+  2d: 0.5
+  tp: 0.025
+  cp: 0.0025
+additional_scalars:
+  # pressure level scalar
+  - _target_: anemoi.training.train.scaling.ReluVariableLevelScaler
+    group: pl
+    y_intercept: 0.2
+    slope: 0.001
+    scale_dim: -1 # dimension on which scaling applied
+    name: "variable_pressure_level"
+  # tendency scalers
+  # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
+  # useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)
+  # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
+  # stdev tendency scaler
+  # - _target_: anemoi.training.train.scaling.StdevTendencyScaler
+  #   scale_dim: -1 # dimension on which scaling applied
+  #   name: "tendency"
+  # var tendency scaler (this should be default!?)
+  # - _target_: anemoi.training.train.scaling.VarTendencyScaler
+  #   scale_dim: -1 # dimension on which scaling applied
+  #   name: "tendency"
 
 metrics:
 - z_500
 - t_850
 - u_850
 - v_850
-
-pressure_level_scaler:
-  _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
-  minimum: 0.2
-  slope: 0.001
 
 node_loss_weights:
   _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
