@@ -10,12 +10,15 @@
 
 import pytest
 import torch
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from torch import nn
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestGraphTransformerBaseMapper:
@@ -26,7 +29,21 @@ class TestGraphTransformerBaseMapper:
     NUM_DST_NODES: int = 200
 
     @pytest.fixture
-    def mapper_init(self):
+    def layer_kernels(self):
+        kernel_config = OmegaConf.create(
+            {
+                "LayerNorm": {
+                    "_target_": "torch.nn.LayerNorm",
+                    "_partial_": True,
+                },
+                "Linear": {"_target_": "torch.nn.Linear", "_partial_": True, "bias": False},
+            }
+        )
+        layer_kernels = load_layer_kernels(kernel_config)
+        return instantiate(layer_kernels)
+
+    @pytest.fixture
+    def mapper_init(self, layer_kernels):
         in_channels_src: int = 3
         in_channels_dst: int = 3
         hidden_dim: int = 256
@@ -46,6 +63,7 @@ class TestGraphTransformerBaseMapper:
             trainable_size,
             num_heads,
             mlp_hidden_ratio,
+            layer_kernels,
         )
 
     @pytest.fixture
@@ -60,6 +78,7 @@ class TestGraphTransformerBaseMapper:
             trainable_size,
             num_heads,
             mlp_hidden_ratio,
+            layer_kernels,
         ) = mapper_init
         return GraphTransformerBaseMapper(
             in_channels_src=in_channels_src,
@@ -73,6 +92,7 @@ class TestGraphTransformerBaseMapper:
             trainable_size=trainable_size,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
+            layer_kernels=layer_kernels,
         )
 
     @pytest.fixture
@@ -87,6 +107,7 @@ class TestGraphTransformerBaseMapper:
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         return (
             torch.rand(self.NUM_SRC_NODES, in_channels_src),
@@ -119,6 +140,7 @@ class TestGraphTransformerBaseMapper:
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         assert isinstance(mapper, GraphTransformerBaseMapper)
         assert mapper.in_channels_src == in_channels_src
@@ -126,6 +148,7 @@ class TestGraphTransformerBaseMapper:
         assert mapper.hidden_dim == hidden_dim
         assert mapper.out_channels_dst == out_channels_dst
         assert mapper.activation == activation
+        assert mapper.emb_nodes_dst.bias is None
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         # Should be a no-op in the base class
@@ -140,6 +163,7 @@ class TestGraphTransformerBaseMapper:
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
@@ -181,6 +205,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             trainable_size,
             num_heads,
             mlp_hidden_ratio,
+            layer_kernels,
         ) = mapper_init
         return GraphTransformerForwardMapper(
             in_channels_src=in_channels_src,
@@ -194,6 +219,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             trainable_size=trainable_size,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
+            layer_kernels=layer_kernels,
         )
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
@@ -208,6 +234,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
@@ -234,6 +261,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         x = pair_tensor
         batch_size = 1
@@ -280,6 +308,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            layer_kernels,
         ) = mapper_init
         return GraphTransformerBackwardMapper(
             in_channels_src=in_channels_src,
@@ -291,6 +320,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
+            layer_kernels=layer_kernels,
         )
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
@@ -305,6 +335,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
@@ -331,6 +362,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         x_dst = torch.rand(self.NUM_DST_NODES, hidden_dim)
         shapes_dst = [list(x_dst.shape)]
@@ -351,6 +383,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
+            _layer_kernels,
         ) = mapper_init
         pair_tensor
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
