@@ -10,20 +10,17 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
-import tempfile
-from functools import cached_property
 
-import requests
+import torch
 
-from anemoi.graphs.nodes.builders.from_file import NPZFileNodes
-from anemoi.utils.config import load_config
+from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
+from anemoi.utils.grids import grids
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ReducedGaussianGridNodes(NPZFileNodes):
+class ReducedGaussianGridNodes(BaseNodeBuilder):
     """Nodes from a reduced gaussian grid.
 
     A gaussian grid is a latitude/longitude grid. The spacing of the latitudes is not regular. However, the spacing of
@@ -54,37 +51,17 @@ class ReducedGaussianGridNodes(NPZFileNodes):
         assert re.fullmatch(
             r"^[oOnN]\d+$", grid
         ), f"{self.__class__.__name__}.grid must match the format [n|N|o|O]XXX with XXX latitude lines between the pole and equator."
-        self.file_name = f"grid-{grid.lower()}.npz"
-        super().__init__(self.local_dir + "/" + self.file_name, name, lat_key="latitudes", lon_key="longitudes")
-        if not self.is_downloaded():
-            print(f"File {self.file_name} not found locally. Downloading...")
-            self.download_file()
+        self.grid = grid
+        super().__init__(name)
 
-    @cached_property
-    def local_dir(self) -> str:
-        tmp_dir = tempfile.gettempdir().rstrip("/")
-        grids_dir = tmp_dir + "/.anemoi-gaussian_grids"
-        os.makedirs(grids_dir, exist_ok=True)
-        return grids_dir
+    def get_coordinates(self) -> torch.Tensor:
+        """Get the coordinates of the nodes.
 
-    @cached_property
-    def download_url(self) -> str:
-        config = load_config(defaults={"graphs": {"named": {}}})
-        return config["graphs"]["named"]["grids"].rstrip("/")
-
-    def is_downloaded(self) -> bool:
-        """Checks if the grid file is already downloaded."""
-        return os.path.exists(self.npz_file)
-
-    def download_file(self):
-        """Downloads the grid file if it is not already downloaded."""
-        url = self.download_url + "/" + self.file_name
-
-        LOGGER.info(f"Downloading {self.file_name} grid from: {url}")
-        response = requests.get(url)
-        if response.status_code == 200:
-            with open(self.npz_file, "wb") as f:
-                f.write(response.content)
-            LOGGER.info(f"File downloaded and saved to {self.local_dir}/.")
-        else:
-            raise FileNotFoundError(f"Failed to download file from {url}. HTTP status code: {response.status_code}")
+        Returns
+        -------
+        torch.Tensor of shape (num_nodes, 2)
+            A 2D tensor with the coordinates, in radians.
+        """
+        grid_data = grids(self.grid)
+        coords = self.reshape_coords(grid_data["latitudes"], grid_data["longitudes"])
+        return coords
