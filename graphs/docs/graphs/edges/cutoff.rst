@@ -49,6 +49,6 @@ YAML configuration:
 
    The cut-off method is recommended for the encoder edge, to connect
    all data nodes to hidden nodes. The optimal ``cutoff_factor`` value
-   will be the lowest value without orphan nodes. This optimal value
+   will be the lowest value without isolated nodes. This optimal value
    depends on the node distribution, so it is recommended to tune it for
    each case.
