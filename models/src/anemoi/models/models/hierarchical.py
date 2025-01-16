@@ -115,7 +115,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self.processor = instantiate(
             model_config.model.processor,
             num_channels=self.hidden_dims[self._graph_hidden_names[self.num_hidden - 1]],
-            sub_graph=self._graph_data[(self._graph_hidden_names[self.num_hidden - 1], "to", self._graph_hidden_names[self.num_hidden - 1])],
+            sub_graph=self._graph_data[
+                (self._graph_hidden_names[self.num_hidden - 1], "to", self._graph_hidden_names[self.num_hidden - 1])
+            ],
             src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
         )
