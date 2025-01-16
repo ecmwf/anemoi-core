@@ -722,6 +722,7 @@ class TransformerBaseMapper(BaseMapper):
         mlp_hidden_ratio: int = 4,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
+        **kwargs,
     ) -> None:
         """Initialize TransformerBaseMapper.
 
@@ -763,6 +764,7 @@ class TransformerBaseMapper(BaseMapper):
             activation=activation,
             window_size=window_size,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.offload_layers(cpu_offload)
@@ -844,6 +846,7 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
             mlp_hidden_ratio=mlp_hidden_ratio,
             window_size=window_size,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
@@ -912,6 +915,7 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
             mlp_hidden_ratio=mlp_hidden_ratio,
             window_size=window_size,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.node_data_extractor = nn.Sequential(

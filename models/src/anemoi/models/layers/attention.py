@@ -18,15 +18,9 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
-try:
-    from flash_attn import flash_attn_func as attn_func
-except ImportError:
-    from flash_attn.layers.rotary import RotaryEmbedding
-    from torch.nn.functional import scaled_dot_product_attention as attn_func
 
-    _FLASH_ATTENTION_AVAILABLE = False
-else:
-    _FLASH_ATTENTION_AVAILABLE = True
+from flash_attn import flash_attn_func as attn_func
+from flash_attn.layers.rotary import RotaryEmbedding
 
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
@@ -34,6 +28,7 @@ from anemoi.models.layers.utils import AutocastLayerNorm
 
 LOGGER = logging.getLogger(__name__)
 
+from anemoi.models.layers.flex_attention import flex_attention
 
 class MultiHeadSelfAttention(nn.Module):
     """Multi Head Self Attention Pytorch Layer."""
@@ -48,6 +43,7 @@ class MultiHeadSelfAttention(nn.Module):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         rotary_embeddings: bool = False,
+        block_mask: Optional = None,
     ):
         super().__init__()
 
@@ -69,8 +65,6 @@ class MultiHeadSelfAttention(nn.Module):
         self.lin_v = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.attention = attn_func
 
-        if not _FLASH_ATTENTION_AVAILABLE:
-            LOGGER.warning("Flash attention not available, falling back to pytorch scaled_dot_product_attention")
 
         self.projection = nn.Linear(embed_dim, embed_dim, bias=True)
 
@@ -79,8 +73,13 @@ class MultiHeadSelfAttention(nn.Module):
             self.k_norm = AutocastLayerNorm(self.head_dim, bias=False)
 
         if self.rotary_embeddings:  # find alternative implementation
-            assert _FLASH_ATTENTION_AVAILABLE, "Rotary embeddings require flash attention"
             self.rotary_emb = RotaryEmbedding(dim=self.head_dim)
+        
+        self.block_mask = None
+        if flex_attention := (self.block_mask is not None):
+            self.block_mask = self.block_mask
+        self.flex_attention = flex_attention
+
 
     def attention_computation(
         self,
@@ -114,31 +113,32 @@ class MultiHeadSelfAttention(nn.Module):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        if _FLASH_ATTENTION_AVAILABLE:
-            query, key, value = (
-                einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
-            )
-            if self.rotary_embeddings:  # can this be done in a better way?
-                key = key.unsqueeze(-3)
-                value = value.unsqueeze(-3)
-                keyvalue = torch.cat((key, value), dim=-3)
-                query, keyvalue = self.rotary_emb(
-                    query, keyvalue, max_seqlen=max(keyvalue.shape[1], query.shape[1])
-                )  # assumption seq const
-                key = keyvalue[:, :, 0, ...]
-                value = keyvalue[:, :, 1, ...]
+        query, key, value = (
+            einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
+        )
+        if self.rotary_embeddings:  # can this be done in a better way?
+            key = key.unsqueeze(-3)
+            value = value.unsqueeze(-3)
+            keyvalue = torch.cat((key, value), dim=-3)
+            query, keyvalue = self.rotary_emb(
+                query, keyvalue, max_seqlen=max(keyvalue.shape[1], query.shape[1])
+            )  # assumption seq const
+            key = keyvalue[:, :, 0, ...]
+            value = keyvalue[:, :, 1, ...]
+        
+        if not self.block_mask:
             out = self.attention(query, key, value, causal=False, window_size=self.window_size, dropout_p=dropout_p)
-            out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         else:
-            out = self.attention(
+            # Don't include dropout_p, not used in any top models anymore
+            out = flex_attention(
                 query,
                 key,
                 value,
-                is_causal=False,
-                dropout_p=dropout_p,
-            )  # expects (batch heads grid variable) format
-        out = shard_sequence(out, shapes=shapes, mgroup=model_comm_group)
-        out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
+                block_mask=self.block_mask[query.device],
+            )
+
+        out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
+
         return self.projection(out)
 
     def forward(

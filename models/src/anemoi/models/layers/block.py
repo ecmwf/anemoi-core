@@ -70,6 +70,7 @@ class TransformerProcessorBlock(BaseBlock):
         activation: str,
         window_size: int,
         dropout_p: float = 0.0,
+        block_mask: Optional = None,
     ):
         super().__init__()
 
@@ -88,6 +89,7 @@ class TransformerProcessorBlock(BaseBlock):
             bias=False,
             is_causal=False,
             dropout_p=dropout_p,
+            block_mask=block_mask,
         )
 
         self.mlp = nn.Sequential(
@@ -106,7 +108,7 @@ class TransformerProcessorBlock(BaseBlock):
         return x
 
 
-class TransformerMapperBlock(TransformerProcessorBlock):
+class TransformerMapperBlock(BaseBlock):
     """Transformer mapper block with MultiHeadCrossAttention and MLPs."""
 
     def __init__(
@@ -117,15 +119,16 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         activation: str,
         window_size: int,
         dropout_p: float = 0.0,
+        block_mask: Optional = None,
     ):
-        super().__init__(
-            num_channels=num_channels,
-            hidden_dim=hidden_dim,
-            num_heads=num_heads,
-            activation=activation,
-            window_size=window_size,
-            dropout_p=dropout_p,
-        )
+
+        try:
+            act_func = getattr(nn, activation)
+        except AttributeError as ae:
+            LOGGER.error("Activation function %s not supported", activation)
+            raise RuntimeError from ae
+        
+        self.layer_norm1 = nn.LayerNorm(num_channels)
 
         self.attention = MultiHeadCrossAttention(
             num_heads=num_heads,
@@ -134,7 +137,15 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             bias=False,
             is_causal=False,
             dropout_p=dropout_p,
+            block_mask=block_mask,
         )
+
+        self.mlp = nn.Sequential(
+            nn.Linear(num_channels, hidden_dim),
+            act_func(),
+            nn.Linear(hidden_dim, num_channels),
+        )
+        self.layer_norm2 = nn.LayerNorm(num_channels)
 
         self.layer_norm_src = nn.LayerNorm(num_channels)
 
@@ -151,7 +162,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         x_dst = x_dst + self.attention((x_src, x_dst), shapes, batch_size, model_comm_group=model_comm_group)
         x_dst = x_dst + self.mlp(self.layer_norm2(x_dst))
         return (x_src, x_dst), None  # logic expects return of edge_attr
-
 
 class GraphConvBaseBlock(BaseBlock):
     """Message passing block with MLPs for node embeddings."""

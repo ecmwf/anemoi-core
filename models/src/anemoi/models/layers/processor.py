@@ -138,6 +138,7 @@ class TransformerProcessor(BaseProcessor):
             window_size=window_size,
             activation=activation,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.offload_layers(cpu_offload)
@@ -310,6 +311,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,
             edge_dim=self.edge_dim,
+            **kwargs,
         )
 
         self.offload_layers(cpu_offload)
