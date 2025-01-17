@@ -60,7 +60,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         cutoff_factor: float,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
-        max_num_neighbours: int = 32,
+        max_num_neighbours: int = 64,
     ) -> None:
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float."
