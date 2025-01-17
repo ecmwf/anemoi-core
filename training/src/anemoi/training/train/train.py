@@ -31,6 +31,8 @@ from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
+from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -61,7 +63,7 @@ class AnemoiTrainer:
         torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
         OmegaConf.resolve(config)
-        self.config = config
+        self.config = BaseSchema(**config)
 
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
         self.load_weights_only = self.config.training.load_weights_only
@@ -135,7 +137,7 @@ class AnemoiTrainer:
 
         from anemoi.graphs.create import GraphCreator
 
-        graph_config = DotDict(OmegaConf.to_container(self.config.graph, resolve=True))
+        graph_config = DotDict(self.config.graph.model_dump(by_alias=True))
         return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,
@@ -240,7 +242,7 @@ class AnemoiTrainer:
         return map_config_to_primitives(
             {
                 "version": "1.0",
-                "config": self.config,
+                "config": convert_to_omegaconf(self.config),
                 "seed": self.initial_seed,
                 "run_id": self.run_id,
                 "dataset": self.datamodule.metadata,
@@ -296,13 +298,6 @@ class AnemoiTrainer:
 
     @cached_property
     def accelerator(self) -> str:
-        assert self.config.hardware.accelerator in {
-            "auto",
-            "cpu",
-            "gpu",
-            "cuda",
-            "tpu",
-        }, f"Invalid accelerator ({self.config.hardware.accelerator}) in hardware config."
         if self.config.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
         return self.config.hardware.accelerator
@@ -373,7 +368,7 @@ class AnemoiTrainer:
         """Training strategy."""
         return DDPGroupStrategy(
             self.config.hardware.num_gpus_per_model,
-            self.config.dataloader.get("read_group_size", self.config.hardware.num_gpus_per_model),
+            self.config.dataloader.read_group_size,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
@@ -421,7 +416,7 @@ class AnemoiTrainer:
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path="../config", config_name="debug")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

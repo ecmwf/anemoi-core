@@ -16,7 +16,11 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hydra import compose
+from hydra import initialize
+
 from anemoi.training.commands import Command
+from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     import argparse
@@ -48,13 +52,19 @@ class ConfigGenerator(Command):
         )
         anemoi_training_home.add_argument("--overwrite", "-f", action="store_true")
 
+        help_msg = "Validate the Anemoi training configs."
+        validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
+
+        validate.add_argument("--name", help="Name of the primary config file")
+        validate.add_argument("--overwrite", "-f", action="store_true")
+
     def run(self, args: argparse.Namespace) -> None:
-        LOGGER.info(
-            "Generating configs, please wait.",
-        )
+
         self.overwrite = args.overwrite
         if args.subcommand == "generate":
-
+            LOGGER.info(
+                "Generating configs, please wait.",
+            )
             self.traverse_config(args.output)
 
             LOGGER.info("Inference checkpoint saved to %s", args.output)
@@ -62,8 +72,17 @@ class ConfigGenerator(Command):
 
         if args.subcommand == "training-home":
             anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
+            LOGGER.info(
+                "Generating configs, please wait.",
+            )
             self.traverse_config(anemoi_home)
             LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
+            return
+
+        if args.subcommand == "validate":
+            LOGGER.info("Validating configs.")
+            self.validate_config(args.name)
+            LOGGER.info("Config files validated.")
             return
 
     def traverse_config(self, destination_dir: Path | str) -> None:
@@ -96,6 +115,12 @@ class ConfigGenerator(Command):
             LOGGER.info("Copied %s to %s", item.name, file_path)
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
+
+    def validate_config(self, name: Path | str) -> None:
+        """Validates the configuration files in the given directory."""
+        with initialize(version_base=None, config_path=""):
+            cfg = compose(config_name=name)
+            cfg = BaseSchema(**cfg)
 
 
 command = ConfigGenerator
