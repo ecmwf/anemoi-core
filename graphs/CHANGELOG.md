@@ -25,7 +25,14 @@ Keep it human-readable, your future self will thank you!
 
 ### Changed
 
+### Changed
+
+- docs: Documentation structure (#84)
 - fix: faster edge builder for tri icosahedron. (#92)
+
+### Added
+
+- feat: Support for multi-dimensional node attributes in plots (#86)
 
 ## [0.4.1 - ICON graphs, multiple edge builders and post processors](https://github.com/ecmwf/anemoi-graphs/compare/0.4.0...0.4.1) - 2024-11-26
 
@@ -37,7 +44,7 @@ Keep it human-readable, your future self will thank you!
 - feat: Define node sets and edges based on an ICON icosahedral mesh (#53)
 - feat: Support for multiple edge builders between two sets of nodes (#70)
 
-# Changed
+### Changed
 
 - fix: bug when computing area weights with scipy.Voronoi. (#79)
 
@@ -50,6 +57,7 @@ Keep it human-readable, your future self will thank you!
 - feat: New class, KNNAreaMaskBuilder, to specify Area of Interest (AOI) based on a set of nodes. (#30)
 - feat: New node builder classes, LimitedAreaXXXXXNodes, to create nodes within an Area of Interest (AOI). (#30)
 - feat: Expanded MultiScaleEdges to support multi-scale connections in limited area graphs. (#30)
+- feat: New edge attribute, Azimuth. (#54)
 - feat: New method update_graph(graph) in the GraphCreator class. (#60)
 - feat: New class StretchedTriNodes to create a stretched mesh. (#51)
 - feat: Expanded MultiScaleEdges to support multi-scale connections in stretched graphs. (#51)
@@ -63,6 +71,8 @@ Keep it human-readable, your future self will thank you!
 ### Changed
 
 - ci: small fixes and updates pre-commit, downsteam-ci (#49)
+- feat: Implementing KNNEdges and CutOffEdges with torch-cluster (#54)
+- feat: Migrate edge attributes to inherit from MessagePassing (#54)
 - Update CODEOWNERS (#61)
 - ci: extened python versions to include 3.11 and 3.12 (#66)
 - Update copyright notice (#67)

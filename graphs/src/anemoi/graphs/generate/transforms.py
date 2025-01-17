@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import numpy as np
+import torch
 
 
 def cartesian_to_latlon_degrees(xyz: np.ndarray) -> np.ndarray:
@@ -88,53 +89,23 @@ def sincos_to_latlon_degrees(sincos: np.ndarray) -> np.ndarray:
     return np.rad2deg(sincos_to_latlon_rad(sincos))
 
 
-def latlon_rad_to_cartesian(loc: tuple[np.ndarray, np.ndarray], radius: float = 1) -> np.ndarray:
+def latlon_rad_to_cartesian(locations: torch.Tensor, radius: float = 1) -> torch.Tensor:
     """Convert planar coordinates to 3D coordinates in a sphere.
 
     Parameters
     ----------
-    loc : np.ndarray
+    locations : torch.Tensor of shape (N, 2)
         The 2D coordinates of the points, in radians.
     radius : float, optional
         The radius of the sphere containing los points. Defaults to the unit sphere.
 
     Returns
     -------
-    np.array of shape (3, num_points)
+    torch.Tensor of shape (N, 3)
         3D coordinates of the points in the sphere.
     """
-    latr, lonr = loc[0], loc[1]
-    x = radius * np.cos(latr) * np.cos(lonr)
-    y = radius * np.cos(latr) * np.sin(lonr)
-    z = radius * np.sin(latr)
-    return np.array((x, y, z)).T
-
-
-def direction_vec(points: np.ndarray, reference: np.ndarray, epsilon: float = 10e-11) -> np.ndarray:
-    """Direction vector computation.
-
-    Compute the direction vector of a set of points with respect to a reference
-    vector.
-
-    Parameters
-    ----------
-    points : np.array of shape (num_points, 3)
-        The points to compute the direction vector.
-    reference : np.array of shape (3, )
-        The reference vector.
-    epsilon : float, optional
-        The value to add to the first vector to avoid division by zero. Defaults to 10e-11.
-
-    Returns
-    -------
-    np.array of shape (3, num_points)
-        The direction vector of the cross product of the two vectors.
-    """
-    v = np.cross(points, reference)
-    vnorm1 = np.power(v, 2).sum(axis=-1)
-    redo_idx = np.where(vnorm1 < epsilon)[0]
-    if len(redo_idx) > 0:
-        points[redo_idx] += epsilon
-        v = np.cross(points, reference)
-        vnorm1 = np.power(v, 2).sum(axis=-1)
-    return v.T / np.sqrt(vnorm1)
+    latr, lonr = locations[..., 0], locations[..., 1]
+    x = radius * torch.cos(latr) * torch.cos(lonr)
+    y = radius * torch.cos(latr) * torch.sin(lonr)
+    z = radius * torch.sin(latr)
+    return torch.stack((x, y, z), dim=-1)
