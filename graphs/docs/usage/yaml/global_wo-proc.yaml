@@ -1,7 +1,3 @@
-nodes:
-  data: ...
-  hidden: ...
-
 edges:
   # A) Encoder connections
   - source_name: data
