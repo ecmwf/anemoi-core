@@ -76,11 +76,22 @@ class AnemoiModelEncProcDec(nn.Module):
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
         )
 
+        positional_encoding_hidden = None
+        if model_config.model.get("positional_encoding") is not None:
+            LOGGER.info(
+                "Using positional encoding. Target function: %s", model_config.model.positional_encoding._target_
+            )
+            self.positional_encoding = instantiate(model_config.model.positional_encoding)
+            positional_encoding_hidden = self.positional_encoding.positional_encoding(
+                self.node_attributes.get_coordinates(self._graph_name_hidden)
+            )
+
         # Processor hidden -> hidden
         self.processor = instantiate(
             model_config.model.processor,
             num_channels=self.num_channels,
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            positional_encoding_hidden=positional_encoding_hidden,
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
         )
