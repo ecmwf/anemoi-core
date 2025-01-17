@@ -65,7 +65,10 @@ following classes define different behaviour:
 
 -  :doc:`node_coordinates/zarr_dataset`
 -  :doc:`node_coordinates/npz_file`
+-  :doc:`node_coordinates/reduced_gaussian`
 -  :doc:`node_coordinates/icon_mesh`
+-  :doc:`node_coordinates/text_file`
+-  :doc:`node_coordinates/latlon_arrays`
 -  :doc:`node_coordinates/tri_refined_icosahedron`
 -  :doc:`node_coordinates/hex_refined_icosahedron`
 -  :doc:`node_coordinates/healpix`
@@ -77,3 +80,5 @@ define the importance of each node in the loss function, or the masks
 can be used to build connections only between subsets of nodes.
 
 -  :doc:`node_attributes/weights`
+-  :doc:`node_attributes/zarr_dataset`
+-  :doc:`node_attributes/boolean_operations`
