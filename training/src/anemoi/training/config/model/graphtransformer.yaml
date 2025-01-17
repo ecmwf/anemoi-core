@@ -4,6 +4,16 @@ num_channels: 1024
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
 
+layer_kernels:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+      _partial_: True
+      #Any arguments to your chosen function go here e.g.
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+      #Any arguments to your chosen function go here e.g.
+
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
   _convert_: all
