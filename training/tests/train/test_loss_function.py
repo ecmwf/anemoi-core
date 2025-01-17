@@ -12,6 +12,8 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.training.losses.mse import WeightedMSELoss
+from anemoi.training.losses.mae import WeightedMAELoss
+from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.train.forecaster import GraphForecaster
 
@@ -62,3 +64,15 @@ def test_dynamic_init_scalar_not_add() -> None:
     assert isinstance(loss, BaseWeightedLoss)
     torch.testing.assert_close(loss.node_weights, torch.ones(1))
     assert "test" not in loss.scalar
+
+
+def test_combined_loss() -> None:
+    loss1 = WeightedMSELoss(torch.ones(1))
+    loss2 = WeightedMAELoss(torch.ones(1))
+    cl = CombinedLoss(losses=[loss1, loss2], loss_weights=(1.0, 0.5))
+    assert isinstance(cl, CombinedLoss)
+    cl_class = CombinedLoss(losses=[WeightedMSELoss, WeightedMAELoss],
+                            node_weights=torch.ones(1),
+                            loss_weights=(1.0, 0.5))    
+    assert isinstance(cl_class, CombinedLoss)
+

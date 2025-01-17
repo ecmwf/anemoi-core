@@ -81,10 +81,16 @@ class CombinedLoss(torch.nn.Module):
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
-        self.losses = [
-            GraphForecaster.get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
-            for loss in losses
-        ]
+        self.losses = []
+        for loss in losses:
+            if isinstance(loss, dict):
+                self.losses.append(GraphForecaster.get_loss_function(loss, **kwargs))
+            elif isinstance(loss, type):
+                self.losses.append(loss(**kwargs))
+            elif hasattr(loss, "__class__"):
+                self.losses.append(loss)
+            else:
+                raise TypeError(f"Loss {loss} is not a valid loss function")
         self.loss_weights = loss_weights
 
     def forward(
