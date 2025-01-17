@@ -11,10 +11,12 @@
 import pytest
 import torch
 from _pytest.fixtures import SubRequest
+from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.train.scaling import GeneralVariableLossScaler
 
 
 @pytest.fixture
@@ -30,43 +32,91 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
             },
             "training": {
                 "variable_loss_scaling": {
-                    "default": 1,
-                    "sfc": {
-                        "z": 0.1,
-                        "other": 100,
+                    "variable_groups": {
+                        "default": "sfc",
+                        "pl": ["y"],
                     },
-                    "pl": {"y": 0.5},
+                    "default": 1,
+                    "z": 0.1,
+                    "other": 100,
+                    "y": 0.5,
                 },
                 "metrics": ["other", "y_850"],
-                "pressure_level_scaler": request.param,
+                "additional_scalars": request.param,
             },
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
-    return config, data_indices
+    statistics = {"stdev": [10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5, 3.5]}
+    statistics_tendencies = {"stdev": [5, 5, 5, 4.0, 7.5, 8.6, 1, 10, 10]}
+    return config, data_indices, statistics, statistics_tendencies
 
 
-linear_scaler = {
-    "_target_": "anemoi.training.data.scaling.LinearPressureLevelScaler",
-    "minimum": 0.0,
-    "slope": 0.001,
-}
-relu_scaler = {
-    "_target_": "anemoi.training.data.scaling.ReluPressureLevelScaler",
-    "minimum": 0.2,
-    "slope": 0.001,
-}
-constant_scaler = {
-    "_target_": "anemoi.training.data.scaling.NoPressureLevelScaler",
-    "minimum": 1.0,
-    "slope": 0.0,
-}
-polynomial_scaler = {
-    "_target_": "anemoi.training.data.scaling.PolynomialPressureLevelScaler",
-    "minimum": 0.2,
-    "slope": 0.001,
-}
+linear_scaler = [
+    {
+        "_target_": "anemoi.training.train.scaling.LinearVariableLevelScaler",
+        "group": "pl",
+        "y_intercept": 0.0,
+        "slope": 0.001,
+        "scale_dim": -1,
+        "name": "variable_pressure_level",
+    },
+]
+relu_scaler = [
+    {
+        "_target_": "anemoi.training.train.scaling.ReluVariableLevelScaler",
+        "group": "pl",
+        "y_intercept": 0.2,
+        "slope": 0.001,
+        "scale_dim": -1,
+        "name": "variable_pressure_level",
+    },
+]
+constant_scaler = [
+    {
+        "_target_": "anemoi.training.train.scaling.NoVariableLevelScaler",
+        "group": "pl",
+        "y_intercept": 1.0,
+        "slope": 0.0,
+        "scale_dim": -1,
+        "name": "variable_pressure_level",
+    },
+]
+polynomial_scaler = [
+    {
+        "_target_": "anemoi.training.train.scaling.PolynomialVariableLevelScaler",
+        "group": "pl",
+        "y_intercept": 0.2,
+        "slope": 0.001,
+        "scale_dim": -1,
+        "name": "variable_pressure_level",
+    },
+]
+
+std_dev_scaler = [
+    {
+        "_target_": "anemoi.training.train.scaling.StdevTendencyScaler",
+        "name": "tendency",
+        "scale_dim": -1,
+    },
+]
+
+var_scaler = [
+    {
+        "_target_": "anemoi.training.train.scaling.VarTendencyScaler",
+        "name": "tendency",
+        "scale_dim": -1,
+    },
+]
+
+no_tend_scaler = [
+    {
+        "_target_": "anemoi.training.train.scaling.NoTendencyScaler",
+        "name": "tendency",
+        "scale_dim": -1,
+    },
+]
 
 expected_linear_scaling = torch.Tensor(
     [
@@ -117,6 +167,45 @@ expected_polynomial_scaling = torch.Tensor(
     ],
 )
 
+expected_no_tendency_scaling = torch.Tensor(
+    [
+        1 * 0.5,  # y_50
+        1 * 0.5,  # y_500
+        1 * 0.5,  # y_850
+        1 * 1,  # q
+        1 * 0.1,  # z
+        1 * 100,  # other
+        1 * 1,  # cos_d
+        1 * 1,  # sin_d
+    ],
+)
+
+expected_stdev_tendency_scaling = torch.Tensor(
+    [
+        (10.0 / 5.0) * 0.5,  # y_50
+        (10.0 / 5.0) * 0.5,  # y_500
+        (10.0 / 5.0) * 0.5,  # y_850
+        (7.0 / 4) * 1,  # q
+        (3.0 / 7.5) * 0.1,  # z
+        (1.0 / 8.6) * 100,  # other
+        (3.5 / 10) * 1,  # cos_d
+        (3.5 / 10) * 1,  # sin_d
+    ],
+)
+
+expected_var_tendency_scaling = torch.Tensor(
+    [
+        (10.0**2) / (5.0**2) * 0.5,  # y_50
+        (10.0**2) / (5.0**2) * 0.5,  # y_500
+        (10.0**2) / (5.0**2) * 0.5,  # y_850
+        (7.0**2) / (4**2) * 1,  # q
+        (3.0**2) / (7.5**2) * 0.1,  # z
+        (1.0**2) / (8.6**2) * 100,  # other
+        (3.5**2) / (10**2) * 1,  # cos_d
+        (3.5**2) / (10**2) * 1,  # sin_d
+    ],
+)
+
 
 @pytest.mark.parametrize(
     ("fake_data", "expected_scaling"),
@@ -125,18 +214,52 @@ expected_polynomial_scaling = torch.Tensor(
         (relu_scaler, expected_relu_scaling),
         (constant_scaler, expected_constant_scaling),
         (polynomial_scaler, expected_polynomial_scaling),
+        (no_tend_scaler, expected_no_tendency_scaling),
+        (std_dev_scaler, expected_stdev_tendency_scaling),
+        (var_scaler, expected_var_tendency_scaling),
     ],
     indirect=["fake_data"],
 )
 def test_variable_loss_scaling_vals(
-    fake_data: tuple[DictConfig, IndexCollection],
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
     expected_scaling: torch.Tensor,
 ) -> None:
-    config, data_indices = fake_data
+    config, data_indices, statistics, statistics_tendencies = fake_data
+    variable_scaling = GeneralVariableLossScaler(
+        config.training.variable_loss_scaling,
+        data_indices,
+    ).get_variable_scaling()
 
-    variable_loss_scaling = GraphForecaster.get_variable_scaling(config, data_indices)
+    scalar = [
+        (
+            instantiate(
+                scalar_config,
+                scaling_config=config.training.variable_loss_scaling,
+                data_indices=data_indices,
+                statistics=statistics,
+                statistics_tendencies=statistics_tendencies,
+            )
+            if scalar_config["name"] == "tendency"
+            else instantiate(
+                scalar_config,
+                scaling_config=config.training.variable_loss_scaling,
+                data_indices=data_indices,
+                metadata_variables=None,
+            )
+        )
+        for scalar_config in config.training.additional_scalars
+    ]
 
-    assert torch.allclose(variable_loss_scaling, expected_scaling)
+    scalars = {
+        "variable": (-1, variable_scaling),
+    }
+    # add addtional user-defined scalars
+
+    [scalars.update({scale.name: (scale.scale_dim, scale.get_variable_scaling())}) for scale in scalar]
+    keys_list = list(scalars.keys())
+    scalars[keys_list[0]][1] * scalars[keys_list[1]][1]
+
+    assert torch.allclose(torch.tensor(scalars[keys_list[0]][1] * scalars[keys_list[1]][1]), expected_scaling)
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
