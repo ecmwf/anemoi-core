@@ -58,6 +58,34 @@ def equirectangular_projection(latlons: np.array) -> np.array:
     return pc_lat, pc_lon
 
 
+def argsort_variablename_variablelevel(data: list[str]) -> list[int]:
+    """Custom sort key to process the strings.
+
+    Sort parameter names by alpha part, then by numeric part at last
+    position (variable level) if available, then by the original string.
+
+    Parameters
+    ----------
+    data : list[str]
+        List of strings to sort.
+
+    Returns
+    -------
+    list[int]
+        Sorted indices of the input list.
+    """
+
+    def custom_sort_key(index: int) -> tuple:
+        s = data[index]  # Access the element by index
+        parts = s.split("_")
+        alpha_part = s if len(parts) == 1 else s[: -len(parts[-1]) - 1]
+        numeric_part = int(parts[-1]) if len(parts) > 1 and parts[-1].isdigit() else float("inf")
+        return (alpha_part, numeric_part, s)
+
+    # Generate argsort indices
+    return sorted(range(len(data)), key=custom_sort_key)
+
+
 def init_plot_settings() -> None:
     """Initialize matplotlib plot settings."""
     small_font_size = 8
@@ -116,6 +144,7 @@ def plot_loss(
     """
     # create plot
     # more space for legend
+    # TODO(who?): make figsize more flexible depending on the number of bars
     figsize = (8, 3) if legend_patches else (4, 3)
     fig, ax = plt.subplots(1, 1, figsize=figsize, layout=LAYOUT)
     # histogram plot
