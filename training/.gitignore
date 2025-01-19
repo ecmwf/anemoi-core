@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# private files
+**/.env
+**/outputs/
+**/*private_*
+**/.vscode
+
 # C extensions
 *.so
 

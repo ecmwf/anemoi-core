@@ -2,7 +2,7 @@ activation: GELU
 num_channels: 1024
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec_TransformerFlexAttn
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
@@ -35,7 +35,7 @@ decoder:
 encoder_block_mask:
   method: knn_haversine # knn_adjacency_matrix, knn_index_matrix, haversine, knn_haversine
   base_grid: keyvalue
-  attention_span: 512
+  attention_span: 3
 
 processor_block_mask:
   method: knn_haversine # knn_adjacency_matrix, knn_index_matrix, haversine, knn_haversine

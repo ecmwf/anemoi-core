@@ -249,13 +249,11 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
 
     def initialise_encoder_processor_decoder(self, config: DotDict):
         
-
         self.initialise_block_masks(config)
 
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
         self.processor_attention_span = config.processor_block_mask.attention_span
-
 
         self.encoder = instantiate_debug(
                     config.model.encoder,
@@ -287,7 +285,6 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )
-
 
     def initialise_block_masks(self, config: DotDict):
         from anemoi.models.layers.flex_attention import BlockMaskCreator

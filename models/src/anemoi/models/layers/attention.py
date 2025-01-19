@@ -75,10 +75,8 @@ class MultiHeadSelfAttention(nn.Module):
         if self.rotary_embeddings:  # find alternative implementation
             self.rotary_emb = RotaryEmbedding(dim=self.head_dim)
         
-        self.block_mask = None
-        if flex_attention := (self.block_mask is not None):
-            self.block_mask = self.block_mask
-        self.flex_attention = flex_attention
+        self.block_mask, self.flex_attention = block_mask, (block_mask is not None)
+        
 
 
     def attention_computation(
@@ -126,7 +124,7 @@ class MultiHeadSelfAttention(nn.Module):
             key = keyvalue[:, :, 0, ...]
             value = keyvalue[:, :, 1, ...]
         
-        if not self.block_mask:
+        if not self.flex_attention:
             out = self.attention(query, key, value, causal=False, window_size=self.window_size, dropout_p=dropout_p)
         else:
             # Don't include dropout_p, not used in any top models anymore

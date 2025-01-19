@@ -10,7 +10,7 @@
 import argparse
 
 from anemoi.graphs.describe import GraphDescriptor
-from anemoi.graphs.inspect import GraphInspector
+from anemoi.graphs.graph_inspect import GraphInspector
 
 from . import Command
 
