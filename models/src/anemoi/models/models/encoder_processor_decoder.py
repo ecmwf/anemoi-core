@@ -35,7 +35,6 @@ class AnemoiModelEncProcDec(nn.Module):
 
     def __init__(
         self,
-        *,
         config: DotDict,
         data_indices: dict,
         graph_data: HeteroData,

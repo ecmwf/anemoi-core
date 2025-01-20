@@ -16,6 +16,8 @@ from torch_geometric.data import HeteroData
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
 
+from anemoi.training.utils.debug_hydra import instantiate_debug
+
 
 class AnemoiModelInterface(torch.nn.Module):
     """An interface for Anemoi models.
@@ -83,9 +85,9 @@ class AnemoiModelInterface(torch.nn.Module):
         self.post_processors = Processors(processors, inverse=True)
 
         # Instantiate the model
-        self.model = instantiate(
+        self.model = instantiate_debug(
             self.config.model.model,
-            model_config=self.config,
+            self.config,
             data_indices=self.data_indices,
             graph_data=self.graph_data,
             _recursive_=False,  # Disables recursive instantiation by Hydra
