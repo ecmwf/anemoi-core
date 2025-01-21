@@ -198,9 +198,9 @@ class InputNormalizer(BasePreprocessor):
         # input and predicted tensors have different shapes
         # hence, we mask out the forcing indices
         if data_index is not None:
-            x[..., :].subtract_(self._norm_add[data_index]).div_(self._norm_mul[data_index])
+            x.subtract_(self._norm_add[data_index]).div_(self._norm_mul[data_index])
         elif x.shape[-1] == len(self._output_idx):
-            x[..., :].subtract_(self._norm_add[self._output_idx]).div_(self._norm_mul[self._output_idx])
+            x.subtract_(self._norm_add[self._output_idx]).div_(self._norm_mul[self._output_idx])
         else:
-            x[..., :].subtract_(self._norm_add).div_(self._norm_mul)
+            x.subtract_(self._norm_add).div_(self._norm_mul)
         return x
