@@ -91,7 +91,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.down_level_processor = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
 
-            for i in range(0, self.num_hidden):
+            for i in range(0, self.num_hidden - 1):
                 nodes_names = self._graph_hidden_names[i]
 
                 self.down_level_processor[nodes_names] = instantiate(
@@ -112,8 +112,15 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     num_layers=model_config.model.level_process_num_layers,
                 )
 
-            # delete final upscale (does not exist): |->|->|<-|<-|
-            del self.up_level_processor[nodes_names]
+        self.processor = instantiate(
+            model_config.model.processor,
+            num_channels=self.hidden_dims[self._graph_hidden_names[self.num_hidden - 1]],
+            sub_graph=self._graph_data[
+                (self._graph_hidden_names[self.num_hidden - 1], "to", self._graph_hidden_names[self.num_hidden - 1])
+            ],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
+        )
 
         # Downscale
         self.downscale = nn.ModuleDict()
@@ -244,20 +251,19 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
         # Processing hidden-most level
-        if self.level_process:
-            curr_latent = self.down_level_processor[dst_hidden_name](
-                curr_latent,
-                batch_size=batch_size,
-                shard_shapes=shard_shapes_hiddens[dst_hidden_name],
-                model_comm_group=model_comm_group,
-            )
+        curr_latent = self.processor(
+            curr_latent,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes_hiddens[dst_hidden_name],
+            model_comm_group=model_comm_group,
+        )
 
         ## Upscale
         for i in range(self.num_hidden - 1, 0, -1):
             src_hidden_name = self._graph_hidden_names[i]
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
-            # Process to next level
+            # Decode to next level
             curr_latent = self._run_mapper(
                 self.upscale[src_hidden_name],
                 (curr_latent, x_encoded_latents[dst_hidden_name]),

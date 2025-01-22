@@ -48,7 +48,7 @@ attributes:
   nodes:
     # Attributes for data nodes
     area_weight:
-      _target_: anemoi.graphs.nodes.attributes.AreaWeights
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
       norm: unit-max
     cutout:
       _target_: anemoi.graphs.nodes.attributes.CutOutMask
