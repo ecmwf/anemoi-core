@@ -35,6 +35,7 @@ class AnemoiModelEncProcDec(nn.Module):
         *,
         model_config: DotDict,
         data_indices: dict,
+        statistics: dict,
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
@@ -57,6 +58,7 @@ class AnemoiModelEncProcDec(nn.Module):
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self.data_indices = data_indices
+        self.statistics = statistics
 
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
@@ -100,7 +102,12 @@ class AnemoiModelEncProcDec(nn.Module):
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
             [
-                instantiate(cfg, name_to_index=self.data_indices.internal_model.output.name_to_index)
+                instantiate(
+                    cfg,
+                    name_to_index=self.data_indices.internal_model.output.name_to_index,
+                    statistics=self.statistics,
+                    name_to_index_stats=self.data_indices.data.input.name_to_index,
+                )
                 for cfg in getattr(model_config.model, "bounding", [])
             ]
         )

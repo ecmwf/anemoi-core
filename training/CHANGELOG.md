@@ -35,6 +35,7 @@ Keep it human-readable, your future self will thank you!
 - Add supporting arrrays (numpy) to checkpoint
 - Support for masking out unconnected nodes in LAM [#171](https://github.com/ecmwf/anemoi-training/pull/171)
 - Improved validation metrics, allow 'all' to be scaled [#202](https://github.com/ecmwf/anemoi-training/pull/202)
+- Added default configuration files for hierarchical processor [175](https://github.com/ecmwf/anemoi-training/pull/175)
 
 ### Changed
 
