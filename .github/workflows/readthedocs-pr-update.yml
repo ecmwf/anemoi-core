@@ -16,26 +16,51 @@ permissions:
   pull-requests: write
 
 jobs:
-  graphs-documentation:
-    if: contains(github.event.pull_request.files.*.path, 'graphs/docs/')
+  documentation:
     runs-on: ubuntu-latest
     steps:
-      - uses: readthedocs/actions/preview@v1
+      - uses: actions/checkout@v3
         with:
-          project-slug: "anemoi-graphs"
+          fetch-depth: 0
+          fetch-tags: true
 
-  models-documentation:
-    if: contains(github.event.pull_request.files.*.path, 'models/docs/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: readthedocs/actions/preview@v1
-        with:
-          project-slug: "anemoi-models"
+      - name: Detect changed packages
+        id: changed-packages
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            # For pull requests, compare with the PR base
+            MERGE_BASE=$(git merge-base origin/${{ github.event.pull_request.base.ref }} ${{ github.event.pull_request.head.sha }})
+            CHANGED_FILES=$(git diff --name-only $MERGE_BASE...${{ github.event.pull_request.head.sha }})
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            # For pushes, compare with the previous commit
+            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+          else
+            # For scheduled runs, check all files
+            CHANGED_FILES=$(git ls-files '*.py')
+          fi
 
-  training-documentation:
-    if: contains(github.event.pull_request.files.*.path, 'training/docs/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: readthedocs/actions/preview@v1
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/docs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/docs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/docs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          # echo "integration_changed=$(echo "$CHANGED_FILES" | grep -q '^tests/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+      - name: Documentation for training package
+        if: steps.changed-packages.outputs.training_changed == 'true'
+        uses: readthedocs/actions/preview@v1
         with:
-          project-slug: "anemoi-training"
+            project-slug: "anemoi-training"
+
+      - name: Documentation for graphs package
+        if: steps.changed-packages.outputs.graphs_changed == 'true'
+        uses: readthedocs/actions/preview@v1
+        with:
+            project-slug: "anemoi-graphs"
+
+      - name: Documentation for models package
+        if: steps.changed-packages.outputs.models_changed == 'true'
+        uses: readthedocs/actions/preview@v1
+        with:
+            project-slug: "anemoi-models"
