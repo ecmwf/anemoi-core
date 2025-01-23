@@ -68,6 +68,7 @@ class TransformerProcessorBlock(BaseBlock):
         num_heads: int,
         activation: str,
         window_size: int,
+        positional_encoding_hidden: Optional[Tensor] = None,
         dropout_p: float = 0.0,
     ):
         super().__init__()
@@ -79,6 +80,12 @@ class TransformerProcessorBlock(BaseBlock):
             raise RuntimeError from ae
 
         self.layer_norm1 = nn.LayerNorm(num_channels)
+
+        self.register_buffer("positional_encoding_hidden", positional_encoding_hidden)
+        if self.positional_encoding_hidden is not None:
+            self.pos_embedder = nn.Linear(
+                self.positional_encoding_hidden.shape[-1], num_channels
+            )  # hidden_dim is num_channels
 
         self.attention = MultiHeadSelfAttention(
             num_heads=num_heads,
@@ -99,6 +106,11 @@ class TransformerProcessorBlock(BaseBlock):
     def forward(
         self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
     ) -> Tensor:
+        if self.positional_encoding_hidden is not None:
+            pos_embedding = self.pos_embedder(self.positional_encoding_hidden)
+            pos_embedding = pos_embedding.repeat(batch_size, 1)
+            x = x + pos_embedding
+
         # Need to be out of place for gradient propagation
         x = x + self.attention(self.layer_norm1(x), shapes, batch_size, model_comm_group=model_comm_group)
         x = x + self.mlp(self.layer_norm2(x))
