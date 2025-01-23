@@ -66,6 +66,18 @@ distinction in mind when designing a weather graph to be used in a
 data-driven model with :ref:`anemoi-training
 <anemoi-training:index-page>`.
 
+**********************
+ Graph configurations
+**********************
+
+`anemoi-graphs` offers exceptional flexibility, allowing users to define
+a wide variety of graph configurations. The image below highlights some
+particularly useful examples.
+
+.. image:: ../../_static/graph_configurations.png
+   :alt: Graph configurations
+   :align: center
+
 *******************
  Design principles
 *******************
