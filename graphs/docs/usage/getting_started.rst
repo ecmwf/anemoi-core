@@ -5,14 +5,14 @@
 #########################
 
 The simplest use case is to build an encoder-processor-decoder graph for
-a global weather model. 
+a global weather model.
 
 .. image:: ../../_static/enc_proc_dec.png
    :alt: Encoder-processor-decoder graph
    :align: center
 
-The following is an expanded version of the examples given in 
-the :ref:`graphs introduction <graphs-introduction>`.
+The following is an expanded version of the examples given in the
+:ref:`graphs introduction <graphs-introduction>`.
 
 *****************
  Nodes and edges
