@@ -43,4 +43,3 @@ refinement level to be considered neighbours, and then connected.
 .. csv-table:: Triangular refinements specifications (x_hops=1)
    :file: ./tri_refined_edges.csv
    :header-rows: 1
-
