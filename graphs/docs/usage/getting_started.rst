@@ -1,8 +1,8 @@
 .. _usage-getting-started:
 
-##############
- First recipe
-##############
+#########################
+ Create your first graph
+#########################
 
 The simplest use case is to build an encoder-processor-decoder graph for
 a global weather model. The following is an expanded version of the
