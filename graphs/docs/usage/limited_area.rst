@@ -23,7 +23,7 @@ region of interest using any of the ``LimitedArea_____Nodes`` classes.
 ************************************************
 
 In this case, the user may want to include boundary forcings to the
-region of interest. AnemoI Graphs allows the user to use 2 datasets to
+region of interest. AnemoI Graphs allows the user to use two datasets to
 build the `data` nodes, combining nodes from the LAM dataset and the
 global dataset (as boundary forcings). The class ``ZarrDatasetNodes``
 allows this functionality:
@@ -36,7 +36,7 @@ which can be used to sampling points from the regional dataset to reduce
 computation during development stage.
 
 In addition, this node builder class will create an additional node
-attribute with a mask showing which node correspond to each of the 2
+attribute with a mask showing which node correspond to each of the two
 datasets.
 
 .. code:: console

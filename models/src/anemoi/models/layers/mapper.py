@@ -31,6 +31,7 @@ from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mlp import MLP
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -190,6 +191,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: int = 0,
         dst_grid_size: int = 0,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
 
@@ -213,6 +215,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             Whether to offload processing to CPU, by default False
         out_channels_dst : Optional[int], optional
             Output channels of the destination node, by default None
+        layer_kernels : DotDict, optional
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
             in_channels_src,
@@ -223,6 +228,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             cpu_offload=cpu_offload,
             activation=activation,
         )
+
+        # Linear = layer_kernels.get("Linear", torch.nn.Linear)
+        Linear = layer_kernels["Linear"]
 
         self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
 
@@ -236,11 +244,12 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             edge_dim=self.edge_dim,
             activation=activation,
             num_chunks=num_chunks,
+            layer_kernels=layer_kernels,
         )
 
         self.offload_layers(cpu_offload)
 
-        self.emb_nodes_dst = nn.Linear(self.in_channels_dst, self.hidden_dim)
+        self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
 
     def forward(
         self,
@@ -291,6 +300,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: int = 0,
         dst_grid_size: int = 0,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
 
@@ -330,9 +340,10 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             sub_graph_edge_attributes=sub_graph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
+            layer_kernels=layer_kernels,
         )
 
-        self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
+        self.emb_nodes_src = layer_kernels["Linear"](self.in_channels_src, self.hidden_dim)
 
     def forward(
         self,
@@ -364,6 +375,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: int = 0,
         dst_grid_size: int = 0,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
 
@@ -387,6 +399,9 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             Whether to offload processing to CPU, by default False
         out_channels_dst : Optional[int], optional
             Output channels of the destination node, by default None
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
             in_channels_src,
@@ -403,6 +418,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             sub_graph_edge_attributes=sub_graph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
+            layer_kernels=layer_kernels,
         )
 
         self.node_data_extractor = nn.Sequential(
@@ -436,6 +452,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: int = 0,
         dst_grid_size: int = 0,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GNNBaseMapper.
 
@@ -459,6 +476,9 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             Whether to offload processing to CPU, by default False
         out_channels_dst : Optional[int], optional
             Output channels of the destination node, by default None
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
             in_channels_src,
@@ -476,6 +496,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             in_features=self.edge_dim,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
+            layer_kernels=layer_kernels,
             n_extra_layers=mlp_extra_layers,
             activation=activation,
         )
@@ -540,6 +561,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: int = 0,
         dst_grid_size: int = 0,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GNNForwardMapper.
 
@@ -563,6 +585,9 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             Whether to offload processing to CPU, by default False
         out_channels_dst : Optional[int], optional
             Output channels of the destination node, by default None
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
             in_channels_src,
@@ -578,11 +603,13 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             sub_graph_edge_attributes=sub_graph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
+            layer_kernels=layer_kernels,
         )
 
         self.proc = GraphConvMapperBlock(
             hidden_dim,
             hidden_dim,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation=activation,
             update_src_nodes=True,
@@ -595,6 +622,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             in_features=in_channels_src,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
+            layer_kernels=layer_kernels,
             n_extra_layers=mlp_extra_layers,
             activation=activation,
         )
@@ -603,6 +631,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             in_features=in_channels_dst,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
+            layer_kernels=layer_kernels,
             n_extra_layers=mlp_extra_layers,
             activation=activation,
         )
@@ -626,6 +655,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: int = 0,
         dst_grid_size: int = 0,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GNNBackwardMapper.
 
@@ -649,6 +679,9 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             Whether to offload processing to CPU, by default False
         out_channels_dst : Optional[int], optional
             Output channels of the destination node, by default None
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
             in_channels_src,
@@ -664,11 +697,13 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             sub_graph_edge_attributes=sub_graph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
+            layer_kernels=layer_kernels,
         )
 
         self.proc = GraphConvMapperBlock(
             hidden_dim,
             hidden_dim,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation=activation,
             update_src_nodes=False,
@@ -681,6 +716,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             in_features=self.hidden_dim,
             hidden_dim=self.hidden_dim,
             out_features=self.out_channels_dst,
+            layer_kernels=layer_kernels,
             n_extra_layers=mlp_extra_layers,
             activation=self.activation,
             layer_norm=False,
