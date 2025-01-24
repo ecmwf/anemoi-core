@@ -11,6 +11,9 @@ information which will be used in the rest of the documentation.
  Terminology
 *************
 
+A `graph` :math:`G = (V, E)` is a collection of nodes/vertices :math:`V`
+and edges :math:`E` that connect the nodes.
+
 nodes
    A `node` represents a location (2D) on the earth's surface which may
    contain additional `attributes`.
@@ -21,12 +24,11 @@ edges
    may also contain `attributes` related to their length, direction or
    other properties.
 
-A `graph` :math:`G = (V, E)` is a collection of nodes/vertices :math:`V`
-and edges :math:`E` that connect the nodes. The nodes can represent
-locations in the globe.
+.. image:: _static/enc_proc_dec.png
+   :alt: Encoder-processor-decoder graph
+   :align: center
 
-In weather models, the nodes :math:`V` can generally be classified into
-three categories:
+In weather models, the nodes :math:`V` can be classified into two categories:
 
 data nodes
    A set of nodes representing one or multiple datasets. The `data
@@ -41,6 +43,8 @@ hidden nodes
    (atmosphere, ocean, etc, ...). These nodes can be generated from
    existing locations (Zarr datasets or NPZ files) or algorithmically
    from iterative refinements of polygons over the globe.
+
+Another important term that can refer to both data and hidden nodes is the following:
 
 isolated nodes
    A set of nodes that are not connected to any other nodes in the
@@ -74,7 +78,7 @@ data-driven model with :ref:`anemoi-training
 a wide variety of graph configurations. The image below highlights some
 particularly useful examples.
 
-.. image:: ../../_static/graph_configurations.png
+.. image:: _static/graph_configurations.png
    :alt: Graph configurations
    :align: center
 

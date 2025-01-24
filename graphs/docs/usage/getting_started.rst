@@ -7,7 +7,7 @@
 The simplest use case is to build an encoder-processor-decoder graph for
 a global weather model.
 
-.. image:: ../../_static/enc_proc_dec.png
+.. image:: ../_static/enc_proc_dec.png
    :alt: Encoder-processor-decoder graph
    :align: center
 
