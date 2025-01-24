@@ -24,6 +24,7 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLP
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         self,
         num_channels: int,
         num_layers: int,
+        layer_kernels: DotDict,
         window_size: int,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
@@ -84,6 +86,11 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             Number of channels
         num_layers : int
             Number of layers
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        window_size: int,
+            1/2 size of shifted window for attention computation
         num_heads: int
             Number of heads to use, default 16
         mlp_hidden_ratio: int
@@ -102,11 +109,16 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             num_heads=num_heads,
             activation=activation,
             window_size=window_size,
+            layer_kernels=layer_kernels,
             dropout_p=dropout_p,
         )
 
     def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         for i in range(self.num_layers):
             x = self.blocks[i](x, shapes, batch_size, model_comm_group=model_comm_group)
@@ -121,6 +133,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
         self,
         num_channels: int,
         num_layers: int,
+        layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
         activation: str = "SiLU",
         edge_dim: Optional[int] = None,
@@ -133,6 +146,9 @@ class GNNProcessorChunk(BaseProcessorChunk):
             Channels of the message passing blocks.
         num_layers : int
             Number of message passing blocks.
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         mlp_extra_layers : int, optional
             Extra num_layers in MLP, by default 0
         activation : str, optional
@@ -148,6 +164,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
                 in_features=edge_dim,
                 hidden_dim=num_channels,
                 out_features=num_channels,
+                layer_kernels=layer_kernels,
                 n_extra_layers=mlp_extra_layers,
                 activation=activation,
             )
@@ -158,6 +175,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
             GraphConvProcessorBlock,
             num_channels,
             num_channels,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation=activation,
         )
@@ -188,6 +206,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         self,
         num_channels: int,
         num_layers: int,
+        layer_kernels: DotDict,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
@@ -201,6 +220,9 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             Number of channels.
         num_layers : int
             Number of layers.
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         num_heads: int
             Number of heads to use, default 16
         mlp_hidden_ratio: int
@@ -217,8 +239,9 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             in_channels=num_channels,
             hidden_dim=mlp_hidden_ratio * num_channels,
             out_channels=num_channels,
-            num_heads=num_heads,
             edge_dim=edge_dim,
+            num_heads=num_heads,
+            layer_kernels=layer_kernels,
             activation=activation,
         )
 

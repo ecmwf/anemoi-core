@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+from hydra.utils import instantiate
 from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -16,6 +17,7 @@ from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.conv import GraphConv
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestGraphConvProcessorBlock:
@@ -37,9 +39,11 @@ class TestGraphConvProcessorBlock:
         update_src_nodes,
         num_chunks,
     ):
+        layer_kernels = instantiate(load_layer_kernels())
         block = GraphConvProcessorBlock(
             in_channels=in_channels,
             out_channels=out_channels,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation=activation,
             update_src_nodes=update_src_nodes,
@@ -73,9 +77,11 @@ class TestGraphConvMapperBlock:
         update_src_nodes,
         num_chunks,
     ):
+        layer_kernels = instantiate(load_layer_kernels())
         block = GraphConvMapperBlock(
             in_channels=in_channels,
             out_channels=out_channels,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation=activation,
             update_src_nodes=update_src_nodes,
