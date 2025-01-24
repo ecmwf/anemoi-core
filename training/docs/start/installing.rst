@@ -37,16 +37,22 @@ To install the package, you can use the following command:
 
    python -m pip install anemoi-training
 
-We also maintain other dependency sets for different subsets of functionality::
-   $ python -m pip install "anemoi-training[profile]" # Install optional
-   dependencies for profiling gpu usage $ python -m pip install
+We also maintain other dependency sets for different subsets of
+functionality:
+
+.. code::
+
+   .. code:: bash
+
+   python -m pip install "anemoi-training[profile]" # Install optional
+   dependencies for profiling gpu usage python -m pip install
    "anemoi-training[docs]" # Install optional dependencies for
    generating docs
 
 .. literalinclude:: ../../pyproject.toml
    :language: toml
-   :start-at: [project.optional-dependencies]
-   :end-before: [project.urls]
+   :start-at: [project.optional-dependencies.all]
+   :end-before: [project.urls.Changelog]
 
 **********************
  Development versions
@@ -64,4 +70,4 @@ To install the most recent development version, install from github:
 
 To run the test suite after installing anemoi-training, install (via
 pypi) `py.test <https://pytest.org>`__ and run ``pytest`` in the
-`training` directory of the anemoi-core repository.
+``training`` directory of the anemoi-core repository.
