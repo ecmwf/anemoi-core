@@ -40,14 +40,10 @@ To install the package, you can use the following command:
 We also maintain other dependency sets for different subsets of
 functionality:
 
-.. code::
+.. code:: bash
 
-   .. code:: bash
-
-   python -m pip install "anemoi-training[profile]" # Install optional
-   dependencies for profiling gpu usage python -m pip install
-   "anemoi-training[docs]" # Install optional dependencies for
-   generating docs
+   python -m pip install "anemoi-training[profile]" # Install optional dependencies for profiling gpu usage
+   python -m pip install "anemoi-training[docs]" # Install optional dependencies for generating docs
 
 .. literalinclude:: ../../pyproject.toml
    :language: toml
