@@ -62,12 +62,10 @@ dependencies = [
 ]
 
 optional-dependencies.all = [  ]
-
 optional-dependencies.dev = [
   "anemoi-training[docs,tests,all]",
   "pre-commit>=3.3.3",
 ]
-
 optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
@@ -81,9 +79,7 @@ optional-dependencies.profile = [
   "rich>=13.6",
   "tabulate>=0.9",
 ]
-
 optional-dependencies.tests = [ "hypothesis", "pytest", "pytest-mock" ]
-
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
