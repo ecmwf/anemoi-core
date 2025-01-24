@@ -1,0 +1,44 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- hardware: example
+- graph: multi_scale
+- model: gnn
+- training: default
+- _self_
+
+
+# diagnostics:
+#   plot:
+#     callbacks: []
+hardware:
+  files:
+    dataset: aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+    graph: test_graph.pt
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
+    grids: null
+    output: ${oc.env:PWD}/tmp_output/
+
+  # number of GPUs per node and number of nodes (for DDP)
+  accelerator: auto
+  num_gpus_per_node: 1
+  num_nodes: 1
+  num_gpus_per_model: 1
+
+
+model:
+  num_channels: 16
+
+dataloader:
+  limit_batches:
+    training: 100
+    validation: 100
+  training:
+    end: 1979-01-08 18:00:00
+  validation:
+    start: 1979-01-08 12:00:00
+
+training:
+  max_epochs:  2
