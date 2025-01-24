@@ -1,3 +1,5 @@
+.. _zarr-file:
+
 ###################
  From Zarr dataset
 ###################
@@ -21,18 +23,20 @@ the following YAML configuration:
 
 where `dataset` is the path to the Zarr dataset.
 
-The ``CutOutZarrDatasetNodes`` class supports 2 input datasets, one for
-the LAM model and one for the boundary forcing. To define the `node
-coordinates` combining multiple Zarr datasets, you can use the following
-YAML configuration:
+The ``ZarrDatasetNodes`` class supports operations over multiple
+datasets. For example, the `cutout` operation supports combining a
+regional dataset and a global dataset to enable both limited area and
+stretched grids. To define the `node coordinates` that combine multiple
+Zarr datasets, you can use the following YAML configuration:
 
 .. code:: yaml
 
    nodes:
      data:  # name of the nodes
        node_builder:
-         _target_: anemoi.graphs.nodes.CutOutZarrDatasetNodes
-         lam_dataset: /path/to/lam_dataset.zarr
-         forcing_dataset: /path/to/boundary_forcing.zarr
-         thinning: 25 # sample every n-th point (only for lam_dataset)
+         _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+         cutout:
+         - dataset: /path/to/lam_dataset.zarr
+           thinning: 25 # sample every n-th point (only for lam_dataset), optional
+         - dataset: /path/to/boundary_forcing.zarr
        attributes: ...

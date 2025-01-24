@@ -27,6 +27,7 @@ else:
 
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class MultiHeadSelfAttention(nn.Module):
         self,
         num_heads: int,
         embed_dim: int,
+        layer_kernels: DotDict,
         bias: bool = False,
         is_causal: bool = False,
         window_size: Optional[int] = None,
@@ -56,13 +58,14 @@ class MultiHeadSelfAttention(nn.Module):
         self.dropout_p = dropout_p
         self.is_causal = is_causal
 
-        self.lin_qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=bias)
+        linear = layer_kernels["Linear"]
+        self.lin_qkv = linear(embed_dim, 3 * embed_dim, bias=bias)
         self.attention = attn_func
 
         if not _FLASH_ATTENTION_AVAILABLE:
             LOGGER.warning("Flash attention not available, falling back to pytorch scaled_dot_product_attention")
 
-        self.projection = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.projection = linear(embed_dim, embed_dim, bias=True)
 
     def forward(
         self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
