@@ -439,8 +439,8 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
 
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Impute missing values in the input tensor."""
-        return super(DynamicMixin).transform(x, in_place)
+        return DynamicMixin.transform(self, x, in_place)
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Impute missing values in the input tensor."""
-        return super(DynamicMixin).inverse_transform(x, in_place)
+        return DynamicMixin.inverse_transform(self, x, in_place)
