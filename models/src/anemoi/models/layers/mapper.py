@@ -26,7 +26,6 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
 from anemoi.models.distributed.shapes import change_channels_in_shape
-from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
@@ -235,12 +234,24 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             num_heads=num_heads,
             edge_dim=self.edge_dim,
             activation=activation,
-            num_chunks=num_chunks,
+            num_chunks=1,  # disable "inner chunking" for now
         )
 
         self.offload_layers(cpu_offload)
 
         self.emb_nodes_dst = nn.Linear(self.in_channels_dst, self.hidden_dim)
+
+    def prepare_edges(self, size, batch_size, model_comm_group=None):
+        edge_attr = self.trainable(self.edge_attr, batch_size)
+        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+        edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
+            size, edge_attr, edge_index, model_comm_group
+        )
+
+        edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
+        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+
+        return edge_attr, edge_index
 
     def forward(
         self,
@@ -250,18 +261,14 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> PairTensor:
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
-        edge_attr = self.trainable(self.edge_attr, batch_size)
-        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
-        shapes_edge_attr = get_shape_shards(edge_attr, 0, model_comm_group)
-        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
-
+        edge_attr, edge_index = self.prepare_edges(size, batch_size, model_comm_group)
         x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
 
         (x_src, x_dst), edge_attr = self.proc(
             (x_src, x_dst),
             edge_attr,
             edge_index,
-            (shapes_src, shapes_dst, shapes_edge_attr),
+            (shapes_src, shapes_dst),
             batch_size,
             model_comm_group,
             size=size,
@@ -345,7 +352,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         return x[0], x_dst
 
 
-class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransformerBaseMapper):
+class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):  # moved PostProcessMixin up to enc_proc_dec
     """Graph Transformer Mapper from hidden -> data."""
 
     def __init__(
