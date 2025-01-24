@@ -5,9 +5,9 @@
 ##############
 
 In `anemoi-graphs`, graphs are built using a `recipe`, which is a YAML
-file that specifies the nodes, edges, and attributes of an encoder-processor-decoder
-graph. The recipe file is used to create the graphs using the :ref:`command-line
-tool <cli-introduction>`.
+file that specifies the nodes, edges, and attributes of an
+encoder-processor-decoder graph. The recipe file is used to create the
+graphs using the :ref:`command-line tool <cli-introduction>`.
 
 .. image:: ../_static/enc_proc_dec.png
    :alt: Encoder-processor-decoder graph

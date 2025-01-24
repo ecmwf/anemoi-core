@@ -28,7 +28,8 @@ edges
    :alt: Encoder-processor-decoder graph
    :align: center
 
-In weather models, the nodes :math:`V` can be classified into two categories:
+In weather models, the nodes :math:`V` can be classified into two
+categories:
 
 data nodes
    A set of nodes representing one or multiple datasets. The `data
@@ -44,7 +45,8 @@ hidden nodes
    existing locations (Zarr datasets or NPZ files) or algorithmically
    from iterative refinements of polygons over the globe.
 
-Another important term that can refer to both data and hidden nodes is the following:
+Another important term that can refer to both data and hidden nodes is
+the following:
 
 isolated nodes
    A set of nodes that are not connected to any other nodes in the
