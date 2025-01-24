@@ -9,10 +9,12 @@
 
 
 import pytest
+from hydra.utils import instantiate
 
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.chunk import GNNProcessorChunk
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestGNNProcessorChunk:
@@ -22,21 +24,23 @@ class TestGNNProcessorChunk:
         num_layers = 3
         mlp_extra_layers = 3
         edge_dim = None
-        return num_channels, num_layers, mlp_extra_layers, edge_dim
+        layer_kernels = instantiate(load_layer_kernels())
+        return num_channels, num_layers, layer_kernels, mlp_extra_layers, edge_dim
 
     @pytest.fixture
     def processor_chunk(self, init):
-        num_channels, num_layers, mlp_extra_layers, edge_dim = init
+        num_channels, num_layers, layer_kernels, mlp_extra_layers, edge_dim = init
         return GNNProcessorChunk(
             num_channels=num_channels,
             num_layers=num_layers,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation="SiLU",
             edge_dim=edge_dim,
         )
 
     def test_embed_edges(self, init, processor_chunk):
-        _num_channels, _num_layers, _mlp_extra_layers, edge_dim = init
+        _num_channels, _num_layers, _layer_kernels, _mlp_extra_layers, edge_dim = init
         if edge_dim:
             assert isinstance(processor_chunk.emb_edges, MLP)
         else:
