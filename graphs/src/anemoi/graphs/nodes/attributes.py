@@ -151,9 +151,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
         super().__init__(norm, dtype)
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
-        points = np.stack([latitudes, longitudes], -1)
-        v = Voronoi(points, qhull_options="QJ Pp")
+        v = Voronoi(nodes.x, qhull_options="QJ Pp")
         areas = []
         for r in v.regions:
             area = ConvexHull(v.vertices[r, :]).volume
@@ -196,8 +194,23 @@ class SphericalAreaWeights(BaseNodeAttribute):
         self.fill_value = fill_value
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
-        points = latlon_rad_to_cartesian((np.asarray(latitudes), np.asarray(longitudes)))
+        """Compute the area associated to each node.
+
+        It uses Voronoi diagrams to compute the area of each node.
+
+        Parameters
+        ----------
+        nodes : NodeStorage
+            Nodes of the graph.
+        kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        np.ndarray
+            Attributes.
+        """
+        points = latlon_rad_to_cartesian(nodes.x)
         sv = SphericalVoronoi(points, self.radius, self.centre)
         mask = np.array([bool(i) for i in sv.regions])
         sv.regions = [region for region in sv.regions if region]

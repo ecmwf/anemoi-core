@@ -1,3 +1,5 @@
+.. _multi_scale:
+
 ################################################
  Multi-scale connections at refined icosahedron
 ################################################

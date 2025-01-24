@@ -1,15 +1,16 @@
 .. _usage-getting-started:
 
-#################
- Getting started
-#################
+##############
+ First recipe
+##############
 
 The simplest use case is to build an encoder-processor-decoder graph for
-a global weather model.
+a global weather model. The following is an expanded version of the
+examples given in the :ref:`graphs introduction <graphs-introduction>`.
 
-**************
- First recipe
-**************
+*****************
+ Nodes and edges
+*****************
 
 In this case, the recipe must contain a ``nodes`` section where the keys
 will be the names of the sets of `nodes`, that will later be used to
@@ -44,6 +45,7 @@ here by the second element of the ``edges`` section.
 .. figure:: schemas/global_wo-proc.png
    :alt: Schema of global graph (without processor connections)
    :align: center
+   :width: 250
 
 To create the graph, run the following command:
 
