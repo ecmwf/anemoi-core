@@ -14,6 +14,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0 # GraphTransformer
+  attention_implementation: flash_attention # flash_attention, flex_attention, scaled_dot_product_attention
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
