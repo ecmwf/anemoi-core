@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from enum import StrEnum
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel
@@ -28,8 +28,9 @@ from .processor import TransformerProcessorSchema
 LOGGER = logging.getLogger(__name__)
 
 
-class DefinedModels(StrEnum):
+class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
+    ANEMOI_MODEL_ENC_HIERPROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
 
 
 class Model(BaseModel):
