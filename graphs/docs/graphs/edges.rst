@@ -15,7 +15,7 @@ for each (`source name`, `target name`) pair specified.
      - source_name: data
        target_name: hidden
        edge_builders:
-       - _target_: anemoi.graphs.edges.CutOff
+       - _target_: anemoi.graphs.edges.CutOffEdges
          cutoff_factor: 0.7
 
 Below are the available methods for defining the edges:

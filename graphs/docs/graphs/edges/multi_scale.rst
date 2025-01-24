@@ -1,12 +1,24 @@
+.. _multi_scale:
+
 ################################################
  Multi-scale connections at refined icosahedron
 ################################################
+
+.. warning::
+
+   This connection method is only support for building the connections
+   within a set of nodes defined with the ``TriNodes`` or ``HexNodes``
+   classes.
 
 The multi-scale connections can only be defined with the same source and
 target nodes. Edges of different scales are defined based on the
 refinement level of an icosahedron. The higher the refinement level, the
 shorther the length of the edges. By default, all possible refinements
 levels are considered.
+
+.. image:: ../../_static/multi_scale_edges.png
+   :alt: Multi-scale edges
+   :align: center
 
 To use this method to build your connections, you can use the following
 YAML configuration:
@@ -31,9 +43,3 @@ refinement level to be considered neighbours, and then connected.
 .. csv-table:: Triangular refinements specifications (x_hops=1)
    :file: ./tri_refined_edges.csv
    :header-rows: 1
-
-.. warning::
-
-   This connection method is only support for building the connections
-   within a set of nodes defined with the ``TriNodes`` or ``HexNodes``
-   classes.

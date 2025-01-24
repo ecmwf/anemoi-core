@@ -1,9 +1,20 @@
+.. _trinodes:
+
 ################################
  Triangular refined Icosahedron
 ################################
 
 This class allows us to define nodes based on iterative refinements of
-an icosahedron with triangles.
+an icosahedron with triangles. This method generates an icosahedron
+projected onto a sphere, where the vertices are the nodes of the graph.
+The icosahedron can be refined iteratively, with each refinement
+dividing each triangular face into four smaller triangles. A key
+property of these methods is that all nodes from a given refinement
+level are retained in subsequent refinements.
+
+.. image:: ../../_static/trinodes.png
+   :alt: Triangular refined icosahedron
+   :align: center
 
 To define the `node coordinates` based on icosahedral refinements of an
 icosahedron, you can use the following YAML configurations:
