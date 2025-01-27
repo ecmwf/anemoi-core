@@ -434,7 +434,7 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
-        )        
+        )
 
     def fill_with_value(self, x, index, nan_locations):
         # Replace values
