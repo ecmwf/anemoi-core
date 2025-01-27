@@ -14,7 +14,6 @@ from typing import Optional
 import einops
 import torch
 from hydra.utils import instantiate
-from omegaconf import OmegaConf
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -70,7 +69,7 @@ class AnemoiModelEncProcDec(nn.Module):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
         # read config.model.layer_kernels to get the implementation for certain layers
-        self.layer_kernels = load_layer_kernels(OmegaConf.select(model_config, "model.layer_kernels"))
+        self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", {}))
 
         # Encoder data -> hidden
         self.encoder = instantiate(
