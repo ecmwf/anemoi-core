@@ -86,3 +86,11 @@ The following missing config options which must be overridden by users:
 -  ``hardware.files.graph``: If you have pre-computed a specific graph,
    specify its filename here. Otherwise, a new graph will be constructed
    on the fly and written to the filename given.
+
+*********************************
+ Validation of the Configuration
+*********************************
+
+The configuration is validated using `Pydantic` before a training run
+starts. To turn this off, you can use the `--no-validation` flag in your
+top-level config.

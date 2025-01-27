@@ -52,6 +52,7 @@ log:
     on_resume_create_child: True
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
+    http_max_retries: 35
   interval: 100
 
 enable_progress_bar: True

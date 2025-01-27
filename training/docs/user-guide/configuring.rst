@@ -153,3 +153,18 @@ or combine everything together
 .. code:: bash
 
    anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
+
+********************
+ Cconfig validation
+********************
+
+It is possible to validate your configuration before starting a training
+run using the following command:
+
+.. code:: bash
+
+   anemoi-training validate --name debug.yaml
+
+This will check that the configuration is valid and that all the
+required fields are present. To turn the validation off, you can use the
+`--no-validate` flag.

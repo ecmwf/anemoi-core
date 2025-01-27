@@ -32,7 +32,6 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.training.diagnostics.mlflow.utils import health_check
-from anemoi.training.utils.jsonify import map_config_to_primitives
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -556,7 +555,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
-                params["config"] = map_config_to_primitives(config)
+                params["config"] = config.model_dump(by_alias=True)
 
             import mlflow
             from mlflow.entities import Param

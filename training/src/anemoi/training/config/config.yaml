@@ -7,3 +7,6 @@ defaults:
 - model: gnn
 - training: default
 - _self_
+
+# set to true to switch off config validation
+no_validation: False
