@@ -430,7 +430,7 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
     ) -> None:
-        CopyImputer.__init__(config, data_indices, statistics)
+        CopyImputer.__init__(self, config, data_indices, statistics)
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
