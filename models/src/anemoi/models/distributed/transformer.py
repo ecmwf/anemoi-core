@@ -18,6 +18,31 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.utils import get_memory_format
 
 
+def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
+    """
+    Wrapper function for all_to_all across NCCL, MPI and Gloo backends.
+    There is no all_to_all primitive for the Gloo backend. In that case each
+    process broadcasts its tensor asynchronously.
+
+    Retuns nothing but modifies output_list in-place
+
+    """
+    comm_size = dist.get_world_size(group=group)
+
+    if dist.is_mpi_available() or dist.is_nccl_available():
+        dist.all_to_all(output_list, input_list, group=group)
+    else:
+        reqs = []
+        for src in range(0, comm_size):
+            if src == dist.get_rank(group=group):
+                output_list[src] = input_list[0]
+            req = dist.broadcast(output_list[src], src, group=group, async_op=True)
+            reqs.append(req)
+
+        for req in reqs:
+            req.wait()
+
+
 def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the head dimension.
 
@@ -50,7 +75,7 @@ def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] =
         for rank in range(comm_size)
     ]
 
-    dist.all_to_all(output_list, input_list, group=group)
+    _alltoallwrapper(output_list, input_list, group=group)
 
     # Note: torch.cat already creates a contiguous tensor.
     return torch.cat(output_list, dim=-2).contiguous(memory_format=input_format)
@@ -76,7 +101,7 @@ def _seqalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = N
 
     output_list = [torch.empty_like(input_list[comm_rank]) for _ in range(comm_size)]
 
-    dist.all_to_all(output_list, input_list, group=group)
+    _alltoallwrapper(output_list, input_list, group=group)
 
     # Note: torch.cat already creates a contiguous tensor.
     return torch.cat(output_list, dim=-3).contiguous(memory_format=input_format)
