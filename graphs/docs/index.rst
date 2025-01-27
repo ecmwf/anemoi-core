@@ -136,6 +136,7 @@ You may also have to install pandoc on MacOS:
 
    overview
    cli/introduction
+   installing
 
 .. toctree::
    :maxdepth: 1
