@@ -44,6 +44,7 @@ dependencies = [
   "anemoi-graphs>=0.4.1",
   "anemoi-models>=0.4.1",
   "anemoi-utils[provenance]>=0.4.4",
+  "dask=2024.12.1",
   "datashader>=0.16.3",
   "einops>=0.6.1",
   "hydra-core>=1.3",
