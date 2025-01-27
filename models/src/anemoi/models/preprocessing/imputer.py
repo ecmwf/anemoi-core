@@ -44,7 +44,7 @@ class BaseImputer(BasePreprocessor, ABC):
         super().__init__(config, data_indices, statistics)
 
         self.nan_locations = None
-        # weight imputed values wiht zero in loss calculation
+        # weight imputed values with zero in loss calculation
         self.loss_mask_training = None
 
     def _validate_indices(self):
@@ -398,7 +398,7 @@ class DynamicInputImputer(DynamicMixin, InputImputer):
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
     ) -> None:
-        super().__init__(config, data_indices, statistics)
+        InputImputer.__init__(self, config, data_indices, statistics)
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
@@ -414,7 +414,7 @@ class DynamicConstantImputer(DynamicMixin, ConstantImputer):
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
     ) -> None:
-        super().__init__(config, data_indices, statistics)
+        ConstantImputer.__init__(config, data_indices, statistics)
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
@@ -423,6 +423,18 @@ class DynamicConstantImputer(DynamicMixin, ConstantImputer):
 
 class DynamicCopyImputer(DynamicMixin, CopyImputer):
     """Dynamic Copy imputation behavior."""
+
+    def __init__(
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
+    ) -> None:
+        CopyImputer.__init__(config, data_indices, statistics)
+        warnings.warn(
+            "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
+                      The model will be trained to predict imputed values. This might deteriorate performances."
+        )        
 
     def fill_with_value(self, x, index, nan_locations):
         # Replace values
