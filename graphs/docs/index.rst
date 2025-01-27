@@ -77,14 +77,9 @@ To install the package, you can use the following command:
 
 .. code:: bash
 
-   pip install anemoi-graphs[...options...]
+   pip install anemoi-graphs
 
-The options are:
-
--  ``dev``: install the development dependencies
--  ``docs``: install the dependencies for the documentation
--  ``test``: install the dependencies for testing
--  ``all``: install all the dependencies
+Get more information in the :ref:`installing <installing>` section.
 
 **************
  Contributing
