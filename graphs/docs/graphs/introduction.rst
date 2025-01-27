@@ -4,64 +4,45 @@
  Introduction
 ##############
 
-The `anemoi-graphs` package allows you to design custom graphs for
-training data-driven weather models. The graphs are built using a
-`recipe`, which is a YAML file that specifies the nodes and edges of the
-graph.
+In `anemoi-graphs`, graphs are built using a `recipe`, which is a YAML
+file that specifies the nodes, edges, and attributes of an
+encoder-processor-decoder graph. The recipe file is used to create the
+graphs using the :ref:`command-line tool <cli-introduction>`.
 
-**********
- Concepts
-**********
+.. image:: ../_static/enc_proc_dec.png
+   :alt: Encoder-processor-decoder graph
+   :align: center
 
-nodes
-   A `node` represents a location (2D) on the earth's surface which may
-   contain additional `attributes`.
+The main components of the recipe file are the definition of the
+`nodes`, the `edges`, and each of these can optionally include
+`attributes`. Here we give an overview of these specifications; more
+details on the available options for each are given in the following
+pages.
 
-data nodes
-   A set of nodes representing one or multiple datasets. The `data
-   nodes` may correspond to the input/output of our data-driven model.
-   They can be defined from Zarr datasets and this method supports all
-   :ref:`anemoi-datasets <anemoi-datasets:index-page>` operations such
-   as `cutout` or `thinning`.
-
-hidden nodes
-   The `hidden nodes` capture intermediate representations of the model,
-   which are used to learn the dynamics of the system considered
-   (atmosphere, ocean, etc, ...). These nodes can be generated from
-   existing locations (Zarr datasets or NPZ files) or algorithmically
-   from iterative refinements of polygons over the globe.
-
-isolated nodes
-   A set of nodes that are not connected to any other nodes in the
-   graph. These nodes can be used to store additional information that
-   is not directly used in the training process.
-
-edges
-   An `edge` represents a connection between two nodes. The `edges` can
-   be used to define the flow of information between the nodes. Edges
-   may also contain `attributes` related to their length, direction or
-   other properties.
-
-*****************
- Data structures
-*****************
-
-The nodes :math:`V` correspond to locations on the earth's surface, and
-they can be classified into 2 categories:
-
--  **Data nodes**: The `data nodes` represent the input/output of the
-   data-driven model, i.e. they are linked to existing datasets.
--  **Hidden nodes**: These `hidden nodes` represent the latent space,
-   where the internal dynamics are learned.
-
-Several methods are currently supported to create your nodes. You can
-use indistinctly any of these to create your `data` or `hidden` nodes.
+*******
+ Nodes
+*******
 
 The `nodes` are defined in the ``nodes`` section of the recipe file. The
 keys are the names of the sets of `nodes` that will later be used to
 build the connections. Each `nodes` configuration must include a
-``node_builder`` section describing how to define the `nodes`. The
-following classes define different behaviour:
+``node_builder`` section describing how to define the `nodes`, and can
+optionally include node `attributes`.
+
+A simple example of the nodes definition, for two sets of nodes, looks
+like this:
+
+.. literalinclude:: ../usage/yaml/nodes.yaml
+   :language: yaml
+
+In this example, two sets of nodes are defined, which have been named
+``data`` and ``hidden`` (these names are later used to define edges).
+The ``data`` nodes have been defined based on coordinates specified in a
+:ref:`zarr file <zarr-file>` and the hidden nodes are specified based on
+a :ref:`triangular refined icosahedron <trinodes>` algorithm.
+
+Several methods are currently supported to create your nodes. You can
+use indistinctly any of these to create your `data` or `hidden` nodes:
 
 -  :doc:`node_coordinates/zarr_dataset`
 -  :doc:`node_coordinates/npz_file`
@@ -71,9 +52,52 @@ following classes define different behaviour:
 -  :doc:`node_coordinates/healpix`
 
 In addition to the ``node_builder`` section, the `nodes` configuration
-can contain an optional ``attributes`` section to define additional node
-attributes (weights, mask, ...). For example, the weights can be used to
-define the importance of each node in the loss function, or the masks
-can be used to build connections only between subsets of nodes.
+can contain an optional section to define additional node attributes
+(weights, mask, ...). For example, the weights can be used to define the
+importance of each node in the loss function, or the masks can be used
+to build connections only between subsets of nodes. See the
+:ref:`attributes <graphs-node_attributes>` page for more details.
 
--  :doc:`node_attributes/weights`
+*******
+ Edges
+*******
+
+The ``edges`` section in the recipe file defines the edges between the
+nodes through which information will flow. These connections are defined
+between pairs of `nodes` sets (source and target, specified by
+`source_name` and `target_name`). There are several methods to build
+these edges, including cutoff (`CutOffEdges`) or nearest neighbours
+(`KNNEdges`).
+
+For an encoder-processor-decoder graph you will need to build two sets
+of `edges`. The first set of edges will connect the `data` nodes with
+the `hidden` nodes to encode the input data into the latent space,
+normally referred to as the `encoder edges` and represented here by the
+first element of the ``edges`` section. The second set of `edges` will
+connect the `hidden` nodes with the `data` nodes to decode the latent
+space into the output data, normally referred to as `decoder edges` and
+represented here by the second element of the ``edges`` section.
+
+Graphically, the encoder-processor-decoder setup looks like this:
+
+.. figure:: ../usage/schemas/global_wo-proc.png
+   :alt: Schema of global graph (without processor connections)
+   :align: center
+   :width: 250
+
+The corresponding recipe file chunk is as follows:
+
+.. literalinclude:: ../usage/yaml/global_wo-proc.yaml
+   :language: yaml
+
+In this example, the encoder edges are defined based on the
+:ref:`cut-off radius <cutoff_radius>`, whereas the decoder nodes use a
+:ref:`k-nearest neighbours <knn>` algorithm. Available methods for
+defining edges are:
+
+-  :ref:`Cut-off radius <cutoff_radius>`
+-  :ref:`K-nearest neighbours <knn>`
+-  :ref:`Multi-scale connections <multi_scale>`
+
+As with the nodes, the edges can have additional attributes - see the
+:ref:`attributes <edge-attributes>` page for more details.

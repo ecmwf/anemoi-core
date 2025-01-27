@@ -4,8 +4,8 @@
  Edges - Attributes
 ####################
 
-There are 2 main edge attributes implemented in the `anemoi-graphs`
-package:
+There are two main edge attributes implemented in the
+:ref:`anemoi-graphs <anemoi-graphs:index-page>` package:
 
 *************
  Edge length

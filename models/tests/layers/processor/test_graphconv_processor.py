@@ -10,10 +10,12 @@
 
 import pytest
 import torch
+from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.processor import GNNProcessor
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestGNNProcessor:
@@ -44,8 +46,10 @@ class TestGNNProcessor:
         src_grid_size = 0
         dst_grid_size = 0
         trainable_size = 8
+        layer_kernels = instantiate(load_layer_kernels())
         return (
             num_layers,
+            layer_kernels,
             num_channels,
             num_chunks,
             mlp_extra_layers,
@@ -62,6 +66,7 @@ class TestGNNProcessor:
     def graphconv_processor(self, graphconv_init):
         (
             num_layers,
+            layer_kernels,
             num_channels,
             num_chunks,
             mlp_extra_layers,
@@ -75,6 +80,7 @@ class TestGNNProcessor:
         ) = graphconv_init
         return GNNProcessor(
             num_layers,
+            layer_kernels,
             num_channels=num_channels,
             num_chunks=num_chunks,
             mlp_extra_layers=mlp_extra_layers,
@@ -90,6 +96,7 @@ class TestGNNProcessor:
     def test_graphconv_processor_init(self, graphconv_processor, graphconv_init):
         (
             num_layers,
+            _layer_kernels,
             num_channels,
             num_chunks,
             _mlp_extra_layers,
@@ -110,6 +117,7 @@ class TestGNNProcessor:
         batch_size = 1
         (
             _num_layers,
+            _layer_kernels,
             num_channels,
             _num_chunks,
             _mlp_extra_layers,

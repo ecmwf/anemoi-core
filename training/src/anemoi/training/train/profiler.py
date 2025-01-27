@@ -95,6 +95,9 @@ class AnemoiProfiler(AnemoiTrainer):
 
         if model_summary is not None:
             self.print_report("Model Summary", model_summary, color="Orange", emoji="robot")
+            num_gpus = self.config.hardware.num_gpus_per_node * self.config.hardware.num_nodes
+            if num_gpus > 1:
+                LOGGER.info("Model Summary displays the stats for a single GPU.")
 
     @staticmethod
     def write_benchmark_profiler_report() -> None:
@@ -108,6 +111,7 @@ class AnemoiProfiler(AnemoiTrainer):
         return df
 
     @cached_property
+    @rank_zero_only
     def speed_profile(self) -> None:
         """Speed profiler Report.
 
@@ -137,6 +141,7 @@ class AnemoiProfiler(AnemoiTrainer):
         return logger_info
 
     @cached_property
+    @rank_zero_only
     def system_profile(self) -> None:
         """System Profiler Report."""
         if self.config.diagnostics.benchmark_profiler.system.enabled:
@@ -151,6 +156,7 @@ class AnemoiProfiler(AnemoiTrainer):
         return None
 
     @cached_property
+    @rank_zero_only
     def memory_profile(self) -> None:
         """Memory Profiler Report."""
         if self.config.diagnostics.benchmark_profiler.memory.enabled:
@@ -158,6 +164,7 @@ class AnemoiProfiler(AnemoiTrainer):
         return None
 
     @cached_property
+    @rank_zero_only
     def time_profile(self) -> None:
         """Time Profiler Report."""
         if self.config.diagnostics.benchmark_profiler.time.enabled:
@@ -167,13 +174,8 @@ class AnemoiProfiler(AnemoiTrainer):
     @cached_property
     def model_summary(self) -> str:
         if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
-            if self.config.hardware.num_gpus_per_model > 1:
-                LOGGER.warning("Model Summary is not supported when using model sharding")
-                self.config.diagnostics.benchmark_profiler.model_summary.enabled = False
-                return None
             model = self.model
-            example_input_array = self.example_input_array
-            return self.profiler.get_model_summary(model=model, example_input_array=example_input_array)
+            return self.profiler.get_model_summary(model=model, example_input_array=self.example_input_array)
         return None
 
     @rank_zero_only
@@ -184,7 +186,6 @@ class AnemoiProfiler(AnemoiTrainer):
         elif self.config.diagnostics.log.mlflow.enabled:
             self.to_mlflow()
 
-    @rank_zero_only
     def report(self) -> str:
         """Print report to console."""
         LOGGER.info("Generating Profiler reports")
@@ -311,6 +312,15 @@ class AnemoiProfiler(AnemoiTrainer):
             ...,
             self.data_indices.data.input.full,
         ]
+        # If the input batch is sharded, replicate it to its full size
+        if self.config.dataloader.read_group_size > 1:
+            self.example_input_array = self.example_input_array.repeat(
+                1,
+                1,
+                1,
+                self.config.dataloader.read_group_size,
+                1,
+            )
         return datamodule
 
     @cached_property
