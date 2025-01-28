@@ -227,3 +227,35 @@ the following error:
    Input should be a valid dictionary or instance of LoggingSchema [type=model_type, input_value=None, input_type=NoneType]
       For further information visit https://errors.pydantic.dev/2.10/v/model_type
    2025-01-28 09:54:08 ERROR 💣 Exiting
+
+Which indicates that the `diagnostics.log` field is not correctly
+defined as it should be a dictionary or instance of `LoggingSchema`.
+Please note there might still be cases not captured by the current
+schemas, so it is always good to double check the configuration file
+before running the training. See below an example of a config with some
+typos that might still need to be fixed manually:
+
+.. code:: yaml
+
+   defaults:
+   - data: zarr
+   - dataloader: native_grid
+   - diagnostics: evaluation
+   - hardware: example
+   - graph: multi_scale
+   - model: transformer # Change from default group
+   - training: default
+   - _self_
+
+
+   diagnostics:
+   log:
+      mlflow:
+         enabled: True
+         ofline: True # this is a typo - should be offline
+         experiment_name: 'test'
+         project_name: 'AIFS'
+         run_name: 'test_anemoi_core'
+         tracking_uri: 'https://mlflow-server.int'
+         authentication: True
+         terminal: True
