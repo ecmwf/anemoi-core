@@ -41,8 +41,8 @@ dynamic = [ "version" ]
 
 dependencies = [
   "anemoi-datasets>=0.5.13",
-  "anemoi-graphs",
-  "anemoi-models",
+  "anemoi-graphs>=0.4.1",
+  "anemoi-models>=0.4.1",
   "anemoi-utils[provenance]>=0.4.4",
   "dask<=2024.12.1",                 # pinned until a new datashader version is released
   "datashader>=0.16.3",
