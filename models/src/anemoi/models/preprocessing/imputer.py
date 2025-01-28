@@ -353,10 +353,9 @@ class DynamicMixin:
 
     def fill_with_value(self, x, index, nan_locations):
         # Replace values
-        for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
-            if idx_dst is not None:
-                x[..., idx_dst][nan_locations[..., idx_src]] = value
-
+        for idx, value in zip(index, self.replacement):
+            if idx is not None:
+                x[..., idx][nan_locations[..., idx]] = value
         return x
 
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
