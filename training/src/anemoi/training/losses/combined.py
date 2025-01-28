@@ -70,7 +70,7 @@ class CombinedLoss(torch.nn.Module):
             losses:
                 - __target__: anemoi.training.losses.mse.WeightedMSELoss
                 - __target__: anemoi.training.losses.mae.WeightedMAELoss
-            scalars: ['variable']
+            scalers: ['variable']
             loss_weights: [1.0,0.5]
         ```
         """
