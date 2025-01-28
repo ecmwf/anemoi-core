@@ -259,3 +259,32 @@ typos that might still need to be fixed manually:
          tracking_uri: 'https://mlflow-server.int'
          authentication: True
          terminal: True
+
+In the example above, if there is a default already defined for
+`offline` under `diagnostics: evaluation` then the validation will be
+successful, and in the high-level config (ie `debug`) `ofline` it will
+just simply not be used, since it has a typo. Otherwise, if there is no
+default for `offline` then the validation will fail, with the following
+error:
+
+.. code:: python
+
+   2025-01-28 09:37:23 INFO Validating configs.
+   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
+   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now:  [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
+   diagnostics.log.mlflow.offline
+   Field required [type=missing, input_value={'enabled': True, 'authen...onfig'], 'ofline': True}, input_type=DictConfig]
+      For further information visit https://errors.pydantic.dev/2.10/v/missing
+   2025-01-28 10:14:49 ERROR
+   💣 1 validation error for BaseSchema
+   diagnostics.log.mlflow.offline
+   Field required [type=missing, input_value={'enabled': True, 'authen...onfig'], 'ofline': True}, input_type=DictConfig]
+      For further information visit https://errors.pydantic.dev/2.10/v/missing
+   2025-01-28 10:14:49 ERROR 💣 Exiting
+
+That will indicate that the `offline` field is required and it is
+missing from the configuration file. If you identify any issues with the
+schemas or missing functionality, please raise an issue on the `Anemoi
+Core repository`.
