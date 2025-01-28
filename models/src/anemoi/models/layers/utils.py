@@ -8,9 +8,17 @@
 # nor does it submit to any jurisdiction.
 
 
-from torch import Tensor
+import logging
+from typing import Optional
+
+from hydra.errors import InstantiationException
+from hydra.utils import instantiate
 from torch import nn
 from torch.utils.checkpoint import checkpoint
+
+from anemoi.utils.config import DotDict
+
+LOGGER = logging.getLogger(__name__)
 
 
 class CheckpointWrapper(nn.Module):
@@ -24,16 +32,33 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
-class AutocastLayerNorm(nn.LayerNorm):
-    """LayerNorm that casts the output back to the input type."""
+def load_layer_kernels(kernel_config: Optional[DotDict] = {}) -> DotDict:
+    """Load layer kernels from the config.
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    Args:
+        kernel_config : Optional[DotDict]
+            Kernel configuration
 
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward with explicit autocast back to the input type.
+    Returns:
+        DotDict: hydra partial instantiation of the layer kernels
+    """
+    # If self.layer_kernels entry is missing from the config, use torch.nn kernels
+    default_kernels = {
+        "Linear": {"_target_": "torch.nn.Linear", "_partial_": True},
+        "LayerNorm": {"_target_": "torch.nn.LayerNorm", "_partial_": True},
+    }
+    layer_kernels = {**default_kernels, **kernel_config}
 
-        This casts the output to (b)float16 (instead of float32) when we run in mixed
-        precision.
-        """
-        return super().forward(x).type_as(x)
+    # Loop through all kernels in the layer_kernels config entry and try import them
+    for kernel in layer_kernels:
+        kernel_entry = layer_kernels[kernel]
+        try:
+            instantiate(kernel_entry)
+        except InstantiationException:
+            LOGGER.info(
+                f"{kernel_entry['_target_']} not found! check your config.model.layer_kernel.{kernel} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+            )
+            raise InstantiationException
+        else:
+            LOGGER.info(f"{kernel} kernel: {kernel_entry}")
+    return layer_kernels

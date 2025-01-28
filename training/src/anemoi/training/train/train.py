@@ -417,7 +417,7 @@ class AnemoiTrainer:
         )
 
         if self.config.diagnostics.print_memory_summary:
-            LOGGER.debug("memory summary: %s", torch.cuda.memory_summary())
+            LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
 
         LOGGER.debug("---- DONE. ----")
 

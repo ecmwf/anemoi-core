@@ -1,0 +1,8 @@
+nodes:
+  data:
+    node_builder: ...
+    attributes:
+      weights:
+        _target_: anemoi.graphs.nodes.attributes.UniformWeights
+        norm: unit-max # options: unit-max, unit-sum
+  hidden: ...

@@ -10,6 +10,10 @@ Keep it human-readable, your future self will thank you!
 
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.3.2...HEAD)
 
+### Fixed
+
+- Profilers 'Model Summary' feature works when the model is sharded across GPUs [#90](https://github.com/ecmwf/anemoi-core/pull/90)
+
 ## [0.3.2 - Multiple Fixes, Checkpoint updates, Stretched-grid/LAM updates](https://github.com/ecmwf/anemoi-training/compare/0.3.1...0.3.2) - 2024-12-19
 
 ### Fixed
@@ -35,6 +39,7 @@ Keep it human-readable, your future self will thank you!
 - Add supporting arrrays (numpy) to checkpoint
 - Support for masking out unconnected nodes in LAM [#171](https://github.com/ecmwf/anemoi-training/pull/171)
 - Improved validation metrics, allow 'all' to be scaled [#202](https://github.com/ecmwf/anemoi-training/pull/202)
+- Added default configuration files for hierarchical processor [175](https://github.com/ecmwf/anemoi-training/pull/175)
 
 ### Changed
 
