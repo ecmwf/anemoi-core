@@ -166,5 +166,19 @@ run using the following command:
    anemoi-training validate --name debug.yaml
 
 This will check that the configuration is valid and that all the
-required fields are present. To turn the validation off, you can use the
-`--no-validate` flag.
+required fields are present. If your config is correctly defined then
+the command will show an output similar to:
+
+.. code:: python
+
+   2025-01-28 09:37:23 INFO Validating configs.
+   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
+   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   cfg = BaseSchema(**cfg)
+   2025-01-28 09:37:23 INFO Config files validated.
+
+Otherwise if there is an issue with some of your configuration fields,
+Pydantic will report an error message. See below example where we have a
+`debug.yaml` file with a field not correctly indented (in this case the
+`diagnostics.log` field):
