@@ -1,0 +1,90 @@
+---
+overwrite: True
+
+data: "data"
+hidden:
+ - "hidden_1"
+ - "hidden_2"
+
+
+nodes:
+  # Data nodes
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      dataset: ${dataloader.dataset}
+    attributes: ${graph.attributes.nodes}
+  hidden_1:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5
+  hidden_2:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 4
+
+edges:
+  # Encoder configuration
+  - source_name: "data"
+    target_name: "hidden_1"
+    edge_builder:
+      _target_: anemoi.graphs.edges.CutOffEdges
+      cutoff_factor: 0.6
+    attributes: ${graph.attributes.edges}
+
+    # Decoder configuration
+  - source_name: "hidden_1"
+    target_name: "data"
+    edge_builder:
+      _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+    attributes: ${graph.attributes.edges}
+
+  # Hierarchical connections: downscale
+  - source_name: "hidden_1"
+    target_name: "hidden_2"
+    edge_builder: ${graph.edge_builders.downscale}
+    attributes: ${graph.attributes.edges}
+
+  # Hierarchical connections: upscale
+  - source_name: "hidden_2"
+    target_name: "hidden_1"
+    edge_builder: ${graph.edge_builders.upscale}
+    attributes: ${graph.attributes.edges}
+
+  # Hierarchical connections: same level
+  - source_name: "hidden_1"
+    target_name: "hidden_1"
+    edge_builder: ${graph.edge_builders.process}
+    attributes: ${graph.attributes.edges}
+
+  - source_name: "hidden_2"
+    target_name: "hidden_2"
+    edge_builder: ${graph.edge_builders.process}
+    attributes: ${graph.attributes.edges}
+
+
+#############
+edge_builders:
+  downscale:
+    _target_: anemoi.graphs.edges.CutOffEdges
+    cutoff_factor: 1.5
+  process:
+    _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+  upscale:
+    _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 5
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.AreaWeights # options: Area, Uniform
+      norm: unit-max  # options: l1, l2, unit-max, unit-sum, unit-std
+  edges:
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
