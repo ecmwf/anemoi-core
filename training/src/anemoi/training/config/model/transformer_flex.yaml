@@ -21,6 +21,11 @@ encoder:
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
   dropout_p: 0.0
+  # kernel_options:
+  #   BLOCK_M: 64
+  #   BLOCK_N: 64
+  #   HAS_FULL_BLOCKS: 1
+  #   ROWS_GUARANTEED_SAFE: True
 
 decoder:
   _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
@@ -36,16 +41,19 @@ encoder_block_mask:
   method: knn_haversine # knn_adjacency_matrix, knn_index_matrix, haversine, knn_haversine
   base_grid: keyvalue
   attention_span: 3
+  block_size: [128,128]
 
 processor_block_mask:
   method: knn_haversine # knn_adjacency_matrix, knn_index_matrix, haversine, knn_haversine
   base_grid: query
   attention_span: 3
+  block_size: [128,128]
 
 decoder_block_mask:
   method: knn_haversine # knn_adjacency_matrix, knn_index_matrix, haversine, knn_haversine
   base_grid: query
   attention_span: 3
+  block_size: [128,128]
 
 
 trainable_parameters:

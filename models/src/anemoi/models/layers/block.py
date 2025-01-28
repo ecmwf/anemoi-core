@@ -33,7 +33,7 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
-
+from anemoi.models.layers.attention import BlockMaskManager
 LOGGER = logging.getLogger(__name__)
 
 # Number of Mapper chunks used during inference (https://github.com/ecmwf/anemoi-models/pull/46)
@@ -70,7 +70,8 @@ class TransformerProcessorBlock(BaseBlock):
         activation: str,
         window_size: int,
         dropout_p: float = 0.0,
-        block_mask: Optional = None,
+        block_mask: Optional[BlockMaskManager] = None,
+        kernel_options: Optional[dict] = None,
     ):
         super().__init__()
 
@@ -90,6 +91,7 @@ class TransformerProcessorBlock(BaseBlock):
             is_causal=False,
             dropout_p=dropout_p,
             block_mask=block_mask,
+            kernel_options=kernel_options,
         )
 
         self.mlp = nn.Sequential(
@@ -119,7 +121,8 @@ class TransformerMapperBlock(BaseBlock):
         activation: str,
         window_size: int,
         dropout_p: float = 0.0,
-        block_mask: Optional = None,
+        block_mask: Optional[BlockMaskManager] = None,
+        kernel_options: Optional[dict] = None,
     ):
 
         try:
@@ -138,6 +141,7 @@ class TransformerMapperBlock(BaseBlock):
             is_causal=False,
             dropout_p=dropout_p,
             block_mask=block_mask,
+            kernel_options=kernel_options,
         )
 
         self.mlp = nn.Sequential(

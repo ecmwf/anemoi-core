@@ -24,7 +24,7 @@ from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.utils.config import DotDict
 from anemoi.training.utils.debug_hydra import instantiate_debug
-
+from anemoi.models.layers.attention import BlockMaskManager, calculate_scaled_attention_attention_spans
 
 
 LOGGER = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self.node_attributes = NamedNodesAttributes(config.model.trainable_parameters.hidden, self._graph_data)
 
-        self.initialise_encoder_decoder(config)
+        self.intialise_encoder_processor_decoder(config)
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
@@ -245,6 +245,35 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
     - GraphTransformerForwardMapper
     - GraphTransformerBackwardMapper
     """
+    def initialise_block_masks(self, config: DotDict):
+        self.map_spanSrcTgtBasegrid_blockmask_manager_manager = {}
+        self.map_spanSrcTgtBasegrid_blockmask_manager = {}
+
+        # setup block masks for encoder transformer processors
+        for source_grid_name, target_grid_name in zip(self.list_graph_name_encoder, self.list_graph_name_encoder[1:]):
+
+            bmc = BlockMaskManager(
+                self._graph_data,
+                **config.model.encoder_processor_block_mask,
+                query_grid_name=source_grid_name,
+                keyvalue_grid_name=source_grid_name,
+                base_attention_span_grid=self._input_grid_name,
+            )
+            self.map_spanSrcTgtBasegrid_blockmask_manager_manager[bmc.signature()] = bmc
+
+        # setup block masks for decoder
+        for source_grid_name, target_grid_name in zip(self.list_graph_name_decoder, self.list_graph_name_decoder[1:]):
+
+            # Processor
+            bmc = BlockMaskManager(
+                self._graph_data,
+                **config.model.decoder_processor_block_mask,
+                query_grid_name=source_grid_name,
+                keyvalue_grid_name=source_grid_name,
+                base_attention_span_grid=self._input_grid_name,
+            )
+            self.map_spanSrcTgtBasegrid_blockmask_manager_manager[bmc.signature()] = bmc
+
 
     def initialise_encoder_processor_decoder(self, config: DotDict):
         
@@ -252,8 +281,7 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
 
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
-        self.processor_attention_span = config.processor_block_mask.attention_span
-
+        # Initiate encoder
         self.encoder = instantiate_debug(
                     config.model.encoder,
                     in_channels_src=input_dim,
@@ -264,12 +292,17 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
                     dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden]
         )
 
-        processor_grid_name = self._graph_name_hidden
+        # Initiate processor
+        self.processor_attention_span = config.model.processor_block_mask.attention_span
+        processor_src_grid_name = self._graph_name_hidden
+        processor_dst_grid_name = self._graph_name_hidden
+        processor_base_grid = config.model.processor_block_mask.base_grid
+
         self.processor = instantiate_debug(
             config.model.processor,
             num_channels=self.num_channels,
-            processor_block_mask=self.map_spanSrcTgtBasegrid_blockmask[
-                (self.processor_attention_span, processor_grid_name, processor_grid_name, False)
+            processor_block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
+                (self.processor_attention_span, processor_src_grid_name, processor_dst_grid_name, processor_base_grid)
             ],
                 )
 
@@ -285,39 +318,7 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )
 
-    def initialise_block_masks(self, config: DotDict):
-        from anemoi.models.layers.flex_attention import BlockMaskCreator
-        
-
-        # NOTE: improve this disbursement across devices strategy
-        devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
-
-        self.map_spanSrcTgtBasegrid_blockmask_creator = {}
-        self.map_spanSrcTgtBasegrid_blockmask = {}
-        
-        # Setting up block mask for processor
-        processor_grid_name = self._graph_name_hidden
-        self.processor_attention_span = config.processor_block_mask.attention_span
-
-        bmc = BlockMaskCreator(
-            graph=self._graph_data,
-            query_grid_name=processor_grid_name,
-            keyvalue_grid_name=processor_grid_name,
-            devices=devices,
-            **config.model.processor_block_mask
-            # base_grid="query",
-            # method="knn_haversine",
-        )
-
-        self.map_spanSrcTgtBasegrid_blockmask[(self.processor_attention_span, processor_grid_name, processor_grid_name, False)] = (
-            bmc.setup_block_mask()
-        )
-        # NOTE: this line below is to make sure the BMC class persists in the memory (otherwise (i think) it may get garbage collected)
-        # - stopping it being gc'd was useful when I had a different strategy for moving the block mask to the correct device. Not sure if this is necessary
-        # now
-        self.map_spanSrcTgtBasegrid_blockmask_creator[(self.processor_attention_span, processor_grid_name, processor_grid_name, False)] = bmc
-
-
+ 
 class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
     """Vector Quantized Variational Autoencoder.
 
@@ -327,8 +328,69 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
     - TransformerBackwardMapper
 
     """
+    
+    def initialise_block_masks(self, config: DotDict):
+        from anemoi.models.layers.attention import BlockMaskCreator
+        
 
-    def initialise_encoder_decoder(self, config: DotDict):
+        # Setup block masks
+        self.map_spanSrcTgtBasegrid_blockmask_manager = {}
+        
+        # region: Processor
+        processor_grid_name = self._graph_name_hidden
+        attention_span = config.processor_block_mask.attention_span
+
+        bmc = BlockMaskManager(
+            self._graph_data,
+            **config.model.processor_block_mask,
+            query_grid_name=processor_grid_name,
+            keyvalue_grid_name=processor_grid_name,
+            base_attention_span_grid=self._input_grid_name,
+        )
+
+        self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = (
+            bmc
+        )
+        # endregion
+        
+        # region: Encoder
+        encoder_grid_name_src = self._graph_name_data
+        encoder_grid_name_dst = self._graph_name_hidden
+
+        bmc = BlockMaskManager(
+            self._graph_data,
+            **config.model.encoder_block_mask,
+            query_grid_name=encoder_grid_name_dst,
+            keyvalue_grid_name=encoder_grid_name_src,
+            base_attention_span_grid=self._input_grid_name,
+        )
+
+        self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = (
+            bmc
+        )
+
+        # endregion
+
+        # region: Decoder
+        decoder_grid_name_src = self._graph_name_hidden
+        decoder_grid_name_dst = self._graph_name_data
+
+        bmc = BlockMaskManager(
+            self._graph_data,
+            **config.model.decoder_block_mask,
+            query_grid_name=decoder_grid_name_dst,
+            keyvalue_grid_name=decoder_grid_name_src,
+            base_attention_span_grid=self._input_grid_name,
+        )
+
+        self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = (
+            bmc
+        )
+
+        # endregion
+
+
+    def intialise_encoder_processor_decoder(self, config: DotDict):
         self.initialise_block_masks(config)
 
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
@@ -345,7 +407,7 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
                 in_channels_src=input_dim,
                 in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
                 hidden_dim=self.num_channels,
-                block_mask=self.map_spanSrcTgtBasegrid_blockmask[
+                block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
                     (self.mapper_attention_span, encoder_src_grid_name, encoder_dst_grid_name, encoder_base_grid)
                 ],
         )
@@ -358,7 +420,7 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
         self.processor = instantiate_debug(
             config.model.processor,
             num_channels=self.num_channels,
-            processor_block_mask=self.map_spanSrcTgtBasegrid_blockmask[
+            processor_block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
                 (self.processor_attention_span, processor_src_grid_name, processor_dst_grid_name, processor_base_grid)
             ],
         )
@@ -374,80 +436,9 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
             in_channels_dst=input_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.num_output_channels,
-            block_mask=self.map_spanSrcTgtBasegrid_blockmask[
+            block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
                 (self.decoder_attention_span, decoder_src_grid_name, decoder_dst_grid_name, decoder_base_grid)
             ],
         )
 
 
-    def initialise_block_masks(self, config: DotDict):
-        from anemoi.models.layers.flex_attention import BlockMaskCreator
-        
-
-        # NOTE: improve this disbursement across devices strategy
-        devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
-
-        self.map_spanSrcTgtBasegrid_blockmask_creator = {}
-        self.map_spanSrcTgtBasegrid_blockmask = {}
-        
-        # region: Setting up block mask for processor
-        processor_grid_name = self._graph_name_hidden
-        attention_span = config.processor_block_mask.attention_span
-
-        bmc = BlockMaskCreator(
-            graph=self._graph_data,
-            query_grid_name=processor_grid_name,
-            keyvalue_grid_name=processor_grid_name,
-            devices=devices,
-            **config.model.processor_block_mask
-            # base_grid="query",
-            # method="knn_haversine",
-        )
-
-        self.map_spanSrcTgtBasegrid_blockmask[(attention_span, processor_grid_name, processor_grid_name, config.model.processor_block_mask.base_grid)] = (
-            bmc.setup_block_mask()
-        )
-        # NOTE: this line below is to make sure the BMC class persists in the memory (otherwise (i think) it may get garbage collected)
-        # - stopping it being gc'd was useful when I had a different strategy for moving the block mask to the correct device. Not sure if this is necessary
-        # now
-        self.map_spanSrcTgtBasegrid_blockmask_creator[(attention_span, processor_grid_name, processor_grid_name, config.model.processor_block_mask.base_grid)] = bmc
-
-        # endregion: Setting up block masks for processor
-        
-        # region: Setting up block masks for encoder
-        encoder_grid_name_src = self._graph_name_data
-        encoder_grid_name_dst = self._graph_name_hidden
-
-        bmc = BlockMaskCreator(
-            graph=self._graph_data,
-            query_grid_name=encoder_grid_name_dst,
-            keyvalue_grid_name=encoder_grid_name_src,
-            devices=devices,
-            **config.model.encoder_block_mask
-        )
-
-        self.map_spanSrcTgtBasegrid_blockmask[(attention_span, encoder_grid_name_src, encoder_grid_name_dst, config.model.encoder_block_mask.base_grid)] = (
-            bmc.setup_block_mask()
-        )
-        self.map_spanSrcTgtBasegrid_blockmask_creator[(attention_span, encoder_grid_name_src, encoder_grid_name_dst, config.model.encoder_block_mask.base_grid)] = bmc
-
-        # endregion: Setting up block masks for encoder
-
-        # region: Setting up block masks for decoder
-        decoder_grid_name_src = self._graph_name_hidden
-        decoder_grid_name_dst = self._graph_name_data
-
-        bmc = BlockMaskCreator(
-            graph=self._graph_data,
-            query_grid_name=decoder_grid_name_dst,
-            keyvalue_grid_name=decoder_grid_name_src,
-            devices=devices,
-            **config.model.decoder_block_mask
-        )
-
-        self.map_spanSrcTgtBasegrid_blockmask[(attention_span, decoder_grid_name_src, decoder_grid_name_dst, config.model.decoder_block_mask.base_grid)] = (
-            bmc.setup_block_mask()
-        )
-        self.map_spanSrcTgtBasegrid_blockmask_creator[(attention_span, decoder_grid_name_src, decoder_grid_name_dst, config.model.decoder_block_mask.base_grid)] = bmc
-
-        # endregion: Setting up block masks for decoder
