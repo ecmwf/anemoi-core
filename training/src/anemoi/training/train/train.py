@@ -163,6 +163,10 @@ class AnemoiTrainer:
                 if self.config.training.transfer_learning:
                     LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
                     model = transfer_learning_loading(model, self.last_checkpoint)
+                else:
+                    LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
+                    model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                    
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
