@@ -15,7 +15,6 @@ from typing import Annotated
 
 from pydantic import AfterValidator
 from pydantic import BaseModel
-from pydantic import DirectoryPath
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import field_validator
@@ -46,20 +45,20 @@ class FilesSchema(BaseModel):
 
 class Logs(BaseModel):
     # TODO(Helen): Discuss merging with logging in diagnsotics
-    wandb: DirectoryPath | None = None
+    wandb: Path | None = None
     "Path to output wandb logs."
-    mlflow: DirectoryPath | None = None
+    mlflow: Path | None = None
     "Path to output mlflow logs."
-    tensorboard: DirectoryPath | None = None
+    tensorboard: Path | None = None
     "Path to output tensorboard logs."
 
 
 class PathsSchema(BaseModel):
-    data: DirectoryPath
+    data: Path
     "Path to the data directory."
-    grids: DirectoryPath
+    grids: Path
     "Path to the grids directory."
-    graph: DirectoryPath
+    graph: Path
     "Path to the graph directory."
     output: Path
     "Path to the output directory."
