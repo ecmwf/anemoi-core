@@ -36,7 +36,7 @@ class BaseEdgeAttribute(ABC, NormaliserMixin):
         if values.ndim == 1:
             values = values[:, np.newaxis]
 
-        normalised_values  = self.normalise(values)
+        normalised_values = self.normalise(values)
 
         return torch.tensor(normalised_values.astype(self.dtype))
 
