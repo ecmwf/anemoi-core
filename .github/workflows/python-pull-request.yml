@@ -1,0 +1,128 @@
+name: Test PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - develop
+  schedule:
+    - cron: "9 2 * * 0" # at 9:02 on sunday
+  workflow_dispatch:
+
+jobs:
+  quality:
+    uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-precommit-run.yml@v2
+    with:
+      skip-hooks: "no-commit-to-branch"
+
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["ubuntu-latest", "macos-latest"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        install-mode: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'skip-ci-release-tests')) && fromJSON('["all"]') || fromJSON('["local-changes", "all"]')) }} # This selects the install mode based on the event type and the labels of the PR
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install test dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-md pytest-emoji
+
+    - name: Detect changed packages
+      id: changed-packages
+      run: |
+        if [ "${{ github.event_name }}" == "pull_request" ]; then
+          # For pull requests, compare with the PR base
+          MERGE_BASE=$(git merge-base origin/${{ github.event.pull_request.base.ref }} ${{ github.event.pull_request.head.sha }})
+          CHANGED_FILES=$(git diff --name-only $MERGE_BASE...${{ github.event.pull_request.head.sha }})
+        elif [ "${{ github.event_name }}" == "push" ]; then
+          # For pushes, compare with the previous commit
+          CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+        else
+          # For scheduled runs, check all files
+          CHANGED_FILES=$(git ls-files '*.py')
+        fi
+
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
+
+        echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        echo "integration_changed=$(echo "$CHANGED_FILES" | grep -q '^tests/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+    - name: Install packages
+      if: (steps.changed-packages.outputs.integration_changed == 'true' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true')
+      run: |
+        PACKAGES=""
+
+        if [[ ${{ matrix.install-mode }} == 'local-changes' ]]; then
+          # Install from local if changed, otherwise from PyPI
+          if [[ ${{ steps.changed-packages.outputs.training_changed }} == 'true' ]]; then
+            PACKAGES="$PACKAGES -e ./training[all,tests]"
+          else
+            PACKAGES="$PACKAGES anemoi-training[all,tests]"
+          fi
+
+          if [[ ${{ steps.changed-packages.outputs.graphs_changed }} == 'true' ]]; then
+            PACKAGES="$PACKAGES -e ./graphs[all,tests]"
+          else
+            PACKAGES="$PACKAGES anemoi-graphs[all,tests]"
+          fi
+
+          if [[ ${{ steps.changed-packages.outputs.models_changed }} == 'true' ]]; then
+            PACKAGES="$PACKAGES -e ./models[all,tests]"
+          else
+            PACKAGES="$PACKAGES anemoi-models[all,tests]"
+          fi
+        else
+          # Install all packages from local
+          PACKAGES="-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
+        fi
+
+        pip install $PACKAGES
+
+    - name: Run pytest for training package
+      if: matrix.install-mode == 'all' || steps.changed-packages.outputs.training_changed == 'true'
+      uses: pavelzw/pytest-action@v2
+      with:
+        report-title: "Test report Anemoi Training (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
+        custom-pytest: pytest ./training
+
+    - name: Run pytest for graphs package
+      if: matrix.install-mode == 'all' || steps.changed-packages.outputs.graphs_changed == 'true'
+      uses: pavelzw/pytest-action@v2
+      with:
+        report-title: "Test report Anemoi Graphs (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
+        custom-pytest: pytest ./graphs
+
+    - name: Run pytest for models package
+      if: matrix.install-mode == 'all' || steps.changed-packages.outputs.models_changed == 'true'
+      uses: pavelzw/pytest-action@v2
+      with:
+        report-title: "Test report Anemoi Models (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
+        custom-pytest: pytest ./models
+
+    - name: Run integration tests
+      if: success() && (steps.changed-packages.outputs.integration_changed == 'true' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true')
+      uses: pavelzw/pytest-action@v2
+      timeout-minutes: 30
+      with:
+        report-title: "Test report Anemoi Core Integration (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
+        custom-pytest: pytest tests/

@@ -10,8 +10,10 @@
 
 import pytest
 import torch
+from hydra.utils import instantiate
 
 from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 @pytest.fixture
@@ -25,8 +27,10 @@ def transformer_processor_init():
     num_heads = 16
     mlp_hidden_ratio = 4
     dropout_p = 0.1
+    layer_kernels = instantiate(load_layer_kernels())
     return (
         num_layers,
+        layer_kernels,
         window_size,
         num_channels,
         num_chunks,
@@ -42,6 +46,7 @@ def transformer_processor_init():
 def transformer_processor(transformer_processor_init):
     (
         num_layers,
+        layer_kernels,
         window_size,
         num_channels,
         num_chunks,
@@ -53,6 +58,7 @@ def transformer_processor(transformer_processor_init):
     ) = transformer_processor_init
     return TransformerProcessor(
         num_layers=num_layers,
+        layer_kernels=layer_kernels,
         window_size=window_size,
         num_channels=num_channels,
         num_chunks=num_chunks,
@@ -67,6 +73,7 @@ def transformer_processor(transformer_processor_init):
 def test_transformer_processor_init(transformer_processor, transformer_processor_init):
     (
         num_layers,
+        _layer_kernels,
         _window_size,
         num_channels,
         num_chunks,
@@ -85,6 +92,7 @@ def test_transformer_processor_init(transformer_processor, transformer_processor
 def test_transformer_processor_forward(transformer_processor, transformer_processor_init):
     (
         _num_layers,
+        _layer_kernels,
         _window_size,
         num_channels,
         _num_chunks,
