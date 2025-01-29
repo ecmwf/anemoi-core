@@ -436,16 +436,17 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
         )
 
     def fill_with_value(self, x, index, nan_locations):
-        # Replace values
-        for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
-            if idx_dst is not None:
-                assert not torch.isnan(
-                    x[..., self.data_indices.data.input.name_to_index[value]][nan_locations[..., idx_src]]
-                ).any(), f"NaNs found in {value}."
-                x[..., idx_dst][nan_locations[..., idx_src]] = x[
-                    ..., self.data_indices.data.input.name_to_index[value]
-                ][nan_locations[..., idx_src]]
 
+        if x.shape[-1] == self.num_training_input_vars:
+            indices = self.data_indices.data.input.name_to_index
+        elif x.shape[-1] == self.num_inference_input_vars:
+            indices = self.data_indices.model.input.name_to_index
+
+        # Replace values
+        for idx, value in zip(index, self.replacement):
+            if idx is not None:
+                assert not torch.isnan(x[..., indices[value]][nan_locations[..., idx]]).any(), f"NaNs found in {value}."
+                x[..., idx][nan_locations[..., idx]] = x[..., indices[value]][nan_locations[..., idx]]
         return x
 
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
