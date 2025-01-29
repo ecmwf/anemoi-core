@@ -111,7 +111,6 @@ class MultiHeadSelfAttention(nn.Module):
     def set_attention_function(self):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
-            "flex_attention": FlexAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
         assert (
@@ -120,16 +119,8 @@ class MultiHeadSelfAttention(nn.Module):
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
         LOGGER.info(f"Using {self.attention_implementation}")
 
-        if self.attention_implementation == "flex_attention":
-            assert (
-                self.embed_dim / self.num_heads >= 16
-            ), f"Embedding dimension ({self.embed_dim}) divided by number of heads ({self.num_heads}) must be >= 16."
-            assert math.log2(
-                self.embed_dim
-            ).is_integer(), f"Embedding dimension must be a power of 2. {self.embed_dim} is not valid."
-
-            # initalise the attn func here
-            self.attention = attn_funcs[self.attention_implementation]()
+        # initalise the attn func here
+        self.attention = attn_funcs[self.attention_implementation]()
 
     def forward(
         self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
@@ -233,77 +224,6 @@ class SDPAAttentionWrapper(nn.Module):
                 is_causal=causal,
                 dropout_p=dropout_p,
             )
-
-        return out
-
-
-class FlexAttentionWrapper(nn.Module):
-    """Wrapper for Pytorch Flex attention."""
-
-    def __init__(self):
-        super().__init__()
-
-        if version.parse(torch.__version__) < version.parse("2.5.0"):
-            raise RuntimeError("Error: torch version is too low. Update to 2.5.0 or higher to use Flex Attention.")
-
-        # we compile flex attn once at the first iteration
-        # This is bc we need to know the seq len to compute the mask mod for sliding window
-        self.is_attn_compiled = False
-
-    def forward(
-        self,
-        query,
-        key,
-        value,
-        batch_size: int,
-        causal: bool = False,
-        window_size: int = None,
-        dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
-        alibi_slopes: torch.Tensor = None,
-    ):
-
-        if alibi_slopes is not None:
-            NotImplementedError("Error. Alibi_slopes not yet implemented in FlexAttn in Anemoi.")
-        if softcap is not None:
-            NotImplementedError("Error. Softcap not yet implemented in FlexAttn in Anemoi.")
-        if dropout_p != 0.0:
-            NotImplementedError("Error. Dropout not yet implemented in FlexAttn in Anemoi.")
-        if causal:
-            NotImplementedError("Error. Causal not yet implemented in FlexAttn in Anemoi.")
-
-        # This assumes seq_len never changes
-        # across iterations and stages
-        # could add something like
-        #   if query.shape[2] != prev_seq_len:
-        #       self.is_attn_compiled = False
-        # To trigger a recompilation
-        if not self.is_attn_compiled:
-            import functools
-
-            from torch.nn.attention.flex_attention import create_block_mask  # should this be after the version check?
-            from torch.nn.attention.flex_attention import flex_attention
-
-            if window_size is not None:
-
-                def sliding_window_mask(b, h, q_idx, kv_idx):
-                    return abs(q_idx - kv_idx) <= window_size
-
-                seq_len = query.shape[2]
-                self.block_mask = create_block_mask(
-                    sliding_window_mask, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len, _compile=True
-                )
-                self.attention = functools.partial(
-                    flex_attention, block_mask=self.block_mask
-                )  # Cache the block mask (recomended in attn blog post)
-            else:
-                self.attention = flex_attention
-            self.attention = torch.compile(self.attention)
-            self.is_attn_compiled = True
-
-        torch._dynamo.config.optimize_ddp = False
-        out = self.attention(query, key, value)
-        torch._dynamo.config.optimize_ddp = True
 
         return out
 
