@@ -30,7 +30,7 @@ class GradientClip(BaseModel):
     val: float = 32.0
     "Gradient clipping value."
     algorithm: Annotated[str, AfterValidator(partial(allowed_values, values=["value", "norm"]))] = Field(
-        default="value",
+        example="value",
     )
     "The gradient clipping algorithm to use"
 
@@ -41,20 +41,20 @@ class SWA(BaseModel):
     See https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
     """
 
-    enabled: bool = Field(default=False)
+    enabled: bool = Field(example=False)
     "Enable stochastic weight averaging."
-    lr: NonNegativeFloat = Field(default=1.0e-4)
+    lr: NonNegativeFloat = Field(example=1.0e-4)
     "Learning rate for SWA."
 
 
 class Rollout(BaseModel):
     """Rollout configuration."""
 
-    start: PositiveInt = Field(default=1)
+    start: PositiveInt = Field(example=1)
     "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(default=0)
+    epoch_increment: NonNegativeInt = Field(example=0)
     "Number of epochs to increment the rollout."
-    max: PositiveInt = Field(default=1)
+    max: PositiveInt = Field(example=1)
     "Maximum number of rollouts."
 
 
@@ -65,13 +65,13 @@ class LR(BaseModel):
     in order to keep a constant global_lr global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model.
     """
 
-    rate: NonNegativeFloat = Field(default=0.625e-4)  # TODO(Helen): Could be computed by pydantic
+    rate: NonNegativeFloat = Field(example=0.625e-4)  # TODO(Helen): Could be computed by pydantic
     "Initial learning rate. Is adjusteed according to the hardware configuration"
-    iterations: NonNegativeInt = Field(default=300000)
+    iterations: NonNegativeInt = Field(example=300000)
     "Number of iterations."
-    min: NonNegativeFloat = Field(default=3e-7)
+    min: NonNegativeFloat = Field(example=3e-7)
     "Minimum learning rate."
-    warmup_t: NonNegativeInt = Field(default=1000)
+    warmup_t: NonNegativeInt = Field(example=1000)
     "Number of warm up iteration. Default to 1000."
 
 
@@ -94,10 +94,10 @@ class PressureLevelScalerTargets(str, Enum):
 
 class PressureLevelScalerSchema(BaseModel):
     target_: PressureLevelScalerTargets = Field(
-        default="anemoi.training.data.scaling.ReluPressureLevelScaler",
+        example="anemoi.training.data.scaling.ReluPressureLevelScaler",
         alias="_target_",
     )
-    minimum: float = Field(default=0.2)
+    minimum: float = Field(example=0.2)
     "Minimum value of the scaling function."
     slope: float = 0.001
     "Slope of the scaling function."
@@ -116,7 +116,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
-    scalars: list[PossibleScalars] = Field(default=["variable"])
+    scalars: list[PossibleScalars] = Field(example=["variable"])
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
@@ -155,29 +155,29 @@ class NodeLossWeightsSchema(BaseModel):
 class TrainingSchema(BaseModel):
     """Training configuration."""
 
-    run_id: str | None = Field(default=None)
+    run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
-    fork_run_id: str | None = Field(default=None)
+    fork_run_id: str | None = Field(example=None)
     "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
-    load_weights_only: bool = Field(default=False)
+    load_weights_only: bool = Field(example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
     deterministic: bool = Field(deafult=False)
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
     precision: str = Field(deafult="16-mixed")
     "Precision"
-    multistep_input: PositiveInt = Field(default=2)
+    multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
     accum_grad_batches: PositiveInt = Field(deafult=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
-    num_sanity_val_steps: PositiveInt = Field(default=6)
+    num_sanity_val_steps: PositiveInt = Field(example=6)
     "Sanity check runs n batches of val before starting the training routine."
     gradient_clip: GradientClip = Field(default_factory=GradientClip)
     "Config for gradient clipping."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
-    zero_optimizer: bool = Field(default=False)
+    zero_optimizer: bool = Field(example=False)
     "use ZeroRedundancyOptimizer, saves memory for larger models."
     training_loss: BaseLossSchema
     "Training loss configuration."

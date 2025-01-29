@@ -41,9 +41,9 @@ class Model(BaseModel):
 
 
 class TrainableParameters(BaseModel):
-    data: NonNegativeInt = Field(default=8)
+    data: NonNegativeInt = Field(example=8)
     "Size of the learnable data node tensor. Default to 8."
-    hidden: NonNegativeInt = Field(default=8)
+    hidden: NonNegativeInt = Field(example=8)
     "Size of the learnable hidden node tensor. Default to 8."
 
 
@@ -80,7 +80,7 @@ class HardtanhBoundingSchema(BaseModel):
 
 
 class BaseModelConfig(BaseModel):
-    num_channels: NonNegativeInt = Field(default=512)
+    num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     model: Model = Field(default_factory=Model)
     "Model schema."
@@ -88,8 +88,8 @@ class BaseModelConfig(BaseModel):
     "Learnable node and edge parameters."
     bounding: list[ReluBoundingSchema | HardtanhBoundingSchema | FractionBoundingSchema]
     "List of bounding configuration applied in order to the specified variables."
-    output_mask: str | None = Field(default=None)
-    "Output mas, it must be a node attribute of the output nodes"
+    output_mask: str | None = Field(example=None)  # !TODO CHECK!
+    "Output mask, it must be a node attribute of the output nodes"
 
 
 class GNNSchema(BaseModelConfig):

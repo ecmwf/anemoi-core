@@ -31,24 +31,24 @@ class LongRolloutPlotsSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    video_rollout: int = Field(default=0)
+    video_rollout: int = Field(example=0)
     "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: list[float] | None = Field(default=None)
+    accumulation_levels_plot: list[float] | None = Field(example=None)
     "Accumulation levels to plot, by default None."
-    cmap_accumulation: list[str] | None = Field(default=None)
+    cmap_accumulation: list[str] | None = Field(example=None)
     "Colors of the accumulation levels, by default None."
-    per_sample: int = Field(default=6)
+    per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
-    every_n_epochs: int = Field(default=1)
+    every_n_epochs: int = Field(example=1)
     "Epoch frequency to plot at, by default 1."
-    animation_interval: int = Field(default=400)
+    animation_interval: int = Field(example=400)
     "Delay between frames in the animation in milliseconds, by default 400."
 
 
 class GraphTrainableFeaturesPlotSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
     "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
-    every_n_epochs: int | None
+    every_n_epochs: int | None  # !HERE WHAT?
     "Epoch frequency to plot at."
 
 
@@ -57,7 +57,7 @@ class PlotLossSchema(BaseModel):
     "PlotLoss object from anemoi training diagnostics callbacks."
     parameter_groups: dict[str, list[str]]
     "Dictionary with parameter groups with parameter names as key."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: int | None = Field(example=None)
     "Batch frequency to plot at."
 
 
@@ -72,11 +72,11 @@ class PlotSampleSchema(BaseModel):
     "Accumulation levels to plot."
     cmap_accumulation: list[str]
     "Colors of the accumulation levels."
-    precip_and_related_fields: list[str] | None = Field(default=None)
+    precip_and_related_fields: list[str] | None = Field(example=None)
     "List of precipitation related fields, by default None."
-    per_sample: int = Field(default=6)
+    per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: int | None = Field(example=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -87,7 +87,7 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: int | None = Field(example=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -98,9 +98,9 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    precip_and_related_fields: list[str] | None = Field(default=None)
+    precip_and_related_fields: list[str] | None = Field(example=None)
     "List of precipitation related fields, by default None."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: int | None = Field(example=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -127,14 +127,14 @@ class PlotSchema(BaseModel):
     "List of parameters to plot."
     precip_and_related_fields: list[str]
     "List of precipitation related fields from the parameters list."
-    callbacks: list[PlotCallbacks] = Field(default=[])
+    callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
 
 
 class PlottingFrequency(BaseModel):
-    batch: PositiveInt = Field(default=750)
+    batch: PositiveInt = Field(example=750)
     "Frequency of the plotting in number of batches."
-    epoch: PositiveInt = Field(default=5)
+    epoch: PositiveInt = Field(example=5)
     "Frequency of the plotting in number of epochs."
 
 
@@ -195,7 +195,7 @@ class MlflowSchema(BaseModel):
     "Whether to create a child run when resuming a run."
     expand_hyperparams: list[str] = Field(default_factory=lambda: ["config"])
     "Keys to expand within params. Any key being expanded will have lists converted according to `expand_iterables`."
-    http_max_retries: PositiveInt = Field(default=35)
+    http_max_retries: PositiveInt = Field(example=35)
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
 
 
@@ -216,29 +216,29 @@ class LoggingSchema(BaseModel):
 
 
 class MemorySchema(BaseModel):
-    enabled: bool = Field(default=False)
+    enabled: bool = Field(example=False)
     "Enable memory report. Default to false."
-    steps: PositiveInt = Field(default=5)
+    steps: PositiveInt = Field(example=5)
     "Frequency of memory profiling. Default to 5."
-    warmup: NonNegativeInt = Field(default=2)
+    warmup: NonNegativeInt = Field(example=2)
     "Number of step to discard before the profiler starts to record traces. Default to 2."
-    extra_plots: bool = Field(default=False)
+    extra_plots: bool = Field(example=False)
     "Save plots produced with torch.cuda._memory_viz.profile_plot if available. Default to false."
-    trace_rank0_only: bool = Field(default=False)
+    trace_rank0_only: bool = Field(example=False)
     "Trace only rank 0 from SLURM_PROC_ID. Default to false."
 
 
 class Snapshot(BaseModel):
-    enabled: bool = Field(default=False)
+    enabled: bool = Field(example=False)
     "Enable memory snapshot recording. Default to false."
-    steps: PositiveInt = Field(default=4)
+    steps: PositiveInt = Field(example=4)
     "Frequency of snapshot. Default to 4."
-    warmup: NonNegativeInt = Field(default=0)
+    warmup: NonNegativeInt = Field(example=0)
     "Number of step to discard before the profiler starts to record traces. Default to 0."
 
 
 class Profiling(BaseModel):
-    enabled: bool = Field(default=False)
+    enabled: bool = Field(example=False)
     "Enable component profiler. Default to false."
     verbose: bool | None = None
     "Set to true to include the full list of profiled action or false to keep it concise."
@@ -262,7 +262,7 @@ class BenchmarkProfilerSchema(BaseModel):
 class DiagnosticsSchema(BaseModel):
     plot: PlotSchema | None = None
     "Plot schema."
-    callbacks: Any = Field(default=[])
+    callbacks: Any = Field(example=[])
     "Callbacks schema."
     benchmark_profiler: BenchmarkProfilerSchema
     "Benchmark profiler schema for `profile` command."

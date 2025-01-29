@@ -21,6 +21,7 @@ from pydantic import model_validator
 class NormalizerSchema(BaseModel):
     default: str = Field(examples=["mean-std", "std", "min-max", "max", "none"])
     "Normalizer default method to apply"
+    # min-max is default None is because an optional NormalizerSchema
     min_max: str | None = Field(default=None)
     "Variables to normalize with min-max method."
     max: list[str] = Field(default_factory=list)
@@ -89,11 +90,11 @@ class DataSchema(BaseModel):
         The number of features in the forecast state. To be set in the code.
     """
 
-    format: str = Field(default=None)
+    format: str = Field(example=None)
     "Format of the data."
-    frequency: str = Field(default=None)
+    frequency: str = Field(example=None)
     "Time frequency requested from the dataset."
-    timestep: str = Field(default=None)
+    timestep: str = Field(example=None)
     "Time step of model (must be multiple of frequency)."
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \
@@ -102,7 +103,7 @@ class DataSchema(BaseModel):
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
     diagnostic: list[str] = Field(default_factory=list)
     "Features that are only part of the forecast state and are not used as an input to the model."
-    remapped: dict | None = Field(default=None)
+    remapped: dict | None = Field(example=None)
     "Dictionary of remapped names for variables."
-    num_features: int | None = Field(default=None)
+    num_features: int | None = Field(example=None)
     "Number of features in the forecast state. To be set in the code."

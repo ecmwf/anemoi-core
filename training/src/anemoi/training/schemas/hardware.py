@@ -36,7 +36,7 @@ class Checkpoint(BaseModel):
 class FilesSchema(BaseModel):
     dataset: Path  # TODO(Helen): Change to FilePath, only posisble after refactor
     "Path to the dataset file."
-    graph: Path | None = Field(default=None)
+    graph: Path | None = Field(example=None)
     "Path to the graph file."
     checkpoint: dict[str, str]
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."

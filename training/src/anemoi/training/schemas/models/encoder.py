@@ -24,7 +24,7 @@ class GNNEncoderSchema(GNNModelComponent):
 class GraphTransformerEncoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GraphTransformerForwardMapper"] = Field(..., alias="_target_")
     "Graph Transfromer Encoder object from anemoi.models.layers.mapper."
-    trainable_size: NonNegativeInt = Field(default=8)
+    trainable_size: NonNegativeInt = Field(example=8)
     "Size of trainable parameters vector. Default to 8."
-    sub_graph_edge_attributes: list[str] = Field(default=["edge_length", "edge_dirs"])
+    sub_graph_edge_attributes: list[str] = Field(examples=["edge_length", "edge_dirs"])
     "Edge attributes to consider in the encoder features."

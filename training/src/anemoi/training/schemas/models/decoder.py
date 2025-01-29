@@ -18,7 +18,7 @@ from .common_components import TransformerModelComponent
 class GraphTransformerDecoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GraphTransformerBackwardMapper"] = Field(..., alias="_target_")
     "Graph Transformer Decoder object from anemoi.models.layers.mapper."
-    sub_graph_edge_attributes: list[str] = Field(default=["edge_length", "edge_dirs"])
+    sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
     "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
 
 

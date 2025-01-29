@@ -20,33 +20,33 @@ from .common_components import TransformerModelComponent
 class GNNProcessorSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.processor.GNNProcessor"] = Field(..., alias="_target_")
     "GNN Processor object from anemoi.models.layers.processor."
-    num_layers: NonNegativeInt = Field(default=16)
+    num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of GNN processor. Default to 16."
-    num_chunks: NonNegativeInt = Field(default=2)
+    num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
 
 
 class GraphTransformerProcessorSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.processor.GraphTransformerProcessor"] = Field(..., alias="_target_")
     "Graph transformer processor object from anemoi.models.layers.processor."
-    trainable_size: NonNegativeInt = Field(default=8)
+    trainable_size: NonNegativeInt = Field(example=8)
     "Size of trainable parameters vector. Default to 8."
-    sub_graph_edge_attributes: list[str] = Field(default=["edge_length", "edge_dir"])
+    sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dir"])
     "Edge attributes to consider in the processor features. Default [edge_length, endge_dirs]."
-    num_layers: NonNegativeInt = Field(default=16)
+    num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of Graph Transformer processor. Default to 16."
-    num_chunks: NonNegativeInt = Field(default=2)
+    num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
 
 
 class TransformerProcessorSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(..., alias="_target_")
     "Transformer processor object from anemoi.models.layers.processor."
-    num_layers: NonNegativeInt = Field(default=16)
+    num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of Transformer processor. Default to 16."
-    num_chunks: NonNegativeInt = Field(default=2)
+    num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
-    window_size: NonNegativeInt = Field(default=512)
+    window_size: NonNegativeInt = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
-    dropout_p: NonNegativeFloat = Field(default=0.0)
+    dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
