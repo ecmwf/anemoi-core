@@ -68,7 +68,7 @@ the encoder:
      target_name: hidden
      edge_builders: ...
      attributes:
-       cutout: # Assigned name to the edge attribute, can be different than node_attr_name
+       comes_from_cutout: # Assigned name to the edge attribute, can be different than node_attr_name
          _target_: anemoi.graphs.edges.attributes.AttributeFromSourceNode
          node_attr_name: cutout
 
@@ -87,6 +87,6 @@ the decoder:
       target_name: data
       edge_builders: ...
       attributes:
-        cutout: # Assigned name to the edge attribute, can be different than node_attr_name
+        comes_from_cutout: # Assigned name to the edge attribute, can be different than node_attr_name
           _target_: anemoi.graphs.edges.attributes.AttributeFromTargetNode
           node_attr_name: cutout

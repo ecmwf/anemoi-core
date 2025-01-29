@@ -36,9 +36,9 @@ class BaseEdgeAttribute(ABC, NormaliserMixin):
         if values.ndim == 1:
             values = values[:, np.newaxis]
 
-        norm_values = self.normalise(values)
+        normalised_values  = self.normalise(values)
 
-        return torch.tensor(norm_values.astype(self.dtype))
+        return torch.tensor(normalised_values.astype(self.dtype))
 
     def compute(self, graph: HeteroData, edges_name: tuple[str, str, str], *args, **kwargs) -> torch.Tensor:
         """Compute the edge attributes."""
@@ -165,7 +165,7 @@ class BooleanBaseEdgeAttribute(BaseEdgeAttribute, ABC):
         super().__init__(norm=None, dtype="bool")
 
 
-class AttributeFromNode(BooleanBaseEdgeAttribute, ABC):
+class BaseAttributeFromNode(BooleanBaseEdgeAttribute, ABC):
     """
     Base class for Attribute from Node.
 
@@ -210,7 +210,7 @@ class AttributeFromNode(BooleanBaseEdgeAttribute, ABC):
             )
 
 
-class AttributeFromSourceNode(AttributeFromNode):
+class AttributeFromSourceNode(BaseAttributeFromNode):
     """
     Copy an attribute of the source node to the edge.
     """
@@ -223,7 +223,7 @@ class AttributeFromSourceNode(AttributeFromNode):
         return source_name
 
 
-class AttributeFromTargetNode(AttributeFromNode):
+class AttributeFromTargetNode(BaseAttributeFromNode):
     """
     Copy an attribute of the target node to the edge.
     """
