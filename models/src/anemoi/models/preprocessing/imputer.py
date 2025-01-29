@@ -413,7 +413,7 @@ class DynamicConstantImputer(DynamicMixin, ConstantImputer):
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
     ) -> None:
-        ConstantImputer.__init__(config, data_indices, statistics)
+        ConstantImputer.__init__(self, config, data_indices, statistics)
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
@@ -441,6 +441,11 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
             indices = self.data_indices.data.input.name_to_index
         elif x.shape[-1] == self.num_inference_input_vars:
             indices = self.data_indices.model.input.name_to_index
+        else:
+            raise ValueError(
+                f"Input tensor ({x.shape[-1]}) does not match the training "
+                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
+            )
 
         # Replace values
         for idx, value in zip(index, self.replacement):
