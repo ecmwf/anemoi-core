@@ -8,6 +8,7 @@ on:
     # Execute this action only on PRs that touch
     # documentation files.
     paths:
+      - "**/.readthedocs.yaml"
       - "graphs/docs/**"
       - "models/docs/**"
       - "training/docs/**"
@@ -45,7 +46,6 @@ jobs:
           echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
           echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
           echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-          # echo "integration_changed=$(echo "$CHANGED_FILES" | grep -q '^tests/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
       - name: Documentation for training package
         if: steps.changed-packages.outputs.training_changed == 'true'
