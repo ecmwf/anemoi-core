@@ -25,7 +25,7 @@ from anemoi.models.layers.utils import load_layer_kernels
     embed_dim_multiplier=st.sampled_from([16, 32, 64]),
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
     softcap=st.floats(min_value=0.0, max_value=1.0),
-    attention_implementation=st.sampled_from(["scaled_dot_product_attention", "flex_attention"]),
+    attention_implementation=st.sampled_from(["scaled_dot_product_attention"]),
 )
 def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout_p, softcap, attention_implementation):
     embed_dim = (

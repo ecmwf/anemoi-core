@@ -95,7 +95,6 @@ class TestTransformerProcessorBlock:
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
             softcap=softcap,
-            dropout_p=dropout_p,
         )
 
         x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
