@@ -81,6 +81,10 @@ class ConfigGenerator(Command):
 
         if args.subcommand == "validate":
             LOGGER.info("Validating configs.")
+            LOGGER.warning(
+                "Note that this command is not taking into account if your config has a no_validation flag."
+                "So this command will validate the config regardless of the flag.",
+            )
             self.validate_config(args.name)
             LOGGER.info("Config files validated.")
             return
