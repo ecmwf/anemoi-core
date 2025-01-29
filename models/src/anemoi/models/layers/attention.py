@@ -98,7 +98,6 @@ class MultiHeadSelfAttention(nn.Module):
         self.is_causal = is_causal
         self.softcap = softcap
 
-
         self.set_attention_function()
 
         if self.use_alibi_slopes:

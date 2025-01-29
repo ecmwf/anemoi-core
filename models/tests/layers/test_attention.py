@@ -33,9 +33,13 @@ def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout
     )  # TODO: Make assert in MHSA to check if embed_dim is divisible by num_heads
     layer_kernels = instantiate(load_layer_kernels())
     mhsa = MultiHeadSelfAttention(
-        num_heads, embed_dim, layer_kernels, dropout_p=dropout_p, attention_implementation=attention_implementation, softcap=softcap
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation=attention_implementation,
+        softcap=softcap,
     )
-
 
     assert isinstance(mhsa, nn.Module)
     assert mhsa.num_heads == num_heads
@@ -57,7 +61,11 @@ def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim
 
     layer_kernels = instantiate(load_layer_kernels())
     mhsa = MultiHeadSelfAttention(
-        num_heads, embed_dim, layer_kernels, dropout_p=dropout_p, attention_implementation="scaled_dot_product_attention"
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation="scaled_dot_product_attention",
     )
 
     x = torch.randn(batch_size * 2, embed_dim)
@@ -80,7 +88,11 @@ def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_di
 
     layer_kernels = instantiate(load_layer_kernels())
     mhsa = MultiHeadSelfAttention(
-        num_heads, embed_dim, layer_kernels, dropout_p=dropout_p, attention_implementation="scaled_dot_product_attention"
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation="scaled_dot_product_attention",
     )
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
