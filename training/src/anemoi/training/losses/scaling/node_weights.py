@@ -17,21 +17,22 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from anemoi.training.losses.scaling import BaseScaler
-
 if TYPE_CHECKING:
-
+    from torch_geometric.data import HeteroData
     from anemoi.models.data_indices.collection import IndexCollection
 
-LOGGER = logging.getLogger(__name__)
 
 
-class BaseLossMaskScaler(BaseScaler, ABC):
+class GraphNodeAttributeScaler(BaseScaler, ABC):
     """Base class for all loss masks that are more than one-dimensional."""
 
     def __init__(
         self,
         data_indices: IndexCollection,
+        graph_data: HeteroData,
         scale_dim: str,
+        nodes_name: str,
+        nodes_attribute_name: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
@@ -43,19 +44,11 @@ class BaseLossMaskScaler(BaseScaler, ABC):
         scale_dim : str
             Dimensions to scale in the format of a string.
         """
+        self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze()
         scale_dim = ast.literal_eval(scale_dim)
         super().__init__(data_indices, scale_dim)
         del kwargs
 
-
-class NaNMaskScaler(BaseLossMaskScaler):
-
     def get_scaling(self) -> np.ndarray:
-        """Get loss scaling.
+        return self.attr_values
 
-        Get  mask multiplying NaN locations with zero.
-        At this stage, returns a loss slicing mask with all values set to 1.
-        When calling the imputer for the first time, the NaN positions are available.
-        Before first application of loss function, the mask is replaced.
-        """
-        return np.ones((1, 1))
