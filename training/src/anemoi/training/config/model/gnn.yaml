@@ -2,7 +2,17 @@ activation: GELU
 num_channels: 512
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
+
+layer_kernels:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+      #Any arguments to your chosen function go here e.g.
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+      #Any arguments to your chosen function go here e.g.
 
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor
@@ -67,3 +77,14 @@ bounding: #These are applied in order
   #   min_val: 0
   #   max_val: 1
   #   total_var: tp
+
+  # [OPTIONAL] NormalizedReluBounding
+  # This is an extension of the Relu bounding in case the thrshold to be used
+  # is not 0. For example, in case of the sea surface temperature we don't use
+  # [0, infinity), buth rather [-2C, infinity). We do not want the water
+  # temperature to be below the freezing temperature.
+
+  # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
+  #   variables: [sst]
+  #   min_val: [-2]
+  #   normalizer: ['mean-std']

@@ -1,0 +1,46 @@
+training:
+- changed-files:
+  - any-glob-to-any-file: [ "training/**/*" ]
+
+graphs:
+- changed-files:
+  - any-glob-to-any-file: [ "graphs/**/*" ]
+
+models:
+- changed-files:
+  - any-glob-to-any-file: [ "models/**/*" ]
+
+dependencies:
+- changed-files:
+  - any-glob-to-any-file:
+    - "requirements.txt"
+    - "setup.py"
+    - "pyproject.toml"
+    - "Pipfile"
+    - "Pipfile.lock"
+    - "requirements/*.txt"
+    - "requirements/*.in"
+
+documentation:
+- changed-files:
+  - any-glob-to-any-file:
+    - "docs/**/*"
+    - "*.md"
+    - "*.rst"
+
+config:
+- changed-files:
+  - any-glob-to-any-file:
+    - ".pre-commit-config.yaml"
+    - "config/**/*"
+    - "settings/**/*"
+    - "*.ini"
+    - "*.cfg"
+    - "*.conf"
+
+CI/CD:
+- changed-files:
+  - any-glob-to-any-file:
+    - ".github/**/*"
+    - "tox.ini"
+    - ".coveragerc"
