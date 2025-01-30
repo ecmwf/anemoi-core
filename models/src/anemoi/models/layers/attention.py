@@ -34,7 +34,6 @@ class MultiHeadSelfAttention(nn.Module):
     allows for three different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
-    - flex attention, see https://pytorch.org/blog/flexattention/
     """
 
     def __init__(
