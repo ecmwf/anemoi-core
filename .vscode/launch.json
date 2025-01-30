@@ -24,6 +24,7 @@
                 // "TRCH_COMPILE":"1",
                 // "PYTHONPATH": "${workspaceFolder}",
                 "_PYTEST_RAISE": "1",
+                "TORCH_NCCL_ENABLE_MONITORING":"0",
                 // "CUDA_LAUNCH_BLOCKING": "1",
                 // "TORCH_USE_CUDA_DSA": "1",
                 // "TORCH_LOGS":"+guards,+dynamo,+recompiles,+graph_breaks,+output_code,+inductor",
@@ -65,8 +66,6 @@
                 "model.processor.num_chunks=1",
                 "model.encoder.num_heads=8",
                 "model.decoder.num_heads=8",
-                "model.encoder_block_mask.attention_span=3",
-                "model.decoder_block_mask.attention_span=6",
                 "model.processor_block_mask.attention_span=128",
 
                 "model.num_channels=128",

@@ -246,7 +246,6 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
     - GraphTransformerBackwardMapper
     """
     def initialise_block_masks(self, config: DotDict):
-        self.map_spanSrcTgtBasegrid_blockmask_manager_manager = {}
         self.map_spanSrcTgtBasegrid_blockmask_manager = {}
 
         # setup block masks for encoder transformer processors
@@ -259,7 +258,7 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
                 keyvalue_grid_name=source_grid_name,
                 base_attention_span_grid=self._input_grid_name,
             )
-            self.map_spanSrcTgtBasegrid_blockmask_manager_manager[bmc.signature()] = bmc
+            self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = bmc
 
         # setup block masks for decoder
         for source_grid_name, target_grid_name in zip(self.list_graph_name_decoder, self.list_graph_name_decoder[1:]):
@@ -272,7 +271,7 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
                 keyvalue_grid_name=source_grid_name,
                 base_attention_span_grid=self._input_grid_name,
             )
-            self.map_spanSrcTgtBasegrid_blockmask_manager_manager[bmc.signature()] = bmc
+            self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = bmc
 
 
     def initialise_encoder_processor_decoder(self, config: DotDict):
@@ -334,7 +333,7 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
         
 
         # Setup block masks
-        self.map_spanSrcTgtBasegrid_blockmask_manager = {}
+        self.map_spanSrcTgtBasegrid_blockmask_manager : dict[str, BlockMaskManager] = {}
         
         # region: Processor
         processor_grid_name = self._graph_name_hidden

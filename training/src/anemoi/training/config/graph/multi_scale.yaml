@@ -9,12 +9,14 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.ZarrDatasetNodes # options: ZarrDatasetNodes, NPZFileNodes
+      _convert_: "partial"
       dataset: ${dataloader.dataset}
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.TriNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
+      _convert_: "partial"
       resolution: 5 # grid resolution for npz (o32, o48, ...)
     attributes: ${graph.attributes.nodes}
 

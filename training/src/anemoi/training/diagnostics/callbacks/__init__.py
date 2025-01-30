@@ -24,6 +24,7 @@ from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
+from anemoi.training.utils.debug_hydra import instantiate_debug
 
 if TYPE_CHECKING:
     from pytorch_lightning.callbacks import Callback
@@ -190,7 +191,7 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     # Plotting callbacks
 
     trainer_callbacks.extend(
-        instantiate(callback, config) for callback in config.diagnostics.plot.get("callbacks", None) or []
+        instantiate_debug(callback, config) for callback in config.diagnostics.plot.get("callbacks", None) or []
     )
 
     # Extend with config enabled callbacks
