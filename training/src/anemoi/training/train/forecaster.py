@@ -29,6 +29,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -121,15 +122,21 @@ class GraphForecaster(pl.LightningModule):
             "limited_area_mask": (2, limited_area_mask),
         }
         self.updated_loss_mask = False
+        self.loss = self.get_loss_function(
+            config.training.training_loss,
+            scalars=self.scalars,
+            graph_data=graph_data,
+            output_mask=self.output_mask,
+            **loss_kwargs,
+        )
 
-        self.loss = self.get_loss_function(config.training.training_loss, scalars=self.scalars, **loss_kwargs)
-
-        assert isinstance(self.loss, BaseWeightedLoss) and not isinstance(
-            self.loss,
-            torch.nn.ModuleList,
-        ), f"Loss function must be a `BaseWeightedLoss`, not a {type(self.loss).__name__!r}"
-
-        self.metrics = self.get_loss_function(config.training.validation_metrics, scalars=self.scalars, **loss_kwargs)
+        self.metrics = self.get_loss_function(
+            config.training.validation_metrics,
+            scalars=self.scalars,
+            graph_data=graph_data,
+            output_mask=self.output_mask,
+            **loss_kwargs,
+        )
         if not isinstance(self.metrics, torch.nn.ModuleList):
             self.metrics = torch.nn.ModuleList([self.metrics])
 
@@ -172,10 +179,13 @@ class GraphForecaster(pl.LightningModule):
         return self.model(x, self.model_comm_group)
 
     # Future import breaks other type hints TODO Harrison Cook
-    @staticmethod
+    @classmethod
     def get_loss_function(
+        cls,
         config: DictConfig,
-        scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None] = None,  # noqa: FA100
+        scalars: dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]],  # noqa: FA100,
+        graph_data: HeteroData,
+        output_mask: torch.Tensor,
         **kwargs,
     ) -> Union[BaseWeightedLoss, torch.nn.ModuleList]:  # noqa: FA100
         """Get loss functions from config.
@@ -186,12 +196,16 @@ class GraphForecaster(pl.LightningModule):
         ----------
         config : DictConfig
             Loss function configuration, should include `scalars` if scalars are to be added to the loss function.
-        scalars : Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None], optional
-            Scalars which can be added to the loss function. Defaults to None., by default None
+        scalars : dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]]
+            Scalars which can be added to the loss function.
             If a scalar is to be added to the loss, ensure it is in `scalars` in the loss config
             E.g.
                 If `scalars: ['variable']` is set in the config, and `variable` in `scalars`
                 `variable` will be added to the scalar of the loss function.
+        graph_data : HeteroData
+            Graph data
+        output_mask : torch.Tensor
+            Output mask
         kwargs : Any
             Additional arguments to pass to the loss function
 
@@ -211,19 +225,55 @@ class GraphForecaster(pl.LightningModule):
         if isinstance(config_container, list):
             return torch.nn.ModuleList(
                 [
-                    GraphForecaster.get_loss_function(
+                    cls.get_loss_function(
                         OmegaConf.create(loss_config),
                         scalars=scalars,
+                        graph_data=graph_data,
+                        output_mask=output_mask,
                         **kwargs,
                     )
                     for loss_config in config
                 ],
             )
 
+        OmegaConf.resolve(config)
+
+        # Special case for combined loss
+        # The underlying losses must be instantiated first
+        # with kwargs that don't come from the config,
+        # so we can't use the normal instantiation method.
+        def full_name(type_: type) -> str:
+            return type_.__module__ + "." + type_.__name__
+
+        if config.get("_target_") == full_name(CombinedLoss):
+            assert hasattr(config, "loss_weights"), "Loss weights must be provided for combined loss"
+            loss_kwargs = kwargs.copy()
+            if config.get("ignore_nans", False):
+                loss_kwargs["ignore_nans"] = True
+
+            losses = [
+                cls.get_loss_function(
+                    loss,
+                    scalars=scalars,
+                    graph_data=graph_data,
+                    output_mask=output_mask,
+                    **loss_kwargs,
+                )
+                for loss in config.losses
+            ]
+            return instantiate({"_target_": config._target_}, losses=losses, loss_weights=config.loss_weights, **kwargs)
+
         loss_config = OmegaConf.to_container(config, resolve=True)
         scalars_to_include = loss_config.pop("scalars", [])
 
-        # Instantiate the loss function with the loss_init_config
+        if config.get("node_weights", None) is not None:
+            node_weighting = instantiate(config.node_weights)
+            node_weights = node_weighting.weights(graph_data)
+            node_weights = output_mask.apply(node_weights, dim=0, fill_value=0.0)
+            if node_weights.dtype == torch.bool:
+                node_weights = node_weights / node_weights.sum()
+            kwargs["node_weights"] = node_weights
+
         loss_function = instantiate(loss_config, **kwargs)
 
         if not isinstance(loss_function, BaseWeightedLoss):
