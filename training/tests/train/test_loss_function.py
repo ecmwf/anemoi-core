@@ -12,7 +12,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.training.losses.mse import WeightedMSELoss
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 from anemoi.training.train.forecaster import GraphForecaster
 
 
@@ -26,7 +26,7 @@ def test_dynamic_init_include() -> None:
         DictConfig({"_target_": "anemoi.training.losses.mse.WeightedMSELoss"}),
         node_weights=torch.ones(1),
     )
-    assert isinstance(loss, BaseWeightedLoss)
+    assert isinstance(loss, BaseLoss)
     assert loss.node_weights == torch.ones(1)
 
 
@@ -41,7 +41,7 @@ def test_dynamic_init_scaler() -> None:
         node_weights=torch.ones(1),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
-    assert isinstance(loss, BaseWeightedLoss)
+    assert isinstance(loss, BaseLoss)
 
     torch.testing.assert_close(loss.node_weights, torch.ones(1))
     assert "test" in loss.scaler
@@ -59,7 +59,7 @@ def test_dynamic_init_add_all() -> None:
         node_weights=torch.ones(1),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
-    assert isinstance(loss, BaseWeightedLoss)
+    assert isinstance(loss, BaseLoss)
 
     torch.testing.assert_close(loss.node_weights, torch.ones(1))
     assert "test" in loss.scaler
@@ -77,7 +77,7 @@ def test_dynamic_init_scaler_not_add() -> None:
         node_weights=torch.ones(1),
         scalers={"test": (-1, torch.ones(2))},
     )
-    assert isinstance(loss, BaseWeightedLoss)
+    assert isinstance(loss, BaseLoss)
     torch.testing.assert_close(loss.node_weights, torch.ones(1))
     assert "test" not in loss.scaler
 
@@ -93,6 +93,6 @@ def test_dynamic_init_scaler_exclude() -> None:
         node_weights=torch.ones(1),
         scalers={"test": (-1, torch.ones(2))},
     )
-    assert isinstance(loss, BaseWeightedLoss)
+    assert isinstance(loss, BaseLoss)
     torch.testing.assert_close(loss.node_weights, torch.ones(1))
     assert "test" not in loss.scaler

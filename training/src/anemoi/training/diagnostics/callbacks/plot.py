@@ -41,7 +41,7 @@ from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 
 if TYPE_CHECKING:
     from typing import Any
@@ -841,9 +841,9 @@ class PlotLoss(BasePerBatchPlotCallback):
         parameter_positions = list(pl_module.data_indices.internal_model.output.name_to_index.values())
         # reorder parameter_names by position
         self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
-        if not isinstance(pl_module.loss, BaseWeightedLoss):
+        if not isinstance(pl_module.loss, BaseLoss):
             LOGGER.warning(
-                "Loss function must be a subclass of BaseWeightedLoss, or provide `squash`.",
+                "Loss function must be a subclass of BaseLoss, or provide `squash`.",
                 RuntimeWarning,
             )
 

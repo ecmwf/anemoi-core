@@ -15,7 +15,7 @@ import logging
 import numpy as np
 import torch
 
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class LogCosh(torch.autograd.Function):
         return grad_output * torch.tanh(inp)
 
 
-class WeightedLogCoshLoss(BaseWeightedLoss):
+class WeightedLogCoshLoss(BaseLoss):
     """Node-weighted LogCosh loss."""
 
     name = "wlogcosh"

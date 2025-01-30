@@ -14,7 +14,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 
 
 LOGGER = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ def get_loss_function(
     config: DictConfig,
     scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None,
     **kwargs
-) -> BaseWeightedLoss | torch.nn.ModuleList:
+) -> BaseLoss | torch.nn.ModuleList:
     """Get loss functions from config.
 
     Can be ModuleList if multiple losses are specified.
@@ -45,13 +45,13 @@ def get_loss_function(
 
     Returns
     -------
-    Union[BaseWeightedLoss, torch.nn.ModuleList]
+    Union[BaseLoss, torch.nn.ModuleList]
         Loss function, or list of metrics
 
     Raises
     ------
     TypeError
-        If not a subclass of `BaseWeightedLoss`
+        If not a subclass of `BaseLoss`
     ValueError
         If scaler is not found in valid scalers
     """
@@ -70,8 +70,8 @@ def get_loss_function(
     # Instantiate the loss function with the loss_init_config
     loss_function = instantiate(loss_config, **kwargs)
 
-    if not isinstance(loss_function, BaseWeightedLoss):
-        error_msg = f"Loss must be a subclass of 'BaseWeightedLoss', not {type(loss_function)}"
+    if not isinstance(loss_function, BaseLoss):
+        error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
 
     for key in scalers_to_include:

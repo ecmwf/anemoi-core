@@ -14,12 +14,12 @@ import logging
 
 import torch
 
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELossLimitedArea(BaseWeightedLoss):
+class WeightedMSELossLimitedArea(BaseLoss):
     """Node-weighted MSE loss, calculated only within or outside the limited area.
 
     Further, the loss can be computed for the specified region (default),

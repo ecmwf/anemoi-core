@@ -23,16 +23,12 @@ from anemoi.training.losses.utils import ScaleTensor
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseWeightedLoss(nn.Module, ABC):
-    """Node-weighted general loss."""
+class BaseLoss(nn.Module, ABC):
+    """Base loss."""
 
     scaler: ScaleTensor
 
-    def __init__(
-        self,
-        node_weights: torch.Tensor,
-        ignore_nans: bool = False,
-    ) -> None:
+    def __init__(self, ignore_nans: bool = False) -> None:
         """Node- and feature_weighted Loss.
 
         Exposes:
@@ -41,13 +37,10 @@ class BaseWeightedLoss(nn.Module, ABC):
         depending on the value of `ignore_nans`
 
         Registers:
-        - self.node_weights: torch.Tensor of shape (N, )
         - self.scaler: ScaleTensor modified with `add_scaler` and `update_scaler`
 
         Parameters
         ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
 
@@ -58,8 +51,6 @@ class BaseWeightedLoss(nn.Module, ABC):
 
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
-
-        self.register_buffer("node_weights", node_weights, persistent=True)
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
@@ -111,38 +102,6 @@ class BaseWeightedLoss(nn.Module, ABC):
         scaler = scaler.expand_as(x)
         return x[subset_indices] * scaler[subset_indices]
 
-    def scale_by_node_weights(self, x: torch.Tensor, squash: bool = True) -> torch.Tensor:
-        """Scale a tensor by the node_weights.
-
-        Equivalent to reducing and averaging accordingly across all
-        dimensions of the tensor.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Tensor to be scaled, shape (bs, ensemble, lat*lon, n_outputs)
-        squash : bool, optional
-            Average last dimension, by default True
-            If False, the loss returned of shape (n_outputs)
-
-        Returns
-        -------
-        torch.Tensor
-            Scaled error tensor
-        """
-        # Squash by last dimension
-        if squash:
-            x = self.avg_function(x, dim=-1)
-            # Weight by area
-            x *= self.node_weights.expand_as(x)
-            x /= self.sum_function(self.node_weights.expand_as(x))
-            return self.sum_function(x)
-
-        # Weight by area, due to weighting construction is analagous to a mean
-        x *= self.node_weights[..., None].expand_as(x)
-        # keep last dimension (variables) when summing weights
-        x /= self.sum_function(self.node_weights[..., None].expand_as(x), dim=(0, 1, 2))
-        return self.sum_function(x, dim=(0, 1, 2))
 
     @abstractmethod
     def forward(
@@ -179,7 +138,11 @@ class BaseWeightedLoss(nn.Module, ABC):
 
         out = self.scale(out, scaler_indices, without_scalers=without_scalers)
 
-        return self.scale_by_node_weights(out, squash)
+        if squash:
+            out = self.avg_function(out, dim=-1)
+            
+        return self.sum_function(out, dim=(0, 1, 2))
+
 
     @property
     def name(self) -> str:
@@ -187,7 +150,7 @@ class BaseWeightedLoss(nn.Module, ABC):
         return self.__class__.__name__.lower()
 
 
-class FunctionalWeightedLoss(BaseWeightedLoss):
+class FunctionalWeightedLoss(BaseLoss):
     """WeightedLoss which a user can subclass and provide `calculate_difference`.
 
     `calculate_difference` should calculate the difference between the prediction and target.

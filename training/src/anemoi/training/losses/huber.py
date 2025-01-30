@@ -13,12 +13,12 @@ import logging
 
 import torch
 
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedHuberLoss(BaseWeightedLoss):
+class WeightedHuberLoss(BaseLoss):
     """Node-weighted Huber loss."""
 
     name = "whuber"

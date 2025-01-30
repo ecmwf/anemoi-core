@@ -14,12 +14,12 @@ import logging
 
 import torch
 
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELoss(BaseWeightedLoss):
+class WeightedMSELoss(BaseLoss):
     """Node-weighted MSE loss."""
 
     name = "wmse"
