@@ -20,6 +20,7 @@ Keep it human-readable, your future self will thank you!
 - Add remappers, e.g. link functions to apply during training to facilitate learning of variables with a difficult distribution [#88](https://github.com/ecmwf/anemoi-models/pull/88)
 - Add Normalized Relu Bounding for minimum bounding thresholds different than 0 [#64](https://github.com/ecmwf/anemoi-core/pull/64)
 - 'predict\_step' can take an optional model comm group. [#77](https://github.com/ecmwf/anemoi-core/pull/77)
+- Added model parallel support for the Transformer model when running on multiple CPU devices. [#95](https://github.com/ecmwf/anemoi-core/pull/95)
 
 ## [0.4.0](https://github.com/ecmwf/anemoi-models/compare/0.3.0...0.4.0) - Improvements to Model Design
 
