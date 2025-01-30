@@ -67,7 +67,6 @@ def test_normalized_relu_bounding(config, name_to_index, name_to_index_stats, in
         name_to_index_stats=name_to_index_stats,
     )
     output = bounding(input_tensor.clone())
-    # breakpoint()
     expected_output = torch.tensor([[2.0, 2.0, 3.0], [4.0, 0.1111, 6.0], [2.0, 0.5, 0.5]])
     assert torch.allclose(output, expected_output, atol=1e-4)
 
