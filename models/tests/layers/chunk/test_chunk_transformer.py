@@ -16,7 +16,7 @@ from anemoi.models.layers.chunk import TransformerProcessorChunk
 from anemoi.models.layers.utils import load_layer_kernels
 
 
-class TestGraphTransformerProcessorChunk:
+class TestTransformerProcessorChunk:
     @pytest.fixture
     def init(self):
         num_channels = 512
@@ -27,6 +27,7 @@ class TestGraphTransformerProcessorChunk:
         window_size: int = 13
         dropout_p: float = 0.1
         layer_kernels = instantiate(load_layer_kernels())
+        attention_implementation = "scaled_dot_product_attention"
 
         # num_heads must be evenly divisible by num_channels for MHSA
         return (
@@ -38,6 +39,7 @@ class TestGraphTransformerProcessorChunk:
             activation,
             window_size,
             dropout_p,
+            attention_implementation,
         )
 
     @pytest.fixture
@@ -51,6 +53,7 @@ class TestGraphTransformerProcessorChunk:
             activation,
             window_size,
             dropout_p,
+            attention_implementation,
         ) = init
         return TransformerProcessorChunk(
             num_channels=num_channels,
@@ -61,6 +64,7 @@ class TestGraphTransformerProcessorChunk:
             activation=activation,
             window_size=window_size,
             dropout_p=dropout_p,
+            attention_implementation=attention_implementation,
         )
 
     def test_all_blocks(self, processor_chunk):

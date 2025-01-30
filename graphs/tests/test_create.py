@@ -51,6 +51,6 @@ class TestGraphCreator:
 
         if graph_path is not None:
             assert graph_path.exists()
-            graph_saved = torch.load(graph_path)
+            graph_saved = torch.load(graph_path, weights_only=False)
             assert graph.node_types == graph_saved.node_types
             assert graph.edge_types == graph_saved.edge_types
