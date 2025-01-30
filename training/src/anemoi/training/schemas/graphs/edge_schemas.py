@@ -22,22 +22,22 @@ from pydantic import PositiveInt
 class KNNEdgeSchema(BaseModel):
     target_: Literal["anemoi.graphs.edges.KNNEdges"] = Field("anemoi.graphs.edges.KNNEdges", alias="_target_")
     "KNN based edges implementation from anemoi.graphs.edges."
-    num_nearest_neighbours: PositiveInt = Field(default=3)
+    num_nearest_neighbours: PositiveInt = Field(example=3)
     "Number of nearest neighbours. Default to 3."
-    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
 class CutoffEdgeSchema(BaseModel):
     target_: Literal["anemoi.graphs.edges.CutOffEdges"] = Field("anemoi.graphs.edges.CutOffEdges", alias="_target_")
     "Cut-off based edges implementation from anemoi.graphs.edges."
-    cutoff_factor: PositiveFloat = Field(default=0.6)
+    cutoff_factor: PositiveFloat = Field(example=0.6)
     "Factor to multiply the grid reference distance to get the cut-off radius. Default to 0.6."
-    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
@@ -47,11 +47,11 @@ class MultiScaleEdgeSchema(BaseModel):
         alias="_target_",
     )
     "Multi-casle edges implementation from anemoi.graphs.edges."
-    x_hops: PositiveInt = Field(default=1)
+    x_hops: PositiveInt = Field(example=1)
     "Number of hops (in the refined icosahedron) between two nodes to connect them with an edge. Default to 1."
-    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
@@ -63,9 +63,9 @@ class ICONTopologicalEdgeSchema(BaseModel):
     ] = Field("anemoi.graphs.edges.ICONTopologicalProcessorEdges", alias="_target_")
     icon_mesh: str
     "The name of the ICON mesh (defines both the processor mesh and the data)."
-    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
@@ -74,7 +74,7 @@ class EdgeAttributeSchema(BaseModel):
         Field("anemoi.graphs.edges.attributes.EdgeLength", alias="_target_")
     )
     "Edge attributes object from anemoi.graphs.edges."
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(default="unit-std")
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
     "Normalisation method applied to the edge attribute."
 
 

@@ -21,5 +21,5 @@ class EdgeAttributeSchema(BaseModel):
         Field("anemoi.graphs.edges.attributes.EdgeLength", alias="_target_")
     )
     "Edge attributes object from anemoi.graphs.edges."
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(default="unit-std")
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
     "Normalisation method applied to the edge attribute."

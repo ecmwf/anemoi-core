@@ -84,7 +84,7 @@ class LimitedAreaNPZFileNodesSchema(BaseModel):
     "Name of the reference nodes in the graph to consider for the Area Mask."
     mask_attr_name: str  # TODO(Helen): Check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
-    margin_radius_km: PositiveFloat = Field(default=100.0)
+    margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
@@ -112,7 +112,7 @@ class LimitedAreaIcosahedralandHealPixNodeSchema(BaseModel):
     "Name of the reference nodes in the graph to consider for the Area Mask."
     mask_attr_name: str  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
-    margin_radius_km: PositiveFloat = Field(default=100.0)
+    margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
@@ -127,7 +127,7 @@ class StretchedIcosahdralNodeSchema(BaseModel):
     "Name of the reference nodes in the graph to consider for the Area Mask."
     mask_attr_name: str
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
-    margin_radius_km: PositiveFloat = Field(default=100.0)
+    margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
@@ -137,20 +137,20 @@ class PlanarAreaWeightSchema(BaseModel):
         "anemoi.graphs.nodes.attributes.PlanarAreaWeights",
     ] = Field(..., alias="_target_")
     "Implementation of the area of the nodes as the weights from anemoi.graphs.nodes.attributes."
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(default="unit-max")
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
     "Normalisation of the weights."
 
 
 class SphericalAreaWeightSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.SphericalAreaWeights"] = Field(..., alias="_target_")
     "Implementation of the 3D area of the nodes as the weights from anemoi.graphs.nodes.attributes."
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(default="unit-max")
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
     "Normalisation of the weights."
-    radius: float = Field(default=1)
+    radius: float = Field(example=1)
     "Radius of the sphere."
-    centre: list[float] = Field(default=[0, 0, 0])
+    centre: list[float] = Field(example=[0, 0, 0])
     "Centre of the sphere."
-    fill_value: float = Field(default=0)
+    fill_value: float = Field(example=0)
     "Value to fill the empty regions."
 
     @model_validator(mode="after")

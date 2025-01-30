@@ -30,20 +30,20 @@ class PlanarAreaWeightSchema(BaseModel):
         "anemoi.graphs.nodes.attributes.UniformWeights",
     ] = Field(..., alias="_target_")
     "Implementation of the area of the nodes as the weights from anemoi.graphs.nodes.attributes."
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(default="unit-max")
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
     "Normalisation of the weights."
 
 
 class SphericalAreaWeightSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.SphericalAreaWeights"] = Field(..., alias="_target_")
     "Implementation of the 3D area of the nodes as the weights from anemoi.graphs.nades.attributes."
-    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(default="unit-max")
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
     "Normalisation of the weights."
-    radius: float = Field(default=1)
+    radius: float = Field(example=1)
     "Radius of the sphere."
-    centre: list[float] = Field(default=[0, 0, 0])
+    centre: list[float] = Field(example=[0, 0, 0])
     "Centre of the sphere."
-    fill_value: float = Field(default=0)
+    fill_value: float = Field(example=0)
     "Value to fill the empty regions."
 
     @model_validator(mode="after")

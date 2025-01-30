@@ -25,9 +25,9 @@ class RemoveUnconnectedNodesSchema(BaseModel):
     "Post processor to remove unconnected nodes."
     nodes_name: str
     "Nodes from which to remove the unconnected nodes."
-    ignore: str = Field(default=None)
+    ignore: str = Field(example=None)
     "Attribute name of nodes to be ignored."
-    save_mask_indices_to_attr: str = Field(default=None)
+    save_mask_indices_to_attr: str = Field(example=None)
     "New attribute name to store the mask indices."
 
 

@@ -46,11 +46,11 @@ class BaseGraphSchema(BaseModel):
     "Nodes schema for all types of nodes (ex. data, hidden)."
     edges: list[EdgeSchema]
     "List of edges schema."
-    overwrite: bool = Field(default=True)
+    overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
     post_processors: list[ProcessorSchema]
-    data: str = Field(default="data")
+    data: str = Field(example="data")
     "Key name for the data nodes. Default to 'data'."
-    hidden: str = Field(default="hidden")
+    hidden: str = Field(example="hidden")
     "Key name for the hidden nodes. Default to 'hidden'."
     # TODO(Helen): Needs to be adjusted for more complex graph setups
