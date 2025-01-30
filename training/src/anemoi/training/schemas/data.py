@@ -19,10 +19,10 @@ from pydantic import model_validator
 
 
 class NormalizerSchema(BaseModel):
-    default: str = Field(examples=["mean-std", "std", "min-max", "max", "none"])
+    default: str = Field(literals=["mean-std", "std", "min-max", "max", "none"])
     "Normalizer default method to apply"
     # min-max is default None is because an optional NormalizerSchema
-    min_max: str | None = Field(default=None)
+    min_max: str | None = Field(default_factory=list)
     "Variables to normalize with min-max method."
     max: list[str] = Field(default_factory=list)
     "Variables to normalize with max method."
@@ -31,13 +31,17 @@ class NormalizerSchema(BaseModel):
 
 
 class ImputerSchema(BaseModel):
-    default: str = Field(examples=["none", "mean", "stdev"])
+    default: str = Field(literals=["none", "mean", "stdev"])
     "Imputer default method to apply."
+    none: list[str] | None = Field(default_factory=list)
+    "Variables not to be imputed."
 
 
 class RemapperSchema(BaseModel):
-    default: str = Field(examples=["none", "cos_sin"])
+    default: str = Field(literals=["none", "cos_sin"])
     "Remapper default method to apply."
+    none: list[str] | None = Field(default_factory=list)
+    "Variables not to be remapped."
 
 
 class PreprocessorTarget(str, Enum):
