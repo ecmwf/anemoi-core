@@ -45,7 +45,6 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
             Dimensions to scale in the format of a string.
         """
         self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze()
-        scale_dim = ast.literal_eval(scale_dim)
         super().__init__(data_indices, scale_dim)
         del kwargs
 

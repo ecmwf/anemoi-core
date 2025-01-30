@@ -42,3 +42,6 @@ class BaseScaler(ABC):
     def get_scaling(self) -> np.ndarray:
         """Abstract method to get loss scaling."""
         ...
+
+    def get_values(self) -> tuple[int | tuple[int, int], np.ndarray]:
+        return self.scale_dim, self.get_scaling()

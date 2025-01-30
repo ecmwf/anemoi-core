@@ -4,6 +4,9 @@ variable_groups:
 
 # Several scalers can be added here. In order to be applied their names must be included in the loss.
 # scaler name must be included in `scalers` in the losses for this to be applied.
+# All scalers needs a `scale_dim` argument representing the dimension/s on which it is applied
+# -1 : channels dimmension (timesteps, variables, ...)
+# -2 : grid dimension
 builders:
   general_variable:
     # Variable groups definition for scaling by variable level.
@@ -56,8 +59,8 @@ builders:
     nodes_attribute_name: area_weight
     scale_dim: 2 # dimension on which scaling applied
 
-  limited_area_mask:
-    _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
-    nodes_name: ${graph.data}
-    nodes_attribute_name: cutout_mask
-    scale_dim: 2
+  #limited_area_mask:
+  #  _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
+  #  nodes_name: ${graph.data}
+  #  nodes_attribute_name: cutout_mask
+  #  scale_dim: 2
