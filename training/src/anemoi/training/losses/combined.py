@@ -80,8 +80,7 @@ class CombinedLoss(torch.nn.Module):
         assert len(losses) > 0, "At least one loss must be provided"
 
         self.losses = [
-            get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
-            for loss in losses
+            get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs) for loss in losses
         ]
         self.loss_weights = loss_weights
 
