@@ -75,7 +75,7 @@ def test_combined_loss() -> None:
                     {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
                     {"_target_": "anemoi.training.losses.mae.WeightedMAELoss"},
                 ],
-                "scalars": ["variable"],
+                "scalars": ["test"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
@@ -83,6 +83,6 @@ def test_combined_loss() -> None:
         scalars={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, CombinedLoss)
-    assert "test" not in loss.scalar
+    assert "test" in loss.scalar
     assert isinstance(loss.losses[0], WeightedMSELoss)
     assert isinstance(loss.losses[1], WeightedMAELoss)
