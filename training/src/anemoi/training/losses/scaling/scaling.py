@@ -28,7 +28,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_scalers(
-    scalers_config: DotDict, data_indices: IndexCollection, output_mask: BaseMask, **kwargs,
+    scalers_config: DotDict,
+    data_indices: IndexCollection,
+    output_mask: BaseMask,
+    **kwargs,
 ) -> tuple[dict, dict]:
     scalers, delayed_scaler_builders = {}, {}
     for name, config in scalers_config.items():
