@@ -108,15 +108,5 @@ class UnvalidatedBaseSchema(BaseModel):
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
-
-    config = {
-        "data": config.data.model_dump(by_alias=True),
-        "dataloader": config.dataloader.model_dump(),
-        "diagnostics": config.diagnostics.model_dump(),
-        "hardware": config.hardware.model_dump(),
-        "graph": config.graph.model_dump(by_alias=True),
-        "model": config.model.model_dump(by_alias=True),
-        "training": config.training.model_dump(by_alias=True),
-    }
-
+    config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
