@@ -13,10 +13,9 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+import numpy as np
 
 if TYPE_CHECKING:
-    import torch
-
     from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
@@ -65,18 +64,18 @@ class BaseScaler(ABC):
         return -2 in self.scale_dims or 2 in self.scale_dims
 
     @abstractmethod
-    def get_scaling(self) -> torch.Tensor:
+    def get_scaling(self) -> np.ndarray:
         """Abstract method to get loss scaling."""
         ...
 
-    def normalise(self, values: torch.Tensor) -> torch.Tensor:
+    def normalise(self, values: np.ndarray) -> np.ndarray:
         if self.norm is None:
             return values
 
         if self.norm.lower() in ["l1", "unit-sum"]:
-            return values / torch.sum(values)
+            return values / np.sum(values)
 
         if self.norm.lower() == "unit-mean":
-            return values / torch.mean(values)
+            return values / np.mean(values)
 
         raise ValueError(f"{self.norm} must be one of: None, unit-sum, l1, unit-mean.")

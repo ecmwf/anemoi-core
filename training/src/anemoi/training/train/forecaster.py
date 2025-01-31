@@ -177,25 +177,20 @@ class GraphForecaster(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x, self.model_comm_group)
 
-    def training_weights_for_imputed_variables(
-        self,
-        batch: torch.Tensor,
-    ) -> None:
-        """Update the loss weights mask for imputed variables."""
-        if "nan_mask_weights" in self.loss.scaler:
-            loss_weights_mask = torch.ones((1, 1), device=batch.device)
-            found_loss_mask_training = False
+    def define_delayed_scalers(self) -> None:
+        """Update delayed scalers such as the loss weights mask for imputed variables."""
+        delayed_scaler = "nan_mask_weights"
+        if delayed_scaler in self.loss.scaler:
+            scaler_dims, loss_weights_mask = self.scalers[delayed_scaler]
+
             # iterate over all pre-processors and check if they have a loss_mask_training attribute
             for pre_processor in self.model.pre_processors.processors.values():
                 if hasattr(pre_processor, "loss_mask_training"):
                     loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
-                    found_loss_mask_training = True
-                # if transform_loss_mask function exists for preprocessor apply it
-                if hasattr(pre_processor, "transform_loss_mask") and found_loss_mask_training:
-                    loss_weights_mask = pre_processor.transform_loss_mask(loss_weights_mask)
+
             # update scaler with loss_weights_mask retrieved from preprocessors
-            self.loss.update_scaler(scaler=loss_weights_mask.cpu(), name="nan_mask_weights")
-            self.scalers["nan_mask_weights"] = ((-2, -1), loss_weights_mask.cpu())
+            self.loss.update_scaler(scaler=loss_weights_mask, name=delayed_scaler)
+            self.scalers[delayed_scaler] = (scaler_dims, loss_weights_mask)
 
         self.updated_loss_mask = True
 
@@ -337,7 +332,7 @@ class GraphForecaster(pl.LightningModule):
 
         if not self.updated_loss_mask:
             # update loss scaler after first application and initialization of preprocessors
-            self.training_weights_for_imputed_variables(batch)
+            self.define_delayed_scalers()
 
         # start rollout of preprocessed batch
         x = batch[

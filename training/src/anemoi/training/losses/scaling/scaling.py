@@ -54,7 +54,7 @@ def get_final_variable_scaling(scalers: dict[str, tuple[tuple[int, ...] | torch.
     final_variable_scaling = 1.0
     for scale_dims, scaling in scalers.values():
         if -1 in scale_dims or 3 in scale_dims:
-            final_variable_scaling = final_variable_scaling * scaling
+            final_variable_scaling = final_variable_scaling * scaling.squeeze()
 
     return final_variable_scaling
 

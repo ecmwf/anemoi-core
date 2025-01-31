@@ -30,7 +30,6 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         self,
         data_indices: IndexCollection,
         graph_data: HeteroData,
-        scale_dim: str,
         nodes_name: str,
         nodes_attribute_name: str | None = None,
         apply_output_mask: bool = False,
@@ -43,8 +42,6 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         ----------
         data_indices : IndexCollection
             Collection of data indices.
-        scale_dim : str
-            Dimensions to scale in the format of a string.
         nodes_name : str
             Name of the nodes in the graph.
         nodes_attribute_name : str | None, optional
@@ -57,8 +54,8 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
             Additional keyword arguments.
         """
         self.apply_output_mask = apply_output_mask
-        self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze()
-        super().__init__(data_indices, scale_dim, norm)
+        self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze().numpy()
+        super().__init__(data_indices, (2, ), norm)
         del kwargs
 
     def get_scaling(self) -> np.ndarray:

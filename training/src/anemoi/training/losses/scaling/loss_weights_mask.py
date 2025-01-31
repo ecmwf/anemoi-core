@@ -11,16 +11,33 @@ from __future__ import annotations
 
 import logging
 
-import torch
+import numpy as np
+from typing import TYPE_CHECKING
 
 from anemoi.training.losses.scaling import BaseScaler
+
+if TYPE_CHECKING:
+    from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 
 
 class NaNMaskScaler(BaseScaler):
 
-    def get_scaling(self) -> torch.Tensor:
+    def __init__(self, data_indices: IndexCollection, norm: str = None, **kwargs) -> None:
+        """Initialise BaseScaler.
+
+        Parameters
+        ----------
+        data_indices : IndexCollection
+            Collection of data indices.
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
+        """
+        super().__init__(data_indices, (-2, -1), norm=norm)
+        del kwargs
+
+    def get_scaling(self) -> np.ndarray:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.
@@ -28,4 +45,4 @@ class NaNMaskScaler(BaseScaler):
         When calling the imputer for the first time, the NaN positions are available.
         Before first application of loss function, the mask is replaced.
         """
-        return torch.ones((1, 1))
+        return np.ones((1, 1))
