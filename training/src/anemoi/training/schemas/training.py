@@ -15,6 +15,7 @@ from typing import Annotated
 from typing import Any
 
 from pydantic import AfterValidator
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -112,9 +113,10 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mse = "anemoi.training.losses.mse.WeightedMSELoss"
     mae = "anemoi.training.losses.mae.WeightedMAELoss"
     logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
+    huber = "anemoi.training.losses.huber.WeightedHuberLoss"
 
 
-class BaseLossSchema(BaseModel):
+class BaseLossSchema(PydanticBaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
     scalars: list[PossibleScalars] = Field(example=["variable"])
@@ -137,6 +139,9 @@ class CombinedLossSchema(BaseLossSchema):
     extra_losses: Any
     losses: Any
     loss_weights: Any
+
+
+LossSchemas = BaseLossSchema | HuberLossschema | WeightedMSELossLimitedAreaSchema | CombinedLossSchema
 
 
 class NodeLossWeightsTargets(str, Enum):
@@ -180,11 +185,11 @@ class TrainingSchema(BaseModel):
     "Config for stochastic weight averaging."
     zero_optimizer: bool = Field(example=False)
     "use ZeroRedundancyOptimizer, saves memory for larger models."
-    training_loss: BaseLossSchema
+    training_loss: LossSchemas
     "Training loss configuration."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
-    validation_metrics: list[BaseLossSchema] = Field(default_factory=BaseLossSchema)
+    validation_metrics: list[LossSchemas] = Field(default_factory=LossSchemas)
     "List of validation metrics configurations."
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."

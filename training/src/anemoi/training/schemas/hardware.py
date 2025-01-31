@@ -16,8 +16,6 @@ from typing import Annotated
 from pydantic import AfterValidator
 from pydantic import Field
 from pydantic import NonNegativeInt
-from pydantic import field_validator
-from pydantic import model_validator
 
 from anemoi.training.schemas.utils import allowed_values
 
@@ -89,17 +87,3 @@ class HardwareSchema(BaseModel):
     "Files schema."
     paths: PathsSchema
     "Paths schema."
-
-    @field_validator("num_gpus_per_node")
-    @classmethod
-    def check_valid_num_gpus_per_node(cls, num_gpus_per_node: int) -> int:
-        assert num_gpus_per_node <= 4, "num_gpus_per_node must be less than 4"
-        return num_gpus_per_node
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_valid_num_gpus_per_model(cls, data: dict) -> dict:
-        assert (
-            data["num_gpus_per_model"] <= data["num_gpus_per_node"]
-        ), "num_gpus_per_model must be less than num_gpus_per_node"
-        return data

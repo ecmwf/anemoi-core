@@ -169,7 +169,7 @@ This will check that the configuration is valid and that all the
 required fields are present. If your config is correctly defined then
 the command will show an output similar to:
 
-.. code:: python
+.. code:: bash
 
    2025-01-28 09:37:23 INFO Validating configs.
    2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
