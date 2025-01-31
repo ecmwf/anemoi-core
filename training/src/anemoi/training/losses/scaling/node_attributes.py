@@ -33,8 +33,8 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         scale_dim: str,
         nodes_name: str,
         nodes_attribute_name: str | None = None,
-        normalise: bool = True,
         apply_output_mask: bool = False,
+        norm: str = None,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
@@ -49,18 +49,17 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
             Name of the nodes in the graph.
         nodes_attribute_name : str | None, optional
             Name of the node attribute to use for scaling, by default None
-        normalise : bool, optional
-            Whether to normalise the values to be represented as weights.
         apply_output_mask : bool, optional
             Whether to apply output mask to the scaling, by default False
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         **kwargs : dict
             Additional keyword arguments.
         """
-        self.normalise = normalise
         self.apply_output_mask = apply_output_mask
         self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze()
-        super().__init__(data_indices, scale_dim)
+        super().__init__(data_indices, scale_dim, norm)
         del kwargs
 
     def get_scaling(self) -> np.ndarray:
-        return self.attr_values / torch.sum(self.attr_values)
+        return self.attr_values

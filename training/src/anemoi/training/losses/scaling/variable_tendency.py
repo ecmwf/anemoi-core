@@ -36,6 +36,7 @@ class BaseTendencyScaler(BaseVariableLossScaler):
         statistics: dict,
         statistics_tendencies: dict,
         scale_dim: int,
+        norm : str = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.
@@ -52,8 +53,10 @@ class BaseTendencyScaler(BaseVariableLossScaler):
             Data statistics dictionary for tendencies
         scale_dim : int
             Dimension to scale
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(group_config, data_indices, scale_dim)
+        super().__init__(group_config, data_indices, scale_dim, norm=norm)
         del kwargs
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies

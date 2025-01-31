@@ -37,6 +37,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         slope: float,
         scale_dim: int,
         metadata_variables: dict | None = None,
+        norm: str = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.
@@ -57,8 +58,10 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
             Dimension to scale
         metadata_variables : dict
             Metadata of the dataset.
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(group_config, data_indices, scale_dim, metadata_variables)
+        super().__init__(group_config, data_indices, scale_dim, metadata_variables=metadata_variables, norm=norm)
         del kwargs
         self.scaling_group = group
         self.y_intercept = y_intercept

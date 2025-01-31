@@ -9,48 +9,18 @@
 
 from __future__ import annotations
 
-import ast
 import logging
-from abc import ABC
-from typing import TYPE_CHECKING
 
-import numpy as np
+import torch
 
 from anemoi.training.losses.scaling import BaseScaler
-
-if TYPE_CHECKING:
-
-    from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseLossMaskScaler(BaseScaler, ABC):
-    """Base class for all loss masks that are more than one-dimensional."""
+class NaNMaskScaler(BaseScaler):
 
-    def __init__(
-        self,
-        data_indices: IndexCollection,
-        scale_dim: str,
-        **kwargs,
-    ) -> None:
-        """Initialise Scaler.
-
-        Parameters
-        ----------
-        data_indices : IndexCollection
-            Collection of data indices.
-        scale_dim : str
-            Dimensions to scale in the format of a string.
-        """
-        scale_dim = ast.literal_eval(scale_dim)
-        super().__init__(data_indices, scale_dim)
-        del kwargs
-
-
-class NaNMaskScaler(BaseLossMaskScaler):
-
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling(self) -> torch.Tensor:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.
@@ -58,4 +28,4 @@ class NaNMaskScaler(BaseLossMaskScaler):
         When calling the imputer for the first time, the NaN positions are available.
         Before first application of loss function, the mask is replaced.
         """
-        return np.ones((1, 1))
+        return torch.ones((1, 1))

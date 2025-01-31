@@ -34,6 +34,7 @@ class BaseVariableLossScaler(BaseScaler):
         data_indices: IndexCollection,
         scale_dim: int,
         metadata_variables: dict | None = None,
+        norm: str = None,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
@@ -48,9 +49,10 @@ class BaseVariableLossScaler(BaseScaler):
             Dimension to scale
         metadata_variables : dict, optional
             Dictionary with variable names as keys and metadata as values, by default None
-
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(data_indices, scale_dim)
+        super().__init__(data_indices, scale_dim, norm=norm)
         del kwargs
         self.variable_groups = group_config
         self.metadata_variables = metadata_variables
@@ -93,6 +95,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         weights: DictConfig,
         scale_dim: int,
         metadata_variables: dict | None = None,
+        norm: str = None,
         **kwargs,
     ) -> None:
         """Initialise GeneralVariableLossScaler.
@@ -109,9 +112,10 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
             Dimension to scale
         metadata_variables : dict, optional
             Dictionary with variable names as keys and metadata as values, by default None
-
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(group_config, data_indices, scale_dim, metadata_variables)
+        super().__init__(group_config, data_indices, scale_dim, metadata_variables=metadata_variables, norm=norm)
         self.weights = weights
         del kwargs
 
