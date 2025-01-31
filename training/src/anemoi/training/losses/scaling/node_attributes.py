@@ -12,6 +12,7 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING
 
+import torch
 import numpy as np
 
 from anemoi.training.losses.scaling import BaseScaler
@@ -32,6 +33,7 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         scale_dim: str,
         nodes_name: str,
         nodes_attribute_name: str | None = None,
+        normalise: bool = True,
         apply_output_mask: bool = False,
         **kwargs,
     ) -> None:
@@ -47,15 +49,18 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
             Name of the nodes in the graph.
         nodes_attribute_name : str | None, optional
             Name of the node attribute to use for scaling, by default None
+        normalise : bool, optional
+            Whether to normalise the values to be represented as weights.
         apply_output_mask : bool, optional
             Whether to apply output mask to the scaling, by default False
         **kwargs : dict
             Additional keyword arguments.
         """
+        self.normalise = normalise
         self.apply_output_mask = apply_output_mask
         self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze()
         super().__init__(data_indices, scale_dim)
         del kwargs
 
     def get_scaling(self) -> np.ndarray:
-        return self.attr_values
+        return self.attr_values / torch.sum(self.attr_values)

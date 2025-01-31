@@ -19,25 +19,10 @@ from anemoi.training.losses.base import BaseLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELoss(BaseLoss):
-    """Node-weighted MSE loss."""
+class MSELoss(BaseLoss):
+    """MSE loss."""
 
-    name = "wmse"
-
-    def __init__(
-        self,
-        ignore_nans: bool = False,
-        **kwargs,
-    ) -> None:
-        """Node- and feature weighted MSE Loss.
-
-        Parameters
-        ----------
-        ignore_nans : bool, optional
-            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-
-        """
-        super().__init__(ignore_nans=ignore_nans, **kwargs)
+    name = "mse"
 
     def forward(
         self,

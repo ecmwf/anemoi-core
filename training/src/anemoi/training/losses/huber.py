@@ -18,7 +18,7 @@ from anemoi.training.losses.base import BaseLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedHuberLoss(BaseLoss):
+class HuberLoss(BaseLoss):
     """Huber loss."""
 
     name = "huber"
@@ -35,8 +35,6 @@ class WeightedHuberLoss(BaseLoss):
 
         Parameters
         ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
         delta : float, optional
             Threshold for Huber loss, by default 1.0
         ignore_nans : bool, optional

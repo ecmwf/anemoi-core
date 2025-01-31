@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__name__)
 class RMSELoss(BaseLoss):
     """RMSE loss."""
 
-    name = "wrmse"
+    name = "rmse"
 
     def forward(
         self,
