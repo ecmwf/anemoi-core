@@ -24,7 +24,6 @@ processor:
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  dropout_p: 0.0 # GraphTransformer or Transformer only
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
