@@ -40,23 +40,6 @@ class LogCoshLoss(BaseLoss):
 
     name = "logcosh"
 
-    def __init__(
-        self,
-        ignore_nans: bool = False,
-        **kwargs,
-    ) -> None:
-        """Node- and feature weighted LogCosh Loss.
-
-        Parameters
-        ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
-        ignore_nans : bool, optional
-            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-
-        """
-        super().__init__(ignore_nans=ignore_nans, **kwargs)
-
     def forward(
         self,
         pred: torch.Tensor,

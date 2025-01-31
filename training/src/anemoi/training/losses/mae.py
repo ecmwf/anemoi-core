@@ -24,23 +24,6 @@ class WeightedMAELoss(BaseLoss):
 
     name = "wmae"
 
-    def __init__(
-        self,
-        ignore_nans: bool = False,
-        **kwargs,
-    ) -> None:
-        """Node- and feature weighted MAE Loss.
-
-        Also known as the Weighted L1 loss.
-
-        Parameters
-        ----------
-        ignore_nans : bool, optional
-            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-
-        """
-        super().__init__(ignore_nans=ignore_nans, **kwargs)
-
     def forward(
         self,
         pred: torch.Tensor,

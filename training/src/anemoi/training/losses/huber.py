@@ -13,19 +13,18 @@ import logging
 
 import torch
 
-from anemoi.training.losses.weightedloss import BaseLoss
+from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
 class WeightedHuberLoss(BaseLoss):
-    """Node-weighted Huber loss."""
+    """Huber loss."""
 
-    name = "whuber"
+    name = "huber"
 
     def __init__(
         self,
-        node_weights: torch.Tensor,
         delta: float = 1.0,
         ignore_nans: bool = False,
         **kwargs,
@@ -43,11 +42,7 @@ class WeightedHuberLoss(BaseLoss):
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
         """
-        super().__init__(
-            node_weights=node_weights,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
+        super().__init__(ignore_nans=ignore_nans, **kwargs)
         self.delta = delta
 
     def huber(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -101,4 +96,7 @@ class WeightedHuberLoss(BaseLoss):
 
         out = self.scale(out, scaler_indices, without_scalers=without_scalers)
 
-        return self.scale_by_node_weights(out, squash)
+        if squash:
+            out = self.avg_function(out, dim=-1)
+
+        return self.sum_function(out, dim=(0, 1, 2))
