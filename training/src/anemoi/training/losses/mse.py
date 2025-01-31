@@ -23,7 +23,7 @@ class MSELoss(FunctionalLoss):
     """MSE loss."""
 
     name = "mse"
-  
+
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate the MSE loss.
 

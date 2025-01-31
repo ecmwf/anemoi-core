@@ -14,7 +14,6 @@ from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     import torch
 
@@ -26,12 +25,7 @@ LOGGER = logging.getLogger(__name__)
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
-    def __init__(
-            self,
-            data_indices: IndexCollection,
-            scale_dims: int | tuple[int],
-            norm: str = None
-        ) -> None:
+    def __init__(self, data_indices: IndexCollection, scale_dims: int | tuple[int], norm: str = None) -> None:
         """Initialise BaseScaler.
 
         Parameters
@@ -44,13 +38,18 @@ class BaseScaler(ABC):
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
         self.data_indices = data_indices
-        self.scale_dims = scale_dims if isinstance(scale_dims, tuple) else (scale_dims, )
+        self.scale_dims = scale_dims if isinstance(scale_dims, tuple) else (scale_dims,)
         self.norm = norm
-        assert norm in [None, "unit-sum", "l1", "unit-mean"], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
+        assert norm in [
+            None,
+            "unit-sum",
+            "l1",
+            "unit-mean",
+        ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
         err_mesg = (
             "Invalid dimension for scaling. Expected dimensions are:"
             "\n  0 (or -4): batch dimension"
-            "\n  1 (or -3): ensemble dimension" 
+            "\n  1 (or -3): ensemble dimension"
             "\n  2 (or -2): spatial dimension"
             "\n  3 (or -1): variable dimension"
             "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
@@ -73,11 +72,11 @@ class BaseScaler(ABC):
     def normalise(self, values: torch.Tensor) -> torch.Tensor:
         if self.norm is None:
             return values
-        
+
         if self.norm.lower() in ["l1", "unit-sum"]:
             return values / torch.sum(values)
 
         if self.norm.lower() == "unit-mean":
             return values / torch.mean(values)
-        
+
         raise ValueError(f"{self.norm} must be one of: None, unit-sum, l1, unit-mean.")

@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
@@ -22,11 +21,11 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.scaling.scaling import define_scaler
 from anemoi.training.losses.scaling.scaling import print_final_variable_scaling
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.scaling.scaling import define_scaler
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask

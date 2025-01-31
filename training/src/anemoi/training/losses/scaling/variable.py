@@ -18,7 +18,6 @@ from anemoi.training.losses.scaling import BaseScaler
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
-    import torch
     from omegaconf import DictConfig
 
     from anemoi.models.data_indices.collection import IndexCollection

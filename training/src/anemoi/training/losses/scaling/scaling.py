@@ -11,24 +11,22 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+
 from hydra.utils import instantiate
 
 if TYPE_CHECKING:
     import torch
+
     from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
 
 
-def define_scaler(
-    config,
-    output_mask: BaseMask,
-    **kwargs
-) -> tuple[tuple[int], torch.Tensor]:
+def define_scaler(config, output_mask: BaseMask, **kwargs) -> tuple[tuple[int], torch.Tensor]:
     scaler_builder = instantiate(config, **kwargs)
     scaler_values = scaler_builder.get_scaling()
 
-    # If a scaler needs to apply the output mask (LAM) after its creation,
+    # If a scaler needs to apply the output mask (LAM) after its creation,
     # it must include the apply_output_mask attribue.
     if scaler_builder.is_spatial_dim_scaled and getattr(scaler_builder, "apply_output_mask", False):
         scaler_values = output_mask.apply(scaler_values, dim=0, fill_value=0.0)
