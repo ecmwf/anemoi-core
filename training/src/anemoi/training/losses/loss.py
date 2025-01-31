@@ -22,7 +22,9 @@ LOGGER = logging.getLogger(__name__)
 
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
-    config: DictConfig, scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None, **kwargs,
+    config: DictConfig,
+    scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None,
+    **kwargs,
 ) -> BaseLoss | torch.nn.ModuleList:
     """Get loss functions from config.
 
