@@ -14,12 +14,12 @@ import logging
 
 import torch
 
-from anemoi.training.losses.mse import BaseLoss
+from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class RMSELoss(BaseLoss):
+class RMSELoss(MSELoss):
     """RMSE loss."""
 
     name = "rmse"
