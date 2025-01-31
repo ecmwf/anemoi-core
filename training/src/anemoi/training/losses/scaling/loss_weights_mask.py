@@ -14,7 +14,7 @@ import logging
 import numpy as np
 from typing import TYPE_CHECKING
 
-from anemoi.training.losses.scaling import BaseScaler
+from anemoi.training.losses.scaling import BaseDelayedScaler
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
@@ -22,10 +22,9 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class NaNMaskScaler(BaseScaler):
-
+class NaNMaskScaler(BaseDelayedScaler):
     def __init__(self, data_indices: IndexCollection, norm: str = None, **kwargs) -> None:
-        """Initialise BaseScaler.
+        """Initialise NanMaskScaler.
 
         Parameters
         ----------
@@ -37,7 +36,7 @@ class NaNMaskScaler(BaseScaler):
         super().__init__(data_indices, (-2, -1), norm=norm)
         del kwargs
 
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling(self, model) -> np.ndarray:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.
@@ -45,4 +44,10 @@ class NaNMaskScaler(BaseScaler):
         When calling the imputer for the first time, the NaN positions are available.
         Before first application of loss function, the mask is replaced.
         """
-        return np.ones((1, 1))
+        loss_weights_mask = np.ones((1, 1))
+        # iterate over all pre-processors and check if they have a loss_mask_training attribute
+        for pre_processor in model.pre_processors.processors.values():
+            if hasattr(pre_processor, "loss_mask_training"):
+                loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
+
+        return loss_weights_mask

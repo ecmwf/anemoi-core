@@ -115,7 +115,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         self.weights = weights
         del kwargs
 
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling(self, **kwargs) -> np.ndarray:
         """Get loss scaling.
 
         Retrieve the loss scaling for each variable from the config file.

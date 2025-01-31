@@ -11,28 +11,49 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+import numpy as np
+from anemoi.utils.config import DotDict
 
+from anemoi.training.losses.scaling import BaseDelayedScaler
 from hydra.utils import instantiate
 
 if TYPE_CHECKING:
     import torch
+    from anemoi.models.data_indices.collection import IndexCollection
 
     from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
 
 
-def define_scaler(config, output_mask: BaseMask, **kwargs) -> tuple[tuple[int], torch.Tensor]:
-    scaler_builder = instantiate(config, **kwargs)
-    scaler_values = scaler_builder.get_scaling()
+def create_scalers(
+    scalers_config: DotDict,
+    data_indices: IndexCollection,
+    output_mask: BaseMask,
+    **kwargs
+) -> tuple[dict, dict]:
+    scalers, delayed_scaler_builders = {}, {}
+    for name, config in scalers_config.items():
+        scaler_builder = instantiate(config, data_indices=data_indices, **kwargs)
 
-    # If a scaler needs to apply the output mask (LAM) after its creation,
-    # it must include the apply_output_mask attribue.
-    if scaler_builder.is_spatial_dim_scaled and getattr(scaler_builder, "apply_output_mask", False):
-        scaler_values = output_mask.apply(scaler_values, dim=0, fill_value=0.0)
+        if isinstance(scaler_builder, BaseDelayedScaler):
+            delayed_scaler_builders[name] = scaler_builder
+            scalers[name] = (scaler_builder.scale_dims, np.ones(tuple([1] * len(scaler_builder.scale_dims))))
+            continue
 
-    scaler_values = scaler_builder.normalise(scaler_values)
-    return scaler_builder.scale_dims, scaler_values
+        scaler_values = scaler_builder.get_scaling()
+
+        # If a scaler needs to apply the output mask (LAM) after its creation,
+        # it must include the apply_output_mask attribue.
+        if scaler_builder.is_spatial_dim_scaled and getattr(scaler_builder, "apply_output_mask", False):
+            scaler_values = output_mask.apply(scaler_values, dim=0, fill_value=0.0)
+
+        scaler_values = scaler_builder.normalise(scaler_values)
+        scalers[name] = (scaler_builder.scale_dims, scaler_values)
+
+    print_final_variable_scaling(scalers, data_indices)
+
+    return scalers, delayed_scaler_builders
 
 
 def get_final_variable_scaling(scalers: dict[str, tuple[tuple[int, ...] | torch.Tensor]]) -> torch.Tensor:

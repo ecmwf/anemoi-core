@@ -64,7 +64,7 @@ class BaseScaler(ABC):
         return -2 in self.scale_dims or 2 in self.scale_dims
 
     @abstractmethod
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling(self, **kwargs) -> np.ndarray:
         """Abstract method to get loss scaling."""
         ...
 
@@ -79,3 +79,6 @@ class BaseScaler(ABC):
             return values / np.mean(values)
 
         raise ValueError(f"{self.norm} must be one of: None, unit-sum, l1, unit-mean.")
+
+class BaseDelayedScaler(BaseScaler, ABC):
+    pass

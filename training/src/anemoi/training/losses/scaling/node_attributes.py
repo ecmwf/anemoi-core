@@ -58,5 +58,5 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         super().__init__(data_indices, (2, ), norm)
         del kwargs
 
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling(self, **kwargs) -> np.ndarray:
         return self.attr_values

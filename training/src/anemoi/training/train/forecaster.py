@@ -23,8 +23,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
-from anemoi.training.losses.scaling.scaling import define_scaler
-from anemoi.training.losses.scaling.scaling import print_final_variable_scaling
+from anemoi.training.losses.scaling.scaling import create_scalers
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
@@ -104,21 +103,16 @@ class GraphForecaster(pl.LightningModule):
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Instantiate all scalers with the training configuration
-        self.scalers = {
-            name: define_scaler(
-                scaler_config,
-                group_config=config.training.scalers.variable_groups,
-                data_indices=data_indices,
-                graph_data=graph_data,
-                statistics=statistics,
-                statistics_tendencies=statistics_tendencies,
-                metadata_variables=metadata["dataset"].get("variables_metadata"),
-                output_mask=self.output_mask,
-            )
-            for name, scaler_config in config.training.scalers.builders.items()
-        }
-
-        print_final_variable_scaling(self.scalers, data_indices)
+        self.scalers, self.delayed_scaler_builders = create_scalers(
+            config.training.scalers.builders,
+            group_config=config.training.scalers.variable_groups,
+            data_indices=data_indices,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            metadata_variables=metadata["dataset"].get("variables_metadata"),
+            output_mask=self.output_mask,
+        )
 
         self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(
             config,
@@ -126,7 +120,7 @@ class GraphForecaster(pl.LightningModule):
             metadata["dataset"].get("variables_metadata"),
         )
 
-        self.updated_loss_mask = False
+        self.is_first_step = True
 
         self.loss = get_loss_function(config.training.training_loss, scalers=self.scalers)
 
@@ -179,20 +173,11 @@ class GraphForecaster(pl.LightningModule):
 
     def define_delayed_scalers(self) -> None:
         """Update delayed scalers such as the loss weights mask for imputed variables."""
-        delayed_scaler = "nan_mask_weights"
-        if delayed_scaler in self.loss.scaler:
-            scaler_dims, loss_weights_mask = self.scalers[delayed_scaler]
-
-            # iterate over all pre-processors and check if they have a loss_mask_training attribute
-            for pre_processor in self.model.pre_processors.processors.values():
-                if hasattr(pre_processor, "loss_mask_training"):
-                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
-
-            # update scaler with loss_weights_mask retrieved from preprocessors
-            self.loss.update_scaler(scaler=loss_weights_mask, name=delayed_scaler)
-            self.scalers[delayed_scaler] = (scaler_dims, loss_weights_mask)
-
-        self.updated_loss_mask = True
+        for name, scaler_builder in self.delayed_scaler_builders.items():
+            scaler_values = scaler_builder.get_scaling(model=self.model)
+            scaler_values = scaler_builder.normalise(scaler_values)
+            self.scalers[name] = (scaler_builder.scale_dims, scaler_values)
+            self.loss.update_scaler(scaler=scaler_values, name=name)
 
     @staticmethod
     def get_val_metric_ranges(
@@ -330,9 +315,9 @@ class GraphForecaster(pl.LightningModule):
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
 
-        if not self.updated_loss_mask:
-            # update loss scaler after first application and initialization of preprocessors
+        if self.is_first_step: # only runs in the first step
             self.define_delayed_scalers()
+            self.is_first_step = False
 
         # start rollout of preprocessed batch
         x = batch[

@@ -64,7 +64,7 @@ class BaseTendencyScaler(BaseVariableLossScaler):
     @abstractmethod
     def get_level_scaling(self, variable_level: int) -> float: ...
 
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling(self, **kwargs) -> np.ndarray:
         variable_level_scaling = np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32)
 
         LOGGER.info("Variable Level Scaling: Applying %s scaling to prognostic variables", self.__class__.__name__)
