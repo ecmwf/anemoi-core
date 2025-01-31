@@ -23,9 +23,10 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.loss import get_loss_function
-from anemoi.training.losses.scaling.variable import print_final_variable_scaling
+from anemoi.training.losses.scaling.scaling import print_final_variable_scaling
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.losses.weightedloss import BaseLoss
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.scaling.scaling import define_scaler
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
@@ -105,7 +106,7 @@ class GraphForecaster(pl.LightningModule):
 
         # Instantiate all scalers with the training configuration
         self.scalers = {
-            name: instantiate(
+            name: define_scaler(
                 scaler_config,
                 group_config=config.training.scalers.variable_groups,
                 data_indices=data_indices,
@@ -113,19 +114,18 @@ class GraphForecaster(pl.LightningModule):
                 statistics=statistics,
                 statistics_tendencies=statistics_tendencies,
                 metadata_variables=metadata["dataset"].get("variables_metadata"),
-            ).get_values()
+                output_mask=self.output_mask,
+            )
             for name, scaler_config in config.training.scalers.builders.items()
         }
 
-        # self.scalers["node_weights"] = self.output_mask.apply(self.scalers["node_weights"], dim=0, fill_value=0.0)
+        print_final_variable_scaling(self.scalers, data_indices)
 
         self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(
             config,
             data_indices,
             metadata["dataset"].get("variables_metadata"),
         )
-
-        print_final_variable_scaling(self.scalers, data_indices)
 
         self.updated_loss_mask = False
 

@@ -14,10 +14,9 @@ from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-import numpy as np
 
 if TYPE_CHECKING:
-    import numpy as np
+    import torch
 
     from anemoi.models.data_indices.collection import IndexCollection
 
@@ -27,21 +26,58 @@ LOGGER = logging.getLogger(__name__)
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
-    def __init__(self, data_indices: IndexCollection, scale_dim: int | tuple[int, int]) -> None:
+    def __init__(
+            self,
+            data_indices: IndexCollection,
+            scale_dims: int | tuple[int],
+            norm: str = None
+        ) -> None:
         """Initialise BaseScaler.
 
         Parameters
         ----------
         data_indices : IndexCollection
             Collection of data indices.
+        scale_dims : int | tuple[int]
+            Dimensions at which to scale. Must be between -4 and 3 inclusive.
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
         self.data_indices = data_indices
-        self.scale_dim = scale_dim
+        self.scale_dims = scale_dims if isinstance(scale_dims, tuple) else (scale_dims, )
+        self.norm = norm
+        assert norm in [None, "unit-sum", "l1", "unit-mean"], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
+        err_mesg = (
+            "Invalid dimension for scaling. Expected dimensions are:"
+            "\n  0 (or -4): batch dimension"
+            "\n  1 (or -3): ensemble dimension" 
+            "\n  2 (or -2): spatial dimension"
+            "\n  3 (or -1): variable dimension"
+            "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
+        )
+        assert all(-4 <= d <= 3 for d in self.scale_dims), err_mesg
+
+    @property
+    def is_variable_dim_scaled(self) -> bool:
+        return -1 in self.scale_dims or 3 in self.scale_dims
+
+    @property
+    def is_spatial_dim_scaled(self) -> bool:
+        return -2 in self.scale_dims or 2 in self.scale_dims
 
     @abstractmethod
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling(self) -> torch.Tensor:
         """Abstract method to get loss scaling."""
         ...
 
-    def get_values(self) -> tuple[int | tuple[int, int], np.ndarray]:
-        return self.scale_dim, self.get_scaling()
+    def normalise(self, values: torch.Tensor) -> torch.Tensor:
+        if self.norm is None:
+            return values
+        
+        if self.norm.lower() in ["l1", "unit-sum"]:
+            return values / torch.sum(values)
+
+        if self.norm.lower() == "unit-mean":
+            return values / torch.mean(values)
+        
+        raise ValueError(f"{self.norm} must be one of: None, unit-sum, l1, unit-mean.")

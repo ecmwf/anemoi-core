@@ -143,35 +143,3 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
                 ), f"Variable {variable_name} is not allowed to have a separate scaling besides {variable_ref}."
 
         return variable_loss_scaling
-
-
-def get_final_variable_scaling(scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]]) -> float:
-    """Get the final variable scaling.
-
-    All variable scalings have scale_dim -1, so we can get the right scalar for printing across the variable dimension.
-
-    Parameters
-    ----------
-    scalers : dict
-        Dictionary of scalers.
-
-    Returns
-    -------
-    float
-        Final variable scaling.
-    """
-    # Subsetting over -1 to get the right scalar for printing across the variable dimension
-    final_variable_scaling = 1.0
-    for scale_dim, scaling in scalers.values():
-        if scale_dim == -1:
-            final_variable_scaling = final_variable_scaling * scaling
-
-    return final_variable_scaling
-
-
-def print_final_variable_scaling(scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]], data_indices) -> None:
-    final_variable_scaling = get_final_variable_scaling(scalers)
-    log_text = "Final Variable Scaling: "
-    for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):
-        log_text += f"{name}: {final_variable_scaling[idx]:.4g}, "
-    LOGGER.debug(log_text)
