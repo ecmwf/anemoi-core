@@ -14,12 +14,13 @@ import logging
 
 import torch
 
-from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class MSELossLimitedArea(BaseLoss):
+# WIP
+class LimitedAreaMSELoss(MSELoss):
     """MSE loss, calculated only within or outside the limited area.
 
     Further, the loss can be computed for the specified region (default),
@@ -30,7 +31,6 @@ class MSELossLimitedArea(BaseLoss):
 
     def __init__(
         self,
-        node_weights: torch.Tensor,
         inside_lam: bool = True,
         wmse_contribution: bool = False,
         ignore_nans: bool = False,
@@ -40,10 +40,6 @@ class MSELossLimitedArea(BaseLoss):
 
         Parameters
         ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
-        mask: torch.Tensor
-            the mask marking the indices of the regional data points (bool)
         inside_lam: bool
             compute the loss inside or outside the limited area, by default inside (True)
         wmse_contribution: bool
@@ -51,19 +47,11 @@ class MSELossLimitedArea(BaseLoss):
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
         """
-        super().__init__(
-            node_weights=node_weights,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
-
+        super().__init__(ignore_nans=ignore_nans, **kwargs)
         self.inside_lam = inside_lam
         self.wmse_contribution = wmse_contribution
 
-        if inside_lam:
-            self.name += "_inside_lam"
-        else:
-            self.name += "_outside_lam"
+        self.name += "_inside_lam" if inside_lam else "_outside_lam"
         if wmse_contribution:
             self.name += "_contribution"
 
@@ -92,7 +80,7 @@ class MSELossLimitedArea(BaseLoss):
         torch.Tensor
             Weighted MSE loss
         """
-        out = torch.square(pred - target)
+        self.calculate_difference(pred, target)
 
         limited_area_mask = self.scaler.subset("limited_area_mask").get_scaler(out.ndim, out.device)
 
