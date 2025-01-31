@@ -13,6 +13,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+
 import numpy as np
 
 if TYPE_CHECKING:
