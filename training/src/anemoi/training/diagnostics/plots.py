@@ -31,6 +31,7 @@ from scipy.interpolate import griddata
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -56,6 +57,38 @@ def equirectangular_projection(latlons: np.array) -> np.array:
     lat, lon = latlons[:, 0], latlons[:, 1]
     pc_lon, pc_lat = pc(lon, lat)
     return pc_lat, pc_lon
+
+
+def argsort_variablename_variablelevel(data: list[str], metadata_variables: dict | None = None) -> list[int]:
+    """Custom sort key to process the strings.
+
+    Sort parameter names by alpha part, then by numeric part at last
+    position (variable level) if available, then by the original string.
+
+    Parameters
+    ----------
+    data : list[str]
+        List of strings to sort.
+
+    Returns
+    -------
+    list[int]
+        Sorted indices of the input list.
+    """
+    extract_variable_group_and_level = ExtractVariableGroupAndLevel(
+        {"default": ""},
+        metadata_variables,
+    )
+
+    def custom_sort_key(index: int) -> tuple:
+        s = data[index]  # Access the element by index
+        _, alpha_part, numeric_part = extract_variable_group_and_level.get_group_and_level(s)
+        if numeric_part is None:
+            numeric_part = float("inf")
+        return (alpha_part, numeric_part, s)
+
+    # Generate argsort indices
+    return sorted(range(len(data)), key=custom_sort_key)
 
 
 def init_plot_settings() -> None:
@@ -116,6 +149,7 @@ def plot_loss(
     """
     # create plot
     # more space for legend
+    # TODO(who?): make figsize more flexible depending on the number of bars
     figsize = (8, 3) if legend_patches else (4, 3)
     fig, ax = plt.subplots(1, 1, figsize=figsize, layout=LAYOUT)
     # histogram plot

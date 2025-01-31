@@ -33,6 +33,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.mapper import GraphEdgeMixin
+from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
 from anemoi.training.diagnostics.plots import plot_graph_edge_features
@@ -739,7 +740,11 @@ class PlotLoss(BasePerBatchPlotCallback):
         def automatically_determine_group(name: str) -> str:
             # first prefix of parameter name is group name
             parts = name.split("_")
-            return parts[0]
+            if len(parts) == 1:
+                # if no underscore is present, return full name
+                return parts[0]
+            # else remove last part of name
+            return name[: -len(parts[-1]) - 1]
 
         # group parameters by their determined group name for > 15 parameters
         if len(self.parameter_names) <= 15:
@@ -841,6 +846,15 @@ class PlotLoss(BasePerBatchPlotCallback):
         parameter_positions = list(pl_module.data_indices.internal_model.output.name_to_index.values())
         # reorder parameter_names by position
         self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
+        self.metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
+
+        # Sort the list using the custom key
+        argsort_indices = argsort_variablename_variablelevel(
+            self.parameter_names,
+            metadata_variables=self.metadata_variables,
+        )
+        self.parameter_names = [self.parameter_names[i] for i in argsort_indices]
+
         if not isinstance(pl_module.loss, BaseLoss):
             LOGGER.warning(
                 "Loss function must be a subclass of BaseLoss, or provide `squash`.",
@@ -859,6 +873,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             loss = pl_module.loss(y_hat, y_true, squash=False).cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
+            loss = loss[argsort_indices]
             fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
             self._output_figure(
