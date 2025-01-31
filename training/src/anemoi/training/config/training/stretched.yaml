@@ -1,6 +1,6 @@
 ---
 defaults:
-  - scalers: global
+  - scalers: regional
 
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
@@ -81,7 +81,7 @@ validation_metrics:
 # Unlike above, variable scaling is possible due to these metrics being
 # calculated in the same way as the training loss, within the internal model space.
 scale_validation_metrics:
-  scalers_to_apply: ['general_variable', 'pressure_level', 'node_weights']
+  scalers_to_apply: ['general_variable', 'pressure_level', 'node_weights', 'limited_area_mask']
   metrics:
     - 'all'
     # - "*"

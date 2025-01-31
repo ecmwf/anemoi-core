@@ -13,7 +13,6 @@ builders:
     # The variable level scaling methods are defined under additional_scalers
     # A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
     _target_: anemoi.training.losses.scaling.variable.GeneralVariableLossScaler
-    scale_dims: -1 # dimension on which scaling applied
     weights:
       default: 1
       q: 0.6 #1
@@ -34,12 +33,10 @@ builders:
     group: pl
     y_intercept: 0.2
     slope: 0.001
-    scale_dims: -1 # dimension on which scaling applied
 
   # mask NaNs with zeros in the loss function
   nan_mask_weights:
     _target_: anemoi.training.losses.scaling.loss_weights_mask.NaNMaskScaler
-    scale_dims: (-2, -1) # dimension on which scaling applied
 
   # tendency scalers
   # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
@@ -47,10 +44,8 @@ builders:
   # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
   stdev_tendency:
     _target_: anemoi.training.losses.scaling.variable_tendency.StdevTendencyScaler
-    scale_dims: -1 # dimension on which scaling applied
   var_tendency:
     _target_: anemoi.training.losses.scaling.variable_tendency.VarTendencyScaler
-    scale_dims: -1 # dimension on which scaling applied
 
   # Scalers from node attributes
   node_weights:
@@ -58,11 +53,9 @@ builders:
     nodes_name: ${graph.data}
     nodes_attribute_name: area_weight
     apply_output_mask: True
-    normalise: True
-    scale_dims: -2 # dimension on which scaling applied
+    norm: "unit-sum"
 
   limited_area_mask:
     _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
     nodes_name: ${graph.data}
     nodes_attribute_name: cutout_mask
-    scale_dims: -2

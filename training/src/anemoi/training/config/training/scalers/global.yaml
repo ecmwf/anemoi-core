@@ -54,4 +54,4 @@ builders:
     nodes_name: ${graph.data}
     nodes_attribute_name: area_weight
     apply_output_mask: True
-    normalise: True
+    norm: unit-sum
