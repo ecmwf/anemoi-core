@@ -75,8 +75,20 @@ class CombinedLoss(BaseWeightedLoss):
             losses:
                 - _target_: anemoi.training.losses.mse.WeightedMSELoss
                 - _target_: anemoi.training.losses.mae.WeightedMAELoss
-            scalars: ['variable']
-            loss_weights: [1.0,0.5]
+            scalars: ['*']
+            loss_weights: [1.0, 0.6]
+        ```
+
+        ```
+        training_loss:
+            _target_: anemoi.training.losses.combined.CombinedLoss
+            losses:
+                - _target_: anemoi.training.losses.mse.WeightedMSELoss
+                  scalars: ['ocean']
+                - _target_: anemoi.training.losses.mae.WeightedMAELoss
+                  scalars: ['atmosphere']
+            scalars: ['*']
+            loss_weights: [1.0, 1.0]
         ```
         """
         self.losses: list[BaseWeightedLoss] = []
