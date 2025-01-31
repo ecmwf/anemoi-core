@@ -19,8 +19,8 @@ from anemoi.training.losses.mse import BaseLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedRMSELoss(BaseLoss):
-    """Node-weighted RMSE loss."""
+class RMSELoss(BaseLoss):
+    """RMSE loss."""
 
     name = "wrmse"
 
@@ -46,7 +46,7 @@ class WeightedRMSELoss(BaseLoss):
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted RMSE loss.
+        """Calculates the RMSE loss.
 
         Parameters
         ----------
@@ -65,7 +65,7 @@ class WeightedRMSELoss(BaseLoss):
         Returns
         -------
         torch.Tensor
-            Weighted RMSE loss
+            RMSE loss
         """
         mse = super().forward(
             pred=pred,

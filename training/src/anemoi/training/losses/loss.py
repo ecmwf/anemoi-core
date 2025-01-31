@@ -15,7 +15,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.training.losses.weightedloss import BaseLoss
+from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 

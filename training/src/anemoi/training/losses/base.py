@@ -149,7 +149,7 @@ class BaseLoss(nn.Module, ABC):
 
 
 class FunctionalLoss(BaseLoss):
-    """WeightedLoss which a user can subclass and provide `calculate_difference`.
+    """Loss which a user can subclass and provide `calculate_difference`.
 
     `calculate_difference` should calculate the difference between the prediction and target.
     All scaling and weighting is handled by the parent class.
