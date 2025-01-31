@@ -1,6 +1,6 @@
 ---
 defaults:
-  - scalers: scalers
+  - scalers: global
 
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
@@ -54,7 +54,7 @@ training_loss:
   # A selection of available scalers are listed in training/scalers/scalers.yaml
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
   ignore_nans: False
 
 loss_gradient_scaling: False

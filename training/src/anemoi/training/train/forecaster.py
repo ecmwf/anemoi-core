@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.scaling.variable import print_final_variable_scaling
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.weightedloss import BaseLoss
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
@@ -131,10 +131,10 @@ class GraphForecaster(pl.LightningModule):
 
         self.loss = get_loss_function(config.training.training_loss, scalers=self.scalers)
 
-        assert isinstance(self.loss, BaseWeightedLoss) and not isinstance(
+        assert isinstance(self.loss, BaseLoss) and not isinstance(
             self.loss,
             torch.nn.ModuleList,
-        ), f"Loss function must be a `BaseWeightedLoss`, not a {type(self.loss).__name__!r}"
+        ), f"Loss function must be a `BaseLoss`, not a {type(self.loss).__name__!r}"
 
         self.metrics = get_loss_function(config.training.validation_metrics, scalers=self.scalers)
         if not isinstance(self.metrics, torch.nn.ModuleList):
@@ -465,7 +465,7 @@ class GraphForecaster(pl.LightningModule):
         for metric in self.metrics:
             metric_name = getattr(metric, "name", metric.__class__.__name__.lower())
 
-            if not isinstance(metric, BaseWeightedLoss):
+            if not isinstance(metric, BaseLoss):
                 # If not a weighted loss, we cannot feature scale, so call normally
                 metrics[f"{metric_name}/{rollout_step + 1}"] = metric(
                     y_pred_postprocessed,

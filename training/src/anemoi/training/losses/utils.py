@@ -606,3 +606,5 @@ class ScaleTensor:
     def __iter__(self):
         """Iterate over tensors."""
         return iter(self.tensors)
+    
+

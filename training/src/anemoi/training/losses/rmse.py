@@ -26,7 +26,6 @@ class WeightedRMSELoss(BaseLoss):
 
     def __init__(
         self,
-        node_weights: torch.Tensor,
         ignore_nans: bool = False,
         **kwargs,
     ) -> None:
@@ -34,16 +33,10 @@ class WeightedRMSELoss(BaseLoss):
 
         Parameters
         ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
         """
-        super().__init__(
-            node_weights=node_weights,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
+        super().__init__(ignore_nans=ignore_nans, **kwargs)
 
     def forward(
         self,

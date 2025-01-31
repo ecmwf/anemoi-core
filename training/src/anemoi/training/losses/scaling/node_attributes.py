@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
 
 
-
 class GraphNodeAttributeScaler(BaseScaler, ABC):
     """Base class for all loss masks that are more than one-dimensional."""
 
@@ -33,6 +32,7 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         scale_dim: str,
         nodes_name: str,
         nodes_attribute_name: str | None = None,
+        apply_output_mask: bool = False,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
@@ -43,7 +43,16 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
             Collection of data indices.
         scale_dim : str
             Dimensions to scale in the format of a string.
+        nodes_name : str
+            Name of the nodes in the graph.
+        nodes_attribute_name : str | None, optional
+            Name of the node attribute to use for scaling, by default None
+        apply_output_mask : bool, optional
+            Whether to apply output mask to the scaling, by default False
+        **kwargs : dict
+            Additional keyword arguments.
         """
+        self.apply_output_mask = apply_output_mask
         self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze()
         super().__init__(data_indices, scale_dim)
         del kwargs

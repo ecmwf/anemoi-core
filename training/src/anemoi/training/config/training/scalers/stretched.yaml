@@ -57,10 +57,10 @@ builders:
     _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
     nodes_name: ${graph.data}
     nodes_attribute_name: area_weight
-    scale_dim: 2 # dimension on which scaling applied
+    scale_dim: -2 # dimension on which scaling applied
 
-  #limited_area_mask:
-  #  _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
-  #  nodes_name: ${graph.data}
-  #  nodes_attribute_name: cutout_mask
-  #  scale_dim: 2
+  limited_area_mask:
+    _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
+    nodes_name: ${graph.data}
+    nodes_attribute_name: cutout_mask
+    scale_dim: -2

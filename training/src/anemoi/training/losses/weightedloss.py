@@ -165,12 +165,8 @@ class FunctionalWeightedLoss(BaseLoss):
     ```
     """
 
-    def __init__(
-        self,
-        node_weights: torch.Tensor,
-        ignore_nans: bool = False,
-    ) -> None:
-        super().__init__(node_weights, ignore_nans)
+    def __init__(self, ignore_nans: bool = False) -> None:
+        super().__init__(ignore_nans)
 
     @abstractmethod
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -210,4 +206,8 @@ class FunctionalWeightedLoss(BaseLoss):
         out = self.calculate_difference(pred, target)
 
         out = self.scale(out, scaler_indices, without_scalers=without_scalers)
-        return self.scale_by_node_weights(out, squash)
+
+        if squash:
+            out = self.avg_function(out, dim=-1)
+            
+        return self.sum_function(out, dim=(0, 1, 2))

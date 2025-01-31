@@ -15,7 +15,7 @@ import logging
 import numpy as np
 import torch
 
-from anemoi.training.losses.weightedloss import BaseLoss
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,14 +35,13 @@ class LogCosh(torch.autograd.Function):
         return grad_output * torch.tanh(inp)
 
 
-class WeightedLogCoshLoss(BaseLoss):
+class WeightedLogCoshLoss(BaseWeightedLoss):
     """Node-weighted LogCosh loss."""
 
     name = "wlogcosh"
 
     def __init__(
         self,
-        node_weights: torch.Tensor,
         ignore_nans: bool = False,
         **kwargs,
     ) -> None:
@@ -56,11 +55,7 @@ class WeightedLogCoshLoss(BaseLoss):
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
 
         """
-        super().__init__(
-            node_weights=node_weights,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
+        super().__init__(ignore_nans=ignore_nans, **kwargs)
 
     def forward(
         self,
@@ -94,4 +89,8 @@ class WeightedLogCoshLoss(BaseLoss):
         """
         out = LogCosh.apply(pred - target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers)
-        return self.scale_by_node_weights(out, squash)
+
+        if squash:
+            out = self.avg_function(out, dim=-1)
+            
+        return self.sum_function(out, dim=(0, 1, 2))
