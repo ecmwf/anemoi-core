@@ -13,7 +13,6 @@ from abc import ABC
 from typing import TYPE_CHECKING
 
 import numpy as np
-import torch
 
 from anemoi.training.losses.scaling import BaseScaler
 
@@ -55,7 +54,7 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         """
         self.apply_output_mask = apply_output_mask
         self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze().numpy()
-        super().__init__(data_indices, (2, ), norm)
+        super().__init__(data_indices, (2,), norm)
         del kwargs
 
     def get_scaling(self) -> np.ndarray:

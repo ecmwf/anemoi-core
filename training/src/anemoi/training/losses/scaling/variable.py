@@ -49,7 +49,7 @@ class BaseVariableLossScaler(BaseScaler):
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(data_indices, (-1, ), norm=norm)
+        super().__init__(data_indices, (-1,), norm=norm)
         del kwargs
         self.variable_groups = group_config
         self.metadata_variables = metadata_variables
