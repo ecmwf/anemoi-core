@@ -138,6 +138,17 @@ class NativeGridDataset(IterableDataset):
         """
         return get_usable_indices(self.data.missing, len(self.data), self.rollout, self.multi_step, self.timeincrement)
 
+    def update_rollout(self, rollout: int) -> None:
+        """Update the rollout window."""
+        if self.rollout == rollout:
+            return
+
+        self.rollout = rollout
+        LOGGER.debug("Updating rollout of %s dataset to %d", self.label, self.rollout)
+
+        if hasattr(self, "valid_date_indices"):
+            del self.valid_date_indices
+
     def set_comm_group_info(
         self,
         global_rank: int,
@@ -228,10 +239,7 @@ class NativeGridDataset(IterableDataset):
         sanity_rnd = self.rng.random(1)
 
         LOGGER.debug(
-            (
-                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                "group_rank %d, base_seed %d), sanity rnd %f"
-            ),
+            ("Worker %d (%s, pid %d, glob. rank %d, model comm group %d, group_rank %d, base_seed %d), sanity rnd %f"),
             worker_id,
             self.label,
             os.getpid(),
