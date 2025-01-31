@@ -315,7 +315,7 @@ class GraphForecaster(pl.LightningModule):
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
 
-        if self.is_first_step: # only runs in the first step
+        if self.is_first_step:  # only runs in the first step
             self.define_delayed_scalers()
             self.is_first_step = False
 

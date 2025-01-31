@@ -81,5 +81,6 @@ class BaseScaler(ABC):
 
         raise ValueError(f"{self.norm} must be one of: None, unit-sum, l1, unit-mean.")
 
+
 class BaseDelayedScaler(BaseScaler, ABC):
     pass

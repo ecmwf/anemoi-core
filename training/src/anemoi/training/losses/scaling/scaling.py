@@ -11,26 +11,24 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+
 import numpy as np
-from anemoi.utils.config import DotDict
+from hydra.utils import instantiate
 
 from anemoi.training.losses.scaling import BaseDelayedScaler
-from hydra.utils import instantiate
+from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
     import torch
-    from anemoi.models.data_indices.collection import IndexCollection
 
+    from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
 
 
 def create_scalers(
-    scalers_config: DotDict,
-    data_indices: IndexCollection,
-    output_mask: BaseMask,
-    **kwargs
+    scalers_config: DotDict, data_indices: IndexCollection, output_mask: BaseMask, **kwargs,
 ) -> tuple[dict, dict]:
     scalers, delayed_scaler_builders = {}, {}
     for name, config in scalers_config.items():
