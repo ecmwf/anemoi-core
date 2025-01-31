@@ -57,6 +57,8 @@ builders:
     _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
     nodes_name: ${graph.data}
     nodes_attribute_name: area_weight
+    apply_output_mask: True
+    normalise: True
     scale_dim: -2 # dimension on which scaling applied
 
   limited_area_mask:
