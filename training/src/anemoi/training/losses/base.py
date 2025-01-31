@@ -150,7 +150,7 @@ class BaseLoss(nn.Module, ABC):
         return self.__class__.__name__.lower()
 
 
-class FunctionalWeightedLoss(BaseLoss):
+class FunctionalLoss(BaseLoss):
     """WeightedLoss which a user can subclass and provide `calculate_difference`.
 
     `calculate_difference` should calculate the difference between the prediction and target.
@@ -159,7 +159,7 @@ class FunctionalWeightedLoss(BaseLoss):
     Example:
     --------
     ```python
-    class MyLoss(FunctionalWeightedLoss):
+    class MyLoss(FunctionalLoss):
         def calculate_difference(self, pred, target):
             return pred - target
     ```

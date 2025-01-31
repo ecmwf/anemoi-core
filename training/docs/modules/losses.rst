@@ -111,16 +111,16 @@ By default, only `all` is kept in the normalised space and scaled.
 
 Additionally, you can define your own loss function by subclassing
 ``BaseLoss`` and implementing the ``forward`` method, or by
-subclassing ``FunctionalWeightedLoss`` and implementing the
+subclassing ``FunctionalLoss`` and implementing the
 ``calculate_difference`` function. The latter abstracts the scaling, and
 node weighting, and allows you to just specify the difference
 calculation.
 
 .. code:: python
 
-   from anemoi.training.losses.weightedloss import FunctionalWeightedLoss
+   from anemoi.training.losses.weightedloss import FunctionalLoss
 
-   class MyLossFunction(FunctionalWeightedLoss):
+   class MyLossFunction(FunctionalLoss):
       def calculate_difference(self, pred, target):
          return (pred - target) ** 2
 
