@@ -14,13 +14,14 @@ import logging
 
 import torch
 
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELossLimitedArea(BaseWeightedLoss):
-    """Node-weighted MSE loss, calculated only within or outside the limited area.
+# WIP
+class LimitedAreaMSELoss(MSELoss):
+    """MSE loss, calculated only within or outside the limited area.
 
     Further, the loss can be computed for the specified region (default),
     or as the contribution to the overall loss.
@@ -30,7 +31,6 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
 
     def __init__(
         self,
-        node_weights: torch.Tensor,
         inside_lam: bool = True,
         wmse_contribution: bool = False,
         ignore_nans: bool = False,
@@ -40,10 +40,6 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
 
         Parameters
         ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
-        mask: torch.Tensor
-            the mask marking the indices of the regional data points (bool)
         inside_lam: bool
             compute the loss inside or outside the limited area, by default inside (True)
         wmse_contribution: bool
@@ -51,19 +47,11 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
         """
-        super().__init__(
-            node_weights=node_weights,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
-
+        super().__init__(ignore_nans=ignore_nans, **kwargs)
         self.inside_lam = inside_lam
         self.wmse_contribution = wmse_contribution
 
-        if inside_lam:
-            self.name += "_inside_lam"
-        else:
-            self.name += "_outside_lam"
+        self.name += "_inside_lam" if inside_lam else "_outside_lam"
         if wmse_contribution:
             self.name += "_contribution"
 
@@ -92,7 +80,7 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
         torch.Tensor
             Weighted MSE loss
         """
-        out = torch.square(pred - target)
+        self.calculate_difference(pred, target)
 
         limited_area_mask = self.scaler.subset("limited_area_mask").get_scaler(out.ndim, out.device)
 
@@ -106,4 +94,7 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
 
         out = self.scale(out, scaler_indices, without_scalers=["limited_area_mask"])
 
-        return self.scale_by_node_weights(out, squash)
+        if squash:
+            out = self.avg_function(out, dim=-1)
+
+        return self.sum_function(out, dim=(0, 1, 2))
