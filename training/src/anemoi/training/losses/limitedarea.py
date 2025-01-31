@@ -14,13 +14,13 @@ import logging
 
 import torch
 
-from anemoi.training.losses.weightedloss import BaseLoss
+from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELossLimitedArea(BaseLoss):
-    """Node-weighted MSE loss, calculated only within or outside the limited area.
+class MSELossLimitedArea(BaseLoss):
+    """MSE loss, calculated only within or outside the limited area.
 
     Further, the loss can be computed for the specified region (default),
     or as the contribution to the overall loss.
@@ -106,4 +106,7 @@ class WeightedMSELossLimitedArea(BaseLoss):
 
         out = self.scale(out, scaler_indices, without_scalers=["limited_area_mask"])
 
-        return self.scale_by_node_weights(out, squash)
+        if squash:
+            out = self.avg_function(out, dim=-1)
+
+        return self.sum_function(out, dim=(0, 1, 2))
