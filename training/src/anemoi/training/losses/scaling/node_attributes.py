@@ -12,8 +12,8 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING
 
-import torch
 import numpy as np
+import torch
 
 from anemoi.training.losses.scaling import BaseScaler
 
