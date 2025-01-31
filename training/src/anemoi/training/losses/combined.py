@@ -15,7 +15,7 @@ from typing import Callable
 
 import torch
 
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.losses.loss import get_loss_function
 
 
 class CombinedLoss(torch.nn.Module):
@@ -40,7 +40,7 @@ class CombinedLoss(torch.nn.Module):
         Parameters
         ----------
         losses: tuple[dict[str, Any]| Callable]
-            Tuple of losses to initialise with `GraphForecaster.get_loss_function`.
+            Tuple of losses to initialise with `get_loss_function`.
             Allows for kwargs to be passed, and weighings controlled.
         *extra_losses: dict[str, Any] | Callable
             Additional arg form of losses to include in the combined loss.
@@ -52,15 +52,13 @@ class CombinedLoss(torch.nn.Module):
         Examples
         --------
         >>> CombinedLoss(
-                {"__target__": "anemoi.training.losses.mse.WeightedMSELoss"},
+                {"__target__": "anemoi.training.losses.mse.MSELoss"},
                 loss_weights=(1.0,),
-                node_weights=node_weights
             )
         --------
         >>> CombinedLoss(
-                losses = [anemoi.training.losses.mse.WeightedMSELoss],
+                losses = [anemoi.training.losses.mse.MSELoss],
                 loss_weights=(1.0,),
-                node_weights=node_weights
             )
         Or from the config,
 
@@ -68,8 +66,8 @@ class CombinedLoss(torch.nn.Module):
         training_loss:
             __target__: anemoi.training.losses.combined.CombinedLoss
             losses:
-                - __target__: anemoi.training.losses.mse.WeightedMSELoss
-                - __target__: anemoi.training.losses.mae.WeightedMAELoss
+                - __target__: anemoi.training.losses.mse.MSELoss
+                - __target__: anemoi.training.losses.mae.MAELoss
             scalers: ['variable']
             loss_weights: [1.0,0.5]
         ```
@@ -82,7 +80,7 @@ class CombinedLoss(torch.nn.Module):
         assert len(losses) > 0, "At least one loss must be provided"
 
         self.losses = [
-            GraphForecaster.get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
+            get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
             for loss in losses
         ]
         self.loss_weights = loss_weights

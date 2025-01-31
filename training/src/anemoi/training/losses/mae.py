@@ -19,10 +19,10 @@ from anemoi.training.losses.base import BaseLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMAELoss(BaseLoss):
-    """Node-weighted MAE loss."""
+class MAELoss(BaseLoss):
+    """MAE loss."""
 
-    name = "wmae"
+    name = "mae"
 
     def forward(
         self,
@@ -32,7 +32,7 @@ class WeightedMAELoss(BaseLoss):
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted MAE loss.
+        """Calculates the MAE loss.
 
         Parameters
         ----------
