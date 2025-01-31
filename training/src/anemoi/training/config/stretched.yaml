@@ -5,7 +5,7 @@ defaults:
 - hardware: example
 - graph: stretched_grid
 - model: graphtransformer
-- training: default
+- training: stretched
 - _self_
 
 
