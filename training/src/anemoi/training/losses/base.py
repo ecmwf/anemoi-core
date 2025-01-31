@@ -102,7 +102,6 @@ class BaseLoss(nn.Module, ABC):
         scaler = scaler.expand_as(x)
         return x[subset_indices] * scaler[subset_indices]
 
-
     @abstractmethod
     def forward(
         self,
@@ -140,9 +139,8 @@ class BaseLoss(nn.Module, ABC):
 
         if squash:
             out = self.avg_function(out, dim=-1)
-            
-        return self.sum_function(out, dim=(0, 1, 2))
 
+        return self.sum_function(out, dim=(0, 1, 2))
 
     @property
     def name(self) -> str:
@@ -209,5 +207,5 @@ class FunctionalLoss(BaseLoss):
 
         if squash:
             out = self.avg_function(out, dim=-1)
-            
+
         return self.sum_function(out, dim=(0, 1, 2))

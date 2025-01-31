@@ -92,5 +92,5 @@ class WeightedLogCoshLoss(BaseWeightedLoss):
 
         if squash:
             out = self.avg_function(out, dim=-1)
-            
+
         return self.sum_function(out, dim=(0, 1, 2))

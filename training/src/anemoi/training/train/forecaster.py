@@ -22,13 +22,13 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaling.variable import print_final_variable_scaling
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.losses.weightedloss import BaseLoss
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.utils.config import DotDict
 
@@ -117,7 +117,7 @@ class GraphForecaster(pl.LightningModule):
             for name, scaler_config in config.training.scalers.builders.items()
         }
 
-        #self.scalers["node_weights"] = self.output_mask.apply(self.scalers["node_weights"], dim=0, fill_value=0.0)
+        # self.scalers["node_weights"] = self.output_mask.apply(self.scalers["node_weights"], dim=0, fill_value=0.0)
 
         self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(
             config,

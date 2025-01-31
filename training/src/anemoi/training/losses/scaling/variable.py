@@ -169,9 +169,7 @@ def get_final_variable_scaling(scalers: dict[str, tuple[int | tuple[int, ...] | 
     return final_variable_scaling
 
 
-def print_final_variable_scaling(
-    scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]], data_indices
-) -> None:
+def print_final_variable_scaling(scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]], data_indices) -> None:
     final_variable_scaling = get_final_variable_scaling(scalers)
     log_text = "Final Variable Scaling: "
     for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):
