@@ -10,6 +10,19 @@
 
 from typing import Any
 
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class BaseModel(PydanticBaseModel):
+    class Config:
+        """Pydantic BaseModel configuration."""
+
+        use_attribute_docstrings = True
+        use_enum_values = True
+        validate_assignment = True
+        validate_default = True
+        extra = "forbid"
+
 
 class ValidationError(Exception):
     pass

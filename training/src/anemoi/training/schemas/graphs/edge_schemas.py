@@ -13,10 +13,11 @@ from __future__ import annotations
 from typing import Literal
 from typing import Union
 
-from pydantic import BaseModel
 from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+
+from anemoi.training.schemas.utils import BaseModel
 
 
 class KNNEdgeSchema(BaseModel):

@@ -16,11 +16,12 @@ from typing import Literal
 from typing import Union
 
 import numpy as np
-from pydantic import BaseModel
 from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
+
+from anemoi.training.schemas.utils import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 

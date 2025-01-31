@@ -14,10 +14,11 @@ from typing import Any
 from typing import Literal
 from typing import Union
 
-from pydantic import BaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+
+from .utils import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 

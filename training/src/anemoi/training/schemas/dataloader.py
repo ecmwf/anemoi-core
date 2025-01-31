@@ -15,13 +15,14 @@ from pathlib import Path  # noqa: TC003
 from typing import Any
 from typing import Literal
 
-from pydantic import BaseModel
 from pydantic import Field
 from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 
 from anemoi.utils.dates import frequency_to_timedelta
+
+from .utils import BaseModel
 
 
 class Frequency(RootModel):

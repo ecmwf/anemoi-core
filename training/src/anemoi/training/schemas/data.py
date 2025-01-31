@@ -12,10 +12,11 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel
 from pydantic import Field
 from pydantic import ValidationError
 from pydantic import model_validator
+
+from .utils import BaseModel
 
 
 class NormalizerSchema(BaseModel):
