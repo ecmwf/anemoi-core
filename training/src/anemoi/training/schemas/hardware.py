@@ -14,13 +14,14 @@ from pathlib import Path  # noqa: TC003
 from typing import Annotated
 
 from pydantic import AfterValidator
-from pydantic import BaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import field_validator
 from pydantic import model_validator
 
 from anemoi.training.schemas.utils import allowed_values
+
+from .utils import BaseModel
 
 
 class Checkpoint(BaseModel):

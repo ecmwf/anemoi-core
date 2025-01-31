@@ -15,13 +15,14 @@ from typing import Annotated
 from typing import Any
 
 from pydantic import AfterValidator
-from pydantic import BaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 
 from anemoi.training.schemas.utils import allowed_values
+
+from .utils import BaseModel
 
 
 class GradientClip(BaseModel):

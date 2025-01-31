@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import logging
 
-from pydantic import BaseModel
 from pydantic import Field
+
+from anemoi.training.schemas.utils import BaseModel
 
 from .edge_attributes_schemas import EdgeAttributeSchema  # noqa: TC001
 from .edge_schemas import EdgeBuilderSchemas  # noqa: TC001

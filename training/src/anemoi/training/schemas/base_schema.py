@@ -14,7 +14,7 @@ import logging
 from typing import Any
 
 from omegaconf import OmegaConf
-from pydantic import BaseModel
+from pydantic import ConfigDict
 from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 
@@ -25,16 +25,23 @@ from .dataloader import DataLoaderSchema  # noqa: TC001
 from .diagnostics import DiagnosticsSchema  # noqa: TC001
 from .graphs.base_graph import BaseGraphSchema  # noqa: TC001
 from .hardware import HardwareSchema  # noqa: TC001
-from .models.models import GNNSchema  # noqa: TC001
-from .models.models import GraphTransformerSchema  # noqa: TC001
-from .models.models import TransformerSchema  # noqa: TC001
+from .models.models import ModelSchema  # noqa: TC001
 from .training import TrainingSchema  # noqa: TC001
+from .utils import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
 
 class BaseSchema(BaseModel):
     """Top-level schema for the training configuration."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        use_enum_values=True,
+        validate_assignment=True,
+        validate_default=True,
+        use_attribute_docstrings=True,
+    )
 
     data: DataSchema
     """Data configuration."""
@@ -46,19 +53,12 @@ class BaseSchema(BaseModel):
     """Hardware configuration."""
     graph: BaseGraphSchema
     """Graph configuration."""
-    model: GNNSchema | TransformerSchema | GraphTransformerSchema
+    model: ModelSchema  # GNNSchema | TransformerSchema | GraphTransformerSchema = Field(..., discriminator='target_')
     """Model configuration."""
     training: TrainingSchema
     """Training configuration."""
-
-    class Config:
-        """Pydantic configuration."""
-
-        use_attribute_docstrings = True
-        use_enum_values = True
-        validate_assignment = True
-        validate_default = True
-        extra = "allow"
+    no_validation: bool = False
+    """Flag to disable validation of the configuration"""
 
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> BaseSchema:
