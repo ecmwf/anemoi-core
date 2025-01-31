@@ -5,8 +5,8 @@
 This module is used to define the loss function used to train the model.
 
 Anemoi-training exposes a couple of loss functions by default to be
-used, all of which are subclassed from ``BaseLoss``. This class
-enables scaler multiplication, and graph node weighting.
+used, all of which are subclassed from ``BaseLoss``. This class enables
+scaler multiplication, and graph node weighting.
 
 .. automodule:: anemoi.training.losses.weightedloss
    :members:
@@ -110,11 +110,10 @@ By default, only `all` is kept in the normalised space and scaled.
 ***********************
 
 Additionally, you can define your own loss function by subclassing
-``BaseLoss`` and implementing the ``forward`` method, or by
-subclassing ``FunctionalWeightedLoss`` and implementing the
-``calculate_difference`` function. The latter abstracts the scaling, and
-node weighting, and allows you to just specify the difference
-calculation.
+``BaseLoss`` and implementing the ``forward`` method, or by subclassing
+``FunctionalWeightedLoss`` and implementing the ``calculate_difference``
+function. The latter abstracts the scaling, and node weighting, and
+allows you to just specify the difference calculation.
 
 .. code:: python
 

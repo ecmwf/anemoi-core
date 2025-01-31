@@ -9,16 +9,16 @@
 
 from __future__ import annotations
 
-import ast
 from abc import ABC
-import logging
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from anemoi.training.losses.scaling import BaseScaler
+
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
+
     from anemoi.models.data_indices.collection import IndexCollection
 
 
@@ -59,4 +59,3 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
 
     def get_scaling(self) -> np.ndarray:
         return self.attr_values
-

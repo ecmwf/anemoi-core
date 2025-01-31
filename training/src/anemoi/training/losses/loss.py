@@ -14,17 +14,15 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from anemoi.training.losses.weightedloss import BaseLoss
 
+from anemoi.training.losses.weightedloss import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
-    config: DictConfig,
-    scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None,
-    **kwargs
+    config: DictConfig, scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None, **kwargs,
 ) -> BaseLoss | torch.nn.ModuleList:
     """Get loss functions from config.
 
@@ -57,9 +55,9 @@ def get_loss_function(
     """
     config_container = OmegaConf.to_container(config, resolve=False)
     if isinstance(config_container, list):
-        return torch.nn.ModuleList([
-            get_loss_function(OmegaConf.create(loss_config), scalers=scalers, **kwargs) for loss_config in config
-        ])
+        return torch.nn.ModuleList(
+            [get_loss_function(OmegaConf.create(loss_config), scalers=scalers, **kwargs) for loss_config in config],
+        )
 
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
