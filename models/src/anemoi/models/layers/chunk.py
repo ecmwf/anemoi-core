@@ -24,6 +24,7 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLP
+from torch.nn.attention.flex_attention import BlockMask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +76,8 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
         dropout_p: float = 0.0,
+        block_mask: Optional[BlockMask] = None,
+        kernel_options: Optional[dict] = None,
     ) -> None:
         """Initialize TransformerProcessor.
 
@@ -103,6 +106,8 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             activation=activation,
             window_size=window_size,
             dropout_p=dropout_p,
+            block_mask=block_mask,
+            kernel_options=kernel_options,
         )
 
     def forward(

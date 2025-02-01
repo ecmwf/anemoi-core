@@ -2,7 +2,7 @@ activation: GELU
 num_channels: 1024
 
 model:
-  _target_: anemoi.models.models.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec_GraphTransformer_Transformer
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
@@ -40,6 +40,7 @@ trainable_parameters:
   data: 8
   hidden: 8
   data2hidden: 8
+  hidden2hidden: 8
   hidden2data: 8
 
 
@@ -48,6 +49,8 @@ attributes:
   - edge_length
   - edge_dirs
   nodes: []
+
+node_loss_weight: area_weight
 
 # Bounding configuration
 bounding: #These are applied in order

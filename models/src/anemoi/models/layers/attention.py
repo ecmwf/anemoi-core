@@ -18,6 +18,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 import os
+import numpy as np
 
 
 
@@ -29,6 +30,8 @@ from torch.nn.attention.flex_attention import flex_attention
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
 from anemoi.models.layers.utils import AutocastLayerNorm
+
+from sklearn.neighbors import NearestNeighbors
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +65,8 @@ create_block_mask = torch.compile(
     create_block_mask,
     dynamic=False,
     fullgraph=os.getenv("FULL_GRAPH", "1") == "1",
+    #    mode="max-autotune",
+    #    options={"shape_padding": True}
 )  # https://twitter.com/cHHillee/status/1851418255749169419ate
 
 LOGGER = logging.getLogger(__name__)
@@ -571,9 +576,6 @@ class MultiHeadSelfAttention(nn.Module):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        query, key, value = (
-            einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
-        )
         if self.rotary_embeddings:  # can this be done in a better way?
             key = key.unsqueeze(-3)
             value = value.unsqueeze(-3)
@@ -588,6 +590,10 @@ class MultiHeadSelfAttention(nn.Module):
             out = self.attention(query, key, value, window_size=self.window_size)
         else:
             # Don't include dropout_p, not used in any top models anymore
+            query = query.contiguous()
+            key = key.contiguous()
+            value = value.contiguous()
+
             out = flex_attention(
                 query,
                 key,
@@ -596,7 +602,7 @@ class MultiHeadSelfAttention(nn.Module):
                 kernel_options=self.kernel_options,
             )
 
-        out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
+        out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         return self.projection(out)
 

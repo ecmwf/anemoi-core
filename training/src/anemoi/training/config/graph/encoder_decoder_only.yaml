@@ -1,5 +1,5 @@
 ---
-overwrite: False
+overwrite: True
 
 data: "data"
 hidden: "hidden"
@@ -11,12 +11,18 @@ nodes:
       _target_: anemoi.graphs.nodes.ZarrDatasetNodes # options: ZarrDatasetNodes, NPZFileNodes
       dataset: ${dataloader.dataset}
     attributes: ${graph.attributes.nodes} # options: l1, l2, unit-max, unit-sum, unit-std
-  # Hidden nodes
+  # # Hidden nodes
+  # hidden:
+  #   node_builder:
+  #     _target_: anemoi.graphs.nodes.NPZFileNodes # options: ZarrDatasetNodes, NPZFileNodes
+  #     grid_definition_path: ${hardware.paths.grids}
+  #     resolution: o48 # grid resolution for npz (o32, o48, ...)
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.NPZFileNodes # options: ZarrDatasetNodes, NPZFileNodes
-      grid_definition_path: ${hardware.paths.grids}
-      resolution: o48 # grid resolution for npz (o32, o48, ...)
+      _target_: anemoi.graphs.nodes.TriNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
+      _convert_: "partial"
+      resolution: 5 # grid resolution for npz (o32, o48, ...)
+    attributes: ${graph.attributes.nodes}
 
 edges:
 # Encoder configuration

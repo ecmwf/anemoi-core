@@ -11,9 +11,10 @@
             "program": "${file}",
             "console": "integratedTerminal"
         },
-        // 059 / transformer_s4_flex_attn.sh
+        
+        // Transformer_flex_attn.sh
         {
-            "name": "Python: Transformer S4 Flex Attn ",
+            "name": "Python: Transformer Flex Attn ",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/training/src/anemoi/training/train/train.py",
@@ -23,10 +24,18 @@
             "env": {
                 // "TRCH_COMPILE":"1",
                 // "PYTHONPATH": "${workspaceFolder}",
-                "_PYTEST_RAISE": "1",
-                "TORCH_NCCL_ENABLE_MONITORING":"0",
-                // "CUDA_LAUNCH_BLOCKING": "1",
-                // "TORCH_USE_CUDA_DSA": "1",
+                // "TORCH_NCCL_ENABLE_MONITORING":"0",
+                
+                // "TORCH_COMPILE_DEBUG": "1",
+                // "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "1",
+                // "TORCHINDUCTOR_FX_GRAPH_CACHE": "0",
+                // "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+                // "TORCHINDUCTOR_CACHE_DIR": "caches_inductor",
+                // "SLURM_GPUS_PER_NODE": "1",
+                // "SLURM_NTASKS_PER_NODE": "1",
+                // "SLURM_NNODES": "1",  
+                // "CUDA_LAUNCH_BLOCKING": "1", 
+
                 // "TORCH_LOGS":"+guards,+dynamo,+recompiles,+graph_breaks,+output_code,+inductor",
                 // "TORCH_LOGS":"+guards,+dynamo,+recompiles,+graph_breaks,+output_code",
                 // "TORCH_LOGS": "+dynamo,+recompiles,+graph_breaks",
@@ -34,8 +43,6 @@
                 // "TORCH_LOGS": "+dynamo,+graph_breaks,+guards,+recompiles",
                 // "TORCH_LOGS": "+dynamo,+graph_breaks,+recompiles",
                 // "TORCH_LOGS_OUT": "dynamo_transformer_s4_flex_attn.log",
-
-                // "TORCH_COMPILE_DEBUG": "1",
                 // "TORCHDYNAMO_VERBOSE": "1",
                 "SLURM_GPUS_PER_NODE": "1",
                 "SLURM_NTASKS_PER_NODE": "1",
@@ -47,35 +54,238 @@
                 "--config-name=config", 
                 "hardware=private_atos",
                 "model=transformer_flex",
+                "graph=encoder_decoder_only",
 
-                "diagnostics.log.mlflow.run_name=debug_flex_knn",
-                "diagnostics.log.mlflow.offline=true",
+                "hardware.files.graph=null",
+
+                "diagnostics.log.mlflow.run_name=SL/1_trans_flex_attn_mem_profile",
+                // "diagnostics.log.mlflow.offline=true",
+                "diagnostics.log.mlflow.offline=false",
+                "diagnostics.log.mlflow.enabled=True",
+                "diagnostics.log.mlflow.experiment_name=recon",
+                
+                
+                "diagnostics.print_memory_summary=true",
 
                 // "graph.nodes.hidden0.node_builder.resolution=3",
                 // "training.max_epochs=250",
                 // "training.max_epochs=10",
 
                 "training.precision=bf16-mixed",
-                "training.max_steps=2000",
+                "training.max_steps=2001", //10001
+                // "training.max_epochs=1", //10001
 
                 "graph.edges=[]",
                 
-                "model.processor.num_layers=1",
-                "model.processor.num_heads=8",
-                "model.processor.mlp_hidden_ratio=4",
-                "model.processor.num_chunks=1",
-                "model.encoder.num_heads=8",
-                "model.decoder.num_heads=8",
-                "model.processor_block_mask.attention_span=128",
+                // "model.processor.num_layers=1",
+                // "model.processor.num_heads=8",
+                // "model.processor.mlp_hidden_ratio=4",
+                // "model.processor.num_chunks=1",
+                // "model.encoder.num_heads=8",
+                // "model.decoder.num_heads=8",
 
-                "model.num_channels=128",
+                "model.encoder_block_mask.attention_span=3",
+                "model.processor_block_mask.attention_span=160",
+                "model.decoder_block_mask.attention_span=3",
+
+                // "model.num_channels=128",
                 
-                "dataloader.batch_size.training=2",
-                "dataloader.batch_size.validation=2",
-                "dataloader.limit_batches.training=20",
-                "dataloader.limit_batches.validation=20",
-                "dataloader.num_workers.training=8",
-                "dataloader.num_workers.validation=8",
+                // "dataloader.batch_size.training=4", //1
+                // "dataloader.batch_size.validation=4", //1
+                // "dataloader.limit_batches.training=20", //1000
+                // "dataloader.limit_batches.validation=20", //1000
+                // "dataloader.num_workers.training=8", //16
+                // "dataloader.num_workers.validation=8", //16
+
+                "dataloader.batch_size.training=1", //1
+                "dataloader.batch_size.validation=1", //1
+                "dataloader.limit_batches.training=1000", 
+                "dataloader.limit_batches.validation=1000", 
+                "dataloader.num_workers.training=16", 
+                "dataloader.num_workers.validation=16",
+                
+            ]
+        },
+        
+        // Graph_Transformer Transformer Flex Attn.sh
+        {
+            "name": "Python: GraphTransformer Transformer Flex Attn ",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/training/src/anemoi/training/train/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                // "TRCH_COMPILE":"1",
+                // "PYTHONPATH": "${workspaceFolder}",
+                // "TORCH_NCCL_ENABLE_MONITORING":"0",
+                
+                // "TORCH_COMPILE_DEBUG": "1",
+                // "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "1",
+                // "TORCHINDUCTOR_FX_GRAPH_CACHE": "0",
+                // "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+                // "TORCHINDUCTOR_CACHE_DIR": "caches_inductor",
+                // "SLURM_GPUS_PER_NODE": "1",
+                // "SLURM_NTASKS_PER_NODE": "1",
+                // "SLURM_NNODES": "1",  
+                // "CUDA_LAUNCH_BLOCKING": "1", 
+
+                // "TORCH_LOGS":"+guards,+dynamo,+recompiles,+graph_breaks,+output_code,+inductor",
+                // "TORCH_LOGS":"+guards,+dynamo,+recompiles,+graph_breaks,+output_code",
+                // "TORCH_LOGS": "+dynamo,+recompiles,+graph_breaks",
+                // "TORCH_LOGS": "+dynamo,+aot,+inductor,+aot_graphs",
+                // "TORCH_LOGS": "+dynamo,+graph_breaks,+guards,+recompiles",
+                // "TORCH_LOGS": "+dynamo,+graph_breaks,+recompiles",
+                // "TORCH_LOGS_OUT": "dynamo_transformer_s4_flex_attn.log",
+                // "TORCHDYNAMO_VERBOSE": "1",
+                "SLURM_GPUS_PER_NODE": "1",
+                "SLURM_NTASKS_PER_NODE": "1",
+                "SLURM_NNODES": "1",
+                // "TORCHDYNAMO_VERBOSE": "1",
+                // "TORCHINDUCTOR_FX_GRAPH_CACHE": "0"
+            },
+            "args": [
+                "--config-name=config", 
+                "hardware=private_atos",
+                "model=graphtransformer_transformer_flex",
+                "graph=encoder_decoder_only",
+
+                "hardware.files.graph=null",
+
+                "diagnostics.log.mlflow.run_name=SL/2_graphtrans_trans_flex_attn_mem_profile",
+                // "diagnostics.log.mlflow.offline=true",
+                "diagnostics.log.mlflow.offline=true",
+                "diagnostics.log.mlflow.enabled=false",
+                "diagnostics.log.mlflow.experiment_name=recon",
+                
+                "diagnostics.print_memory_summary=true",
+                
+                // "training.max_epochs=250",
+                // "training.max_epochs=10",
+
+                "training.precision=bf16-mixed",
+                "training.max_steps=2001", //10001
+                // "training.max_epochs=1", //10001
+
+                // "graph.edges=[]",
+                
+                // "model.processor.num_layers=1",
+                // "model.processor.num_heads=8",
+                // "model.processor.mlp_hidden_ratio=4",
+                // "model.processor.num_chunks=1",
+                // "model.encoder.num_heads=8",
+                // "model.decoder.num_heads=8",
+
+                // "model.encoder_block_mask.attention_span=3",
+                "model.processor_block_mask.attention_span=160",
+                // "model.decoder_block_mask.attention_span=3",
+
+                // "model.num_channels=128",
+                
+                // "dataloader.batch_size.training=4", //1
+                // "dataloader.batch_size.validation=4", //1
+                // "dataloader.limit_batches.training=20", //1000
+                // "dataloader.limit_batches.validation=20", //1000
+                // "dataloader.num_workers.training=8", //16
+                // "dataloader.num_workers.validation=8", //16
+
+                "dataloader.batch_size.training=1", //1
+                "dataloader.batch_size.validation=1", //1
+                "dataloader.limit_batches.training=1000", 
+                "dataloader.limit_batches.validation=1000", 
+                "dataloader.num_workers.training=16", 
+                "dataloader.num_workers.validation=16",
+                
+            ]
+        },
+        
+        // Graph_Transformer.sh
+        {
+            "name": "Python: GraphTransformer Transformer ",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/training/src/anemoi/training/train/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                // "TRCH_COMPILE":"1",
+                // "PYTHONPATH": "${workspaceFolder}",
+                // "TORCH_NCCL_ENABLE_MONITORING":"0",
+                
+                // "TORCH_COMPILE_DEBUG": "1",
+                // "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "1",
+                // "TORCHINDUCTOR_FX_GRAPH_CACHE": "0",
+                // "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+                // "TORCHINDUCTOR_CACHE_DIR": "caches_inductor",
+                // "SLURM_GPUS_PER_NODE": "1",
+                // "SLURM_NTASKS_PER_NODE": "1",
+                // "SLURM_NNODES": "1",  
+                // "CUDA_LAUNCH_BLOCKING": "1", 
+
+                // "TORCH_LOGS":"+guards,+dynamo,+recompiles,+graph_breaks,+output_code,+inductor",
+                // "TORCH_LOGS":"+guards,+dynamo,+recompiles,+graph_breaks,+output_code",
+                // "TORCH_LOGS": "+dynamo,+recompiles,+graph_breaks",
+                // "TORCH_LOGS": "+dynamo,+aot,+inductor,+aot_graphs",
+                // "TORCH_LOGS": "+dynamo,+graph_breaks,+guards,+recompiles",
+                // "TORCH_LOGS": "+dynamo,+graph_breaks,+recompiles",
+                // "TORCH_LOGS_OUT": "dynamo_transformer_s4_flex_attn.log",
+                // "TORCHDYNAMO_VERBOSE": "1",
+                "SLURM_GPUS_PER_NODE": "1",
+                "SLURM_NTASKS_PER_NODE": "1",
+                "SLURM_NNODES": "1",
+                // "TORCHDYNAMO_VERBOSE": "1",
+                // "TORCHINDUCTOR_FX_GRAPH_CACHE": "0"
+            },
+            "args": [
+                "--config-name=config", 
+                "hardware=private_atos",
+                "model=graphtransformer_transformer",
+                "graph=encoder_decoder_only",
+                "hardware.files.graph=null",
+
+                "diagnostics.log.mlflow.run_name=SL/3_graphtrans_trans_mem_profile",
+                // "diagnostics.log.mlflow.offline=true",
+                "diagnostics.log.mlflow.offline=true",
+                "diagnostics.log.mlflow.enabled=false",
+                "diagnostics.log.mlflow.experiment_name=recon",
+                
+                "diagnostics.print_memory_summary=true",
+
+                // "training.max_epochs=250",
+                // "training.max_epochs=10",
+
+                "training.precision=bf16-mixed",
+                "training.max_steps=2001", //10001
+                // "training.max_epochs=1", //10001
+                
+                // "model.processor.num_layers=1",
+                // "model.processor.num_heads=8",
+                // "model.processor.mlp_hidden_ratio=4",
+                // "model.processor.num_chunks=1",
+                // "model.encoder.num_heads=8",
+                // "model.decoder.num_heads=8",
+
+                // "model.encoder_block_mask.attention_span=3",
+                "model.processor.window_size=608",
+                // "model.decoder_block_mask.attention_span=3",
+
+                // "model.num_channels=128",
+                
+                // "dataloader.batch_size.training=4", //1
+                // "dataloader.batch_size.validation=4", //1
+                // "dataloader.limit_batches.training=20", //1000
+                // "dataloader.limit_batches.validation=20", //1000
+                // "dataloader.num_workers.training=8", //16
+                // "dataloader.num_workers.validation=8", //16
+
+                "dataloader.batch_size.training=1", //1
+                "dataloader.batch_size.validation=1", //1
+                "dataloader.limit_batches.training=1000", 
+                "dataloader.limit_batches.validation=1000", 
+                "dataloader.num_workers.training=16", 
+                "dataloader.num_workers.validation=16",
                 
             ]
         },

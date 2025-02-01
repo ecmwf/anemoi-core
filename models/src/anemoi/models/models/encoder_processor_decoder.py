@@ -65,12 +65,12 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self.node_attributes = NamedNodesAttributes(config.model.trainable_parameters.hidden, self._graph_data)
 
-        self.intialise_encoder_processor_decoder(config)
+        self.initialise_encoder_processor_decoder(config)
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
             [
-                instantiate(cfg, name_to_index=self.data_indices.internal_model.output.name_to_index)
+                instantiate_debug(cfg, name_to_index=self.data_indices.internal_model.output.name_to_index)
                 for cfg in getattr(config.model, "bounding", [])
             ]
         )
@@ -79,7 +79,7 @@ class AnemoiModelEncProcDec(nn.Module):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
         # Encoder data -> hidden
-        self.encoder = instantiate(
+        self.encoder = instantiate_debug(
             config.model.encoder,
             in_channels_src=input_dim,
             in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
@@ -90,7 +90,7 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # Processor hidden -> hidden
-        self.processor = instantiate(
+        self.processor = instantiate_debug(
             config.model.processor,
             num_channels=self.num_channels,
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
@@ -99,7 +99,7 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # Decoder hidden -> data
-        self.decoder = instantiate(
+        self.decoder = instantiate_debug(
             config.model.decoder,
             in_channels_src=self.num_channels,
             in_channels_dst=input_dim,
@@ -237,43 +237,72 @@ class AnemoiModelEncProcDec(nn.Module):
 
         return x_out
 
-
-class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
+class AnemoiModelEncProcDec_GraphTransformer_Transformer(AnemoiModelEncProcDec):
     """
-    GraphTransformerFlexAttn Implies:
-    - TransformerProcessor
-    - GraphTransformerForwardMapper
-    - GraphTransformerBackwardMapper
+        GraphTransformer_Transformer Implies:
+        - TransformerProcessor
+        - GraphTransformerForwardMapper
+        - GraphTransformerBackwardMapper
+    """
+    pass
+
+    def initialise_encoder_processor_decoder(self, config: DotDict):
+        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+
+        # Encoder data -> hidden
+        self.encoder = instantiate_debug(
+            config.model.encoder,
+            in_channels_src=input_dim,
+            in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
+            hidden_dim=self.num_channels,
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+        )
+
+        # Processor hidden -> hidden
+        self.processor = instantiate_debug(
+            config.model.processor,
+            num_channels=self.num_channels,
+        )
+
+        # Decoder hidden -> data
+        self.decoder = instantiate_debug(
+            config.model.decoder,
+            in_channels_src=self.num_channels,
+            in_channels_dst=input_dim,
+            hidden_dim=self.num_channels,
+            out_channels_dst=self.num_output_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+        )
+  
+class AnemoiModelEncProcDec_GraphTransformer_TransformerFlexAttn(AnemoiModelEncProcDec):
+    """
+        GraphTransformer_TransformerFlexAttn Implies:
+        - TransformerProcessor w/ FlexAttn
+        - GraphTransformerForwardMapper
+        - GraphTransformerBackwardMapper
     """
     def initialise_block_masks(self, config: DotDict):
-        self.map_spanSrcTgtBasegrid_blockmask_manager = {}
+        
+        self.map_spanSrcTgtBasegrid_blockmask_manager : dict[str, BlockMaskManager] = {}
+        
+        processor_grid_name = self._graph_name_hidden
 
-        # setup block masks for encoder transformer processors
-        for source_grid_name, target_grid_name in zip(self.list_graph_name_encoder, self.list_graph_name_encoder[1:]):
+        bmc = BlockMaskManager(
+            self._graph_data,
+            **config.model.processor_block_mask,
+            query_grid_name=processor_grid_name,
+            keyvalue_grid_name=processor_grid_name,
+            base_attention_span_grid=self._graph_name_data,
+        )
 
-            bmc = BlockMaskManager(
-                self._graph_data,
-                **config.model.encoder_processor_block_mask,
-                query_grid_name=source_grid_name,
-                keyvalue_grid_name=source_grid_name,
-                base_attention_span_grid=self._input_grid_name,
-            )
-            self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = bmc
-
-        # setup block masks for decoder
-        for source_grid_name, target_grid_name in zip(self.list_graph_name_decoder, self.list_graph_name_decoder[1:]):
-
-            # Processor
-            bmc = BlockMaskManager(
-                self._graph_data,
-                **config.model.decoder_processor_block_mask,
-                query_grid_name=source_grid_name,
-                keyvalue_grid_name=source_grid_name,
-                base_attention_span_grid=self._input_grid_name,
-            )
-            self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = bmc
-
-
+        self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = (
+            bmc
+        )
+        
     def initialise_encoder_processor_decoder(self, config: DotDict):
         
         self.initialise_block_masks(config)
@@ -300,13 +329,10 @@ class AnemoiModelEncProcDec_GraphTransformerFlexAttn(AnemoiModelEncProcDec):
         self.processor = instantiate_debug(
             config.model.processor,
             num_channels=self.num_channels,
-            processor_block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
-                (self.processor_attention_span, processor_src_grid_name, processor_dst_grid_name, processor_base_grid)
-            ],
-                )
-
+            block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[(self.processor_attention_span, processor_src_grid_name, processor_dst_grid_name, processor_base_grid)])
+                    
         # Decoder hidden -> data
-        self.decoder = instantiate(
+        self.decoder = instantiate_debug(
             config.model.decoder,
             in_channels_src=self.num_channels,
             in_channels_dst=input_dim,
@@ -329,22 +355,21 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
     """
     
     def initialise_block_masks(self, config: DotDict):
-        from anemoi.models.layers.attention import BlockMaskCreator
+        from anemoi.models.layers.attention import BlockMaskManager
         
-
         # Setup block masks
         self.map_spanSrcTgtBasegrid_blockmask_manager : dict[str, BlockMaskManager] = {}
         
         # region: Processor
         processor_grid_name = self._graph_name_hidden
-        attention_span = config.processor_block_mask.attention_span
+        attention_span = config.model.processor_block_mask.attention_span
 
         bmc = BlockMaskManager(
             self._graph_data,
             **config.model.processor_block_mask,
             query_grid_name=processor_grid_name,
             keyvalue_grid_name=processor_grid_name,
-            base_attention_span_grid=self._input_grid_name,
+            base_attention_span_grid=self._graph_name_data,
         )
 
         self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = (
@@ -361,7 +386,7 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
             **config.model.encoder_block_mask,
             query_grid_name=encoder_grid_name_dst,
             keyvalue_grid_name=encoder_grid_name_src,
-            base_attention_span_grid=self._input_grid_name,
+            base_attention_span_grid=self._graph_name_data,
         )
 
         self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = (
@@ -379,7 +404,7 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
             **config.model.decoder_block_mask,
             query_grid_name=decoder_grid_name_dst,
             keyvalue_grid_name=decoder_grid_name_src,
-            base_attention_span_grid=self._input_grid_name,
+            base_attention_span_grid=self._graph_name_data,
         )
 
         self.map_spanSrcTgtBasegrid_blockmask_manager[bmc.signature()] = (
@@ -389,14 +414,14 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
         # endregion
 
 
-    def intialise_encoder_processor_decoder(self, config: DotDict):
+    def initialise_encoder_processor_decoder(self, config: DotDict):
         self.initialise_block_masks(config)
 
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
         
         # Initiate encoder
-        self.mapper_attention_span = config.model.mapper_attention_span
+        self.encoder_mapper_attention_span = config.model.encoder_block_mask.attention_span
         encoder_src_grid_name = self._graph_name_data
         encoder_dst_grid_name = self._graph_name_hidden
         encoder_base_grid = config.model.encoder_block_mask.base_grid
@@ -407,24 +432,25 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
                 in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
                 hidden_dim=self.num_channels,
                 block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
-                    (self.mapper_attention_span, encoder_src_grid_name, encoder_dst_grid_name, encoder_base_grid)
+                    (self.encoder_mapper_attention_span, encoder_src_grid_name, encoder_dst_grid_name, encoder_base_grid)
                 ],
         )
 
         # Initiate processor
-        self.processor_attention_span = config.base_processor_attention_span
+        self.processor_attention_span = config.model.processor_block_mask.attention_span
         processor_src_grid_name = self._graph_name_hidden
         processor_dst_grid_name = self._graph_name_hidden
         processor_base_grid = config.model.processor_block_mask.base_grid
         self.processor = instantiate_debug(
             config.model.processor,
             num_channels=self.num_channels,
-            processor_block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
+            block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
                 (self.processor_attention_span, processor_src_grid_name, processor_dst_grid_name, processor_base_grid)
             ],
         )
 
         # Initiate decoder
+        self.decoder_attention_span = config.model.decoder_block_mask.attention_span
         decoder_src_grid_name = self._graph_name_hidden
         decoder_dst_grid_name = self._graph_name_data
         decoder_base_grid = config.model.decoder_block_mask.base_grid
@@ -439,5 +465,3 @@ class AnemoiModelEncProcDec_TransformerFlexAttn(AnemoiModelEncProcDec):
                 (self.decoder_attention_span, decoder_src_grid_name, decoder_dst_grid_name, decoder_base_grid)
             ],
         )
-
-

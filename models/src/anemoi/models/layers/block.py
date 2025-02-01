@@ -124,6 +124,7 @@ class TransformerMapperBlock(BaseBlock):
         block_mask: Optional[BlockMaskManager] = None,
         kernel_options: Optional[dict] = None,
     ):
+        super().__init__()
 
         try:
             act_func = getattr(nn, activation)

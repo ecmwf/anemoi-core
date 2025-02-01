@@ -2,14 +2,12 @@ activation: GELU
 num_channels: 1024
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec_GraphTransformerFlexAttn
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec_GraphTransformer_TransformerFlexAttn
 
 processor:
-  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  _target_: anemoi.models.layers.processor.TransformerProcessor
   _convert_: all
   activation: ${model.activation}
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
-
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
@@ -39,7 +37,8 @@ decoder:
 processor_block_mask:
   method: knn_haversine # knn_adjacency_matrix, knn_index_matrix, haversine, knn_haversine
   base_grid: query
-  attention_span: 3
+  attention_span: 160
+  block_size: [128,128]
 
 
 trainable_parameters:
@@ -54,6 +53,8 @@ attributes:
   - edge_length
   - edge_dirs
   nodes: []
+
+node_loss_weight: area_weight 
 
 # Bounding configuration
 bounding: #These are applied in order
