@@ -15,12 +15,10 @@ from pathlib import Path  # noqa: TC003
 from typing import Literal
 from typing import Union
 
-import numpy as np
 from pydantic import BaseModel
 from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
-from pydantic import model_validator
 
 LOGGER = logging.getLogger(__name__)
 
