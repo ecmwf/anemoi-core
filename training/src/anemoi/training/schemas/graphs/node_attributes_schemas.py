@@ -39,10 +39,6 @@ class SphericalAreaWeightSchema(BaseModel):
     "Implementation of the 3D area of the nodes as the weights from anemoi.graphs.nades.attributes."
     norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
     "Normalisation of the weights."
-    radius: float = Field(example=1)
-    "Radius of the sphere."
-    centre: list[float] = Field(example=[0, 0, 0])
-    "Centre of the sphere."
     fill_value: float = Field(example=0)
     "Value to fill the empty regions."
 
