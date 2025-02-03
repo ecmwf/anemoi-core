@@ -28,6 +28,8 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 12
+    source_mask_attr_name: null
+    target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Processor
 - source_name: ${graph.hidden}
@@ -35,6 +37,8 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
+    source_mask_attr_name: null
+    target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Decoder
 - source_name: ${graph.hidden}
@@ -42,6 +46,8 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 
 attributes:
@@ -59,3 +65,5 @@ attributes:
     edge_dirs:
       _target_: anemoi.graphs.edges.attributes.EdgeDirection
       norm: unit-std
+
+post_processors: []
