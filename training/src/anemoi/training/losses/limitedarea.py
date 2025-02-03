@@ -39,7 +39,6 @@ class LimitedAreaMSELoss(MSELoss):
 
         Parameters
         ----------
-        
         wmse_contribution: bool
             compute loss as the contribution to the overall MSE, by default False
         ignore_nans : bool, optional
