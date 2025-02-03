@@ -73,3 +73,4 @@ test:
   start: 2022
   end: null
   frequency: ${data.frequency}
+  drop:  []
