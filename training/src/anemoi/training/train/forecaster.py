@@ -153,7 +153,12 @@ class GraphForecaster(pl.LightningModule):
             self.loss.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.multi_step = config.training.multistep_input
-        self.lr = config.training.lr.rate
+        self.lr = (
+            config.hardware.num_nodes
+            * config.hardware.num_gpus_per_node
+            * config.training.lr.rate
+            / config.hardware.num_gpus_per_model
+        )
 
         self.warmup_t = config.training.lr.warmup_t
         self.lr_iterations = config.training.lr.iterations

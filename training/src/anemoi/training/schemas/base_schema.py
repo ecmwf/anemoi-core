@@ -67,16 +67,6 @@ class BaseSchema(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def adjust_lr_to_hardware_settings(self) -> BaseSchema:
-        self.training.lr.rate = (
-            self.hardware.num_nodes
-            * self.hardware.num_gpus_per_node
-            * self.training.lr.rate
-            / self.hardware.num_gpus_per_model
-        )
-        return self
-
-    @model_validator(mode="after")
     def check_log_paths_available_for_loggers(self) -> BaseSchema:
         logger = []
         if self.diagnostics.log.wandb.enabled and not self.hardware.paths.logs.wandb:
