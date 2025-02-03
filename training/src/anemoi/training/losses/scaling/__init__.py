@@ -24,22 +24,22 @@ LOGGER = logging.getLogger(__name__)
 
 class ScaleDimMeta(type):
     def __new__(cls, name, bases, class_dict):
-        if 'scale_dims' not in class_dict:
+        if "scale_dims" not in class_dict:
             raise TypeError(f"Class {name} must define 'scale_dims'")
 
         # Convert scale_dims to a tuple if it's an int
-        if isinstance(class_dict['scale_dims'], int):
-            class_dict['scale_dims'] = (class_dict['scale_dims'],)
+        if isinstance(class_dict["scale_dims"], int):
+            class_dict["scale_dims"] = (class_dict["scale_dims"],)
 
         err_mesg = (
-            "Invalid dimension for scaling in \'scale_dims\'. Expected dimensions are:"
+            "Invalid dimension for scaling in 'scale_dims'. Expected dimensions are:"
             "\n  0 (or -4): batch dimension"
             "\n  1 (or -3): ensemble dimension"
             "\n  2 (or -2): spatial dimension"
             "\n  3 (or -1): variable dimension"
             "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
         )
-        if not all(-4 <= d <= 3 for d in class_dict['scale_dims']):
+        if not all(-4 <= d <= 3 for d in class_dict["scale_dims"]):
             raise ValueError(err_mesg)
 
         return super().__new__(cls, name, bases, class_dict)
