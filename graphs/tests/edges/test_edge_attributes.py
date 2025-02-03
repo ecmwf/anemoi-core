@@ -9,10 +9,12 @@
 
 import pytest
 import torch
+from functools import partial
 
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
-
+from anemoi.graphs.edges.attributes import AttributeFromSourceNode
+from anemoi.graphs.edges.attributes import AttributeFromTargetNode
 
 @pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-std"])
 @pytest.mark.parametrize("luse_rotated_features", [True, False])
@@ -36,3 +38,17 @@ def test_fail_edge_features(attribute_builder, graph_nodes_and_edges):
     """Test edge attribute builder fails with unknown nodes."""
     with pytest.raises(AssertionError):
         attribute_builder.compute(graph_nodes_and_edges, ("test_nodes", "to", "unknown_nodes"))
+
+
+@pytest.mark.parametrize(
+    "attribute_builder",
+    [
+        partial(AttributeFromSourceNode, node_attr_name="example_attr"),
+        partial(AttributeFromTargetNode, node_attr_name="example_attr"),
+    ],
+)
+def test_fail_edge_attribute_from_node(attribute_builder, graph_nodes_and_edges):
+    """Test edge attribute builder fails with unknown nodes."""
+    with pytest.raises(AttributeError):
+        builder_instance = attribute_builder() 
+        builder_instance.compute(graph_nodes_and_edges, ("test_nodes", "to", "unknown_nodes"))
