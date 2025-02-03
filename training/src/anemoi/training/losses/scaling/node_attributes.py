@@ -32,6 +32,7 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         nodes_name: str,
         nodes_attribute_name: str | None = None,
         apply_output_mask: bool = False,
+        inverse: bool = False,
         norm: str = None,
         **kwargs,
     ) -> None:
@@ -53,7 +54,10 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
             Additional keyword arguments.
         """
         self.apply_output_mask = apply_output_mask
-        self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze().numpy()
+        if inverse:
+            self.attr_values = ~graph_data[nodes_name][nodes_attribute_name].squeeze().numpy()
+        else:
+            self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze().numpy()
         super().__init__(data_indices, (2,), norm)
         del kwargs
 

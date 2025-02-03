@@ -19,7 +19,6 @@ from anemoi.training.losses.mse import MSELoss
 LOGGER = logging.getLogger(__name__)
 
 
-# WIP
 class LimitedAreaMSELoss(MSELoss):
     """MSE loss, calculated only within or outside the limited area.
 
@@ -27,11 +26,11 @@ class LimitedAreaMSELoss(MSELoss):
     or as the contribution to the overall loss.
     """
 
-    name = "wmse"
+    name = "mse"
 
     def __init__(
         self,
-        inside_lam: bool = True,
+        lam_scalar: str,
         wmse_contribution: bool = False,
         ignore_nans: bool = False,
         **kwargs,
@@ -40,20 +39,15 @@ class LimitedAreaMSELoss(MSELoss):
 
         Parameters
         ----------
-        inside_lam: bool
-            compute the loss inside or outside the limited area, by default inside (True)
+        
         wmse_contribution: bool
             compute loss as the contribution to the overall MSE, by default False
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
         """
+        self.lam_scalar = lam_scalar
         super().__init__(ignore_nans=ignore_nans, **kwargs)
-        self.inside_lam = inside_lam
         self.wmse_contribution = wmse_contribution
-
-        self.name += "_inside_lam" if inside_lam else "_outside_lam"
-        if wmse_contribution:
-            self.name += "_contribution"
 
     def forward(
         self,
@@ -80,19 +74,15 @@ class LimitedAreaMSELoss(MSELoss):
         torch.Tensor
             Weighted MSE loss
         """
-        self.calculate_difference(pred, target)
+        out = self.calculate_difference(pred, target)
 
-        limited_area_mask = self.scaler.subset("limited_area_mask").get_scaler(out.ndim, out.device)
-
-        if not self.inside_lam:
-            limited_area_mask = ~limited_area_mask
-
-        if not self.wmse_contribution:
-            self.node_weights *= limited_area_mask[0, 0, :, 0]
+        limited_area_mask = self.scaler.subset(self.lam_scalar).get_scaler(out.ndim, out.device).bool()
 
         out *= limited_area_mask
 
-        out = self.scale(out, scaler_indices, without_scalers=["limited_area_mask"])
+        out = self.scale(out, scaler_indices, without_scalers=[self.lam_scalar])
+
+        # TODO: Fix contribution
 
         if squash:
             out = self.avg_function(out, dim=-1)

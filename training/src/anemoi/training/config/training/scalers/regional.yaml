@@ -59,3 +59,9 @@ builders:
     _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
     nodes_name: ${graph.data}
     nodes_attribute_name: cutout_mask
+
+  outside_lam_mask:
+    _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
+    nodes_name: ${graph.data}
+    nodes_attribute_name: cutout_mask
+    inverse: True

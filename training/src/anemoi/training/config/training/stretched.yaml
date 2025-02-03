@@ -75,6 +75,26 @@ validation_metrics:
     scalers: []
     # other kwargs
     ignore_nans: True
+  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
+    lam_scalar: 'limited_area_mask'
+    scalars: ['limited_area_mask']
+    wmse_contribution: False
+    ignore_nans: True
+  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
+    lam_scalar: 'outside_lam_mask'
+    scalars: ['outside_lam_mask']
+    wmse_contribution: False
+    ignore_nans: True
+  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
+    lam_scalar: 'limited_area_mask'
+    scalars: ['limited_area_mask']
+    wmse_contribution: True
+    ignore_nans: True
+  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
+    lam_scalar: 'outside_lam_mask'
+    scalars: ['outside_lam_mask']
+    wmse_contribution: True
+    ignore_nans: True
 
 # List of validation metrics to keep in normalised space, and scalers to be applied
 # Use '*' in reference all metrics, or a list of metric names.
