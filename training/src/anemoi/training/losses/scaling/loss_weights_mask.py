@@ -18,6 +18,7 @@ from anemoi.training.losses.scaling import BaseDelayedScaler
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import AnemoiModelInterface
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class NaNMaskScaler(BaseDelayedScaler):
         super().__init__(data_indices, norm=norm)
         del kwargs
 
-    def get_scaling(self, model) -> np.ndarray:
+    def get_scaling(self, model: AnemoiModelInterface) -> np.ndarray:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.

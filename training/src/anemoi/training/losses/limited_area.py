@@ -11,10 +11,12 @@
 from __future__ import annotations
 
 import logging
-
-import torch
+from typing import TYPE_CHECKING
 
 from anemoi.training.losses.mse import MSELoss
+
+if TYPE_CHECKING:
+    import torch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,7 +83,7 @@ class LimitedAreaMSELoss(MSELoss):
 
         out = self.scale(out, scaler_indices, without_scalers=[self.lam_scalar])
 
-        # TODO: Fix contribution
+        # TODO(Mario): Fix contribution
 
         if squash:
             out = self.avg_function(out, dim=-1)

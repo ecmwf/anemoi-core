@@ -16,10 +16,10 @@ import numpy as np
 from hydra.utils import instantiate
 
 from anemoi.training.losses.scaling import BaseDelayedScaler
-from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
     import torch
+    from anemoi.utils.config import DotDict
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.utils.masks import BaseMask
@@ -81,7 +81,7 @@ def get_final_variable_scaling(scalers: dict[str, tuple[tuple[int, ...] | torch.
     return final_variable_scaling
 
 
-def print_final_variable_scaling(scalers: dict[str, tuple[tuple[int] | torch.Tensor]], data_indices) -> None:
+def print_final_variable_scaling(scalers: dict[str, tuple[tuple[int] | torch.Tensor]], data_indices: IndexCollection) -> None:
     final_variable_scaling = get_final_variable_scaling(scalers)
     log_text = "Final Variable Scaling: "
     for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):

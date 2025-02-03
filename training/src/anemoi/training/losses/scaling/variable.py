@@ -93,7 +93,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         data_indices: IndexCollection,
         weights: DictConfig,
         metadata_variables: dict | None = None,
-        norm: str = None,
+        norm: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise GeneralVariableLossScaler.

@@ -12,12 +12,12 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING
 
-import numpy as np
 
 from anemoi.training.losses.scaling import BaseScaler
 
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
+    import numpy as np
 
     from anemoi.models.data_indices.collection import IndexCollection
 
@@ -35,7 +35,7 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
         nodes_attribute_name: str | None = None,
         apply_output_mask: bool = False,
         inverse: bool = False,
-        norm: str = None,
+        norm: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
