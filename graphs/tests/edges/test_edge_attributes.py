@@ -7,14 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import pytest
-import torch
 from functools import partial
 
-from anemoi.graphs.edges.attributes import EdgeDirection
-from anemoi.graphs.edges.attributes import EdgeLength
+import pytest
+import torch
+
 from anemoi.graphs.edges.attributes import AttributeFromSourceNode
 from anemoi.graphs.edges.attributes import AttributeFromTargetNode
+from anemoi.graphs.edges.attributes import EdgeDirection
+from anemoi.graphs.edges.attributes import EdgeLength
+
 
 @pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-std"])
 @pytest.mark.parametrize("luse_rotated_features", [True, False])
@@ -50,5 +52,5 @@ def test_fail_edge_features(attribute_builder, graph_nodes_and_edges):
 def test_fail_edge_attribute_from_node(attribute_builder, graph_nodes_and_edges):
     """Test edge attribute builder fails with unknown nodes."""
     with pytest.raises(AttributeError):
-        builder_instance = attribute_builder() 
+        builder_instance = attribute_builder()
         builder_instance.compute(graph_nodes_and_edges, ("test_nodes", "to", "unknown_nodes"))
