@@ -35,7 +35,7 @@ class BaseVariableLossScaler(BaseScaler):
         group_config: DictConfig,
         data_indices: IndexCollection,
         metadata_variables: dict | None = None,
-        norm: str = None,
+        norm: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise Scaler.
@@ -117,7 +117,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         self.weights = weights
         del kwargs
 
-    def get_scaling(self, **kwargs) -> np.ndarray:
+    def get_scaling(self, **_kwargs) -> np.ndarray:
         """Get loss scaling.
 
         Retrieve the loss scaling for each variable from the config file.

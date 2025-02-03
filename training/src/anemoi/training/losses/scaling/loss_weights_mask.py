@@ -27,7 +27,7 @@ class NaNMaskScaler(BaseDelayedScaler):
 
     scale_dims: tuple[int] = (-2, -1)
 
-    def __init__(self, data_indices: IndexCollection, norm: str = None, **kwargs) -> None:
+    def __init__(self, data_indices: IndexCollection, norm: str | None = None, **kwargs) -> None:
         """Initialise NanMaskScaler.
 
         Parameters

@@ -23,24 +23,25 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ScaleDimMeta(type):
-    def __new__(cls, name, bases, class_dict):
+    def __new__(cls, name: str, bases: tuple, class_dict: dict):
         if "scale_dims" not in class_dict:
-            raise TypeError(f"Class {name} must define 'scale_dims'")
+            error_msg = f"Class {name} must define 'scale_dims'"
+            raise TypeError(error_msg)
 
         # Convert scale_dims to a tuple if it's an int
         if isinstance(class_dict["scale_dims"], int):
             class_dict["scale_dims"] = (class_dict["scale_dims"],)
 
-        err_mesg = (
-            "Invalid dimension for scaling in 'scale_dims'. Expected dimensions are:"
-            "\n  0 (or -4): batch dimension"
-            "\n  1 (or -3): ensemble dimension"
-            "\n  2 (or -2): spatial dimension"
-            "\n  3 (or -1): variable dimension"
-            "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
-        )
         if not all(-4 <= d <= 3 for d in class_dict["scale_dims"]):
-            raise ValueError(err_mesg)
+            error_msg = (
+                "Invalid dimension for scaling in 'scale_dims'. Expected dimensions are:"
+                "\n  0 (or -4): batch dimension"
+                "\n  1 (or -3): ensemble dimension"
+                "\n  2 (or -2): spatial dimension"
+                "\n  3 (or -1): variable dimension"
+                "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
+            )
+            raise ValueError(error_msg)
 
         return super().__new__(cls, name, bases, class_dict)
 
@@ -48,7 +49,7 @@ class ScaleDimMeta(type):
 class BaseScaler(ABC, metaclass=ScaleDimMeta):
     """Base class for all loss scalers."""
 
-    def __init__(self, data_indices: IndexCollection, norm: str = None) -> None:
+    def __init__(self, data_indices: IndexCollection, norm: str | None = None) -> None:
         """Initialise BaseScaler.
 
         Parameters
@@ -90,7 +91,8 @@ class BaseScaler(ABC, metaclass=ScaleDimMeta):
         if self.norm.lower() == "unit-mean":
             return values / np.mean(values)
 
-        raise ValueError(f"{self.norm} must be one of: None, unit-sum, l1, unit-mean.")
+        error_msg = f"{self.norm} must be one of: None, unit-sum, l1, unit-mean."
+        raise ValueError(error_msg)
 
 
 class BaseDelayedScaler(BaseScaler, ABC):

@@ -80,7 +80,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         """
         ...
 
-    def get_scaling(self, **kwargs) -> np.ndarray:
+    def get_scaling(self, **_kwargs) -> np.ndarray:
         variable_level_scaling = np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32)
 
         LOGGER.info(

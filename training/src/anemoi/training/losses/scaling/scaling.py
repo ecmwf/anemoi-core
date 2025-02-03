@@ -82,7 +82,8 @@ def get_final_variable_scaling(scalers: dict[str, tuple[tuple[int, ...] | torch.
 
 
 def print_final_variable_scaling(
-    scalers: dict[str, tuple[tuple[int] | torch.Tensor]], data_indices: IndexCollection,
+    scalers: dict[str, tuple[tuple[int] | torch.Tensor]],
+    data_indices: IndexCollection,
 ) -> None:
     final_variable_scaling = get_final_variable_scaling(scalers)
     log_text = "Final Variable Scaling: "
