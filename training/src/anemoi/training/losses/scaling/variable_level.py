@@ -36,7 +36,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         y_intercept: float,
         slope: float,
         metadata_variables: dict | None = None,
-        norm: str = None,
+        norm: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.

@@ -35,7 +35,7 @@ class BaseTendencyScaler(BaseVariableLossScaler):
         data_indices: IndexCollection,
         statistics: dict,
         statistics_tendencies: dict,
-        norm: str = None,
+        norm: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.
