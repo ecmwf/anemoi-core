@@ -53,4 +53,4 @@ def test_fail_edge_attribute_from_node(attribute_builder, graph_nodes_and_edges)
     """Test edge attribute builder fails with unknown nodes."""
     with pytest.raises(AttributeError):
         builder_instance = attribute_builder()
-        builder_instance.compute(graph_nodes_and_edges, ("test_nodes", "to", "unknown_nodes"))
+        builder_instance.compute(graph_nodes_and_edges, ("test_nodes", "to", "test_nodes"))
