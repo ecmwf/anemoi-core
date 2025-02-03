@@ -22,23 +22,43 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseScaler(ABC):
+class ScaleDimMeta(type):
+    def __new__(cls, name, bases, class_dict):
+        if 'scale_dims' not in class_dict:
+            raise TypeError(f"Class {name} must define 'scale_dims'")
+
+        # Convert scale_dims to a tuple if it's an int
+        if isinstance(class_dict['scale_dims'], int):
+            class_dict['scale_dims'] = (class_dict['scale_dims'],)
+
+        err_mesg = (
+            "Invalid dimension for scaling in \'scale_dims\'. Expected dimensions are:"
+            "\n  0 (or -4): batch dimension"
+            "\n  1 (or -3): ensemble dimension"
+            "\n  2 (or -2): spatial dimension"
+            "\n  3 (or -1): variable dimension"
+            "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
+        )
+        if not all(-4 <= d <= 3 for d in class_dict['scale_dims']):
+            raise ValueError(err_mesg)
+
+        return super().__new__(cls, name, bases, class_dict)
+
+
+class BaseScaler(ABC, metaclass=ScaleDimMeta):
     """Base class for all loss scalers."""
 
-    def __init__(self, data_indices: IndexCollection, scale_dims: int | tuple[int], norm: str = None) -> None:
+    def __init__(self, data_indices: IndexCollection, norm: str = None) -> None:
         """Initialise BaseScaler.
 
         Parameters
         ----------
         data_indices : IndexCollection
             Collection of data indices.
-        scale_dims : int | tuple[int]
-            Dimensions at which to scale. Must be between -4 and 3 inclusive.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
         self.data_indices = data_indices
-        self.scale_dims = scale_dims if isinstance(scale_dims, tuple) else (scale_dims,)
         self.norm = norm
         assert norm in [
             None,
@@ -46,15 +66,6 @@ class BaseScaler(ABC):
             "l1",
             "unit-mean",
         ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
-        err_mesg = (
-            "Invalid dimension for scaling. Expected dimensions are:"
-            "\n  0 (or -4): batch dimension"
-            "\n  1 (or -3): ensemble dimension"
-            "\n  2 (or -2): spatial dimension"
-            "\n  3 (or -1): variable dimension"
-            "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
-        )
-        assert all(-4 <= d <= 3 for d in self.scale_dims), err_mesg
 
     @property
     def is_variable_dim_scaled(self) -> bool:

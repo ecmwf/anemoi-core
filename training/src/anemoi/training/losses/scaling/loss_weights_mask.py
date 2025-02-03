@@ -23,6 +23,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 class NaNMaskScaler(BaseDelayedScaler):
+
+    scale_dims: tuple[int] = (-2, -1)
+
     def __init__(self, data_indices: IndexCollection, norm: str = None, **kwargs) -> None:
         """Initialise NanMaskScaler.
 
@@ -33,7 +36,7 @@ class NaNMaskScaler(BaseDelayedScaler):
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(data_indices, (-2, -1), norm=norm)
+        super().__init__(data_indices, norm=norm)
         del kwargs
 
     def get_scaling(self, model) -> np.ndarray:

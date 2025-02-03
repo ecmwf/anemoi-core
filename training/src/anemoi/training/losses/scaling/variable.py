@@ -28,6 +28,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseVariableLossScaler(BaseScaler):
     """Base class for all variable loss scalers."""
 
+    scale_dims: int = 3
+
     def __init__(
         self,
         group_config: DictConfig,
@@ -49,7 +51,7 @@ class BaseVariableLossScaler(BaseScaler):
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(data_indices, (-1,), norm=norm)
+        super().__init__(data_indices, norm=norm)
         del kwargs
         self.variable_groups = group_config
         self.metadata_variables = metadata_variables

@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 class GraphNodeAttributeScaler(BaseScaler, ABC):
     """Base class for all loss masks that are more than one-dimensional."""
 
+    scale_dims: int = 2
+
     def __init__(
         self,
         data_indices: IndexCollection,
@@ -58,7 +60,7 @@ class GraphNodeAttributeScaler(BaseScaler, ABC):
             self.attr_values = ~graph_data[nodes_name][nodes_attribute_name].squeeze().numpy()
         else:
             self.attr_values = graph_data[nodes_name][nodes_attribute_name].squeeze().numpy()
-        super().__init__(data_indices, (2,), norm)
+        super().__init__(data_indices, norm=norm)
         del kwargs
 
     def get_scaling(self, **kwargs) -> np.ndarray:
