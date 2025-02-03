@@ -204,8 +204,8 @@ class BaseAttributeFromNode(BooleanBaseEdgeAttribute, ABC):
         try:
             return graph[node_name][self.node_attr_name].numpy()[edge_index[self.idx]]
 
-        except AttributeError:
-            raise AttributeError(
+        except KeyError:
+            raise KeyError(
                 f"{self.__class__.__name__} failed because the attribute '{self.node_attr_name}' is not defined for the nodes."
             )
 
