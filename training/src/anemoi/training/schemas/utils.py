@@ -11,6 +11,8 @@
 from typing import Any
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 
 class BaseModel(PydanticBaseModel):
@@ -21,7 +23,26 @@ class BaseModel(PydanticBaseModel):
         use_enum_values = True
         validate_assignment = True
         validate_default = True
-        extra = "forbid"
+        extra = "ignore"
+
+
+CUSTOM_MESSAGES = {
+    "missing": "A config entry seems to be missing. If not please check for any typos.",
+    "extra_forbidden": "Extra entries in the config are forebidden. Please check for typos.",
+}
+
+
+def convert_errors(e: ValidationError, custom_messages: dict[str, str]) -> list[ErrorDetails]:
+    new_errors: list[ErrorDetails] = []
+    for error in e.errors():
+        custom_message = custom_messages.get(error["type"])
+
+        if custom_message:
+
+            ctx = error.get("ctx")
+            error["msg"] = custom_message.format(**ctx) if ctx else custom_message
+        new_errors.append(error)
+    return new_errors
 
 
 class ValidationError(Exception):

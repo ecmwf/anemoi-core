@@ -20,7 +20,7 @@ from hydra import compose
 from hydra import initialize
 
 from anemoi.training.commands import Command
-from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import validate_schema
 
 if TYPE_CHECKING:
     import argparse
@@ -124,7 +124,7 @@ class ConfigGenerator(Command):
         """Validates the configuration files in the given directory."""
         with initialize(version_base=None, config_path=""):
             cfg = compose(config_name=name)
-            cfg = BaseSchema(**cfg)
+            validate_schema(cfg)
 
 
 command = ConfigGenerator
