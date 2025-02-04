@@ -1,4 +1,5 @@
-name: "Ensure Conventional Commit in PR title"
+# This workflow ensures that the PR title follows the Conventional Commit format.
+name: "[Pull Request] Ensure Conventional Commit in PR title"
 
 on:
   pull_request_target:
