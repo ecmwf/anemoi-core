@@ -34,10 +34,12 @@ class ZarrNodeSchema(BaseModel):
 class NPZnodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.NPZFileNodes"] = Field(..., alias="_target_")
     "Nodes from NPZ grids class implementation from anemoi.graphs.nodes."
-    grid_definition_path: str
-    "Path to the folder containing the grid definition files."
-    resolution: str = Field(examples=["o48", "o96", "n320"])
-    "The grid resolution."
+    npz_file: str
+    "Path to the NPZ file."
+    lat_key: str = Field(examples=["lat", "latitude"])
+    "The key name of the latitude field."
+    lon_key: str = Field(examples=["lon", "longitude"])
+    "The key name of the longitude field."
 
 
 class TextNodeSchema(BaseModel):
@@ -49,6 +51,13 @@ class TextNodeSchema(BaseModel):
     "The index of the longitude in the dataset."
     idx_lat: int
     "The index of the latitude in the dataset."
+
+
+class ReducedGaussianGridNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.ReducedGaussianGridNodes"] = Field(..., alias="_target_")
+    "Nodes from NPZ grids class implementation from anemoi.graphs.nodes."
+    grid: Literal["o16", "o32", "o48", "o96", "o160", "o256", "o320", "n320", "o1280"]
+    "Reduced gaussian grid."
 
 
 class ICONNodeSchema(BaseModel):
@@ -137,6 +146,7 @@ NodeBuilderSchemas = Union[
     | ICONNodeSchema
     | ICONMeshNodeSchema
     | LimitedAreaNPZFileNodesSchema
+    | ReducedGaussianGridNodeSchema
     | IcosahedralandHealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
     | StretchedIcosahdralNodeSchema
