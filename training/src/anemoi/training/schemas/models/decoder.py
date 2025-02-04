@@ -10,18 +10,21 @@
 from typing import Literal
 
 from pydantic import Field
+from pydantic import NonNegativeInt
 
 from .common_components import GNNModelComponent
 from .common_components import TransformerModelComponent
 
 
-class GraphTransformerDecoderSchema(TransformerModelComponent):
-    target_: Literal["anemoi.models.layers.mapper.GraphTransformerBackwardMapper"] = Field(..., alias="_target_")
-    "Graph Transformer Decoder object from anemoi.models.layers.mapper."
-    sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
-    "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
-
-
 class GNNDecoderSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GNNBackwardMapper"] = Field(..., alias="_target_")
     "GNN decoder object from anemoi.models.layers.mapper."
+
+
+class GraphTransformerDecoderSchema(TransformerModelComponent):
+    target_: Literal["anemoi.models.layers.mapper.GraphTransformerBackwardMapper"] = Field(..., alias="_target_")
+    "Graph Transformer Decoder object from anemoi.models.layers.mapper."
+    trainable_size: NonNegativeInt = Field(example=8)
+    "Size of trainable parameters vector. Default to 8."
+    sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
+    "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
