@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## 0.4.4 (2025-02-04)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+
+
+**Full Changelog**: https://github.com/ecmwf/anemoi-core/compare/anemoi-graphs-0.4.3...anemoi-graphs-0.4.4
+
 ## 0.4.3 (2025-02-04)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
