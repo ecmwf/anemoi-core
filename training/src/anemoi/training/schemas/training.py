@@ -167,6 +167,10 @@ class TrainingSchema(BaseModel):
     "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
     load_weights_only: bool = Field(example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
+    transfer_learning: bool = Field(example=False)
+    "Flag to activate transfer learning mode when loading a checkpoint."
+    submodules_to_freeze: list[str] = Field(example=["processor"])
+    "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(deafult=False)
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
     precision: str = Field(deafult="16-mixed")
