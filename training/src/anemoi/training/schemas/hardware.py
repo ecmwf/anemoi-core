@@ -14,6 +14,7 @@ from pathlib import Path  # noqa: TC003
 from typing import Annotated
 
 from pydantic import AfterValidator
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 
@@ -32,8 +33,8 @@ class Checkpoint(BaseModel):
     "File name pattern for checkpoint files saved by time frequency (minutes)."
 
 
-class FilesSchema(BaseModel):
-    dataset: Path  # TODO(Helen): Change to FilePath, only posisble after refactor
+class FilesSchema(PydanticBaseModel):
+    dataset: Path | dict[str, Path]  # dict option for multiple datasets
     "Path to the dataset file."
     graph: Path | None = Field(example=None)
     "Path to the graph file."
@@ -42,7 +43,7 @@ class FilesSchema(BaseModel):
     warm_start: str | None = None
 
 
-class Logs(BaseModel):
+class Logs(PydanticBaseModel):
     # TODO(Helen): Discuss merging with logging in diagnsotics
     wandb: Path | None = None
     "Path to output wandb logs."
