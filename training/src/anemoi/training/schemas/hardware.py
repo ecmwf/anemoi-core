@@ -36,7 +36,7 @@ class Checkpoint(BaseModel):
 class FilesSchema(PydanticBaseModel):
     dataset: Path | dict[str, Path]  # dict option for multiple datasets
     "Path to the dataset file."
-    graph: Path | None = Field(example=None)
+    graph: Path | None = Field(default=None)
     "Path to the graph file."
     checkpoint: dict[str, str]
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."

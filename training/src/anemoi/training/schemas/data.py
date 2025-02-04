@@ -23,7 +23,7 @@ from .utils import BaseModel
 class NormalizerSchema(BaseModel):
     default: str | None = Field(literals=["mean-std", "std", "min-max", "max", "none"])
     """Normalizer default method to apply"""
-    remap: dict[str, str] | None = Field(default=dict)
+    remap: dict[str, str] | None = Field(default_factory=dict)
     """Dictionary for remapping variables"""
     std: list[str] | None = Field(default_factory=list)
     """Variables to normalise with std"""

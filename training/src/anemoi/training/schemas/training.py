@@ -15,7 +15,6 @@ from typing import Annotated
 from typing import Any
 
 from pydantic import AfterValidator
-from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -113,10 +112,9 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mse = "anemoi.training.losses.mse.WeightedMSELoss"
     mae = "anemoi.training.losses.mae.WeightedMAELoss"
     logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
-    huber = "anemoi.training.losses.huber.WeightedHuberLoss"
 
 
-class BaseLossSchema(PydanticBaseModel):
+class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
     scalars: list[PossibleScalars] = Field(example=["variable"])
@@ -183,7 +181,7 @@ class TrainingSchema(BaseModel):
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
     num_sanity_val_steps: PositiveInt = Field(example=6)
     "Sanity check runs n batches of val before starting the training routine."
-    gradient_clip: GradientClip = Field(default_factory=GradientClip)
+    gradient_clip: GradientClip
     "Config for gradient clipping."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
@@ -193,7 +191,7 @@ class TrainingSchema(BaseModel):
     "Training loss configuration."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
-    validation_metrics: list[LossSchemas] = Field(default_factory=LossSchemas)
+    validation_metrics: list[LossSchemas]
     "List of validation metrics configurations."
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
@@ -203,9 +201,9 @@ class TrainingSchema(BaseModel):
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     lr: LR = Field(default_factory=LR)
     "Learning rate configuration."
-    variable_loss_scaling: LossScalingSchema = Field(default_factory=LossScalingSchema)
+    variable_loss_scaling: LossScalingSchema
     "Configuration of the variable scaling used in the loss computation."
-    pressure_level_scaler: PressureLevelScalerSchema = Field(default_factory=PressureLevelScalerSchema)
+    pressure_level_scaler: PressureLevelScalerSchema
     "Configuration of the pressure level scaler apllied in the loss computation."
     metrics: list[str]
     "List of metrics"

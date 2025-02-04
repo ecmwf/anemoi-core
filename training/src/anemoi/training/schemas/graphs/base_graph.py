@@ -19,7 +19,7 @@ from .edge_attributes_schemas import EdgeAttributeSchema  # noqa: TC001
 from .edge_schemas import EdgeBuilderSchemas  # noqa: TC001
 from .node_attributes_schemas import NodeAttributeSchemas  # noqa: TC001
 from .node_schemas import NodeBuilderSchemas  # noqa: TC001
-from .post_processors import ProcessorSchema  # noqa: TC001
+from .post_processors import ProcessorSchemas  # noqa: TC001
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class BaseGraphSchema(BaseModel):
     "List of edges schema."
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
-    post_processors: list[ProcessorSchema]
+    post_processors: list[ProcessorSchemas] = Field(default_factory=list)
     data: str = Field(example="data")
     "Key name for the data nodes. Default to 'data'."
     hidden: str = Field(example="hidden")

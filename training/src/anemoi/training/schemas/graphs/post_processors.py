@@ -11,8 +11,8 @@
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 from typing import Literal
-from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -31,4 +31,4 @@ class RemoveUnconnectedNodesSchema(BaseModel):
     "New attribute name to store the mask indices."
 
 
-ProcessorSchema = Union[RemoveUnconnectedNodesSchema]
+ProcessorSchemas = Annotated[RemoveUnconnectedNodesSchema, Field(discriminator="target_")]

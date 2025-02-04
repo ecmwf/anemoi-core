@@ -74,7 +74,6 @@ processors:
   #   config: ${data.imputer}
   normalizer:
     _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-    #   _convert_: all # Is it still used ???
     config: ${data.normalizer}
   # remapper:
   #   _target_: anemoi.models.preprocessing.remapper.Remapper

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -47,7 +46,7 @@ class BaseSchema(BaseModel):
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: HardwareSchema
     """Hardware configuration."""
-    graph: Any | BaseGraphSchema
+    graph: BaseGraphSchema
     """Graph configuration."""
     model: ModelSchema  # GNNSchema | TransformerSchema | GraphTransformerSchema = Field(..., discriminator='target_')
     """Model configuration."""

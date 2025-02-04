@@ -15,6 +15,7 @@ from pathlib import Path  # noqa: TC003
 from typing import Any
 from typing import Literal
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import PositiveInt
 from pydantic import RootModel
@@ -60,13 +61,13 @@ class DatasetSchema(BaseModel):
 
     dataset: str | dict | Path
     "Dataset"
-    start: int | None = Field(example=None)
+    start: int | None = Field(default=None)
     "Starting datetime for sample of the dataset."
-    end: int | None = Field(example=None)
+    end: int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
     frequency: Frequency
     "Temporal resolution, frequency must be >= to dataset frequency."
-    drop: list | None = Field(example=None)
+    drop: list | None = Field(default=None)
     "List of variables to drop from dataset"
 
 
@@ -101,7 +102,7 @@ class MaskedGridIndicesSchema(BaseModel):
     "Name of the nodes graph attribute used for masking."
 
 
-class DataLoaderSchema(BaseModel):
+class DataLoaderSchema(PydanticBaseModel):
     prefetch_factor: int = Field(example=2, ge=0)
     "Number of batches loaded in advance by each worker."
     pin_memory: bool = Field(example=True)
