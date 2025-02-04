@@ -8,6 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## 0.4.3 (2025-02-04)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Training
+* fix(training, plots) Exclude nans from error colorbars by @anaprietonem in https://github.com/ecmwf/anemoi-core/pull/59
+* fix(training): bump anemoi-datasets required version to 0.5.13 by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/74
+* chore(training): Add default config files for 2 and 3 level hierarchical processors by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/50
+* fix: update graph configs to avoid DeprecationWarning for area weights by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/53
+* feat(models): normalization layers by @jakob-schloer in https://github.com/ecmwf/anemoi-core/pull/47
+* Fix crash in diagnostic plots (colorbar limits) by @lzampier in https://github.com/ecmwf/anemoi-core/pull/85
+* fix(training): profiler 'Model Summary' works when sharding models over multiple GPUs by @cathalobrien in https://github.com/ecmwf/anemoi-core/pull/90
+* docs(graphs): Refactor anemoi-graphs documentation by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/49
+* fix: pin dask version to 2024.12.1  by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/94
+* docs: Improve installation docs by @HCookie in https://github.com/ecmwf/anemoi-core/pull/91
+* docs: cancel RTD builds on PRs without change by @JesperDramsch in https://github.com/ecmwf/anemoi-core/pull/97
+* feat: Model Freezing ❄️  by @icedoom888 in https://github.com/ecmwf/anemoi-core/pull/61
+* feat: make flash attention configurable by @theissenhelen in https://github.com/ecmwf/anemoi-core/pull/60
+* fix: cpu memory savings of sharded dataloader by @japols in https://github.com/ecmwf/anemoi-core/pull/83
+* chore: synced file(s) with ecmwf-actions/reusable-workflows by @DeployDuck in https://github.com/ecmwf/anemoi-core/pull/84
+### Models
+* feature(models): Add model comm group to predict_step  by @cathalobrien in https://github.com/ecmwf/anemoi-core/pull/77
+* Implementation of NormalizedReluBounding for non-zero thresholds by @lzampier in https://github.com/ecmwf/anemoi-core/pull/64
+* fix: normalise in place to reduce memory by @japols in https://github.com/ecmwf/anemoi-core/pull/82
+* feat(models): use num_layers of the processor in hierarchical graphs by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/78
+* fix: default behaviour for kernel_layers when not set in config. by @jakob-schloer in https://github.com/ecmwf/anemoi-core/pull/93
+* fix:  bug in variables ordering in NormalizedReluBounding by @lzampier in https://github.com/ecmwf/anemoi-core/pull/98
+* feat(models): Copy Imputer by @icedoom888 in https://github.com/ecmwf/anemoi-core/pull/72
+### Graphs
+* feat(graphs,plots): expand support for multi-dimensional node attributes by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/48
+* feat(graphs): New Edge Attribute: AttributeFromNode by @icedoom888 in https://github.com/ecmwf/anemoi-core/pull/62
+* feat: support ReducedGaussianGridNodes by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/54
+### Other Changes
+* pre-commits-for-models-graphs-dev by @sahahner in https://github.com/ecmwf/anemoi-core/pull/45
+* ci(docs): bring ReadTheDocs CI pipeline by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/73
+* ci: Reinstantiate CI files by @JesperDramsch in https://github.com/ecmwf/anemoi-core/pull/75
+* ci: Propose release-please implementation by @JesperDramsch in https://github.com/ecmwf/anemoi-core/pull/100
+
+## New Contributors
+* @anaprietonem made their first contribution in https://github.com/ecmwf/anemoi-core/pull/59
+* @cathalobrien made their first contribution in https://github.com/ecmwf/anemoi-core/pull/77
+* @lzampier made their first contribution in https://github.com/ecmwf/anemoi-core/pull/64
+* @japols made their first contribution in https://github.com/ecmwf/anemoi-core/pull/82
+* @JesperDramsch made their first contribution in https://github.com/ecmwf/anemoi-core/pull/75
+* @jakob-schloer made their first contribution in https://github.com/ecmwf/anemoi-core/pull/47
+* @icedoom888 made their first contribution in https://github.com/ecmwf/anemoi-core/pull/61
+* @theissenhelen made their first contribution in https://github.com/ecmwf/anemoi-core/pull/60
+* @DeployDuck made their first contribution in https://github.com/ecmwf/anemoi-core/pull/84
+
+**Full Changelog**: https://github.com/ecmwf/anemoi-core/compare/anemoi-graphs-0.4.2...anemoi-graphs-0.4.3
+
 ## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.4.2...HEAD)
 
 ### Added
