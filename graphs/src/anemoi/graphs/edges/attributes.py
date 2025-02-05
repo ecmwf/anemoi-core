@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import logging
+from abc import ABC
 
 import torch
+from torch_geometric.data.storage import NodeStorage
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
@@ -24,17 +26,30 @@ from anemoi.graphs.utils import haversine_distance
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
+class NodeAttributeMeta(type):
+    def __new__(cls, name: str, bases: tuple, class_dict: dict):
+        if "node_attr_name" not in class_dict:
+            error_msg = f"Class {name} must define 'node_attr_name'"
+            raise TypeError(error_msg)
+
+        return super().__new__(cls, name, bases, class_dict)
+
+
+class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, metaclass=NodeAttributeMeta):
     """Base class for edge attribute builders."""
+
+    node_attr_name: str = None
 
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
-        self._idx_lat = 0
-        self._idx_lon = 1
         self.norm = norm
         self.dtype = dtype
 
-    def forward(self, x: PairTensor, edge_index: Adj, size: Size = None) -> torch.Tensor:
+    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+        return source_nodes[self.node_attr_name], target_nodes[self.node_attr_name]
+
+    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
+        x = self.subset_node_information(*x)
         return self.propagate(edge_index, x=x, size=size)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
@@ -65,7 +80,15 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
     def aggregate(self, edge_features: torch.Tensor) -> torch.Tensor:
         return edge_features
 
-class EdgeLength(BaseEdgeAttributeBuilder):
+
+class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
+
+    node_attr_name: str = "x"
+    _idx_lat: int = 0
+    _idx_lon: int = 1
+
+
+class EdgeLength(BasePositionalBuilder):
     """Computes edge length for bipartite graphs."""
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
@@ -73,7 +96,7 @@ class EdgeLength(BaseEdgeAttributeBuilder):
         return edge_length
 
 
-class EdgeDirection(BaseEdgeAttributeBuilder):
+class EdgeDirection(BasePositionalBuilder):
     """Computes edge direction for bipartite graphs."""
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
@@ -81,7 +104,7 @@ class EdgeDirection(BaseEdgeAttributeBuilder):
         return edge_dirs
 
 
-class Azimuth(BaseEdgeAttributeBuilder):
+class Azimuth(BasePositionalBuilder):
     """Compute the azimuth of the edge.
 
     Attributes
@@ -93,7 +116,7 @@ class Azimuth(BaseEdgeAttributeBuilder):
 
     Methods
     -------
-    compute(graph, source_name, target_name)
+    compute(x_i, x_j)
         Compute edge lengths attributes.
 
     References
@@ -114,3 +137,49 @@ class Azimuth(BaseEdgeAttributeBuilder):
         edge_dirs = torch.atan2(a2, a1)
 
         return edge_dirs
+
+
+class BooleanBaseEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
+    """Base class for boolean edge attributes."""
+
+    def __init__(self) -> None:
+        super().__init__(norm=None, dtype="bool")
+
+
+class BaseAttributeFromNodeBuilder(BooleanBaseEdgeAttributeBuilder, ABC):
+    """Base class for propagating an attribute from the nodes to the edges."""
+
+    def __init__(self, node_attr_name: str) -> None:
+        super().__init__()
+        self.node_attr_name = node_attr_name
+
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        return (x_i, x_j)[self.node_idx]
+
+
+class AttributeFromSourceNode(BaseAttributeFromNodeBuilder):
+    """
+    Copy an attribute of the source node to the edge.
+    Used for example to identify if an encoder edge originates from a LAM or global node.
+
+    Attributes
+    ----------
+    node_attr_name : str
+        Name of the node attribute to propagate.
+    """
+
+    node_idx: int = 0
+
+
+class AttributeFromTargetNode(BaseAttributeFromNodeBuilder):
+    """Copy an attribute of the target node to the edge.
+
+    Used for example to identify if an encoder edge ends at a LAM or global node.
+
+    Attributes
+    ----------
+    node_attr_name : str
+        Name of the node attribute to propagate.
+    """
+
+    node_idx: int = 1

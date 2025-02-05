@@ -102,10 +102,10 @@ class BaseEdgeBuilder(ABC):
         """
         for attr_name, attr_config in config.items():
             edge_index = graph[self.name].edge_index
-            source_coords = graph[self.name[0]].x
-            target_coords = graph[self.name[2]].x
             edge_builder = instantiate(attr_config)
-            graph[self.name][attr_name] = edge_builder(x=(source_coords, target_coords), edge_index=edge_index)
+            graph[self.name][attr_name] = edge_builder(
+                x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
+            )
         return graph
 
     def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
