@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import TYPE_CHECKING
+
 import pytest
 import torch
 
