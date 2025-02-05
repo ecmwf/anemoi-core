@@ -10,11 +10,15 @@
 
 import pytest
 import torch
+from typing import TYPE_CHECKING
 
 from anemoi.graphs.edges.attributes import AttributeFromSourceNode
 from anemoi.graphs.edges.attributes import AttributeFromTargetNode
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
+
+if TYPE_CHECKING:
+    from torch_geometric.data import HeteroData
 
 TEST_EDGES = ("test_nodes", "to", "test_nodes")
 
