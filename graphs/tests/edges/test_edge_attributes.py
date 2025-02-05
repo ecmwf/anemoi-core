@@ -40,6 +40,7 @@ def test_edge_lengths(graph_nodes_and_edges, norm):
     edge_attr = edge_attr_builder(x=(source_nodes, target_nodes), edge_index=edge_index)
     assert isinstance(edge_attr, torch.Tensor)
 
+
 @pytest.mark.parametrize("attribute_builder_cls", [AttributeFromSourceNode, AttributeFromTargetNode])
 def test_edge_attribute_from_node(attribute_builder_cls, graph_nodes_and_edges: HeteroData):
     """Test edge attribute builder fails with unknown nodes."""
