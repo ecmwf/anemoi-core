@@ -13,7 +13,6 @@ import logging
 import time
 from datetime import timedelta
 from pathlib import Path
-from typing import override
 
 import pytorch_lightning as pl
 
@@ -55,12 +54,12 @@ class TimeLimit(pl.callbacks.Callback):
 
         self._start_time = time.time()
 
-    @override
     def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        _ = pl_module
         self._run_stopping_check(trainer)
 
-    @override
     def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        _ = pl_module
         self._run_stopping_check(trainer)
 
     def _run_stopping_check(self, trainer: pl.Trainer) -> None:
