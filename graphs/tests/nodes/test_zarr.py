@@ -12,7 +12,7 @@ import torch
 import zarr
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import AreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders import from_file
 
@@ -47,7 +47,7 @@ def test_register_nodes(mocker, mock_zarr_dataset):
     assert graph["test_nodes"].node_type == "ZarrDatasetNodes"
 
 
-@pytest.mark.parametrize("attr_class", [UniformWeights, AreaWeights])
+@pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])
 def test_register_attributes(mocker, graph_with_nodes: HeteroData, attr_class):
     """Test ZarrDatasetNodes register correctly the weights."""
     mocker.patch.object(from_file, "open_dataset", return_value=None)

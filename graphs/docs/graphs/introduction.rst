@@ -5,9 +5,13 @@
 ##############
 
 In `anemoi-graphs`, graphs are built using a `recipe`, which is a YAML
-file that specifies the nodes, edges, and attributes of the graph. The
-recipe file is used to create the graphs using the :ref:`command-line
-tool <cli-introduction>`.
+file that specifies the nodes, edges, and attributes of an
+encoder-processor-decoder graph. The recipe file is used to create the
+graphs using the :ref:`command-line tool <cli-introduction>`.
+
+.. image:: ../_static/enc_proc_dec.png
+   :alt: Encoder-processor-decoder graph
+   :align: center
 
 The main components of the recipe file are the definition of the
 `nodes`, the `edges`, and each of these can optionally include
@@ -42,7 +46,10 @@ use indistinctly any of these to create your `data` or `hidden` nodes:
 
 -  :doc:`node_coordinates/zarr_dataset`
 -  :doc:`node_coordinates/npz_file`
+-  :doc:`node_coordinates/reduced_gaussian`
 -  :doc:`node_coordinates/icon_mesh`
+-  :doc:`node_coordinates/text_file`
+-  :doc:`node_coordinates/latlon_arrays`
 -  :doc:`node_coordinates/tri_refined_icosahedron`
 -  :doc:`node_coordinates/hex_refined_icosahedron`
 -  :doc:`node_coordinates/healpix`

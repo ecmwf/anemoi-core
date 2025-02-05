@@ -27,6 +27,7 @@ from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mapper import GraphEdgeMixin
+from anemoi.utils.config import DotDict
 
 
 class BaseProcessor(nn.Module, ABC):
@@ -88,6 +89,7 @@ class TransformerProcessor(BaseProcessor):
     def __init__(
         self,
         num_layers: int,
+        layer_kernels: DotDict,
         *args,
         window_size: Optional[int] = None,
         num_channels: int = 128,
@@ -97,6 +99,9 @@ class TransformerProcessor(BaseProcessor):
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         dropout_p: float = 0.1,
+        attention_implementation: str = "flash_attention",
+        softcap: float = 0.0,
+        use_alibi_slopes: bool = False,
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -105,6 +110,9 @@ class TransformerProcessor(BaseProcessor):
         ----------
         num_layers : int
             Number of num_layers
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         window_size: int,
             1/2 size of shifted window for attention computation
         num_channels : int
@@ -117,10 +125,17 @@ class TransformerProcessor(BaseProcessor):
             Activation function, by default "GELU"
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.0
+        attention_implementation: str, optional
+            A predefined string which selects which underlying attention
+            implementation, by default "flash_attention"
+        softcap : float, optional
+            Anything > 0 activates softcapping flash attention, by default None
+        use_alibi_slopes : bool, optional
+            Use aLiBI option, only used for flash attention, by default None
         """
         super().__init__(
-            num_channels=num_channels,
             num_layers=num_layers,
+            num_channels=num_channels,
             window_size=window_size,
             num_chunks=num_chunks,
             activation=activation,
@@ -132,12 +147,16 @@ class TransformerProcessor(BaseProcessor):
         self.build_layers(
             TransformerProcessorChunk,
             num_channels=num_channels,
+            num_layers=self.chunk_size,
+            layer_kernels=layer_kernels,
             mlp_hidden_ratio=mlp_hidden_ratio,
             num_heads=num_heads,
-            num_layers=self.chunk_size,
             window_size=window_size,
             activation=activation,
             dropout_p=dropout_p,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
         )
 
         self.offload_layers(cpu_offload)
@@ -168,6 +187,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
     def __init__(
         self,
         num_layers: int,
+        layer_kernels: DotDict,
         *args,
         trainable_size: int = 8,
         num_channels: int = 128,
@@ -212,16 +232,15 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
         kwargs = {
-            "num_layers": self.chunk_size,
             "mlp_extra_layers": mlp_extra_layers,
             "activation": activation,
             "edge_dim": None,
         }
 
-        self.build_layers(GNNProcessorChunk, num_channels, **kwargs)
+        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, layer_kernels, **kwargs)
 
         kwargs["edge_dim"] = self.edge_dim  # Edge dim for first layer
-        self.proc[0] = GNNProcessorChunk(num_channels, **kwargs)
+        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, layer_kernels, **kwargs)
 
         self.offload_layers(cpu_offload)
 
@@ -256,6 +275,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
     def __init__(
         self,
         num_layers: int,
+        layer_kernels: DotDict,
         trainable_size: int = 8,
         num_channels: int = 128,
         num_chunks: int = 2,
@@ -289,8 +309,8 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             Whether to offload processing to CPU, by default False
         """
         super().__init__(
-            num_layers=num_layers,
             num_channels=num_channels,
+            num_layers=num_layers,
             num_chunks=num_chunks,
             activation=activation,
             cpu_offload=cpu_offload,
@@ -306,6 +326,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             GraphTransformerProcessorChunk,
             num_channels=num_channels,
             num_layers=self.chunk_size,
+            layer_kernels=layer_kernels,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,

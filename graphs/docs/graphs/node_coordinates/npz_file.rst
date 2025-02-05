@@ -11,20 +11,10 @@ following YAML configuration:
      data: # name of the nodes
        node_builder:
          _target_: anemoi.graphs.nodes.NPZFileNodes
-         grid_definition_path: /path/to/folder/with/grids/
-         resolution: o48
+         npz_file: /path/to/folder/with/grids/my_grid.npz
+         lat_key: latitudes
+         lon_key: longitudes
 
-where `grid_definition_path` is the path to the folder containing the
-grid definition files and `resolution` is the resolution of the grid to
-be used.
-
-By default, the grid files are assumed to be in the `grids` folder in
-the same directory as the recipe file. The grid definition files are
-expected to be named `"grid_{resolution}.npz"`.
-
-.. note::
-
-   The NPZ file should contain the following keys:
-
-   -  `longitudes`: The longitudes of the grid.
-   -  `latitudes`: The latitudes of the grid.
+where `npz_file` is the path to the NPZ file and `lat_key` and `lon_key`
+are optional arguments with the key names of the latitude and longitude
+arrays.

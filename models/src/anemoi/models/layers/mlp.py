@@ -13,8 +13,8 @@ import logging
 import torch
 from torch import nn
 
-from anemoi.models.layers.utils import AutocastLayerNorm
 from anemoi.models.layers.utils import CheckpointWrapper
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ class MLP(nn.Module):
         in_features: int,
         hidden_dim: int,
         out_features: int,
+        layer_kernels: DotDict,
         n_extra_layers: int = 0,
         activation: str = "SiLU",
         final_activation: bool = False,
@@ -43,6 +44,9 @@ class MLP(nn.Module):
             Hidden dimensions
         out_features : int
             Number of output features
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         n_extra_layers : int, optional
             Number of extra layers in MLP, by default 0
         activation : str, optional
@@ -65,23 +69,27 @@ class MLP(nn.Module):
             If activation function is not supported
         """
         super().__init__()
+
+        Linear = layer_kernels["Linear"]
+        LayerNorm = layer_kernels["LayerNorm"]
+
         try:
             act_func = getattr(nn, activation)
         except AttributeError as ae:
             LOGGER.error("Activation function %s not supported", activation)
             raise RuntimeError from ae
 
-        mlp1 = nn.Sequential(nn.Linear(in_features, hidden_dim), act_func())
+        mlp1 = nn.Sequential(Linear(in_features, hidden_dim), act_func())
         for _ in range(n_extra_layers + 1):
-            mlp1.append(nn.Linear(hidden_dim, hidden_dim))
+            mlp1.append(Linear(hidden_dim, hidden_dim))
             mlp1.append(act_func())
-        mlp1.append(nn.Linear(hidden_dim, out_features))
+        mlp1.append(Linear(hidden_dim, out_features))
 
         if final_activation:
             mlp1.append(act_func())
 
         if layer_norm:
-            mlp1.append(AutocastLayerNorm(out_features))
+            mlp1.append(LayerNorm(normalized_shape=out_features))
 
         self.model = CheckpointWrapper(mlp1) if checkpoints else mlp1
 

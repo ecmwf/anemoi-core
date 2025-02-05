@@ -5,7 +5,7 @@
 Zarr datasets are the standard format to define data nodes in
 :ref:`anemoi-graphs <anemoi-graphs:index-page>`. The user can define
 node attributes based on a zarr dataset variable. For example, the
-following recipe will define an attribute `land_mask` based on the _lsm_
+following recipe will define an attribute `land_mask` based on the `lsm`
 variable of the dataset.
 
 .. literalinclude:: ../yaml/attributes_nonmissingzarr.yaml

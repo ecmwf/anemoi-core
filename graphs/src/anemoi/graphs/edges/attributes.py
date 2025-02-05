@@ -27,11 +27,12 @@ LOGGER = logging.getLogger(__name__)
 class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
     """Base class for edge attribute builders."""
 
-    def __init__(self, norm: str | None = None) -> None:
+    def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
         self._idx_lat = 0
         self._idx_lon = 1
         self.norm = norm
+        self.dtype = dtype
 
     def forward(self, x: PairTensor, edge_index: Adj, size: Size = None) -> torch.Tensor:
         return self.propagate(edge_index, x=x, size=size)
@@ -63,7 +64,6 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
 
     def aggregate(self, edge_features: torch.Tensor) -> torch.Tensor:
         return edge_features
-
 
 class EdgeLength(BaseEdgeAttributeBuilder):
     """Computes edge length for bipartite graphs."""
