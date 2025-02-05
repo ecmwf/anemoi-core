@@ -8,9 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import TYPE_CHECKING
+
 import pytest
 import torch
-from typing import TYPE_CHECKING
 
 from anemoi.graphs.edges.attributes import AttributeFromSourceNode
 from anemoi.graphs.edges.attributes import AttributeFromTargetNode
