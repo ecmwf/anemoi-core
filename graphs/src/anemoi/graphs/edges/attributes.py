@@ -65,6 +65,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
     def aggregate(self, edge_features: torch.Tensor) -> torch.Tensor:
         return edge_features
 
+
 class EdgeLength(BaseEdgeAttributeBuilder):
     """Computes edge length for bipartite graphs."""
 
