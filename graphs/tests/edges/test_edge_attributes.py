@@ -40,17 +40,22 @@ def test_edge_lengths(graph_nodes_and_edges, norm):
     edge_attr = edge_attr_builder(x=(source_nodes, target_nodes), edge_index=edge_index)
     assert isinstance(edge_attr, torch.Tensor)
 
+@pytest.mark.parametrize("attribute_builder_cls", [AttributeFromSourceNode, AttributeFromTargetNode])
+def test_edge_attribute_from_node(attribute_builder_cls, graph_nodes_and_edges: HeteroData):
+    """Test edge attribute builder fails with unknown nodes."""
+    edge_attr_builder = attribute_builder_cls(node_attr_name="mask")
+    edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
+    source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
+    target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
+    edge_attr = edge_attr_builder.compute(x=(source_nodes, target_nodes), edge_index=edge_index)
+    assert isinstance(edge_attr, torch.Tensor)
+
 
 @pytest.mark.parametrize("attribute_builder", [EdgeDirection(), EdgeLength()])
 def test_fail_edge_features(attribute_builder, graph_nodes_and_edges):
     """Test edge attribute builder fails with unknown nodes."""
     with pytest.raises(AssertionError):
-        attribute_builder.compute(graph_nodes_and_edges, ("test_nodes", "to", "unknown_nodes"))
-
-
-@pytest.mark.parametrize("attribute_builder", [AttributeFromSourceNode, AttributeFromTargetNode])
-def test_fail_edge_attribute_from_node(attribute_builder, graph_nodes_and_edges):
-    """Test edge attribute builder fails with unknown nodes."""
-    with pytest.raises(KeyError):
-        builder_instance = attribute_builder(node_attr_name="example_attr")
-        builder_instance.compute(graph_nodes_and_edges, ("test_nodes", "to", "test_nodes"))
+        edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
+        source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
+        target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
+        attribute_builder.compute(x=(source_nodes, target_nodes), edge_index=edge_index)
