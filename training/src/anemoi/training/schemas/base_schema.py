@@ -74,6 +74,7 @@ class BaseSchema(BaseModel):
         if logger:
             msg = ", ".join(logger) + " logging path(s) not provided."
             raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
+        return self
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:

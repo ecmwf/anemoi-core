@@ -33,7 +33,6 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.schemas.base_schema import validate_schema
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -69,7 +68,7 @@ class AnemoiTrainer:
             self.config = BaseSchema.model_construct(**config)
             LOGGER.info("Skipping config validation.")
         else:
-            validate_schema(config)
+            self.config = BaseSchema(**config)
 
             LOGGER.info("Config validated.")
 

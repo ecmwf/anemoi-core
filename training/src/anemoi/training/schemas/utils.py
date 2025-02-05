@@ -8,6 +8,7 @@
 #
 
 
+from collections.abc import Iterator
 from typing import Any
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -23,7 +24,7 @@ class BaseModel(PydanticBaseModel):
         use_enum_values = True
         validate_assignment = True
         validate_default = True
-        extra = "ignore"
+        extra = "forbid"
 
 
 CUSTOM_MESSAGES = {
@@ -54,3 +55,14 @@ def allowed_values(v: Any, values: list[Any]) -> Any:
         msg = {f"Value {v} not in {values}"}
         raise ValidationError(msg)
     return v
+
+
+def required_fields(model: type[PydanticBaseModel], recursive: bool = False) -> Iterator[str]:
+    for name, field in model.model_fields.items():
+        if not field.is_required():
+            continue
+        t = field.annotation
+        if recursive and isinstance(t, type) and issubclass(t, PydanticBaseModel):
+            yield from required_fields(t, recursive=True)
+        else:
+            yield name

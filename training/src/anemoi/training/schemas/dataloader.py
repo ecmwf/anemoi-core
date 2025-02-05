@@ -59,11 +59,11 @@ class Frequency(RootModel):
 class DatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
-    dataset: str | dict | Path
-    "Dataset"
-    start: int | None = Field(default=None)
+    dataset: str | dict | Path | list[dict]
+    "Dataset, see anemoi-datasets"
+    start: datetime.datetime | None = Field(default=None)
     "Starting datetime for sample of the dataset."
-    end: int | None = Field(default=None)
+    end: datetime.datetime | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
     frequency: Frequency
     "Temporal resolution, frequency must be >= to dataset frequency."

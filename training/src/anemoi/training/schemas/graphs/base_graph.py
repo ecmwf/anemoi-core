@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
 from anemoi.training.schemas.utils import BaseModel
@@ -42,7 +43,7 @@ class EdgeSchema(BaseModel):
     "Dictionary of attributes with names as keys and anemoi.graphs.edges.attributes objects as values."
 
 
-class BaseGraphSchema(BaseModel):
+class BaseGraphSchema(PydanticBaseModel):
     nodes: dict[str, NodeSchema]
     "Nodes schema for all types of nodes (ex. data, hidden)."
     edges: list[EdgeSchema]
