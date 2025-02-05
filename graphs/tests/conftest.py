@@ -79,7 +79,7 @@ def graph_nodes_and_edges() -> HeteroData:
     graph = HeteroData()
     graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
     graph["test_nodes"].mask = torch.tensor([True] * len(coords))
-    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor([[0, 1], [1, 2], [2, 3], [3, 0]])
+    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
     return graph
 
 
