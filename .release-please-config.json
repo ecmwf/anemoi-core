@@ -4,7 +4,7 @@
   "bump-patch-for-minor-pre-major": true,
   "separate-pull-requests": true,
   "always-update": true,
-  "changelog-type": "default",
+  "changelog-type": "github",
   "include-component-in-tag": true,
   "include-v-in-tag": false,
   "draft-pull-request": true,
