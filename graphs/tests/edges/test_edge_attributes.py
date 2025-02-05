@@ -25,9 +25,9 @@ def test_directional_features(graph_nodes_and_edges, norm):
     """Test EdgeDirection compute method."""
     edge_attr_builder = EdgeDirection(norm=norm)
     edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
-    source_coords = graph_nodes_and_edges[TEST_EDGES[0]].x
-    target_coords = graph_nodes_and_edges[TEST_EDGES[2]].x
-    edge_attr = edge_attr_builder(x=(source_coords, target_coords), edge_index=edge_index)
+    source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
+    target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
+    edge_attr = edge_attr_builder(x=(source_nodes, target_nodes), edge_index=edge_index)
     assert isinstance(edge_attr, torch.Tensor)
 
 
@@ -36,9 +36,9 @@ def test_edge_lengths(graph_nodes_and_edges, norm):
     """Test EdgeLength compute method."""
     edge_attr_builder = EdgeLength(norm=norm)
     edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
-    source_coords = graph_nodes_and_edges[TEST_EDGES[0]].x
-    target_coords = graph_nodes_and_edges[TEST_EDGES[2]].x
-    edge_attr = edge_attr_builder(x=(source_coords, target_coords), edge_index=edge_index)
+    source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
+    target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
+    edge_attr = edge_attr_builder(x=(source_nodes, target_nodes), edge_index=edge_index)
     assert isinstance(edge_attr, torch.Tensor)
 
 
@@ -49,15 +49,9 @@ def test_fail_edge_features(attribute_builder, graph_nodes_and_edges):
         attribute_builder.compute(graph_nodes_and_edges, ("test_nodes", "to", "unknown_nodes"))
 
 
-@pytest.mark.parametrize(
-    "attribute_builder",
-    [
-        partial(AttributeFromSourceNode, node_attr_name="example_attr"),
-        partial(AttributeFromTargetNode, node_attr_name="example_attr"),
-    ],
-)
+@pytest.mark.parametrize("attribute_builder", [AttributeFromSourceNode, AttributeFromTargetNode])
 def test_fail_edge_attribute_from_node(attribute_builder, graph_nodes_and_edges):
     """Test edge attribute builder fails with unknown nodes."""
     with pytest.raises(KeyError):
-        builder_instance = attribute_builder()
+        builder_instance = attribute_builder(node_attr_name="example_attr")
         builder_instance.compute(graph_nodes_and_edges, ("test_nodes", "to", "test_nodes"))
