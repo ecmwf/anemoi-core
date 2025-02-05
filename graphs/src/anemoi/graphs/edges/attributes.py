@@ -38,8 +38,6 @@ class NodeAttributeMeta(type):
 class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, metaclass=NodeAttributeMeta):
     """Base class for edge attribute builders."""
 
-    node_attr_name: str = None
-
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
         self.norm = norm
