@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hydra
+from hydra.utils import instantiate
+import importlib
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -143,8 +145,14 @@ class AnemoiTrainer:
         )
 
     @cached_property
-    def model(self) -> GraphForecaster:
+    def model(self) -> pl.LightningModule:
         """Provide the model instance."""
+
+        # Extract module and class
+        module_name, class_name = self.config.training.task.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        model_class = getattr(module, class_name)
+
         kwargs = {
             "config": self.config,
             "data_indices": self.data_indices,
@@ -154,7 +162,8 @@ class AnemoiTrainer:
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model = GraphForecaster(**kwargs)
+        # Dynamically instantiate the model
+        model = model_class(**kwargs)
 
         # Load the model weights
         if self.load_weights_only:
@@ -165,11 +174,11 @@ class AnemoiTrainer:
                     model = transfer_learning_loading(model, self.last_checkpoint)
                 else:
                     LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                    model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                    model = model_class.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_class.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
