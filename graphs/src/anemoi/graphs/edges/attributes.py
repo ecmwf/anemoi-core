@@ -28,6 +28,9 @@ LOGGER = logging.getLogger(__name__)
 
 class NodeAttributeMeta(type):
     def __new__(cls, name: str, bases: tuple, class_dict: dict):
+        if ABC in bases:
+            return super().__new__(cls, name, bases, class_dict)
+            
         if "node_attr_name" not in class_dict:
             error_msg = f"Class {name} must define 'node_attr_name'"
             raise TypeError(error_msg)
