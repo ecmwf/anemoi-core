@@ -10,15 +10,13 @@
 
 import pytest
 import torch
-from typing import TYPE_CHECKING
 
 from anemoi.graphs.edges.attributes import AttributeFromSourceNode
 from anemoi.graphs.edges.attributes import AttributeFromTargetNode
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
 
-if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
+from torch_geometric.data import HeteroData
 
 TEST_EDGES = ("test_nodes", "to", "test_nodes")
 
@@ -52,7 +50,7 @@ def test_edge_attribute_from_node(attribute_builder_cls, graph_nodes_and_edges: 
     edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
     source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
     target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
-    edge_attr = edge_attr_builder.compute(x=(source_nodes, target_nodes), edge_index=edge_index)
+    edge_attr = edge_attr_builder(x=(source_nodes, target_nodes), edge_index=edge_index)
     assert isinstance(edge_attr, torch.Tensor)
 
 
@@ -63,4 +61,4 @@ def test_fail_edge_features(attribute_builder, graph_nodes_and_edges):
         edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
         source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
         target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
-        attribute_builder.compute(x=(source_nodes, target_nodes), edge_index=edge_index)
+        attribute_builder(x=(source_nodes, target_nodes), edge_index=edge_index)

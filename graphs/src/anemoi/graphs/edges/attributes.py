@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC
+from abc import ABC, ABCMeta
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -26,25 +26,18 @@ from anemoi.graphs.utils import haversine_distance
 LOGGER = logging.getLogger(__name__)
 
 
-class NodeAttributeMeta(type):
-    def __new__(cls, name: str, bases: tuple, class_dict: dict):
-        if ABC in bases:
-            return super().__new__(cls, name, bases, class_dict)
-
-        if "node_attr_name" not in class_dict:
-            error_msg = f"Class {name} must define 'node_attr_name'"
-            raise TypeError(error_msg)
-
-        return super().__new__(cls, name, bases, class_dict)
-
-
-class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, metaclass=NodeAttributeMeta):
+class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
     """Base class for edge attribute builders."""
+
+    node_attr_name: str = None
 
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
         self.norm = norm
         self.dtype = dtype
+        if self.node_attr_name is None:
+            error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
+            raise TypeError(error_msg)
 
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
         return source_nodes[self.node_attr_name], target_nodes[self.node_attr_name]
@@ -83,7 +76,6 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, metaclass=NodeAt
 
 
 class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
-
     node_attr_name: str = "x"
     _idx_lat: int = 0
     _idx_lon: int = 1
@@ -151,11 +143,16 @@ class BaseAttributeFromNodeBuilder(BooleanBaseEdgeAttributeBuilder, ABC):
     """Base class for propagating an attribute from the nodes to the edges."""
 
     def __init__(self, node_attr_name: str) -> None:
-        super().__init__()
         self.node_attr_name = node_attr_name
+        super().__init__()
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        return (x_i, x_j)[self.node_idx]
+    def compute(self, x_i: torch.Tensor, _x_j: torch.Tensor) -> torch.Tensor:
+        return x_i
+
+    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
+        return self.propagate(
+            edge_index, x=(x[self.node_idx][self.node_attr_name], x[self.node_idx][self.node_attr_name]), size=size
+        )
 
 
 class AttributeFromSourceNode(BaseAttributeFromNodeBuilder):
