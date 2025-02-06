@@ -59,7 +59,13 @@ class BaseNodeBuilder(ABC):
         """
         graph[self.name].x = self.get_coordinates()
         graph[self.name].node_type = type(self).__name__
-        graph[self.name]["_grid_reference_distance"] = get_grid_reference_distance(graph[self.name].x.cpu())
+
+        if graph[self.name].num_nodes >= 2:
+            # At least 2 nodes are needed to compute the grid_reference_distance
+            graph[self.name]["_grid_reference_distance"] = get_grid_reference_distance(graph[self.name].x.cpu())
+        else:
+            LOGGER.warning(f"{self.__class__.__name__} registered {graph[self.name].num_nodes} nodes.")
+
         return graph
 
     def register_attributes(self, graph: HeteroData, config: DotDict | None = None) -> HeteroData:
