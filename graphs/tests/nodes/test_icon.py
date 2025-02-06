@@ -7,18 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from typing import Type
+
 import netCDF4
 import numpy as np
 import pytest
 import torch
-from typing import Type
-
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import ICONTopologicalDecoderEdges
 from anemoi.graphs.edges import ICONTopologicalEncoderEdges
-from anemoi.graphs.edges.builders.icon import ICONTopologicalBaseEdgeBuilder
 from anemoi.graphs.edges import ICONTopologicalProcessorEdges
+from anemoi.graphs.edges.builders.icon import ICONTopologicalBaseEdgeBuilder
 from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
 from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes import ICONCellGridNodes
