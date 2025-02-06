@@ -24,7 +24,7 @@ class GraphDescriptor:
 
     def __init__(self, path: Union[str, Path], **kwargs):
         self.path = path
-        self.graph = torch.load(self.path)
+        self.graph = torch.load(self.path, weights_only=False)
 
     @property
     def total_size(self):
