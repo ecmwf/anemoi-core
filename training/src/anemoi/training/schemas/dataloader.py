@@ -61,7 +61,7 @@ class DatasetSchema(BaseModel):
 
     dataset: str | dict | Path | list[dict]
     "Dataset, see anemoi-datasets"
-    start: datetime.datetime | None = Field(default=None)
+    start: datetime.datetime | None = Field(default=None)  # TODO(Helen): should be a before valiadtion
     "Starting datetime for sample of the dataset."
     end: datetime.datetime | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
