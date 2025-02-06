@@ -7,9 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from functools import partial
+
 import pytest
 import torch
 
+from anemoi.graphs.edges.attributes import AttributeFromSourceNode
+from anemoi.graphs.edges.attributes import AttributeFromTargetNode
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
 
@@ -36,3 +40,17 @@ def test_fail_edge_features(attribute_builder, graph_nodes_and_edges):
     """Test edge attribute builder fails with unknown nodes."""
     with pytest.raises(AssertionError):
         attribute_builder.compute(graph_nodes_and_edges, ("test_nodes", "to", "unknown_nodes"))
+
+
+@pytest.mark.parametrize(
+    "attribute_builder",
+    [
+        partial(AttributeFromSourceNode, node_attr_name="example_attr"),
+        partial(AttributeFromTargetNode, node_attr_name="example_attr"),
+    ],
+)
+def test_fail_edge_attribute_from_node(attribute_builder, graph_nodes_and_edges):
+    """Test edge attribute builder fails with unknown nodes."""
+    with pytest.raises(KeyError):
+        builder_instance = attribute_builder()
+        builder_instance.compute(graph_nodes_and_edges, ("test_nodes", "to", "test_nodes"))
