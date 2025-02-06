@@ -10,9 +10,10 @@
 from __future__ import annotations
 
 import logging
-import torch
-import numpy as np
 from abc import ABC
+
+import numpy as np
+import torch
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
@@ -67,41 +68,46 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
-        edge_index = np.stack([
-            self.icon_sub_graph.edge_vertices[:, self.vertex_index[0]], 
-            self.icon_sub_graph.edge_vertices[:, self.vertex_index[1]]
-        ])
+        edge_index = np.stack(
+            [
+                self.icon_sub_graph.edge_vertices[:, self.vertex_index[0]],
+                self.icon_sub_graph.edge_vertices[:, self.vertex_index[1]],
+            ]
+        )
         edge_index = torch.from_numpy(edge_index, axis=0)
         return edge_index.to(target_nodes.x.device)
 
 
 class ICONTopologicalProcessorEdges(ICONTopologicalBaseEdgeBuilder):
     """ICON Topological Processor Edges
-    
+
     Computes edges based on ICON grid topology: processor grid built
     from ICON grid vertices.
     """
+
     vertex_index: tuple[int, int] = (1, 0)
     sub_graph_address: str = "_multi_mesh"
 
 
 class ICONTopologicalEncoderEdges(ICONTopologicalBaseEdgeBuilder):
     """ICON Topological Encoder Edges
-    
+
     Computes encoder edges based on ICON grid topology: ICON cell
     circumcenters for mapped onto processor grid built from ICON grid
     vertices.
     """
+
     vertex_index: tuple[int, int] = (1, 0)
     sub_graph_address: str = "_cell_grid"
 
 
 class ICONTopologicalDecoderEdges(ICONTopologicalBaseEdgeBuilder):
     """ICON Topological Decoder Edges
-    
+
     Computes encoder edges based on ICON grid topology: mapping from
     processor grid built from ICON grid vertices onto ICON cell
     circumcenters.
     """
+
     vertex_index: tuple[int, int] = (0, 1)
     sub_graph_address: str = "_cell_grid"
