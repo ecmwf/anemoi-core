@@ -8,9 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import pytest
+from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import CutOffEdges
-from torch_geometric.data import HeteroData
 
 
 def test_init():

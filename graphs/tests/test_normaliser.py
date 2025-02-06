@@ -7,9 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
-import torch
 import pytest
+import torch
 
 from anemoi.graphs.normalise import NormaliserMixin
 
