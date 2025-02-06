@@ -47,9 +47,9 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
         if values.ndim == 1:
             values = values[:, np.newaxis]
 
-        norm_values = self.normalise(values)
+        values = torch.tensor(values.astype(self.dtype))
 
-        return torch.tensor(norm_values.astype(self.dtype))
+        return self.normalise(values)
 
     def compute(self, graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor:
         """Get the nodes attribute.

@@ -13,7 +13,7 @@ import torch
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
-NORTH_POLE = torch.tensor([[0, 0, 1]], dtype=torch.float32)  # North pole in 3D coordinates
+NORTH_POLE = [0, 0, 1]  # North pole in 3D coordinates
 
 
 def direction_vec(points: torch.Tensor, reference: torch.Tensor, epsilon: float = 10e-11) -> torch.Tensor:
@@ -78,20 +78,19 @@ def compute_directions(source_coords: torch.Tensor, target_coords: torch.Tensor)
     torch.Tensor of shape (N, 2)
         The direction of the edge.
     """
+    north_pole = torch.tensor([NORTH_POLE], dtype=source_coords.dtype).to(device=source_coords.device)
     source_coords_xyz = latlon_rad_to_cartesian(source_coords, 1.0)
     target_coords_xyz = latlon_rad_to_cartesian(target_coords, 1.0)
 
     # Compute the unit direction vector & the angle theta between target coords and the north pole.
-    v_unit = direction_vec(target_coords_xyz, NORTH_POLE.to(source_coords.device))
-    theta = torch.acos(
-        torch.clamp(torch.sum(target_coords_xyz * NORTH_POLE.to(source_coords.device), dim=1), -1.0, 1.0)
-    )  # Clamp for numerical stability
+    v_unit = direction_vec(target_coords_xyz, north_pole)
+    theta = torch.acos(torch.clamp(torch.sum(target_coords_xyz * north_pole, dim=1), -1.0, 1.0))  # Clamp for numerical stability
 
     # Rotate source coords by angle theta around v_unit axis.
     rotated_source_coords_xyz = rotate_vectors(source_coords_xyz, v_unit, theta)
 
     # Compute the direction from the rotated vector to the north pole.
-    direction = direction_vec(rotated_source_coords_xyz, NORTH_POLE.to(source_coords.device))
+    direction = direction_vec(rotated_source_coords_xyz, north_pole)
     normed_direction = direction / torch.norm(direction, dim=1).unsqueeze(-1)
 
     # All 3rd components should be 0s

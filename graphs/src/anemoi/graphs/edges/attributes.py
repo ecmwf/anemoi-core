@@ -69,10 +69,10 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
         if edge_features.ndim == 1:
             edge_features = edge_features.unsqueeze(-1)
 
-        return self.normalise(edge_features)
+        return edge_features
 
     def aggregate(self, edge_features: torch.Tensor) -> torch.Tensor:
-        return edge_features
+        return self.normalise(edge_features)
 
 
 class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
@@ -150,9 +150,10 @@ class BaseAttributeFromNodeBuilder(BooleanBaseEdgeAttributeBuilder, ABC):
         return x_i
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
-        return self.propagate(
-            edge_index, x=(x[self.node_idx][self.node_attr_name], x[self.node_idx][self.node_attr_name]), size=size
-        )
+        return self.propagate(edge_index, x=x, size=size)
+    
+    def message(self, x_i: NodeStorage, x_j: NodeStorage) -> torch.Tensor:
+        return (x_i, x_j)[self.node_idx][self.node_attr_name]
 
 
 class AttributeFromSourceNode(BaseAttributeFromNodeBuilder):
