@@ -11,10 +11,13 @@ import netCDF4
 import numpy as np
 import pytest
 import torch
+from typing import Type
+
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import ICONTopologicalDecoderEdges
 from anemoi.graphs.edges import ICONTopologicalEncoderEdges
+from anemoi.graphs.edges.builders.icon import ICONTopologicalBaseEdgeBuilder
 from anemoi.graphs.edges import ICONTopologicalProcessorEdges
 from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
 from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
@@ -105,25 +108,23 @@ def test_init(monkeypatch, max_level_multimesh: int, max_level_dataset: int):
     assert isinstance(node_builder, ICONNodes)
 
 
-@pytest.mark.parametrize("Node_builder", [ICONCellGridNodes, ICONMultimeshNodes])
-def test_Node_builder_dependencies(monkeypatch, Node_builder):
-    """Test that the `Node_builder` depends on the presence of ICONNodes."""
-
+@pytest.mark.parametrize("node_builder_cls", [ICONCellGridNodes, ICONMultimeshNodes])
+def test_node_builder_dependencies(monkeypatch, node_builder_cls: Type[BaseNodeBuilder]):
+    """Test that the `node_builder` depends on the presence of ICONNodes."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
     nodes = ICONNodes("test_icon_nodes", "test.nc", 0, 0)
-    data_nodes = Node_builder("data_nodes", "test_icon_nodes")
-    config = {}
+    node_builder = node_builder_cls("data_nodes", "test_icon_nodes")
     graph = HeteroData()
-    graph = nodes.register_attributes(graph, config)
+    graph = nodes.register_attributes(graph, {})
 
-    data_nodes.update_graph(graph)
+    node_builder.update_graph(graph)
 
-    data_nodes = ICONCellGridNodes("data_nodes2", "missing_icon_nodes")
+    cell_grid_builder = ICONCellGridNodes("data_nodes2", "missing_icon_nodes")
     with pytest.raises(KeyError):
-        data_nodes.update_graph(graph)
+        cell_grid_builder.update_graph(graph)
 
 
-class Test_Edge_builder_dependencies:
+class TestEdgeBuilderDependencies:
     @pytest.fixture()
     def icon_graph(self, monkeypatch) -> HeteroData:
         """Return a HeteroData object with ICONNodes nodes."""
@@ -139,25 +140,16 @@ class Test_Edge_builder_dependencies:
         return graph
 
     @pytest.mark.parametrize(
-        "Edge_builder", [ICONTopologicalProcessorEdges, ICONTopologicalEncoderEdges, ICONTopologicalDecoderEdges]
+        "edge_builder_cls", [ICONTopologicalProcessorEdges, ICONTopologicalEncoderEdges, ICONTopologicalDecoderEdges]
     )
-    def test_ProcessorEdges_dependencies(self, icon_graph, Edge_builder):
-        """Test that the `Edge_builder` depends on the presence of ICONNodes."""
+    def test_edges_dependencies(self, icon_graph, edge_builder_cls: Type[ICONTopologicalBaseEdgeBuilder]):
+        """Test that the `edge_builder_cls` depends on the presence of ICONNodes."""
+        edge_builder1 = edge_builder_cls(source_name="data", target_name="data", icon_mesh="test_icon_nodes")
+        edge_builder1.update_graph(icon_graph)
 
-        edges = Edge_builder(
-            source_name="data",
-            target_name="data",
-            icon_mesh="test_icon_nodes",
-        )
-        edges.update_graph(icon_graph)
-
-        edges2 = Edge_builder(
-            source_name="data",
-            target_name="data",
-            icon_mesh="missing_icon_nodes",
-        )
+        edge_builder2 = edge_builder_cls(source_name="data", target_name="data", icon_mesh="missing_icon_nodes")
         with pytest.raises(KeyError):
-            edges2.update_graph(icon_graph)
+            edge_builder2.update_graph(icon_graph)
 
 
 def test_register_nodes(monkeypatch):
@@ -179,10 +171,7 @@ def test_register_nodes(monkeypatch):
     assert graph["test_icon_nodes"].x.shape[0] == 4, "number of vertices at refinement_level_v == 1"
 
 
-def test_register_attributes(
-    monkeypatch,
-    graph_with_nodes: HeteroData,
-):
+def test_register_attributes(monkeypatch):
     """Test ICONNodes register correctly the weights."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
     nodes = ICONNodes("test_icon_nodes", "test.nc", 0, 0)
