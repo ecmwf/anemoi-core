@@ -10,9 +10,9 @@
 from __future__ import annotations
 
 import logging
-
+import torch
 import numpy as np
-import scipy
+from abc import ABC
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
@@ -22,7 +22,7 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
-class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder):
+class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
     """Base class for computing edges based on ICON grid topology.
 
     Attributes
@@ -52,97 +52,56 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder):
         self.icon_sub_graph = graph[self.icon_mesh][self.sub_graph_address]
         return super().update_graph(graph, attrs_config)
 
-    def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage):
-        """Parameters
+    def compute_edge_index(self, _source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        """Compute the edge indices for the KNN method.
+
+        Parameters
         ----------
         source_nodes : NodeStorage
             The source nodes.
         target_nodes : NodeStorage
             The target nodes.
+
+        Returns
+        -------
+        torch.Tensor of shape (2, num_edges)
+            Indices of source and target nodes connected by an edge.
         """
-        LOGGER.info(f"Using ICON topology {self.source_name}>{self.target_name}")
-        nrows = self.icon_sub_graph.num_edges
-        adj_matrix = scipy.sparse.coo_matrix(
-            (
-                np.ones(nrows),
-                (
-                    self.icon_sub_graph.edge_vertices[:, self.vertex_index[0]],
-                    self.icon_sub_graph.edge_vertices[:, self.vertex_index[1]],
-                ),
-            )
-        )
-        return adj_matrix
+        edge_index = np.stack([
+            self.icon_sub_graph.edge_vertices[:, self.vertex_index[0]], 
+            self.icon_sub_graph.edge_vertices[:, self.vertex_index[1]]
+        ])
+        edge_index = torch.from_numpy(edge_index, axis=0)
+        return edge_index.to(target_nodes.x.device)
 
 
 class ICONTopologicalProcessorEdges(ICONTopologicalBaseEdgeBuilder):
-    """Computes edges based on ICON grid topology: processor grid built
+    """ICON Topological Processor Edges
+    
+    Computes edges based on ICON grid topology: processor grid built
     from ICON grid vertices.
     """
-
-    def __init__(
-        self,
-        source_name: str,
-        target_name: str,
-        icon_mesh: str,
-        source_mask_attr_name: str | None = None,
-        target_mask_attr_name: str | None = None,
-    ):
-        self.sub_graph_address = "_multi_mesh"
-        self.vertex_index = (1, 0)
-        super().__init__(
-            source_name,
-            target_name,
-            icon_mesh,
-            source_mask_attr_name,
-            target_mask_attr_name,
-        )
+    vertex_index: tuple[int, int] = (1, 0)
+    sub_graph_address: str = "_multi_mesh"
 
 
 class ICONTopologicalEncoderEdges(ICONTopologicalBaseEdgeBuilder):
-    """Computes encoder edges based on ICON grid topology: ICON cell
+    """ICON Topological Encoder Edges
+    
+    Computes encoder edges based on ICON grid topology: ICON cell
     circumcenters for mapped onto processor grid built from ICON grid
     vertices.
     """
-
-    def __init__(
-        self,
-        source_name: str,
-        target_name: str,
-        icon_mesh: str,
-        source_mask_attr_name: str | None = None,
-        target_mask_attr_name: str | None = None,
-    ):
-        self.sub_graph_address = "_cell_grid"
-        self.vertex_index = (1, 0)
-        super().__init__(
-            source_name,
-            target_name,
-            icon_mesh,
-            source_mask_attr_name,
-            target_mask_attr_name,
-        )
+    vertex_index: tuple[int, int] = (1, 0)
+    sub_graph_address: str = "_cell_grid"
 
 
 class ICONTopologicalDecoderEdges(ICONTopologicalBaseEdgeBuilder):
-    """Computes encoder edges based on ICON grid topology: mapping from
+    """ICON Topological Decoder Edges
+    
+    Computes encoder edges based on ICON grid topology: mapping from
     processor grid built from ICON grid vertices onto ICON cell
     circumcenters.
     """
-
-    def __init__(
-        self,
-        source_name: str,
-        target_name: str,
-        icon_mesh: str,
-        source_mask_attr_name: str | None = None,
-        target_mask_attr_name: str | None = None,
-    ):
-        self.sub_graph_address = "_cell_grid"
-        self.vertex_index = (0, 1)
-        super().__init__(
-            source_name,
-            target_name,
-            icon_mesh,
-            source_mask_attr_name,
-            target_mask_attr_name,
-        )
+    vertex_index: tuple[int, int] = (0, 1)
+    sub_graph_address: str = "_cell_grid"
