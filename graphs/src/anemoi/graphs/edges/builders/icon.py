@@ -75,8 +75,7 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
             ],
             axis=0,
         )
-        edge_index = torch.from_numpy(edge_index)
-        return edge_index.to(target_nodes.x.device)
+        return torch.from_numpy(edge_index)
 
 
 class ICONTopologicalProcessorEdges(ICONTopologicalBaseEdgeBuilder):
