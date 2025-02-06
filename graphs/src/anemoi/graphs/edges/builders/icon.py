@@ -72,9 +72,9 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
             [
                 self.icon_sub_graph.edge_vertices[:, self.vertex_index[0]],
                 self.icon_sub_graph.edge_vertices[:, self.vertex_index[1]],
-            ]
+            ], axis=0
         )
-        edge_index = torch.from_numpy(edge_index, axis=0)
+        edge_index = torch.from_numpy(edge_index)
         return edge_index.to(target_nodes.x.device)
 
 
