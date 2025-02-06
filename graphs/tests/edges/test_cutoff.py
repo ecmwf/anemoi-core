@@ -10,6 +10,7 @@
 import pytest
 
 from anemoi.graphs.edges import CutOffEdges
+from torch_geometric.data import HeteroData
 
 
 def test_init():
@@ -24,7 +25,7 @@ def test_fail_init(cutoff_factor: str):
         CutOffEdges("test_nodes1", "test_nodes2", cutoff_factor)
 
 
-def test_cutoff(graph_with_nodes):
+def test_cutoff(graph_with_nodes: HeteroData):
     """Test CutOffEdges."""
     builder = CutOffEdges("test_nodes", "test_nodes", 0.5)
     graph = builder.update_graph(graph_with_nodes)

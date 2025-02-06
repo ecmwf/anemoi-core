@@ -94,7 +94,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
             mask = target_nodes[mask_attr].cpu()
             target_grid_reference_distance = get_grid_reference_distance(target_nodes.x.cpu(), mask)
         else:
-            target_grid_reference_distance = target_nodes._grid_reference_distance
+            target_grid_reference_distance = target_nodes["_grid_reference_distance"]
 
         radius = target_grid_reference_distance * self.cutoff_factor
         return radius
