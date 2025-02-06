@@ -151,7 +151,7 @@ class BaseAttributeFromNodeBuilder(BooleanBaseEdgeAttributeBuilder, ABC):
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
         return self.propagate(edge_index, x=x, size=size)
-    
+
     def message(self, x_i: NodeStorage, x_j: NodeStorage) -> torch.Tensor:
         return (x_i, x_j)[self.node_idx][self.node_attr_name]
 

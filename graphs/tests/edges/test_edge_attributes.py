@@ -56,7 +56,7 @@ def test_edge_attribute_from_node(attribute_builder_cls, graph_nodes_and_edges: 
 @pytest.mark.parametrize("attribute_builder", [EdgeDirection(), EdgeLength()])
 def test_fail_edge_features(attribute_builder, graph_nodes_and_edges):
     """Test edge attribute builder fails with unknown nodes."""
-    #with pytest.raises(AssertionError):
+    # with pytest.raises(AssertionError):
     edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
     source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
     target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]

@@ -84,7 +84,9 @@ def compute_directions(source_coords: torch.Tensor, target_coords: torch.Tensor)
 
     # Compute the unit direction vector & the angle theta between target coords and the north pole.
     v_unit = direction_vec(target_coords_xyz, north_pole)
-    theta = torch.acos(torch.clamp(torch.sum(target_coords_xyz * north_pole, dim=1), -1.0, 1.0))  # Clamp for numerical stability
+    theta = torch.acos(
+        torch.clamp(torch.sum(target_coords_xyz * north_pole, dim=1), -1.0, 1.0)
+    )  # Clamp for numerical stability
 
     # Rotate source coords by angle theta around v_unit axis.
     rotated_source_coords_xyz = rotate_vectors(source_coords_xyz, v_unit, theta)
