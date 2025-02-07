@@ -1,0 +1,28 @@
+# This workflow uses an action to run Release Please to create a release PR.
+# It is governed by the config and manifest in the root of the repo.
+# For more information see: https://github.com/googleapis/release-please
+name: Run Release Please
+on:
+  push:
+    branches:
+      - main
+      - hotfix/*
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # this assumes that you have created a personal access token
+          # (PAT) and configured it as a GitHub action secret named
+          # `MY_RELEASE_PLEASE_TOKEN` (this secret name is not important).
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          # optional. customize path to .release-please-config.json
+          config-file: .release-please-config.json
+          # Currently releases are done from main
+          target-branch: ${{ github.ref_name }}

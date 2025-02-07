@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path  # noqa: TC003
+from typing import Annotated
 from typing import Literal
-from typing import Union
 
 from pydantic import Field
 from pydantic import PositiveFloat
@@ -139,7 +139,7 @@ class StretchedIcosahdralNodeSchema(BaseModel):
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
-NodeBuilderSchemas = Union[
+NodeBuilderSchemas = Annotated[
     ZarrNodeSchema
     | NPZnodeSchema
     | TextNodeSchema
@@ -149,5 +149,6 @@ NodeBuilderSchemas = Union[
     | ReducedGaussianGridNodeSchema
     | IcosahedralandHealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
-    | StretchedIcosahdralNodeSchema
+    | StretchedIcosahdralNodeSchema,
+    Field(discriminator="target_"),
 ]

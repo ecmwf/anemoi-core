@@ -10,9 +10,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 from typing import Any
 from typing import Literal
-from typing import Union
 
 from pydantic import Field
 from pydantic import NonNegativeInt
@@ -58,7 +58,7 @@ class PlotLossSchema(BaseModel):
     "PlotLoss object from anemoi training diagnostics callbacks."
     parameter_groups: dict[str, list[str]]
     "Dictionary with parameter groups with parameter names as key."
-    every_n_batches: int | None = Field(example=None)
+    every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
 
 
@@ -73,11 +73,11 @@ class PlotSampleSchema(BaseModel):
     "Accumulation levels to plot."
     cmap_accumulation: list[str]
     "Colors of the accumulation levels."
-    precip_and_related_fields: list[str] | None = Field(example=None)
+    precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
-    every_n_batches: int | None = Field(example=None)
+    every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -88,7 +88,7 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    every_n_batches: int | None = Field(example=None)
+    every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -99,19 +99,20 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    precip_and_related_fields: list[str] | None = Field(example=None)
+    precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
-    every_n_batches: int | None = Field(example=None)
+    every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
-PlotCallbacks = Union[
+PlotCallbacks = Annotated[
     LongRolloutPlotsSchema
     | GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
     | PlotSampleSchema
     | PlotSpectrumSchema
-    | PlotHistogramSchema
+    | PlotHistogramSchema,
+    Field(discriminator="target_"),
 ]
 
 

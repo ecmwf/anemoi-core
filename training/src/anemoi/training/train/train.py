@@ -38,7 +38,6 @@ from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.config import DotDict
 from anemoi.utils.provenance import gather_provenance_info
 
 if TYPE_CHECKING:
@@ -63,12 +62,16 @@ class AnemoiTrainer:
         # This can increase performance (and TensorCore usage, where available).
         torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
-        OmegaConf.resolve(config)
+
         if config.no_validation:
+            config = OmegaConf.to_object(config)
             self.config = BaseSchema.model_construct(**config)
             LOGGER.info("Skipping config validation.")
         else:
+
+            OmegaConf.resolve(config)
             self.config = BaseSchema(**config)
+
             LOGGER.info("Config validated.")
 
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
@@ -143,7 +146,7 @@ class AnemoiTrainer:
 
         from anemoi.graphs.create import GraphCreator
 
-        graph_config = DotDict(self.config.graph.model_dump(by_alias=True))
+        graph_config = convert_to_omegaconf(self.config.graph)
         return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,

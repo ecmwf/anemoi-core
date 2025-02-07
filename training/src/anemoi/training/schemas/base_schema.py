@@ -11,12 +11,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import sys
 
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from pydantic import ConfigDict
 from pydantic import model_validator
 from pydantic_core import PydanticCustomError
+from pydantic_core import ValidationError
 
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
@@ -27,21 +28,15 @@ from .graphs.base_graph import BaseGraphSchema  # noqa: TC001
 from .hardware import HardwareSchema  # noqa: TC001
 from .models.models import ModelSchema  # noqa: TC001
 from .training import TrainingSchema  # noqa: TC001
+from .utils import CUSTOM_MESSAGES
 from .utils import BaseModel
+from .utils import convert_errors
 
 LOGGER = logging.getLogger(__name__)
 
 
 class BaseSchema(BaseModel):
     """Top-level schema for the training configuration."""
-
-    model_config = ConfigDict(
-        extra="forbid",
-        use_enum_values=True,
-        validate_assignment=True,
-        validate_default=True,
-        use_attribute_docstrings=True,
-    )
 
     data: DataSchema
     """Data configuration."""
@@ -79,24 +74,20 @@ class BaseSchema(BaseModel):
         if logger:
             msg = ", ".join(logger) + " logging path(s) not provided."
             raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
-
-
-class UnvalidatedBaseSchema(BaseModel):
-    data: Any
-    dataloader: Any
-    diagnostics: Any
-    hardware: Any
-    graph: Any
-    model: Any
-    training: Any
-
-    class Config:
-        """Pydantic configuration."""
-
-        extra = "allow"
-        arbitrary_types_allowed = True
+        return self
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
+
+
+def validate_schema(config: DictConfig) -> BaseSchema:
+    try:
+        config = BaseSchema(**config)
+    except ValidationError as e:
+        errors = convert_errors(e, CUSTOM_MESSAGES)
+        LOGGER.error(errors)  # noqa: TRY400
+        sys.exit(0)
+    else:
+        return config

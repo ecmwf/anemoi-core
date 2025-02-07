@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
+from typing import Annotated
 from typing import Literal
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
+from pydantic import model_validator
 
 from anemoi.training.schemas.utils import BaseModel
 
@@ -42,7 +44,7 @@ class Model(BaseModel):
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
 
 
-class TrainableParameters(BaseModel):
+class TrainableParameters(PydanticBaseModel):
     data: NonNegativeInt = Field(example=8)
     "Size of the learnable data node tensor. Default to 8."
     hidden: NonNegativeInt = Field(example=8)
@@ -81,20 +83,42 @@ class HardtanhBoundingSchema(BaseModel):
     "The maximum value for the HardTanh activation."
 
 
-class BaseModelConfig(PydanticBaseModel):
+class NormalizedReluBounding(BaseModel):
+    target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(..., alias="_target_")
+    variables: list[str]
+    min_val: list[float]
+    normalizer: list[str]
+
+    @model_validator(mode="after")
+    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBounding:
+        error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
+        match the number of variables ({len(self.variables)})"""
+        assert len(self.normalizer) == len(self.variables), error_msg
+        error_msg = f"""{self.__class__} requires that number of min_val ({len(self.min_val)}) or  match
+        the number of variables ({len(self.variables)})"""
+        assert len(self.min_val) == len(self.variables), error_msg
+        return self
+
+
+Bounding = Annotated[
+    ReluBoundingSchema | FractionBoundingSchema | HardtanhBoundingSchema | NormalizedReluBounding,
+    Field(discriminator="target_"),
+]
+
+
+class ModelSchema(PydanticBaseModel):
+
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     model: Model = Field(default_factory=Model)
     "Model schema."
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
-    bounding: list[ReluBoundingSchema | HardtanhBoundingSchema | FractionBoundingSchema]
+    bounding: list[Bounding]
     "List of bounding configuration applied in order to the specified variables."
     output_mask: str | None = Field(example=None)  # !TODO CHECK!
     "Output mask, it must be a node attribute of the output nodes"
 
-
-class ModelSchema(BaseModelConfig):
     processor: GNNProcessorSchema | GraphTransformerProcessorSchema | TransformerProcessorSchema = Field(
         ...,
         discriminator="target_",

@@ -124,7 +124,7 @@ class ConfigGenerator(Command):
         """Validates the configuration files in the given directory."""
         with initialize(version_base=None, config_path=""):
             cfg = compose(config_name=name)
-            cfg = BaseSchema(**cfg)
+            BaseSchema(**cfg)
 
 
 command = ConfigGenerator

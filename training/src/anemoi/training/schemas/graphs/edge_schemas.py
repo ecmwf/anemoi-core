@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
+from typing import Annotated
 from typing import Literal
-from typing import Union
 
 from pydantic import Field
 from pydantic import PositiveFloat
@@ -25,9 +25,9 @@ class KNNEdgeSchema(BaseModel):
     "KNN based edges implementation from anemoi.graphs.edges."
     num_nearest_neighbours: PositiveInt = Field(example=3)
     "Number of nearest neighbours. Default to 3."
-    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
@@ -36,9 +36,9 @@ class CutoffEdgeSchema(BaseModel):
     "Cut-off based edges implementation from anemoi.graphs.edges."
     cutoff_factor: PositiveFloat = Field(example=0.6)
     "Factor to multiply the grid reference distance to get the cut-off radius. Default to 0.6."
-    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
@@ -50,9 +50,9 @@ class MultiScaleEdgeSchema(BaseModel):
     "Multi-casle edges implementation from anemoi.graphs.edges."
     x_hops: PositiveInt = Field(example=1)
     "Number of hops (in the refined icosahedron) between two nodes to connect them with an edge. Default to 1."
-    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
@@ -64,9 +64,9 @@ class ICONTopologicalEdgeSchema(BaseModel):
     ] = Field("anemoi.graphs.edges.ICONTopologicalProcessorEdges", alias="_target_")
     icon_mesh: str
     "The name of the ICON mesh (defines both the processor mesh and the data)."
-    source_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
-    target_mask_attr_name: str | None = Field(examples=["boundary_mask"])
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
 
 
@@ -79,4 +79,7 @@ class EdgeAttributeSchema(BaseModel):
     "Normalisation method applied to the edge attribute."
 
 
-EdgeBuilderSchemas = Union[KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | ICONTopologicalEdgeSchema]
+EdgeBuilderSchemas = Annotated[
+    KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | ICONTopologicalEdgeSchema,
+    Field(discriminator="target_"),
+]
