@@ -154,9 +154,9 @@ or combine everything together
 
    anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
 
-********************
- Cconfig validation
-********************
+*******************
+ Config validation
+*******************
 
 It is possible to validate your configuration before starting a training
 run using the following command:

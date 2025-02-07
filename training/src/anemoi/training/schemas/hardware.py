@@ -24,7 +24,6 @@ from .utils import BaseModel
 
 
 class Checkpoint(BaseModel):
-    # TODO(HELEN): Discuss merging with diagnostics checkpoint.
     every_n_epochs: str = "anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}"
     "File name pattern for checkpoint files saved by epoch frequency."
     every_n_train_steps: str = "anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}"
@@ -44,7 +43,6 @@ class FilesSchema(PydanticBaseModel):
 
 
 class Logs(PydanticBaseModel):
-    # TODO(Helen): Discuss merging with logging in diagnsotics
     wandb: Path | None = None
     "Path to output wandb logs."
     mlflow: Path | None = None

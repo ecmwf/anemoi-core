@@ -318,6 +318,14 @@ class AnemoiTrainer:
 
     @cached_property
     def accelerator(self) -> str:
+        assert self.config.hardware.accelerator in {
+            "auto",
+            "cpu",
+            "gpu",
+            "cuda",
+            "tpu",
+        }, f"Invalid accelerator ({self.config.hardware.accelerator}) in hardware config."
+
         if self.config.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
         return self.config.hardware.accelerator
