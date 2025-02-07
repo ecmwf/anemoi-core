@@ -14,10 +14,8 @@ import logging
 from typing import Literal
 from typing import Union
 
-import numpy as np
 from pydantic import BaseModel
 from pydantic import Field
-from pydantic import model_validator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,11 +38,6 @@ class SphericalAreaWeightSchema(BaseModel):
     "Normalisation of the weights."
     fill_value: float = Field(example=0)
     "Value to fill the empty regions."
-
-    @model_validator(mode="after")
-    def convert_centre_to_ndarray(self) -> SphericalAreaWeightSchema:
-        self.centre = np.array(self.centre)
-        return self
 
 
 class CutOutMaskSchema(BaseModel):
