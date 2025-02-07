@@ -134,16 +134,17 @@ class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
     wmse_contribution: bool = False
 
 
-class CombinedLossSchema(PydanticBaseModel):
+class CombinedLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     losses: list[BaseLossSchema] = Field(min_length=1)
     loss_weights: list[int | float] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def check_length_of_weights_and_losses(cls, values):
+    def check_length_of_weights_and_losses(self, values: dict) -> CombinedLossSchema:
         losses, loss_weights = values["losses"], values["loss_weights"]
         if len(losses) != len(loss_weights):
-            raise ValueError("Number of losses and weights must match")
+            error_msg = "Number of losses and weights must match"
+            raise ValueError(error_msg)
         return values
 
 
