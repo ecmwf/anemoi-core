@@ -156,6 +156,19 @@ class NodeLossWeightsSchema(BaseModel):
     "name of node weight attribute, key in HeteroData graph object."
 
 
+class ScaleValidationMetrics(BaseModel):
+    """Configuration for scaling validation metrics.
+
+    Here variable scaling is possible due to the metrics being calculated in the same way as the
+    training loss, within internal model space.
+    """
+
+    scalars_to_apply: list[str] = Field(example=["variable"])
+    """List of scalars to be applied."""
+    metrics: list[str]
+    """List of metrics to keep in normalised space.."""
+
+
 class TrainingSchema(BaseModel):
     """Training configuration."""
 
@@ -192,7 +205,9 @@ class TrainingSchema(BaseModel):
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
     validation_metrics: list[LossSchemas]
-    "List of validation metrics configurations."
+    "List of validation metrics configurations. These metrics "
+    scale_validation_metrics: ScaleValidationMetrics
+    """Configuration for scaling validation metrics."""
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
     max_epochs: PositiveInt | None = None

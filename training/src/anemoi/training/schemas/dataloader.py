@@ -61,9 +61,9 @@ class DatasetSchema(BaseModel):
 
     dataset: str | dict | Path | list[dict]
     "Dataset, see anemoi-datasets"
-    start: datetime.datetime | None = Field(default=None)  # TODO(Helen): should be a before valiadtion
+    start: str | int | None = Field(default=None)
     "Starting datetime for sample of the dataset."
-    end: datetime.datetime | None = Field(default=None)
+    end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
     frequency: Frequency
     "Temporal resolution, frequency must be >= to dataset frequency."
