@@ -14,10 +14,8 @@ nodes:
   # Hidden nodes
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.NPZFileNodes # options: ZarrDatasetNodes, NPZFileNodes
-      npz_file: ${hardware.paths.grids}
-      lat_key: latitiude
-      lon_key: longitude
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes # options: ZarrDatasetNodes, NPZFileNodes
+      grid: "o96"
 
 edges:
 # Encoder configuration

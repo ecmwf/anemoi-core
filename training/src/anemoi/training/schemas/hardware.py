@@ -56,8 +56,6 @@ class Logs(PydanticBaseModel):
 class PathsSchema(BaseModel):
     data: Path
     "Path to the data directory."
-    grids: Path
-    "Path to the grids directory."
     graph: Path
     "Path to the graph directory."
     output: Path
