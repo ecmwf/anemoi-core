@@ -123,7 +123,7 @@ class BaseLossSchema(BaseModel):
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
 
 
-class HuberLossschema(BaseLossSchema):
+class HuberLossSchema(BaseLossSchema):
     delta: float = 1.0
     "Threshold for Huber loss."
 
@@ -139,7 +139,7 @@ class CombinedLossSchema(BaseLossSchema):
     loss_weights: Any
 
 
-LossSchemas = BaseLossSchema | HuberLossschema | WeightedMSELossLimitedAreaSchema | CombinedLossSchema
+LossSchemas = BaseLossSchema | HuberLossSchema | WeightedMSELossLimitedAreaSchema | CombinedLossSchema
 
 
 class NodeLossWeightsTargets(str, Enum):
