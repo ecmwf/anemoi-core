@@ -26,7 +26,6 @@ class PlanarAreaWeightSchema(BaseModel):
     target_: Literal[
         "anemoi.graphs.nodes.attributes.AreaWeights",
         "anemoi.graphs.nodes.attributes.PlanarAreaWeights",
-        "anemoi.graphs.nodes.attributes.CutOutMask",
         "anemoi.graphs.nodes.attributes.UniformWeights",
     ] = Field(..., alias="_target_")
     "Implementation of the area of the nodes as the weights from anemoi.graphs.nodes.attributes."

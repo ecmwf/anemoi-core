@@ -12,13 +12,14 @@ from __future__ import annotations
 from enum import Enum
 from functools import partial
 from typing import Annotated
-from typing import Any
+from typing import Literal
 
 from pydantic import AfterValidator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import model_validator
 
 from anemoi.training.schemas.utils import allowed_values
 
@@ -133,10 +134,18 @@ class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
     wmse_contribution: bool = False
 
 
-class CombinedLossSchema(BaseLossSchema):
-    extra_losses: Any
-    losses: Any
-    loss_weights: Any
+class CombinedLossSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
+    losses: list[BaseLossSchema] = Field(min_length=1)
+    loss_weights: list[int | float] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def check_length_of_weights_and_losses(self, values: dict) -> CombinedLossSchema:
+        losses, loss_weights = values["losses"], values["loss_weights"]
+        if len(losses) != len(loss_weights):
+            error_msg = "Number of losses and weights must match"
+            raise ValueError(error_msg)
+        return values
 
 
 LossSchemas = BaseLossSchema | HuberLossSchema | WeightedMSELossLimitedAreaSchema | CombinedLossSchema
@@ -182,14 +191,14 @@ class TrainingSchema(BaseModel):
     "Flag to activate transfer learning mode when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
-    deterministic: bool = Field(deafult=False)
+    deterministic: bool = Field(default=False)
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
-    precision: str = Field(deafult="16-mixed")
+    precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
-    accum_grad_batches: PositiveInt = Field(deafult=1)
+    accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
     num_sanity_val_steps: PositiveInt = Field(example=6)
