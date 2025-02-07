@@ -14,9 +14,8 @@ nodes:
   # Hidden nodes
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.NPZFileNodes # options: ZarrDatasetNodes, NPZFileNodes
-      grid_definition_path: ${hardware.paths.grids}
-      resolution: o48 # grid resolution for npz (o32, o48, ...)
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes # options: ZarrDatasetNodes, NPZFileNodes
+      grid: o48 # o32, o48, ...
 
 edges:
 # Encoder configuration
