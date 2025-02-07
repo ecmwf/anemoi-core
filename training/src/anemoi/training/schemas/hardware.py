@@ -44,7 +44,7 @@ class FilesSchema(PydanticBaseModel):
 
 
 class Logs(PydanticBaseModel):
-    # TODO(Helen): Discuss merging with logging in diagnsotics
+    # TODO(Helen): Discuss merging with logging in diagnostics
     wandb: Path | None = None
     "Path to output wandb logs."
     mlflow: Path | None = None
