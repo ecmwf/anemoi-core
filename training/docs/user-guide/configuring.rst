@@ -288,3 +288,107 @@ That will indicate that the `offline` field is required and it is
 missing from the configuration file. If you identify any issues with the
 schemas or missing functionality, please raise an issue on the `Anemoi
 Core repository`.
+
+Another type of error that we can see when working with Pydantic, is
+when we have a union of schemas, and then we try to validate using on
+those schemas config. For information about Unions, please refer to the
+`Pydantic documentation
+<https://docs.pydantic.dev/latest/concepts/unions/>`_. For example,
+let's say we have a config with a union of schemas like the following:
+
+.. code:: yaml
+
+   defaults:
+   - data: zarr
+   - dataloader: native_grid
+   - diagnostics: evaluation
+   - hardware: example
+   - graph: multi_scale
+   - model: transformer # Change from default group
+   - training: default
+   - _self_
+
+
+   graphs:
+      attributes:
+         nodes:
+             area_weight:
+               _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
+               norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
+
+In the example above, Pydantic will try to validate the
+SphericalAreaWeights schema using the union NodeAttributeSchemas, which
+contains a list of all the possible schemas for graph nodes attributes.
+
+.. code:: python
+
+   NodeAttributeSchemas = Union[
+      PlanarAreaWeightSchema
+      | SphericalAreaWeightSchema
+      | CutOutMaskSchema
+      | NonmissingZarrVariableSchema
+      | BooleanOperationSchema
+   ]
+
+If the schema is not correctly defined, then the validation will fail,
+with the following error:
+
+.. code:: python
+
+   2025-01-28 09:37:23 INFO Validating configs.
+   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
+   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now:  [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
+   2025-01-28 10:14:49 ERROR
+   💣 14 validation error for BaseSchema
+   graph.nodes.data.attributes.area_weight.PlanarAreaWeightSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.AreaWeights', 'anemoi.graphs.nodes.attributes.PlanarAreaWeights', 'anemoi.graphs.nodes.attributes.CutOutMask' or 'anemoi.graphs.nodes.attributes.UniformWeights' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   graph.nodes.data.attributes.area_weight.function-after[convert_centre_to_ndarray(), SphericalAreaWeightSchema].fill_value
+   Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
+      For further information visit https://errors.pydantic.dev/2.10/v/missing
+   graph.nodes.data.attributes.area_weight.CutOutMaskSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.CutOutMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   graph.nodes.data.attributes.area_weight.NonmissingZarrVariableSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.NonmissingZarrVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   graph.nodes.data.attributes.area_weight.NonmissingZarrVariableSchema.variable
+   Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
+      For further information visit https://errors.pydantic.dev/2.10/v/missing
+   graph.nodes.data.attributes.area_weight.BooleanOperationSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.BooleanNot', 'anemoi.graphs.nodes.attributes.BooleanAndMask' or 'anemoi.graphs.nodes.attributes.BooleanOrMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   graph.nodes.hidden.attributes.area_weight.PlanarAreaWeightSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.AreaWeights', 'anemoi.graphs.nodes.attributes.PlanarAreaWeights', 'anemoi.graphs.nodes.attributes.CutOutMask' or 'anemoi.graphs.nodes.attributes.UniformWeights' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   graph.nodes.hidden.attributes.area_weight.function-after[convert_centre_to_ndarray(), SphericalAreaWeightSchema].fill_value
+   Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
+      For further information visit https://errors.pydantic.dev/2.10/v/missing
+   graph.nodes.hidden.attributes.area_weight.CutOutMaskSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.CutOutMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   graph.nodes.hidden.attributes.area_weight.NonmissingZarrVariableSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.NonmissingZarrVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   graph.nodes.hidden.attributes.area_weight.NonmissingZarrVariableSchema.variable
+   Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
+      For further information visit https://errors.pydantic.dev/2.10/v/missing
+   graph.nodes.hidden.attributes.area_weight.BooleanOperationSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.BooleanNot', 'anemoi.graphs.nodes.attributes.BooleanAndMask' or 'anemoi.graphs.nodes.attributes.BooleanOrMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+      For further information visit https://errors.pydantic.dev/2.10/v/literal_error
+   training.scale_validation_metrics
+   Extra inputs are not permitted [type=extra_forbidden, input_value={'scalars_to_apply': ['va...e'], 'metrics': ['all']}, input_type=DictConfig]
+      For further information visit https://errors.pydantic.dev/2.10/v/extra_forbidden
+   2025-02-07 16:13:33 ERROR 💣 Exiting
+
+What's happening here, is that Pydantic can't match the config schema
+with the defined SphericalAreaWeightSchema (since it's missing the entry
+`fill_value: 0`. ) and it then tries to see if any of the other schemas
+in the union match our config, going from left to right and throwing an
+error for each of the schemas in the union. We understand the current
+error reported is not very intuitive and indeed hides the real issue. We
+will work on improving this on future releases, but mean time we
+recommend to double check the schemas and the config files to make sure
+they are correctly defined.
