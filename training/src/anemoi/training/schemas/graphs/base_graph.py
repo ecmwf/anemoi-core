@@ -13,6 +13,7 @@ import logging
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
+from pydantic import model_validator
 
 from anemoi.training.schemas.utils import BaseModel
 
@@ -44,9 +45,9 @@ class EdgeSchema(BaseModel):
 
 
 class BaseGraphSchema(PydanticBaseModel):
-    nodes: dict[str, NodeSchema]
+    nodes: dict[str, NodeSchema] | None = Field(default=None)
     "Nodes schema for all types of nodes (ex. data, hidden)."
-    edges: list[EdgeSchema]
+    edges: list[EdgeSchema] | None = Field(default=None)
     "List of edges schema."
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
@@ -56,3 +57,10 @@ class BaseGraphSchema(PydanticBaseModel):
     hidden: str = Field(example="hidden")
     "Key name for the hidden nodes. Default to 'hidden'."
     # TODO(Helen): Needs to be adjusted for more complex graph setups
+
+    @model_validator(mode="after")
+    def check_if_nodes_edges_present_if_overwrite(self) -> BaseGraphSchema:
+        if self.overwrite and ("nodes" not in self.model_fields_set or "edges" not in self.model_fields_set):
+            msg = "If overwrite is True, nodes and edges must be provided."
+            raise ValueError(msg)
+        return self
