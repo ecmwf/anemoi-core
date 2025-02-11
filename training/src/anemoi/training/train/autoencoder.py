@@ -56,10 +56,6 @@ class GraphAutoEncoder(GraphForecaster):
         """
         super().__init__(config=config, graph_data=graph_data, statistics=statistics, data_indices=data_indices, metadata=metadata, supporting_arrays=supporting_arrays)
 
-    def get_loss_function(self):
-
-        return torch.nn.L1Loss()
-
     def rollout_step(
         self,
         batch: torch.Tensor,
@@ -114,25 +110,15 @@ class GraphAutoEncoder(GraphForecaster):
             f", {batch.shape[1]} !>= {rollout + self.multi_step}"
         )
         assert batch.shape[1] >= rollout + self.multi_step, msg
-
-        # Get prognostic variables
-        print("prog shape: ", x[:, 0, ..., self.data_indices.internal_model.input.prognostic].shape)
         
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
-            y = x[..., self.data_indices.internal_data.output.full]
-
-            print(x.shape, y.shape, y_pred.shape)
-
-            # y includes the auxiliary variables, so we must leave those out when computing the loss
+            y = batch[:, 0, ..., self.data_indices.internal_data.output.full]
+       
             loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
-            print(loss)
-
             x = self.advance_input(x, y_pred, batch, rollout_step)
-
-            print(x.shape)
  
             metrics_next = {}
             if validation_mode:

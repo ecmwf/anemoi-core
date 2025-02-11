@@ -10,5 +10,6 @@
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .autoencoder import AnemoiModelAutoEncoder
+from .autoencoder import AnemoiModelHierarchicalAutoEncoder
 
-__all__ = ["AnemoiModelEncProcDec", "AnemoiModelEncProcDecHierarchical", "AnemoiModelAutoEncoder"]
+__all__ = ["AnemoiModelEncProcDec", "AnemoiModelEncProcDecHierarchical", "AnemoiModelAutoEncoder", "AnemoiModelHierarchicalAutoEncoder"]
