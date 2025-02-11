@@ -25,7 +25,8 @@
 -   [ ] I ran the [complete Pytest test](https://anemoi.readthedocs.io/projects/training/en/latest/dev/testing.html) suite locally, and they pass
 -   [ ] I have tested the changes on a single GPU
 -   [ ] I have tested the changes on multiple GPUs / multi-node setups
--   [ ] I have run the [Benchmark Profiler](https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/benchmarking.html) against the old version of the code
+-   [ ] I have run the Benchmark Profiler against the old version of the code
+-   [ ] If the new feature introduces modifications at the config level, I have made sure to update Pydantic Schemas and default configs accordingly
 
 
 <!-- In case this affects the model sharding or other specific components please describe these here. -->
