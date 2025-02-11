@@ -21,6 +21,6 @@ LOGGER = logging.getLogger(__name__)
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
 def test_training_cycle_debug_gnn_config(debug_config) -> None:
     LOGGER.info(debug_config.model.processor)
-    assert debug_config.model.processor._target_ == "anemoi.models.layers.processor.GNNProcessor"
+    assert debug_config.model.processor._target_ == "anemoi.models.layers.processor.TransformerProcessor"
     AnemoiTrainer(debug_config).train()
     shutil.rmtree(debug_config.hardware.paths.output)

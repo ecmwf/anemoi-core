@@ -13,7 +13,8 @@ def hydra_overrides() -> None:
 @pytest.fixture()
 @pytest.mark.parametrize("hydra_overrides", ["model=gnn"])  # , 'model=transformer', 'model=graph_transformer'])
 def debug_config(hydra_overrides) -> None:
-    initialize(version_base=None, config_path="../training/src/anemoi/training/config", job_name="test_training")
-    cfg = compose(config_name="debug", overrides=hydra_overrides)
+    initialize(version_base=None, config_path="", job_name="test_training")
+    print(hydra_overrides)
+    cfg = compose(config_name="basic_config", overrides=hydra_overrides)
     OmegaConf.resolve(cfg)
     return cfg
