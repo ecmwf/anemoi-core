@@ -18,6 +18,8 @@ Keep it human-readable, your future self will thank you!
 - Reduced memory usage when using chunking in the mapper [#84](https://github.com/ecmwf/anemoi-models/pull/84)
 - Added `supporting_arrays` argument, which contains arrays to store in checkpoints. [#97](https://github.com/ecmwf/anemoi-models/pull/97)
 - Add remappers, e.g. link functions to apply during training to facilitate learning of variables with a difficult distribution [#88](https://github.com/ecmwf/anemoi-models/pull/88)
+- Add Normalized Relu Bounding for minimum bounding thresholds different than 0 [#64](https://github.com/ecmwf/anemoi-core/pull/64)
+- 'predict\_step' can take an optional model comm group. [#77](https://github.com/ecmwf/anemoi-core/pull/77)
 
 ## [0.4.0](https://github.com/ecmwf/anemoi-models/compare/0.3.0...0.4.0) - Improvements to Model Design
 
@@ -53,7 +55,15 @@ Keep it human-readable, your future self will thank you!
 ### Added
 
 - CI workflow to update the changelog on release
+- add configurability of flash attention (#47)
+- configurabilty of the dropout probability in the the MultiHeadSelfAttention module
+- CI workflow to update the changelog on release
 - Remapper: Preprocessor for remapping one variable to multiple ones. Includes changes to the data indices since the remapper changes the number of variables. With optional config keywords.
+- Codeowners file
+- Pygrep precommit hooks
+- Docsig precommit hooks
+- Changelog merge strategy
+
 
 ### Changed
 
@@ -61,6 +71,7 @@ Keep it human-readable, your future self will thank you!
 - run downstream-ci only when src and tests folders have changed
 - New error messages for wrongs graphs.
 - Feature: Change model to be instantiatable in the interface, addressing [#28](https://github.com/ecmwf/anemoi-models/issues/28) through [#45](https://github.com/ecmwf/anemoi-models/pulls/45)
+- Bugfixes for CI
 
 ### Removed
 
