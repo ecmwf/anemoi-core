@@ -15,7 +15,8 @@ nodes:
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes # options: ZarrDatasetNodes, NPZFileNodes
-      grid: "o48"
+      grid: o48 # o32, o48, ...
+
 
 edges:
 # Encoder configuration
