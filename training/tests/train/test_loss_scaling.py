@@ -134,7 +134,11 @@ def test_variable_loss_scaling_vals(
 ) -> None:
     config, data_indices = fake_data
 
-    variable_loss_scaling = GraphForecaster.get_variable_scaling(config, data_indices)
+    variable_loss_scaling = GraphForecaster.get_variable_scaling(
+        config.training.variable_loss_scaling,
+        config.training.pressure_level_scaler,
+        data_indices,
+    )
 
     assert torch.allclose(variable_loss_scaling, expected_scaling)
 
