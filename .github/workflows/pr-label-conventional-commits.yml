@@ -44,5 +44,5 @@ jobs:
               - type: 'config'
                 nouns: ['config', 'conf', 'configuration']
                 labels: ['config']
-          maintain-labels-not-matched: false
+          maintain-labels-not-matched: true
           apply-changes: true
