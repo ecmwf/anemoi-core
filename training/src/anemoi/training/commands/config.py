@@ -17,11 +17,14 @@ import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import Any
+from typing import get_type_hints
 
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pydantic import BaseModel
 
 from anemoi.training.commands import Command
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -133,27 +136,34 @@ class ConfigGenerator(Command):
         """Mask environment variables are set."""
         # Convert OmegaConf dict to YAML format (raw string)
         raw_cfg = OmegaConf.to_yaml(cfg)
-
-        # Regex pattern to match ${oc.decode:${oc.env:ENV_VAR}}
-        pattern = r"\$\{oc\.decode\:\$\{oc\.env\:(\S+)\}\}"
-
-        # Find all matches in the raw_cfg string
-        matches = re.findall(pattern, raw_cfg)
-
         # To extract and replace environment variables, loop through the matches
         updated_cfg = raw_cfg
+        primitive_type_hints = extract_primitive_type_hints(BaseSchema)
 
-        for match in matches:
-            # Check if the environment variable exists
-            env_value = os.getenv(match)
+        patterns = [
+            r"(\w+):\s*\$\{oc\.env:([A-Z0-9_]+)\}(?!\})",
+            r"(\w+):\s*\$\{oc\.decode:\$\{oc\.env:([A-Z0-9_]+)\}\}",
+        ]
+        replaces = ["${{oc.env:{match}}}", "${{oc.decode:${{oc.env:{match}}}}}"]
+        # Find all matches in the raw_cfg string
+        for pattern, replace in zip(patterns, replaces):
+            matches = re.findall(pattern, raw_cfg)
+            # Find the corresponding type hints for each extracted key
+            for extracted_key, match in matches:
+                corresponding_keys = next(iter([key for key in primitive_type_hints if extracted_key in key]))
+                # Check if the environment variable exists
+                env_value = os.getenv(match)
 
-            # If environment variable doesn't exist, replace with default string
-            if env_value is None:
-                env_value = "0"
-                LOGGER.warning("Environment variable %s not found, masking with %s", match, env_value)
+                # If environment variable doesn't exist, replace with default string
+                if env_value is None:
+                    def_str = "default"
+                    def_int = 0
+                    env_value = def_str if primitive_type_hints[corresponding_keys] is str else def_int
+                    LOGGER.warning("Environment variable %s not found, masking with %s", match, env_value)
 
-            # Replace the pattern with the actual value or the default string
-            updated_cfg = updated_cfg.replace(f"${{oc.decode:${{oc.env:{match}}}}}", env_value)
+                    # Replace the pattern with the actual value or the default string
+                    updated_cfg = updated_cfg.replace(replace.format(match=match), str(env_value))
+
         return OmegaConf.create(updated_cfg)
 
     def validate_config(self, name: Path | str, mask_env_vars: bool) -> None:
@@ -164,6 +174,30 @@ class ConfigGenerator(Command):
                 cfg = self._mask_slurm_env_variables(cfg)
             OmegaConf.resolve(cfg)
             BaseSchema(**cfg)
+
+
+def extract_primitive_type_hints(schema: type[BaseModel]) -> dict[str, Any]:
+    """Recursively extract only primitive type hints from a nested Pydantic schema."""
+    type_hints = {}
+
+    def _extract(schema: type[BaseModel], prefix: str = "") -> None:
+        """Helper function to traverse the schema recursively."""
+        hints = get_type_hints(schema)
+
+        for field_name, field_type in hints.items():
+            full_field_name = f"{prefix}{field_name}"  # Preserve nested paths
+
+            # If field is another Pydantic model, recurse; otherwise, store it
+            if isinstance(field_type, type) and issubclass(field_type, BaseModel):
+                _extract(field_type, prefix=f"{full_field_name}.")  # Nest fields
+            else:
+                try:
+                    type_hints[full_field_name] = field_type.__args__[0]
+                except AttributeError:
+                    type_hints[full_field_name] = field_type
+
+    _extract(schema)
+    return type_hints
 
 
 command = ConfigGenerator
