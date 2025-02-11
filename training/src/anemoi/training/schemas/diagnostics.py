@@ -139,6 +139,15 @@ class PlottingFrequency(BaseModel):
     "Frequency of the plotting in number of epochs."
 
 
+class TimeLimitSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.stopping.TimeLimit"] = Field(alias="_target_")
+    "TimeLimit object from anemoi training diagnostics callbacks."
+    limit: int | str
+    "Time limit, if int, assumed to be hours, otherwise must be a string with units (e.g. '1h', '30m')."
+    record_file: str | None = Field(default=None)
+    "File to record the last checkpoint to on exit, if set."
+
+
 class Debug(BaseModel):
     anomaly_detection: bool
     "Activate anomaly detection. This will detect and trace back NaNs/Infs, but slow down training."
