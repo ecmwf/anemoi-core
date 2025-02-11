@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import logging
+import os
+import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -60,10 +62,10 @@ class ConfigGenerator(Command):
         validate.add_argument("--name", help="Name of the primary config file")
         validate.add_argument("--overwrite", "-f", action="store_true")
         validate.add_argument(
-            "--env_vars",
+            "--mask_env_vars",
             "-m",
-            help="Use environment variables from config. Default False",
-            action="store_false",
+            help="Mask environment variables from config. Default False",
+            action="store_true",
         )
 
     def run(self, args: argparse.Namespace) -> None:
@@ -93,7 +95,7 @@ class ConfigGenerator(Command):
                 "Note that this command is not taking into account if your config has a no_validation flag."
                 "So this command will validate the config regardless of the flag.",
             )
-            self.validate_config(args.name, args.env_vars)
+            self.validate_config(args.name, args.mask_env_vars)
             LOGGER.info("Config files validated.")
             return
 
@@ -128,23 +130,39 @@ class ConfigGenerator(Command):
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
 
-    def _mask_slurm_env_variables(self, cfg: DictConfig, env_vars: bool = True) -> None:
-        """Check if SLURM environment variables are set."""
-        import torch
+    def _mask_slurm_env_variables(self, cfg: DictConfig) -> None:
+        """Mask environment variables are set."""
+        # Convert OmegaConf dict to YAML format (raw string)
+        raw_cfg = OmegaConf.to_yaml(cfg)
 
-        if not torch.cuda.is_available() and env_vars:
-            LOGGER.warning("CUDA is not available. Masking check your environment variables.")
-            cfg.hardware.num_gpus_per_node = 1
-            cfg.hardware.num_nodes = 1
-            LOGGER.warning("Using hardware configuration num_gpus_per_model: %s", cfg.hardware.num_gpus_per_model)
-            LOGGER.warning("Using hardware configuration num_nodes: %s", cfg.hardware.num_nodes)
-            LOGGER.warning("Using hardware configuration num_gpus_per_node: %s", cfg.hardware.num_gpus_per_node)
+        # Regex pattern to match ${oc.decode:${oc.env:ENV_VAR}}
+        pattern = r"\$\{oc\.decode\:\$\{oc\.env\:(\S+)\}\}"
 
-    def validate_config(self, name: Path | str, env_vars: bool) -> None:
+        # Find all matches in the raw_cfg string
+        matches = re.findall(pattern, raw_cfg)
+
+        # To extract and replace environment variables, loop through the matches
+        updated_cfg = raw_cfg
+
+        for match in matches:
+            # Check if the environment variable exists
+            env_value = os.getenv(match)
+
+            # If environment variable doesn't exist, replace with default string
+            if env_value is None:
+                env_value = "0"
+                LOGGER.warning("Environment variable %s not found, masking with %s", match, env_value)
+
+            # Replace the pattern with the actual value or the default string
+            updated_cfg = updated_cfg.replace(f"${{oc.decode:${{oc.env:{match}}}}}", env_value)
+        return OmegaConf.create(updated_cfg)
+
+    def validate_config(self, name: Path | str, mask_env_vars: bool) -> None:
         """Validates the configuration files in the given directory."""
         with initialize(version_base=None, config_path=""):
             cfg = compose(config_name=name)
-            self._mask_slurm_env_variables(cfg, env_vars)
+            if mask_env_vars:
+                cfg = self._mask_slurm_env_variables(cfg)
             OmegaConf.resolve(cfg)
             BaseSchema(**cfg)
 
