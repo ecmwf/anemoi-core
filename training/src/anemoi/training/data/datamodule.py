@@ -90,7 +90,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         reader_group_size = self.config.dataloader.read_group_size
 
         grid_indices = instantiate(
-            self.config.dataloader.grid_indices.model_dump(by_alias=True),
+            self.config.model_dump(by_alias=True).dataloader.grid_indices,
             reader_group_size=reader_group_size,
         )
         grid_indices.setup(self.graph_data)
@@ -127,7 +127,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
-            open_dataset(self.config.dataloader.training.model_dump()),
+            open_dataset(self.config.model_dump().dataloader.training),
             label="train",
         )
 
@@ -143,7 +143,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 self.config.dataloader.validation.start,
             )
         return self._get_dataset(
-            open_dataset(self.config.dataloader.validation.model_dump()),
+            open_dataset(self.config.model_dump().dataloader.validation),
             shuffle=False,
             rollout=r,
             label="validation",
@@ -160,7 +160,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             f"test start date {self.config.dataloader.test.start}"
         )
         return self._get_dataset(
-            open_dataset(self.config.dataloader.test.model_dump()),
+            open_dataset(self.config.model_dump().dataloader.test),
             shuffle=False,
             label="test",
         )
@@ -198,9 +198,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         assert stage in {"training", "validation", "test"}
         return DataLoader(
             ds,
-            batch_size=self.config.dataloader.batch_size.model_dump()[stage],
+            batch_size=self.config.model_dump().dataloader.batch_size[stage],
             # number of worker processes
-            num_workers=self.config.dataloader.num_workers.model_dump()[stage],
+            num_workers=self.config.model_dump().dataloader.num_workers[stage],
             # use of pinned memory can speed up CPU-to-GPU data transfers
             # see https://pytorch.org/docs/stable/notes/cuda.html#cuda-memory-pinning
             pin_memory=self.config.dataloader.pin_memory,

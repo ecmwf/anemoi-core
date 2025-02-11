@@ -32,6 +32,7 @@ from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
@@ -65,7 +66,7 @@ class AnemoiTrainer:
 
         if config.no_validation:
             config = OmegaConf.to_object(config)
-            self.config = BaseSchema.model_construct(**config)
+            self.config = UnvalidatedBaseSchema(**DictConfig(config))
             LOGGER.info("Skipping config validation.")
         else:
 
@@ -146,7 +147,7 @@ class AnemoiTrainer:
 
         from anemoi.graphs.create import GraphCreator
 
-        graph_config = convert_to_omegaconf(self.config.graph)
+        graph_config = convert_to_omegaconf(self.config).graph
         return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,

@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import Any
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import model_validator
+from pydantic._internal import _model_construction
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
@@ -31,6 +34,8 @@ from .training import TrainingSchema  # noqa: TC001
 from .utils import CUSTOM_MESSAGES
 from .utils import BaseModel
 from .utils import convert_errors
+
+_object_setattr = _model_construction.object_setattr
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +53,7 @@ class BaseSchema(BaseModel):
     """Hardware configuration."""
     graph: BaseGraphSchema
     """Graph configuration."""
-    model: ModelSchema  # GNNSchema | TransformerSchema | GraphTransformerSchema = Field(..., discriminator='target_')
+    model: ModelSchema
     """Model configuration."""
     training: TrainingSchema
     """Training configuration."""
@@ -75,6 +80,29 @@ class BaseSchema(BaseModel):
             msg = ", ".join(logger) + " logging path(s) not provided."
             raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
         return self
+
+
+class UnvalidatedBaseSchema(PydanticBaseModel):
+    data: Any
+    """Data configuration."""
+    dataloader: Any
+    """Dataloader configuration."""
+    diagnostics: Any
+    """Diagnostics configuration such as logging, plots and metrics."""
+    hardware: Any
+    """Hardware configuration."""
+    graph: Any
+    """Graph configuration."""
+    model: Any
+    """Model configuration."""
+    training: Any
+    """Training configuration."""
+    no_validation: bool = False
+    """Flag to disable validation of the configuration"""
+
+    def model_dump(self, by_alias: bool = False) -> dict:
+        dumped_model = super().model_dump(by_alias=by_alias)
+        return DictConfig(dumped_model)
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
