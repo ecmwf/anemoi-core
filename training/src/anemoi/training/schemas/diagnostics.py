@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
-from typing import Any
 from typing import Literal
 
 from pydantic import Field
@@ -264,7 +263,7 @@ class BenchmarkProfilerSchema(BaseModel):
 class DiagnosticsSchema(BaseModel):
     plot: PlotSchema | None = None
     "Plot schema."
-    callbacks: Any = Field(example=[])
+    callbacks: list = Field(example=[])
     "Callbacks schema."
     benchmark_profiler: BenchmarkProfilerSchema
     "Benchmark profiler schema for `profile` command."
