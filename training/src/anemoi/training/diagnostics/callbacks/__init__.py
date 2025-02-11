@@ -188,7 +188,6 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     )
 
     # Plotting callbacks
-
     trainer_callbacks.extend(
         instantiate(callback, config) for callback in config.diagnostics.plot.get("callbacks", None) or []
     )
