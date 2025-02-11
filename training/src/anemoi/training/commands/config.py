@@ -63,6 +63,7 @@ class ConfigGenerator(Command):
         validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
 
         validate.add_argument("--name", help="Name of the primary config file")
+        validate.add_argument("--overwrite", "-f", action="store_true")
         validate.add_argument(
             "--mask_env_vars",
             "-m",
