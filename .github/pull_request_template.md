@@ -26,7 +26,6 @@
 -   [ ] I have tested the changes on a single GPU
 -   [ ] I have tested the changes on multiple GPUs / multi-node setups
 -   [ ] I have run the [Benchmark Profiler](https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/benchmarking.html) against the old version of the code
--   [ ] If the new feature introduces modifications at config level, I have made sure to update Pydantic Schemas and default configs accordingly
 
 <!-- In case this affects the model sharding or other specific components please describe these here. -->
 
