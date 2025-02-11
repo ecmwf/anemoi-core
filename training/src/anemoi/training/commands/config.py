@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 from hydra import compose
 from hydra import initialize
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from anemoi.training.commands import Command
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -57,6 +59,12 @@ class ConfigGenerator(Command):
 
         validate.add_argument("--name", help="Name of the primary config file")
         validate.add_argument("--overwrite", "-f", action="store_true")
+        validate.add_argument(
+            "--env_vars",
+            "-m",
+            help="Use environment variables from config. Default False",
+            action="store_false",
+        )
 
     def run(self, args: argparse.Namespace) -> None:
 
@@ -85,7 +93,7 @@ class ConfigGenerator(Command):
                 "Note that this command is not taking into account if your config has a no_validation flag."
                 "So this command will validate the config regardless of the flag.",
             )
-            self.validate_config(args.name)
+            self.validate_config(args.name, args.env_vars)
             LOGGER.info("Config files validated.")
             return
 
@@ -120,10 +128,24 @@ class ConfigGenerator(Command):
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
 
-    def validate_config(self, name: Path | str) -> None:
+    def _mask_slurm_env_variables(self, cfg: DictConfig, env_vars: bool = True) -> None:
+        """Check if SLURM environment variables are set."""
+        import torch
+
+        if not torch.cuda.is_available() and env_vars:
+            LOGGER.warning("CUDA is not available. Masking check your environment variables.")
+            cfg.hardware.num_gpus_per_node = 1
+            cfg.hardware.num_nodes = 1
+            LOGGER.warning("Using hardware configuration num_gpus_per_model: %s", cfg.hardware.num_gpus_per_model)
+            LOGGER.warning("Using hardware configuration num_nodes: %s", cfg.hardware.num_nodes)
+            LOGGER.warning("Using hardware configuration num_gpus_per_node: %s", cfg.hardware.num_gpus_per_node)
+
+    def validate_config(self, name: Path | str, env_vars: bool) -> None:
         """Validates the configuration files in the given directory."""
         with initialize(version_base=None, config_path=""):
             cfg = compose(config_name=name)
+            self._mask_slurm_env_variables(cfg, env_vars)
+            OmegaConf.resolve(cfg)
             BaseSchema(**cfg)
 
 
