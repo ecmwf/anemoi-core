@@ -12,15 +12,24 @@ import shutil
 
 import pytest
 import torch
+from hydra import compose
+from hydra import initialize
+from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
 
 LOGGER = logging.getLogger(__name__)
 
 
+@pytest.mark.parametrize(
+    "hydra_overrides", [["model=gnn"], ["model=graphtransformer"], ["model=transformer", "graph=encoder_decoder_only"]]
+)
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
-def test_training_cycle_debug_gnn_config(debug_config) -> None:
-    LOGGER.info(debug_config.model.processor)
-    assert debug_config.model.processor._target_ == "anemoi.models.layers.processor.TransformerProcessor"
-    AnemoiTrainer(debug_config).train()
-    shutil.rmtree(debug_config.hardware.paths.output)
+def test_training_cycle_debug_gnn_config(hydra_overrides) -> None:
+
+    with initialize(version_base=None, config_path="", job_name="test_training"):
+        cfg = compose(config_name="basic_config", overrides=hydra_overrides)
+        OmegaConf.resolve(cfg)
+
+        AnemoiTrainer(cfg).train()
+        shutil.rmtree(cfg.hardware.paths.output)
