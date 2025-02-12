@@ -110,6 +110,13 @@ class EarlyStopping(pl.callbacks.EarlyStopping):
         """
         Early stopping callback.
 
+        Set `monitor` to metric to check.
+        Common names within `Anemoi` are:
+            - `val_{loss_name}_epoch`
+            - `train_{loss_name}_epoch`
+            - `val_{metric_name}/{param}_{level}/{rollout}` i.e. `val_wmse/v_850/1`
+            - `val_{metric_name}/sfc_{param}/{rollout}` i.e. `val_wmse/sfc_2t/1`
+
         See Pytorch Lightning documentation for more information.
         https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.EarlyStopping.html
         """
