@@ -16,6 +16,10 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hydra import compose
+from hydra import initialize
+from omegaconf import OmegaConf
+
 from anemoi.training.commands import Command
 
 if TYPE_CHECKING:
@@ -48,15 +52,26 @@ class ConfigGenerator(Command):
         )
         anemoi_training_home.add_argument("--overwrite", "-f", action="store_true")
 
+        help_msg = "Dump Anemoi configs to a YAML file."
+        dump = subparsers.add_parser(
+            "dump",
+            help=help_msg,
+            description=help_msg,
+        )
+        dump.add_argument("--config-dir", "-i", default=Path.cwd(), help="Configuration directory")
+        dump.add_argument("--name", "-n", default="config", help="Name of the configuration")
+        dump.add_argument("--output", "-o", default="./config.yaml", help="Output file path")
+        dump.add_argument("--overwrite", "-f", action="store_true")
+
     def run(self, args: argparse.Namespace) -> None:
         LOGGER.info(
             "Generating configs, please wait.",
         )
+
         self.overwrite = args.overwrite
+
         if args.subcommand == "generate":
-
             self.traverse_config(args.output)
-
             LOGGER.info("Inference checkpoint saved to %s", args.output)
             return
 
@@ -64,6 +79,11 @@ class ConfigGenerator(Command):
             anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
             self.traverse_config(anemoi_home)
             LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
+            return
+
+        if args.subcommand == "dump":
+            self.dump_config(args.config_dir, args.name, args.output)
+            LOGGER.info("Dumping config to %s", args.output)
             return
 
     def traverse_config(self, destination_dir: Path | str) -> None:
@@ -96,6 +116,15 @@ class ConfigGenerator(Command):
             LOGGER.info("Copied %s to %s", item.name, file_path)
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
+
+    def dump_config(self, config_dir: str, name: str, output: str) -> None:
+        """Dump config files in one YAML file."""
+        with initialize(version_base=None, config_path=config_dir):
+            cfg = compose(config_name=name)
+
+        fp = Path(output)
+        with fp.open("w") as f:
+            f.write(OmegaConf.to_yaml(cfg))
 
 
 command = ConfigGenerator
