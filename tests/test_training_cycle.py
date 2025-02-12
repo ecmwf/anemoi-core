@@ -33,3 +33,7 @@ def test_training_cycle_debug_gnn_config(hydra_overrides) -> None:
 
         AnemoiTrainer(cfg).train()
         shutil.rmtree(cfg.hardware.paths.output)
+
+def test_fixtures(debug_config) -> None:
+    print(debug_config)
+    assert debug_config
