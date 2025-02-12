@@ -39,6 +39,7 @@ class BaseEdgeBuilder(ABC):
         self.target_name = target_name
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     @property
     def name(self) -> tuple[str, str, str]:
@@ -55,7 +56,8 @@ class BaseEdgeBuilder(ABC):
     def get_edge_index(self, graph: HeteroData) -> torch.Tensor:
         """Get the edge index."""
         source_nodes, target_nodes = self.prepare_node_data(graph)
-        return self.compute_edge_index(source_nodes, target_nodes)
+        edge_index = self.compute_edge_index(source_nodes, target_nodes)
+        return edge_index.to(self.device)
 
     def register_edges(self, graph: HeteroData) -> HeteroData:
         """Register edges in the graph.
@@ -123,9 +125,6 @@ class BaseEdgeBuilder(ABC):
         HeteroData
             The graph with the edges.
         """
-        if torch.cuda.is_available():
-            graph = graph.to("cuda")
-
         t0 = time.time()
         graph = self.register_edges(graph)
         t1 = time.time()

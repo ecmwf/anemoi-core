@@ -66,8 +66,8 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
         from torch_cluster.knn import knn
 
         edge_index = knn(
-            latlon_rad_to_cartesian(source_nodes.x),
-            latlon_rad_to_cartesian(target_nodes.x),
+            latlon_rad_to_cartesian(source_nodes.x.to(self.device)),
+            latlon_rad_to_cartesian(target_nodes.x.to(self.device)),
             k=self.num_nearest_neighbours,
         )
         return torch.flip(edge_index, [0])
@@ -83,7 +83,7 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
         # Post-process the adjacency matrix. Add masked nodes.
         adj_matrix = self.undo_masking(adj_matrix, source_nodes, target_nodes)
         edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
-        return edge_index.to(target_nodes.x.device)
+        return edge_index
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices for the KNN method.

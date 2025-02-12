@@ -38,16 +38,15 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         self.norm = norm
         self.dtype = dtype
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     @abstractmethod
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray: ...
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor: ...
 
-    def post_process(self, values: np.ndarray) -> torch.Tensor:
+    def post_process(self, values: torch.Tensor) -> torch.Tensor:
         """Post-process the values."""
         if values.ndim == 1:
-            values = values[:, np.newaxis]
-
-        values = torch.tensor(values.astype(self.dtype))
+            values = torch.unsqueeze(values, -1)
 
         return self.normalise(values)
 
@@ -68,8 +67,8 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
         torch.Tensor
             Attributes associated to the nodes.
         """
-        nodes = graph[nodes_name]
-        attributes = self.get_raw_values(nodes, **kwargs)
+        nodes = graph[nodes_name].to(self.device)
+        attributes = self.get_raw_values(nodes, **kwargs).to(self.device)
         return self.post_process(attributes)
 
 
@@ -82,7 +81,7 @@ class UniformWeights(BaseNodeAttribute):
         Compute the area attributes for each node.
     """
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         """Compute the weights.
 
         Parameters
@@ -94,10 +93,10 @@ class UniformWeights(BaseNodeAttribute):
 
         Returns
         -------
-        np.ndarray
-            Attributes.
+        torch.Tensor
+            Ones.
         """
-        return np.ones(nodes.num_nodes)
+        return torch.ones(nodes.num_nodes)
 
 
 class AreaWeights(BaseNodeAttribute):
@@ -143,20 +142,13 @@ class PlanarAreaWeights(BaseNodeAttribute):
         Compute the area attributes for each node.
     """
 
-    def __init__(
-        self,
-        norm: str | None = None,
-        dtype: str = "float32",
-    ) -> None:
-        super().__init__(norm, dtype)
-
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        v = Voronoi(nodes.x, qhull_options="QJ Pp")
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        v = Voronoi(nodes.x.cpu(), qhull_options="QJ Pp")
         areas = []
         for r in v.regions:
             area = ConvexHull(v.vertices[r, :]).volume
             areas.append(area)
-        result = np.asarray(areas)
+        result = torch.from_array(np.asarray(areas))
         return result
 
 
@@ -210,9 +202,9 @@ class SphericalAreaWeights(BaseNodeAttribute):
         np.ndarray
             Attributes.
         """
-        points = latlon_rad_to_cartesian(nodes.x)
+        points = latlon_rad_to_cartesian(nodes.x.cpu())
         sv = SphericalVoronoi(points, self.radius, self.centre)
-        mask = np.array([bool(i) for i in sv.regions])
+        mask = torch.tensor([bool(i) for i in sv.regions])
         sv.regions = [region for region in sv.regions if region]
         # compute the area weight without empty regions
         area_weights = sv.calculate_areas()
@@ -224,12 +216,12 @@ class SphericalAreaWeights(BaseNodeAttribute):
                 100 * null_nodes / len(mask),
                 self.fill_value,
             )
-        result = np.ones(points.shape[0]) * self.fill_value
+        result = torch.ones(points.shape[0]) * self.fill_value
         result[mask] = area_weights
         LOGGER.debug(
             "There are %d of weights, which (unscaled) add up a total weight of %.2f.",
             len(result),
-            np.array(result).sum(),
+            result.sum(),
         )
         return result
 
@@ -263,22 +255,22 @@ class NonmissingZarrVariable(BooleanBaseNodeAttribute):
         super().__init__()
         self.variable = variable
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert (
             nodes["node_type"] == "ZarrDatasetNodes"
         ), f"{self.__class__.__name__} can only be used with ZarrDatasetNodes."
         ds = open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
-        return ~np.isnan(ds)
+        return torch.from_array(~np.isnan(ds))
 
 
 class CutOutMask(BooleanBaseNodeAttribute):
     """Cut out mask."""
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert isinstance(nodes["_dataset"], dict), "The 'dataset' attribute must be a dictionary."
         assert "cutout" in nodes["_dataset"], "The 'dataset' attribute must contain a 'cutout' key."
         num_lam, num_other = open_dataset(nodes["_dataset"]).grids
-        return np.array([True] * num_lam + [False] * num_other, dtype=bool)
+        return torch.tensor([True] * num_lam + [False] * num_other, dtype=torch.bool)
 
 
 class BooleanOperation(BooleanBaseNodeAttribute, ABC):
@@ -289,7 +281,7 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
         self.masks = masks if isinstance(masks, list) else [masks]
 
     @staticmethod
-    def get_mask_values(mask: MaskAttributeType, nodes: NodeStorage, **kwargs) -> np.array:
+    def get_mask_values(mask: MaskAttributeType, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         if isinstance(mask, str):
             attributes = nodes[mask]
             assert (
@@ -300,9 +292,9 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
         return mask.get_raw_values(nodes, **kwargs)
 
     @abstractmethod
-    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray: ...
+    def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor: ...
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         mask_values = [BooleanOperation.get_mask_values(mask, nodes, **kwargs) for mask in self.masks]
         return self.reduce_op(mask_values)
 
@@ -310,7 +302,7 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
 class BooleanNot(BooleanOperation):
     """Boolean NOT mask."""
 
-    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray:
+    def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor:
         assert len(self.masks) == 1, f"The {self.__class__.__name__} can only be aplied to one mask."
         return ~masks[0]
 
@@ -318,12 +310,12 @@ class BooleanNot(BooleanOperation):
 class BooleanAndMask(BooleanOperation):
     """Boolean AND mask."""
 
-    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray:
-        return np.logical_and.reduce(masks)
+    def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor:
+        return torch.logical_and.reduce(masks)
 
 
 class BooleanOrMask(BooleanOperation):
     """Boolean OR mask."""
 
-    def reduce_op(self, masks: list[np.ndarray]) -> np.ndarray:
-        return np.logical_or.reduce(masks)
+    def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor:
+        return torch.logical_or.reduce(masks)

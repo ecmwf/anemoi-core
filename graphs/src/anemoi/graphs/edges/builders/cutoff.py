@@ -91,8 +91,8 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         target_nodes = graph[self.target_name]
         if mask_attr is not None:
             # If masking target nodes, we have to recompute the grid reference distance only over the masked nodes
-            mask = target_nodes[mask_attr].cpu()
-            target_grid_reference_distance = get_grid_reference_distance(target_nodes.x.cpu(), mask)
+            mask = target_nodes[mask_attr]
+            target_grid_reference_distance = get_grid_reference_distance(target_nodes.x, mask)
         else:
             target_grid_reference_distance = target_nodes["_grid_reference_distance"]
 
@@ -108,8 +108,8 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         from torch_cluster.radius import radius
 
         edge_index = radius(
-            latlon_rad_to_cartesian(source_nodes.x),
-            latlon_rad_to_cartesian(target_nodes.x),
+            latlon_rad_to_cartesian(source_nodes.x.to(self.device)),
+            latlon_rad_to_cartesian(target_nodes.x.to(self.device)),
             r=self.radius,
             max_num_neighbors=self.max_num_neighbours,
         )
@@ -151,7 +151,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         adj_matrix = self.undo_masking(adj_matrix, source_nodes, target_nodes)
         edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
 
-        return edge_index.to(target_nodes.x.device)
+        return edge_index
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Get the adjacency matrix for the cut-off method.

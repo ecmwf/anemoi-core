@@ -35,12 +35,13 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
         super().__init__()
         self.norm = norm
         self.dtype = dtype
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if self.node_attr_name is None:
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
 
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
-        return source_nodes[self.node_attr_name], target_nodes[self.node_attr_name]
+        return source_nodes[self.node_attr_name].to(self.device), target_nodes[self.node_attr_name].to(self.device)
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
         x = self.subset_node_information(*x)
