@@ -45,8 +45,8 @@ def get_loss_function(
 
     Returns
     -------
-    Union[BaseLoss, torch.nn.ModuleList]
-        Loss function, or list of metrics
+    Union[BaseLoss, torch.nn.ModuleDict]
+        Loss function, or dict of metrics
 
     Raises
     ------
@@ -56,9 +56,9 @@ def get_loss_function(
         If scaler is not found in valid scalers
     """
     config_container = OmegaConf.to_container(config, resolve=False)
-    if isinstance(config_container, list):
-        return torch.nn.ModuleList(
-            [get_loss_function(OmegaConf.create(loss_config), scalers=scalers, **kwargs) for loss_config in config],
+    if isinstance(config_container, dict):
+        return torch.nn.ModuleDict(
+            {name: get_loss_function(OmegaConf.create(loss_config), scalers=scalers, **kwargs) for name, loss_config in config.items()},
         )
 
     loss_config = OmegaConf.to_container(config, resolve=True)

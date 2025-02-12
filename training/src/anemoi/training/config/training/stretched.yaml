@@ -66,34 +66,27 @@ loss_gradient_scaling: False
 # have undergone postprocessing.
 validation_metrics:
   # loss class to initialise
-  - _target_: anemoi.training.losses.mse.MSELoss
+  mse: 
+    _target_: anemoi.training.losses.mse.MSELoss
     # Scalers to include in loss calculation
     # Cannot scale over the variable dimension due to possible remappings.
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: []
+    scalers: ['node_weights']
     # other kwargs
     ignore_nans: True
-  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
-    lam_scalar: 'limited_area_mask'
-    scalars: ['limited_area_mask']
-    wmse_contribution: False
+  mse_inside_lam_contribution:
+    _target_: anemoi.training.losses.mse.MSELoss
+    scalers: ['limited_area_mask', 'node_weights']
     ignore_nans: True
-  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
-    lam_scalar: 'outside_lam_mask'
-    scalars: ['outside_lam_mask']
-    wmse_contribution: False
+  mse_outside_lam_contribution:
+    _target_: anemoi.training.losses.mse.MSELoss
+    scalars: ['outside_lam_mask', 'node_weights']
     ignore_nans: True
-  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
-    lam_scalar: 'limited_area_mask'
-    scalars: ['limited_area_mask']
-    wmse_contribution: True
-    ignore_nans: True
-  - _target_: anemoi.training.losses.limitedarea.LimitedAreaMSELoss
-    lam_scalar: 'outside_lam_mask'
-    scalars: ['outside_lam_mask']
-    wmse_contribution: True
+  mse_inside_lam:
+    _target_: anemoi.training.losses.mse.MSELoss
+    scalars: ['limited_area_mask', 'lam_node_weights']
     ignore_nans: True
 
 # List of validation metrics to keep in normalised space, and scalers to be applied

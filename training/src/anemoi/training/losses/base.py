@@ -142,11 +142,6 @@ class BaseLoss(nn.Module, ABC):
 
         return self.sum_function(out, dim=(0, 1, 2))
 
-    @property
-    def name(self) -> str:
-        """Used for logging identification purposes."""
-        return self.__class__.__name__.lower()
-
 
 class FunctionalLoss(BaseLoss):
     """Loss which a user can subclass and provide `calculate_difference`.

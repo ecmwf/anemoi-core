@@ -441,8 +441,7 @@ class GraphForecaster(pl.LightningModule):
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
 
-        for metric in self.metrics:
-            metric_name = getattr(metric, "name", metric.__class__.__name__.lower())
+        for metric_name, metric in self.metrics.items():
 
             if not isinstance(metric, BaseLoss):
                 # If not a weighted loss, we cannot feature scale, so call normally

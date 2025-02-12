@@ -55,6 +55,13 @@ builders:
     apply_output_mask: True
     norm: "unit-sum"
 
+  lam_node_weights:
+    _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
+    nodes_name: ${graph.data}
+    nodes_attribute_name: lam_area_weight
+    apply_output_mask: True
+    norm: "unit-sum"  
+
   limited_area_mask:
     _target_: anemoi.training.losses.scaling.node_attributes.GraphNodeAttributeScaler
     nodes_name: ${graph.data}
