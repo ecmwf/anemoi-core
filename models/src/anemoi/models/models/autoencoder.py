@@ -66,9 +66,12 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
 
         # get shard shapes
+        print("\nData shape: ", x_data_latent.shape)
         shard_shapes_data = get_shape_shards(x_data_latent, 0, model_comm_group)
+        print("\nHidden shape: ", x_hidden_latent.shape)
         shard_shapes_hidden = get_shape_shards(x_hidden_latent, 0, model_comm_group)
 
+        print("\nEncoder shapes: ", (shard_shapes_data, shard_shapes_hidden))
         # Run encoder
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
@@ -147,14 +150,14 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelEncProcDecHierarchical):
             x_trainable_hiddens[hidden] = self.node_attributes(hidden, batch_size=batch_size)
 
         # Get data and hidden shapes for sharding
+        print("\nData shape: ", x_trainable_data.shape)
         shard_shapes_data = get_shape_shards(x_trainable_data, 0, model_comm_group)
         shard_shapes_hiddens = {}
         for hidden, x_latent in x_trainable_hiddens.items():
+            print(f"{hidden} shape: ", x_latent.shape)
             shard_shapes_hiddens[hidden] = get_shape_shards(x_latent, 0, model_comm_group)
 
-        print(shard_shapes_data, shard_shapes_hiddens)
-
-        print("Encoder shapes: ", (shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]))
+        print("\nEncoder shapes: ", (shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]))
         # Run encoder
         x_data_latent, curr_latent = self._run_mapper(
             self.encoder,

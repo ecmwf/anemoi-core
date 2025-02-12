@@ -96,7 +96,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 layer_kernels=self.layer_kernels,
 
             )
-        except InstantiationException as e:
+        except InstantiationException or AssertionError as e:
             print(e)
             LOGGER.info(f"Could not instantiate {model_config.model.encoder}, might cause errors later if this module is used.")
 
@@ -130,6 +130,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 )
 
         try:
+            print("About to do processor")
             self.processor = instantiate(
                 model_config.model.processor,
                 num_channels=self.hidden_dims[self._graph_hidden_names[self.num_hidden - 1]],
@@ -140,8 +141,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
                 layer_kernels=self.layer_kernels,
             )
-        except InstantiationException as e:
-            print(e)
+            print("Done")
+        except InstantiationException or AssertionError as e:
+            print("Exception occurred: ", e)
             LOGGER.info(f"Could not instantiate {model_config.model.processor}, might cause errors later if this module is used.")
 
         # Downscale
@@ -194,7 +196,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
                 layer_kernels=self.layer_kernels,
             )
-        except InstantiationException:
+        except InstantiationException or AssertionError as e:
+            print(e)
             LOGGER.info(f"Could not instantiate {model_config.model.decoder}, might cause errors later if this module is used.")
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
