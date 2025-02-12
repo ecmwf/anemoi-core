@@ -25,7 +25,7 @@ def get_loss_function(
     config: DictConfig,
     scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None,
     **kwargs,
-) -> BaseLoss | torch.nn.ModuleList:
+) -> BaseLoss | torch.nn.ModuleDict:
     """Get loss functions from config.
 
     Can be ModuleList if multiple losses are specified.

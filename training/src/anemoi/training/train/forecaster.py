@@ -344,11 +344,7 @@ class GraphForecaster(pl.LightningModule):
 
             metrics_next = {}
             if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred,
-                    y,
-                    rollout_step,
-                )
+                metrics_next = self.calculate_val_metrics(y_pred, y, rollout_step)
             yield loss, metrics_next, y_pred
 
     def _step(
@@ -445,13 +441,11 @@ class GraphForecaster(pl.LightningModule):
 
             if not isinstance(metric, BaseLoss):
                 # If not a weighted loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}/{rollout_step + 1}"] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                )
+                metrics[f"{metric_name}/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():
+                metric_step_name = f"{metric_name}/{mkey}/{rollout_step + 1}"
                 if "scale_validation_metrics" in self.config.training and (
                     mkey in self.config.training.scale_validation_metrics.metrics
                     or "*" in self.config.training.scale_validation_metrics.metrics
@@ -462,12 +456,7 @@ class GraphForecaster(pl.LightningModule):
 
                         # Use internal model space indices
                         internal_model_indices = self.internal_metric_ranges[mkey]
-
-                        metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
-                            y_pred,
-                            y,
-                            scaler_indices=[..., internal_model_indices],
-                        )
+                        metrics[metric_step_name] = metric(y_pred, y, scaler_indices=[..., internal_model_indices])
                 else:
                     if -1 in metric.scaler:
                         exception_msg = (
@@ -477,10 +466,8 @@ class GraphForecaster(pl.LightningModule):
                         )
                         raise ValueError(exception_msg)
 
-                    metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
-                        y_pred_postprocessed,
-                        y_postprocessed,
-                        scaler_indices=[..., indices],
+                    metrics[metric_step_name] = metric(
+                        y_pred_postprocessed, y_postprocessed, scaler_indices=[..., indices],
                     )
 
         return metrics
@@ -488,7 +475,7 @@ class GraphForecaster(pl.LightningModule):
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
-            f"train_{getattr(self.loss, 'name', self.loss.__class__.__name__.lower())}",
+            f"train_loss",
             train_loss,
             on_epoch=True,
             on_step=True,
@@ -546,7 +533,7 @@ class GraphForecaster(pl.LightningModule):
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
 
         self.log(
-            f"val_{getattr(self.loss, 'name', self.loss.__class__.__name__.lower())}",
+            f"val_loss",
             val_loss,
             on_epoch=True,
             on_step=True,
