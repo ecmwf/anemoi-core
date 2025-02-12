@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
@@ -28,7 +27,7 @@ from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -114,7 +113,7 @@ class GraphForecaster(pl.LightningModule):
             output_mask=self.output_mask,
         )
 
-        self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(
+        self.internal_metric_ranges, self.val_metric_ranges = get_metric_ranges(
             config,
             data_indices,
             metadata["dataset"].get("variables_metadata"),
@@ -178,51 +177,6 @@ class GraphForecaster(pl.LightningModule):
             scaler_values = scaler_builder.normalise(scaler_values)
             self.scalers[name] = (scaler_builder.scale_dims, scaler_values)
             self.loss.update_scaler(scaler=scaler_values, name=name)
-
-    @staticmethod
-    def get_val_metric_ranges(
-        config: DictConfig,
-        data_indices: IndexCollection,
-        metadata_variables: dict | None = None,
-    ) -> tuple[dict, dict]:
-
-        metric_ranges = defaultdict(list)
-        metric_ranges_validation = defaultdict(list)
-        variable_groups = config.training.scalers.variable_groups
-
-        extract_variable_group_and_level = ExtractVariableGroupAndLevel(
-            variable_groups,
-            metadata_variables,
-        )
-
-        for key, idx in data_indices.internal_model.output.name_to_index.items():
-            variable_group, variable_ref, _ = extract_variable_group_and_level.get_group_and_level(key)
-
-            # Add metrics for grouped variables and variables in default group
-            metric_ranges[f"{variable_group}_{variable_ref}"].append(idx)
-
-            # Specific metrics from hydra to log in logger
-            if key in config.training.metrics:
-                metric_ranges[key] = [idx]
-
-        # Add the full list of output indices
-        metric_ranges["all"] = data_indices.internal_model.output.full.tolist()
-
-        # metric for validation, after postprocessing
-        for key, idx in data_indices.model.output.name_to_index.items():
-            variable_group, variable_ref, _ = extract_variable_group_and_level.get_group_and_level(key)
-
-            # Add metrics for grouped variables and variables in default group
-            metric_ranges_validation[f"{variable_group}_{variable_ref}"].append(idx)
-
-            # Create specific metrics from hydra to log in logger
-            if key in config.training.metrics:
-                metric_ranges_validation[key] = [idx]
-
-        # Add the full list of output indices
-        metric_ranges_validation["all"] = data_indices.model.output.full.tolist()
-
-        return metric_ranges, metric_ranges_validation
 
     def set_model_comm_group(
         self,
