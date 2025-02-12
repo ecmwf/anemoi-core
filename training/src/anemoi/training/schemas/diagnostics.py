@@ -272,7 +272,8 @@ class BenchmarkProfilerSchema(BaseModel):
 class DiagnosticsSchema(BaseModel):
     plot: PlotSchema | None = None
     "Plot schema."
-    callbacks: list | None = Field(default_factory=list)
+    #callbacks: list | None = Field(default_factory=list)
+    callbacks: list | None = Field(default_factory=list,example=[])
     "Callbacks schema."
     benchmark_profiler: BenchmarkProfilerSchema
     "Benchmark profiler schema for `profile` command."
