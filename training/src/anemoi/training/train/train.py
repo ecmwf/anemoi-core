@@ -255,7 +255,7 @@ class AnemoiTrainer:
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config)
+        return get_callbacks(self.config.model_dump(by_alias=True))
 
     @cached_property
     def metadata(self) -> dict:

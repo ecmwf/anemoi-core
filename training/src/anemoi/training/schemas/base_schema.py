@@ -81,6 +81,10 @@ class BaseSchema(BaseModel):
             raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
         return self
 
+    def model_dump(self, by_alias: bool = False) -> dict:
+        dumped_model = super().model_dump(by_alias=by_alias)
+        return DictConfig(dumped_model)
+
 
 class UnvalidatedBaseSchema(PydanticBaseModel):
     data: Any

@@ -148,7 +148,11 @@ class GraphForecaster(pl.LightningModule):
             torch.nn.ModuleList,
         ), f"Loss function must be a `BaseWeightedLoss`, not a {type(self.loss).__name__!r}"
 
-        self.metrics = self.get_loss_function(config.training.validation_metrics, scalars=self.scalars, **loss_kwargs)
+        self.metrics = self.get_loss_function(
+            config.model_dump(by_alias=True).training.validation_metrics,
+            scalars=self.scalars,
+            **loss_kwargs,
+        )
         if not isinstance(self.metrics, torch.nn.ModuleList):
             self.metrics = torch.nn.ModuleList([self.metrics])
 
@@ -227,8 +231,7 @@ class GraphForecaster(pl.LightningModule):
         ValueError
             If scalar is not found in valid scalars
         """
-        config_container = OmegaConf.to_container(config, resolve=False)
-        if isinstance(config_container, list):
+        if isinstance(config, list):
             return torch.nn.ModuleList(
                 [
                     GraphForecaster.get_loss_function(
@@ -241,6 +244,7 @@ class GraphForecaster(pl.LightningModule):
             )
 
         loss_config = OmegaConf.to_container(config, resolve=True)
+
         scalars_to_include = loss_config.pop("scalars", [])
 
         # Instantiate the loss function with the loss_init_config
