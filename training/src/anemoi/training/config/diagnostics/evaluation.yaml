@@ -1,7 +1,7 @@
 ---
 defaults:
-  - plot: detailed 
-  - callbacks: [] 
+  - plot: detailed
+  - callbacks: []
   - benchmark_profiler: detailed
 
 debug:
