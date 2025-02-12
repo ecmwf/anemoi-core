@@ -130,7 +130,9 @@ class AreaWeights(BaseNodeAttribute):
 
 
 class PlanarAreaWeights(BaseNodeAttribute):
-    """Implements the 2D area of the nodes as the weights.
+    """Planar area weights
+
+    It computes the area in a 2D plane asociated to each node.
 
     Attributes
     ----------
@@ -143,15 +145,11 @@ class PlanarAreaWeights(BaseNodeAttribute):
         Compute the area attributes for each node.
     """
 
-    def __init__(
-        self,
-        norm: str | None = None,
-        dtype: str = "float32",
-    ) -> None:
-        super().__init__(norm, dtype)
+    def get_latlon_coordinates(self, nodes: NodeStorage) -> tuple[torch.Tensor, torch.Tensor]:
+        return nodes.x[:, 0], nodes.x[:, 1]
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
-        latitudes, longitudes = nodes.x[:, 0], nodes.x[:, 1]
+        latitudes, longitudes = self.get_latlon_coordinates(nodes)
         points = np.stack([latitudes, longitudes], -1)
         v = Voronoi(points, qhull_options="QJ Pp")
         areas = []
@@ -162,8 +160,45 @@ class PlanarAreaWeights(BaseNodeAttribute):
         return result
 
 
+class MaskedPlanarAreaWeights(PlanarAreaWeights):
+    """Masked planar area weights
+
+    It computes the area in a 2D plane asociated to each node.
+
+    Attributes
+    ----------
+    mask_node_attr_name : str
+        Name of a node attribute to use as a mask for the computing the area weights.
+        It sets to 0 values outside this masked region.
+    norm : str, optional
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def __init__(
+        self,
+        mask_node_attr_name: str,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm, dtype)
+        assert isinstance(mask_node_attr_name, str), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
+        self.mask_node_attr_name = mask_node_attr_name
+
+    def get_latlon_coordinates(self, nodes: NodeStorage) -> tuple[torch.Tensor, torch.Tensor]:
+        latitudes, longitudes = super().get_latlon_coordinates(nodes)
+        mask = nodes[self.mask_node_attr_name].squeeze()
+        return latitudes * mask, longitudes * mask
+
+
 class SphericalAreaWeights(BaseNodeAttribute):
-    """Implements the 3D area of the nodes as the weights.
+    """Spherical area weights
+    
+    It computes the area of a unit radius sphere asociated to each node.
 
     Attributes
     ----------
