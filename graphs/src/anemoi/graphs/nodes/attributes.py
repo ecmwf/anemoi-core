@@ -148,7 +148,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
         for r in v.regions:
             area = ConvexHull(v.vertices[r, :]).volume
             areas.append(area)
-        result = torch.from_array(np.asarray(areas))
+        result = torch.from_numpy(np.asarray(areas))
         return result
 
 
@@ -223,7 +223,7 @@ class SphericalAreaWeights(BaseNodeAttribute):
             len(result),
             result.sum(),
         )
-        return torch.from_array(result)
+        return torch.from_numpy(result)
 
 
 class BooleanBaseNodeAttribute(BaseNodeAttribute, ABC):
@@ -260,7 +260,7 @@ class NonmissingZarrVariable(BooleanBaseNodeAttribute):
             nodes["node_type"] == "ZarrDatasetNodes"
         ), f"{self.__class__.__name__} can only be used with ZarrDatasetNodes."
         ds = open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
-        return torch.from_array(~np.isnan(ds))
+        return torch.from_numpy(~np.isnan(ds))
 
 
 class CutOutMask(BooleanBaseNodeAttribute):
