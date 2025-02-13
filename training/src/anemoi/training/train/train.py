@@ -140,7 +140,7 @@ class AnemoiTrainer:
 
             if graph_filename.exists() and not self.config.graph.overwrite:
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename)
+                return torch.load(graph_filename, weights_only=False)
 
         else:
             graph_filename = None
