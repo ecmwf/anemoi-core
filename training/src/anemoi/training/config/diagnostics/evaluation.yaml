@@ -1,8 +1,13 @@
 ---
 defaults:
   - plot: detailed
-  - callbacks: []
+  - callbacks: placeholder # no empty file
+  # placeholder no_validation True works
+  # placeholder no_validation False works
+  # [] no_validation True  fails
+  # [] no_validation False works
   - benchmark_profiler: detailed
+
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
