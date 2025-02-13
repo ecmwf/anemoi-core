@@ -4,9 +4,6 @@ variable_groups:
 
 # Several scalers can be added here. In order to be applied their names must be included in the loss.
 # scaler name must be included in `scalers` in the losses for this to be applied.
-# All scalers needs a `scale_dims` argument representing the dimension/s on which it is applied
-# -1 : channels dimmension (timesteps, variables, ...)
-# -2 : grid dimension
 builders:
   general_variable:
     # Variable groups definition for scaling by variable level.
@@ -45,6 +42,7 @@ builders:
   # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
   stdev_tendency:
     _target_: anemoi.training.losses.scaling.variable_tendency.StdevTendencyScaler
+
   var_tendency:
     _target_: anemoi.training.losses.scaling.variable_tendency.VarTendencyScaler
 

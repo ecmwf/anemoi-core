@@ -17,13 +17,14 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
+    import numpy as np
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.data_indices.tensor import OutputTensorIndex
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 LOGGER = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
-    scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None,
+    scalers: dict[str, tuple[tuple[int] | np.ndarray]] | None = None,
     **kwargs,
 ) -> BaseLoss | torch.nn.ModuleDict:
     """Get loss functions from config.
@@ -98,7 +99,7 @@ def get_loss_function(
 def _get_metric_ranges(
     extract_variable_group_and_level: ExtractVariableGroupAndLevel,
     output_data_indices: OutputTensorIndex,
-    metrics_to_log: list = [],
+    metrics_to_log: list | None = None,
 ) -> METRIC_RANGE_DTYPE:
     metric_ranges = defaultdict(list)
 
@@ -109,7 +110,7 @@ def _get_metric_ranges(
         metric_ranges[f"{variable_group}_{variable_ref}"].append(idx)
 
         # Specific metrics from hydra to log in logger
-        if key in metrics_to_log:
+        if metrics_to_log is not None and key in metrics_to_log:
             metric_ranges[key] = [idx]
 
     # Add the full list of output indices
@@ -130,9 +131,13 @@ def get_metric_ranges(
 
     extract_variable_group_and_level = ExtractVariableGroupAndLevel(variable_groups, metadata_variables)
     metric_ranges = _get_metric_ranges(
-        extract_variable_group_and_level, data_indices.internal_model.output, metrics_to_log=metrics_to_log,
+        extract_variable_group_and_level,
+        data_indices.internal_model.output,
+        metrics_to_log=metrics_to_log,
     )
     metric_ranges_validation = _get_metric_ranges(
-        extract_variable_group_and_level, data_indices.model.output, metrics_to_log=metrics_to_log,
+        extract_variable_group_and_level,
+        data_indices.model.output,
+        metrics_to_log=metrics_to_log,
     )
     return metric_ranges, metric_ranges_validation

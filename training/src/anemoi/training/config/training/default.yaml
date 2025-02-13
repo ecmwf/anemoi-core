@@ -68,14 +68,14 @@ validation_metrics:
   # loss class to initialise
   mse:
     _target_: anemoi.training.losses.mse.MSELoss
-      # Scalers to include in loss calculation
-      # Cannot scale over the variable dimension due to possible remappings.
-      # Available scalers include:
-      # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
-      # Use the `scale_validation_metrics` section to variable scale.
-      scalers: []
-      # other kwargs
-      ignore_nans: True
+    # Scalers to include in loss calculation
+    # Cannot scale over the variable dimension due to possible remappings.
+    # Available scalers include:
+    # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
+    # Use the `scale_validation_metrics` section to variable scale.
+    scalers: []
+    # other kwargs
+    ignore_nans: True
 
 # List of validation metrics to keep in normalised space, and scalers to be applied
 # Use '*' in reference all metrics, or a list of metric names.
