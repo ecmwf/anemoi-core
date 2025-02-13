@@ -45,33 +45,12 @@ config entry:
    :alt: Schematic of IndexCollection with Data Indexing on Data and Model levels.
    :align: center
 
-Additionally, prognostic and forcing variables can be remapped and
-converted to multiple variables. The conversion is then done by the
-remapper-preprocessor.
-
-.. code:: yaml
-
-   data:
-     remapped:
-       d:
-         - "d_1"
-         - "d_2"
-
-There are two main Index-levels:
+There are two Index-levels:
 
 -  Data: The data at "Zarr"-level provided by Anemoi-Datasets
 -  Model: The "squeezed" tensors with irrelevant parts missing.
 
-Additionally, there are two internal model levels (After preprocessor
-and before postprocessor) that are necessary because of the possiblity
-to remap variables to multiple variables.
-
--  Internal Data: Variables from Data-level that are used internally in
-   the model, but not exposed to the user.
--  Internal Model: Variables from Model-level that are used internally
-   in the model, but not exposed to the user.
-
-All indices at the different levels are split into two versions:
+These are both split into two versions:
 
 -  Input: The data going into training / model
 -  Output: The data produced by training / model
