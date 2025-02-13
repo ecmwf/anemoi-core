@@ -17,14 +17,12 @@ import numpy as np
 from geopy.distance import geodesic
 
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
-from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian, cartesian_to_latlon_rad
 from anemoi.graphs.generate.tri_icosahedron import create_nx_graph_from_tri_coords
 from anemoi.graphs.generate.tri_icosahedron import get_latlon_coords_icosphere
 from anemoi.graphs.generate.utils import get_coordinates_ordering
 
 LOGGER = logging.getLogger(__name__)
-
 
 def find_geographical_center(coords):
     """
@@ -45,7 +43,7 @@ def find_geographical_center(coords):
     center /= np.linalg.norm(center)
 
     # Convert back to latitude and longitude
-    return cartesian_to_latlon_rad(*center)
+    return cartesian_to_latlon_rad(np.array([center]))[0]
 
 
 def get_latlon_coords_concentric(
@@ -70,7 +68,7 @@ def get_latlon_coords_concentric(
 
         LOGGER.info(f"\nCircle {i} has a distance from the center of: {r}.")
         LOGGER.info(f"Distance from previous circle: {r-prev_r} km.")
-        LOGGER.info(f"Number of pointss: {num_points}.")
+        LOGGER.info(f"Number of points: {num_points}.")
 
         prev_r = r
 

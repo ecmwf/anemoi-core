@@ -32,6 +32,8 @@ from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaHex
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaTriNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import StretchedTriNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import TriNodes
+from anemoi.graphs.nodes.builders.from_concentric import ConcentricNodes
+from anemoi.graphs.nodes.builders.from_concentric import StretchedConcentricNodes
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.utils.config import DotDict
@@ -400,6 +402,8 @@ class MultiScaleEdges(BaseEdgeBuilder):
         LimitedAreaTriNodes,
         LimitedAreaHexNodes,
         StretchedTriNodes,
+        ConcentricNodes,
+        StretchedConcentricNodes
     ]
 
     def __init__(self, source_name: str, target_name: str, x_hops: int, **kwargs):
@@ -441,11 +445,11 @@ class MultiScaleEdges(BaseEdgeBuilder):
         return nodes
 
     def get_adjacency_matrix(self, source_nodes: NodeStorage, target_nodes: NodeStorage):
-        if source_nodes.node_type in [TriNodes.__name__, LimitedAreaTriNodes.__name__]:
+        if source_nodes.node_type in [TriNodes.__name__, LimitedAreaTriNodes.__name__, ConcentricNodes.__name__]:
             source_nodes = self.add_edges_from_tri_nodes(source_nodes)
         elif source_nodes.node_type in [HexNodes.__name__, LimitedAreaHexNodes.__name__]:
             source_nodes = self.add_edges_from_hex_nodes(source_nodes)
-        elif source_nodes.node_type == StretchedTriNodes.__name__:
+        elif source_nodes.node_type in [StretchedTriNodes.__name__, StretchedConcentricNodes.__name__]:
             source_nodes = self.add_edges_from_stretched_tri_nodes(source_nodes)
         else:
             raise ValueError(f"Invalid node type {source_nodes.node_type}")
