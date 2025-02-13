@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .builders.from_concentric import ConcentricNodes
+from .builders.from_concentric import StretchedConcentricNodes
 from .builders.from_file import LimitedAreaNPZFileNodes
 from .builders.from_file import NPZFileNodes
 from .builders.from_file import TextNodes
@@ -41,4 +43,6 @@ __all__ = [
     "ICONCellGridNodes",
     "ICONNodes",
     "TextNodes",
+    "StretchedConcentricNodes",
+    "ConcentricNodes",
 ]
