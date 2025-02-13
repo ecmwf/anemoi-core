@@ -563,7 +563,7 @@ class GraphForecaster(pl.LightningModule):
                             metric.add_scalar(*self.scalars[key], name=key)
 
                         # Use model space indices
-                        model_indices = self.metric_ranges[mkey]
+                        model_indices = self.val_metric_ranges[mkey]
 
                         metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
                             y_pred,
