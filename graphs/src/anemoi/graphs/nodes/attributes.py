@@ -186,7 +186,9 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
         dtype: str = "float32",
     ) -> None:
         super().__init__(norm, dtype)
-        assert isinstance(mask_node_attr_name, str), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
+        assert isinstance(
+            mask_node_attr_name, str
+        ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
         self.mask_node_attr_name = mask_node_attr_name
 
     def get_latlon_coordinates(self, nodes: NodeStorage) -> tuple[torch.Tensor, torch.Tensor]:
@@ -197,7 +199,7 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
 
 class SphericalAreaWeights(BaseNodeAttribute):
     """Spherical area weights
-    
+
     It computes the area of a unit radius sphere asociated to each node.
 
     Attributes

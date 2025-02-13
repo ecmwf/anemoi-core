@@ -7,18 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 from __future__ import annotations
-from typing import TYPE_CHECKING
+
 import logging
+from collections import defaultdict
+from typing import TYPE_CHECKING
 
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from collections import defaultdict
 
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.training.losses.base import BaseLoss
 from anemoi.models.data_indices.tensor import OutputTensorIndex
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
 
@@ -66,7 +67,10 @@ def get_loss_function(
     config_container = OmegaConf.to_container(config, resolve=False)
     if isinstance(config_container, dict):
         return torch.nn.ModuleDict(
-            {name: get_loss_function(OmegaConf.create(loss_config), scalers=scalers, **kwargs) for name, loss_config in config.items()},
+            {
+                name: get_loss_function(OmegaConf.create(loss_config), scalers=scalers, **kwargs)
+                for name, loss_config in config.items()
+            },
         )
 
     loss_config = OmegaConf.to_container(config, resolve=True)
@@ -126,9 +130,9 @@ def get_metric_ranges(
 
     extract_variable_group_and_level = ExtractVariableGroupAndLevel(variable_groups, metadata_variables)
     metric_ranges = _get_metric_ranges(
-        extract_variable_group_and_level, data_indices.internal_model.output, metrics_to_log=metrics_to_log
+        extract_variable_group_and_level, data_indices.internal_model.output, metrics_to_log=metrics_to_log,
     )
     metric_ranges_validation = _get_metric_ranges(
-        extract_variable_group_and_level, data_indices.model.output, metrics_to_log=metrics_to_log
+        extract_variable_group_and_level, data_indices.model.output, metrics_to_log=metrics_to_log,
     )
     return metric_ranges, metric_ranges_validation

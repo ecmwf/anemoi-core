@@ -22,12 +22,12 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaling.scaling import create_scalers
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -421,7 +421,9 @@ class GraphForecaster(pl.LightningModule):
                         raise ValueError(exception_msg)
 
                     metrics[metric_step_name] = metric(
-                        y_pred_postprocessed, y_postprocessed, scaler_indices=[..., indices],
+                        y_pred_postprocessed,
+                        y_postprocessed,
+                        scaler_indices=[..., indices],
                     )
 
         return metrics
@@ -429,7 +431,7 @@ class GraphForecaster(pl.LightningModule):
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
-            f"train_loss",
+            "train_loss",
             train_loss,
             on_epoch=True,
             on_step=True,
@@ -487,7 +489,7 @@ class GraphForecaster(pl.LightningModule):
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
 
         self.log(
-            f"val_loss",
+            "val_loss",
             val_loss,
             on_epoch=True,
             on_step=True,

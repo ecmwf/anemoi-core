@@ -48,7 +48,7 @@ attributes:
   nodes:
     # Attributes for data nodes
     cutout:
-      _target_: anemoi.graphs.nodes.attributes.CutOutMask    
+      _target_: anemoi.graphs.nodes.attributes.CutOutMask
     area_weight:
       _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
     lam_area_weight:
