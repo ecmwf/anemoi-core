@@ -19,6 +19,7 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from omegaconf import ListConfig
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
@@ -231,7 +232,7 @@ class GraphForecaster(pl.LightningModule):
         ValueError
             If scalar is not found in valid scalars
         """
-        if isinstance(config, list):
+        if isinstance(config, ListConfig):
             return torch.nn.ModuleList(
                 [
                     GraphForecaster.get_loss_function(
