@@ -204,7 +204,7 @@ class SphericalAreaWeights(BaseNodeAttribute):
         """
         points = latlon_rad_to_cartesian(nodes.x.cpu())
         sv = SphericalVoronoi(points, self.radius, self.centre)
-        mask = torch.tensor([bool(i) for i in sv.regions])
+        mask = np.array([bool(i) for i in sv.regions])
         sv.regions = [region for region in sv.regions if region]
         # compute the area weight without empty regions
         area_weights = sv.calculate_areas()
@@ -216,14 +216,14 @@ class SphericalAreaWeights(BaseNodeAttribute):
                 100 * null_nodes / len(mask),
                 self.fill_value,
             )
-        result = torch.ones(points.shape[0]) * self.fill_value
+        result = np.ones(points.shape[0]) * self.fill_value
         result[mask] = area_weights
         LOGGER.debug(
             "There are %d of weights, which (unscaled) add up a total weight of %.2f.",
             len(result),
             result.sum(),
         )
-        return result
+        return torch.from_array(result)
 
 
 class BooleanBaseNodeAttribute(BaseNodeAttribute, ABC):
