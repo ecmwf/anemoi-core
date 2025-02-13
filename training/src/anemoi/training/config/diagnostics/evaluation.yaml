@@ -1,13 +1,12 @@
 ---
 defaults:
   - plot: detailed
-  - callbacks: placeholder # no empty file
-  # placeholder no_validation True works
-  # placeholder no_validation False works
-  # [] no_validation True  fails
-  # [] no_validation False works
+  - callbacks: placeholder
   - benchmark_profiler: detailed
 
+# another alternative if you don't have any callbacks is to remove it from the
+# defaults list and just use
+# callbacks: []
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
