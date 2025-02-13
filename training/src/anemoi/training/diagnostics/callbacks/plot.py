@@ -355,7 +355,7 @@ class LongRolloutPlots(BasePlotCallback):
             Number of rollout steps for video, by default 0 (no video)
         accumulation_levels_plot : list[float] | None
             Accumulation levels to plot, by default None
-        colormaps : dict[str, str] | None
+        colormaps : dict[str, Colormap] | None
             Dictionary of colormaps, by default None
         per_sample : int, optional
             Number of plots per sample, by default 6
@@ -900,7 +900,7 @@ class PlotSample(BasePerBatchPlotCallback):
             Accumulation levels to plot
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
-        colormaps : dict[str, str] | None, optional
+        colormaps : dict[str, Colormap] | None, optional
             Dictionary of colormaps, by default None
         per_sample : int, optional
             Number of plots per sample, by default 6

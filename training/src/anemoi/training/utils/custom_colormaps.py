@@ -54,12 +54,12 @@ class MatplotlibColormap(CustomColormap):
 class MatplotlibColormapClevels(CustomColormap):
     """Class for Matplotlib colormaps with custom levels."""
 
-    def __init__(self, clevels: float, variables: list | None = None) -> None:
+    def __init__(self, clevels: list, variables: list | None = None) -> None:
         """Initializes the custom colormap with custom levels.
 
         Parameters
         ----------
-        clevels : float
+        clevels : list
             The custom levels for the colormap.
         variables : list, optional
             A list of strings representing the variables for which the colormap is used.

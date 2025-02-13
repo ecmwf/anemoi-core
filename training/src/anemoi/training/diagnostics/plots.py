@@ -389,7 +389,7 @@ def plot_predicted_multilevel_flat_sample(
         Scatter plot, by default False
     precip_and_related_fields : list, optional
         List of precipitation-like variables, by default []
-    colormaps : dict[str, str], optional
+    colormaps : dict[str, Colormap], optional
         Dictionary of colormaps, by default None
 
     Returns
