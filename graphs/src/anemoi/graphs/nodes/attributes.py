@@ -96,7 +96,7 @@ class UniformWeights(BaseNodeAttribute):
         torch.Tensor
             Ones.
         """
-        return torch.ones((nodes.num_nodes, ))
+        return torch.ones((nodes.num_nodes,))
 
 
 class AreaWeights(BaseNodeAttribute):
