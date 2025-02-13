@@ -175,7 +175,7 @@ class GraphForecaster(pl.LightningModule):
     @staticmethod
     def get_loss_function(
         config: DictConfig,
-        scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None] = None,  # noqa: FA100
+        scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None],  # noqa: FA100
         **kwargs,
     ) -> Union[BaseWeightedLoss, torch.nn.ModuleList]:  # noqa: FA100
         """Get loss functions from config.
@@ -186,8 +186,8 @@ class GraphForecaster(pl.LightningModule):
         ----------
         config : DictConfig
             Loss function configuration, should include `scalars` if scalars are to be added to the loss function.
-        scalars : Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None], optional
-            Scalars which can be added to the loss function. Defaults to None., by default None
+        scalars : dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]] | None,
+            Scalars which can be added to the loss function. Defaults to None.,
             If a scalar is to be added to the loss, ensure it is in `scalars` in the loss config
             E.g.
                 If `scalars: ['variable']` is set in the config, and `variable` in `scalars`
@@ -208,6 +208,8 @@ class GraphForecaster(pl.LightningModule):
             If scalar is not found in valid scalars
         """
         config_container = OmegaConf.to_container(config, resolve=False)
+        scalars = scalars or {}
+
         if isinstance(config_container, list):
             return torch.nn.ModuleList(
                 [
@@ -232,7 +234,7 @@ class GraphForecaster(pl.LightningModule):
             raise TypeError(error_msg)
 
         for key in scalars_to_include:
-            if key not in scalars or []:
+            if key not in scalars:
                 error_msg = f"Scalar {key!r} not found in valid scalars: {list(scalars.keys())}"
                 raise ValueError(error_msg)
             loss_function.add_scalar(*scalars[key], name=key)
