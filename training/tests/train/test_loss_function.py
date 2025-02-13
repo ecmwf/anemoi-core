@@ -8,7 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+import pytest
 import torch
+from hydra.errors import InstantiationException
 from omegaconf import DictConfig
 
 from anemoi.training.losses.combined import CombinedLoss
@@ -92,6 +94,47 @@ def test_combined_loss() -> None:
 
     assert isinstance(loss.losses[1], WeightedMAELoss)
     assert "test" in loss.losses[1].scalar
+
+
+def test_combined_loss_invalid_loss_weights() -> None:
+    """Test the combined loss function with invalid loss weights."""
+    with pytest.raises(InstantiationException):
+        GraphForecaster.get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                    "losses": [
+                        {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
+                        {"_target_": "anemoi.training.losses.mae.WeightedMAELoss"},
+                    ],
+                    "scalars": ["test"],
+                    "loss_weights": [1.0, 0.5, 1],
+                },
+            ),
+            node_weights=torch.ones(1),
+            scalars={"test": (-1, torch.ones(2))},
+        )
+
+
+def test_combined_loss_invalid_behaviour() -> None:
+    """Test the combined loss function and setting the scalrs."""
+    loss = GraphForecaster.get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "losses": [
+                    {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
+                    {"_target_": "anemoi.training.losses.mae.WeightedMAELoss"},
+                ],
+                "scalars": ["test"],
+                "loss_weights": [1.0, 0.5],
+            },
+        ),
+        node_weights=torch.ones(1),
+        scalars={"test": (-1, torch.ones(2))},
+    )
+    with pytest.raises(AttributeError):
+        loss.scalar = "test"
 
 
 def test_combined_loss_equal_weighting() -> None:
