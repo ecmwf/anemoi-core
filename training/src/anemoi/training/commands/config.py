@@ -18,19 +18,20 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import get_type_hints
 
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from pydantic import BaseModel
 
 from anemoi.training.commands import Command
 from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     import argparse
+
+    from pydantic import BaseModel
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -159,9 +160,19 @@ class ConfigGenerator(Command):
                 if env_value is None:
                     def_str = "default"
                     def_int = 0
-                    env_value = def_str if primitive_type_hints[corresponding_keys] is str else def_int
+                    def_bool = True
+                    if primitive_type_hints[corresponding_keys] is str:
+                        env_value = def_str
+                    elif primitive_type_hints[corresponding_keys] in [int, float]:
+                        env_value = def_int
+                    elif primitive_type_hints[corresponding_keys] is bool:
+                        env_value = def_bool
+                    elif primitive_type_hints[corresponding_keys] is Path:
+                        env_value = Path(def_str)
+                    else:
+                        msg = "Type not supported for masking environment variables"
+                        raise TypeError(msg)
                     LOGGER.warning("Environment variable %s not found, masking with %s", match, env_value)
-
                     # Replace the pattern with the actual value or the default string
                     updated_cfg = updated_cfg.replace(replace.format(match=match), str(env_value))
 
@@ -177,28 +188,23 @@ class ConfigGenerator(Command):
             BaseSchema(**cfg)
 
 
-def extract_primitive_type_hints(schema: type[BaseModel]) -> dict[str, Any]:
-    """Recursively extract only primitive type hints from a nested Pydantic schema."""
-    type_hints = {}
+def extract_primitive_type_hints(model: type[BaseModel], prefix: str = "") -> dict[str, Any]:
+    field_types = {}
 
-    def _extract(schema: type[BaseModel], prefix: str = "") -> None:
-        """Helper function to traverse the schema recursively."""
-        hints = get_type_hints(schema)
+    for field_name, field_info in model.model_fields.items():
+        field_type = field_info.annotation
+        full_field_name = f"{prefix}.{field_name}" if prefix else field_name
 
-        for field_name, field_type in hints.items():
-            full_field_name = f"{prefix}{field_name}"  # Preserve nested paths
+        # Check if the field type has 'model_fields' (indicating a nested Pydantic model)
+        if hasattr(field_type, "model_fields"):
+            field_types.update(extract_primitive_type_hints(field_type, full_field_name))
+        else:
+            try:
+                field_types[full_field_name] = field_type.__args__[0]
+            except AttributeError:
+                field_types[full_field_name] = field_type
 
-            # If field is another Pydantic model, recurse; otherwise, store it
-            if isinstance(field_type, type) and issubclass(field_type, BaseModel):
-                _extract(field_type, prefix=f"{full_field_name}.")  # Nest fields
-            else:
-                try:
-                    type_hints[full_field_name] = field_type.__args__[0]
-                except AttributeError:
-                    type_hints[full_field_name] = field_type
-
-    _extract(schema)
-    return type_hints
+    return field_types
 
 
 command = ConfigGenerator
