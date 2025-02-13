@@ -88,7 +88,7 @@ class DistinctipyColormap(CustomColormap):
         try:
             from distinctipy import distinctipy
         except ImportError:
-            error_message = "distinctipy package is not available. Please install it to use DistinctpyColormapN."
+            error_message = "distinctipy package is not available. Please install it to use DistinctipyColormapN."
             raise ImportError(error_message) from None
         super().__init__(variables)
         self.n_colors = n_colors

@@ -28,7 +28,7 @@ colormaps:
   default:
     _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
     name: viridis
-  # in order to use distinctpy, you need to install the package
+  # in order to use distinctipy, you need to install the package
   # default:
   #   _target_: anemoi.training.utils.custom_colormaps.DistinctipyColormap
   #   n_colors: 8
