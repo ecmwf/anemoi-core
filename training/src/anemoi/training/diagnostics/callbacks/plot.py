@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     import pytorch_lightning as pl
+    from matplotlib.colors import Colormap
     from omegaconf import OmegaConf
 
     from anemoi.models.layers.graph import NamedNodesAttributes
@@ -333,7 +334,7 @@ class LongRolloutPlots(BasePlotCallback):
         parameters: list[str],
         video_rollout: int = 0,
         accumulation_levels_plot: list[float] | None = None,
-        colormaps: dict[str, str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
@@ -880,7 +881,7 @@ class PlotSample(BasePerBatchPlotCallback):
         parameters: list[str],
         accumulation_levels_plot: list[float],
         precip_and_related_fields: list[str] | None = None,
-        colormaps: dict[str, str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
         **kwargs: Any,

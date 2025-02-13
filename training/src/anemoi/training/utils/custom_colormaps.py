@@ -72,7 +72,7 @@ class MatplotlibColormapClevels(CustomColormap):
         return self.colormap
 
 
-class DistinctpyColormap(CustomColormap):
+class DistinctipyColormap(CustomColormap):
     def __init__(self, n_colors: int, variables: list | None = None, colorblind_type: str | None = None) -> None:
         """Initializes the custom colormap with distinctipy.
 

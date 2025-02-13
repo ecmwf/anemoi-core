@@ -362,7 +362,7 @@ def plot_predicted_multilevel_flat_sample(
     y_pred: np.ndarray,
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
-    colormaps: dict[str, str] | None = None,
+    colormaps: dict[str, Colormap] | None = None,
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
