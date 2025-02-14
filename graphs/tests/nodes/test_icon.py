@@ -169,6 +169,19 @@ def test_register_nodes(monkeypatch):
     nodes2 = ICONNodes("test_icon_nodes", "test.nc", 1, 0)
     graph = nodes2.register_nodes(graph)
     assert graph["test_icon_nodes"].x.shape[0] == 4, "number of vertices at refinement_level_v == 1"
-    assert graph["test_icon_nodes"]["_grid_filename"] is not None
-    assert isinstance(graph["test_icon_nodes"]["_multi_mesh"], ICONMultiMesh)
-    assert isinstance(graph["test_icon_nodes"]["_cell_grid"], ICONCellDataGrid)
+
+
+def test_register_attributes(
+    monkeypatch,
+    graph_with_nodes: HeteroData,
+):
+    """Test ICONNodes register correctly the weights."""
+    monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
+    nodes = ICONNodes("test_nodes", "test.nc", 0, 0)
+    config = {"test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}}
+
+    graph = nodes.register_attributes(graph_with_nodes, config)
+    
+    assert graph["test_nodes"]["_grid_filename"] is not None
+    assert isinstance(graph["test_nodes"]["_multi_mesh"], ICONMultiMesh)
+    assert isinstance(graph["test_nodes"]["_cell_grid"], ICONCellDataGrid)
