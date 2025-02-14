@@ -14,6 +14,7 @@ import logging
 from pathlib import Path  # noqa: TC003
 from typing import Annotated
 from typing import Literal
+from typing import Union
 
 from pydantic import Field
 from pydantic import PositiveFloat
@@ -27,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 class ZarrNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.ZarrDatasetNodes"] = Field(..., alias="_target_")
     "Nodes from Zarr dataset class implementation from anemoi.graphs.nodes."
-    dataset: str | dict  # TODO(Helen): Discuss schema with Baudouin
+    dataset: Union[str, dict]  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
 
 
@@ -45,7 +46,7 @@ class NPZnodeSchema(BaseModel):
 class TextNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.TextNodes"] = Field(..., alias="_target_")
     "Nodes from text file class implementation from anemoi.graphs.nodes."
-    dataset: str | Path
+    dataset: Union[str, Path]
     "The path to text file containing the coordinates of the nodes."
     idx_lon: int
     "The index of the longitude in the dataset."
@@ -140,15 +141,17 @@ class StretchedIcosahdralNodeSchema(BaseModel):
 
 
 NodeBuilderSchemas = Annotated[
-    ZarrNodeSchema
-    | NPZnodeSchema
-    | TextNodeSchema
-    | ICONNodeSchema
-    | ICONMeshNodeSchema
-    | LimitedAreaNPZFileNodesSchema
-    | ReducedGaussianGridNodeSchema
-    | IcosahedralandHealPixNodeSchema
-    | LimitedAreaIcosahedralandHealPixNodeSchema
-    | StretchedIcosahdralNodeSchema,
+    Union[
+        ZarrNodeSchema,
+        NPZnodeSchema,
+        TextNodeSchema,
+        ICONNodeSchema,
+        ICONMeshNodeSchema,
+        LimitedAreaNPZFileNodesSchema,
+        ReducedGaussianGridNodeSchema,
+        IcosahedralandHealPixNodeSchema,
+        LimitedAreaIcosahedralandHealPixNodeSchema,
+        StretchedIcosahdralNodeSchema,
+    ],
     Field(discriminator="target_"),
 ]

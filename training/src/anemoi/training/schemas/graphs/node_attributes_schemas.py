@@ -62,9 +62,9 @@ class BooleanOperationSchema(BaseModel):
 
 
 NodeAttributeSchemas = Union[
-    PlanarAreaWeightSchema
-    | SphericalAreaWeightSchema
-    | CutOutMaskSchema
-    | NonmissingZarrVariableSchema
-    | BooleanOperationSchema
+    PlanarAreaWeightSchema,
+    SphericalAreaWeightSchema,
+    CutOutMaskSchema,
+    NonmissingZarrVariableSchema,
+    BooleanOperationSchema,
 ]

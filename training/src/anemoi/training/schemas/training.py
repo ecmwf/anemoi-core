@@ -13,6 +13,7 @@ from enum import Enum
 from functools import partial
 from typing import Annotated
 from typing import Literal
+from typing import Union
 
 from pydantic import AfterValidator
 from pydantic import Field
@@ -137,7 +138,7 @@ class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
 class CombinedLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     losses: list[BaseLossSchema] = Field(min_length=1)
-    loss_weights: list[int | float] = Field(min_length=1)
+    loss_weights: list[Union[int, float]] = Field(min_length=1)
 
     @model_validator(mode="after")
     def check_length_of_weights_and_losses(self, values: dict) -> CombinedLossSchema:
@@ -148,7 +149,7 @@ class CombinedLossSchema(BaseModel):
         return values
 
 
-LossSchemas = BaseLossSchema | HuberLossSchema | WeightedMSELossLimitedAreaSchema | CombinedLossSchema
+LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
 
 
 class NodeLossWeightsTargets(str, Enum):
@@ -181,9 +182,9 @@ class ScaleValidationMetrics(BaseModel):
 class TrainingSchema(BaseModel):
     """Training configuration."""
 
-    run_id: str | None = Field(example=None)
+    run_id: Union[str, None] = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
-    fork_run_id: str | None = Field(example=None)
+    fork_run_id: Union[str, None] = Field(example=None)
     "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
     load_weights_only: bool = Field(example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
@@ -219,7 +220,7 @@ class TrainingSchema(BaseModel):
     """Configuration for scaling validation metrics."""
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
-    max_epochs: PositiveInt | None = None
+    max_epochs: Union[PositiveInt, None] = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
     max_steps: PositiveInt = 150000
     "Maximum number of steps, stops earlier if max_epochs is reached first."

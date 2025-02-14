@@ -14,6 +14,7 @@ import datetime  # noqa: TC003
 from pathlib import Path  # noqa: TC003
 from typing import Any
 from typing import Literal
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
@@ -59,24 +60,24 @@ class Frequency(RootModel):
 class DatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
-    dataset: str | dict | Path | list[dict]
+    dataset: Union[str, dict, Path, list[dict]]
     "Dataset, see anemoi-datasets"
-    start: str | int | None = Field(default=None)
+    start: Union[str, int, None] = Field(default=None)
     "Starting datetime for sample of the dataset."
-    end: str | int | None = Field(default=None)
+    end: Union[str, int, None] = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
     frequency: Frequency
     "Temporal resolution, frequency must be >= to dataset frequency."
-    drop: list | None = Field(default=None)
+    drop: Union[list, None] = Field(default=None)
     "List of variables to drop from dataset"
 
 
 class LoaderSet(BaseModel):
-    training: PositiveInt | None = Field(example=None)
+    training: Union[PositiveInt, None] = Field(example=None)
     "Value for training dataset"
-    validation: PositiveInt | None = Field(example=None)
+    validation: Union[PositiveInt, None] = Field(example=None)
     "Value for validation dataset"
-    test: PositiveInt | None = Field(example=None)
+    test: Union[PositiveInt, None] = Field(example=None)
     "Value for test dataset"
 
 
@@ -124,5 +125,5 @@ class DataLoaderSchema(PydanticBaseModel):
     # TODO(Helen): Ccheck that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
-    grid_indices: FullGridIndicesSchema | MaskedGridIndicesSchema
+    grid_indices: Union[FullGridIndicesSchema, MaskedGridIndicesSchema]
     "Grid indice schema."

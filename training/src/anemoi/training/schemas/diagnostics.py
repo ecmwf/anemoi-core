@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 from typing import Literal
+from typing import Union
 
 from pydantic import Field
 from pydantic import NonNegativeInt
@@ -33,9 +34,9 @@ class LongRolloutPlotsSchema(BaseModel):
     "List of parameters to plot."
     video_rollout: int = Field(example=0)
     "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: list[float] | None = Field(example=None)
+    accumulation_levels_plot: Union[list[float], None] = Field(example=None)
     "Accumulation levels to plot, by default None."
-    cmap_accumulation: list[str] | None = Field(example=None)
+    cmap_accumulation: Union[list[str], None] = Field(example=None)
     "Colors of the accumulation levels, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
@@ -48,7 +49,7 @@ class LongRolloutPlotsSchema(BaseModel):
 class GraphTrainableFeaturesPlotSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
     "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
-    every_n_epochs: int | None  # !HERE WHAT?
+    every_n_epochs: Union[int, None]
     "Epoch frequency to plot at."
 
 
@@ -57,7 +58,7 @@ class PlotLossSchema(BaseModel):
     "PlotLoss object from anemoi training diagnostics callbacks."
     parameter_groups: dict[str, list[str]]
     "Dictionary with parameter groups with parameter names as key."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: Union[int, None] = Field(default=None)
     "Batch frequency to plot at."
 
 
@@ -72,11 +73,11 @@ class PlotSampleSchema(BaseModel):
     "Accumulation levels to plot."
     cmap_accumulation: list[str]
     "Colors of the accumulation levels."
-    precip_and_related_fields: list[str] | None = Field(default=None)
+    precip_and_related_fields: Union[list[str], None] = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: Union[int, None] = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -87,7 +88,7 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: Union[int, None] = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -98,19 +99,21 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    precip_and_related_fields: list[str] | None = Field(default=None)
+    precip_and_related_fields: Union[list[str], None] = Field(default=None)
     "List of precipitation related fields, by default None."
-    every_n_batches: int | None = Field(default=None)
+    every_n_batches: Union[int, None] = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
 PlotCallbacks = Annotated[
-    LongRolloutPlotsSchema
-    | GraphTrainableFeaturesPlotSchema
-    | PlotLossSchema
-    | PlotSampleSchema
-    | PlotSpectrumSchema
-    | PlotHistogramSchema,
+    Union[
+        LongRolloutPlotsSchema,
+        GraphTrainableFeaturesPlotSchema,
+        PlotLossSchema,
+        PlotSampleSchema,
+        PlotSpectrumSchema,
+        PlotHistogramSchema,
+    ],
     Field(discriminator="target_"),
 ]
 
@@ -142,9 +145,9 @@ class PlottingFrequency(BaseModel):
 class TimeLimitSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.stopping.TimeLimit"] = Field(alias="_target_")
     "TimeLimit object from anemoi training diagnostics callbacks."
-    limit: int | str
+    limit: Union[int, str]
     "Time limit, if int, assumed to be hours, otherwise must be a string with units (e.g. '1h', '30m')."
-    record_file: str | None = Field(default=None)
+    record_file: Union[str, None] = Field(default=None)
     "File to record the last checkpoint to on exit, if set."
 
 
@@ -154,7 +157,7 @@ class Debug(BaseModel):
 
 
 class CheckpointSchema(BaseModel):
-    save_frequency: int | None
+    save_frequency: Union[int, None]
     "Frequency at which to save the checkpoints."
     num_models_saved: int
     "Number of model checkpoint to save. Only the last num_models_saved checkpoints will be kept. \
@@ -166,7 +169,7 @@ class WandbSchema(BaseModel):
     "Use Weights & Biases logger."
     offline: bool
     "Run W&B offline."
-    log_model: bool | Literal["all"]
+    log_model: Union[bool, Literal["all"]]
     "Log checkpoints created by ModelCheckpoint as W&B artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
     project: str
@@ -175,7 +178,7 @@ class WandbSchema(BaseModel):
     "Whether to log the gradients."
     parameters: bool
     "Whether to log the hyper parameters."
-    entity: str | None = None
+    entity: Union[str, None] = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
 
 
@@ -186,10 +189,10 @@ class MlflowSchema(BaseModel):
     "Run MLflow offline. Necessary if no internet access available."
     authentication: bool
     "Whether to authenticate with server or not"
-    log_model: bool | Literal["all"]
+    log_model: Union[bool, Literal["all"]]
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
-    tracking_uri: str | None
+    tracking_uri: Union[str, None]
     "Address of local or remote tracking server."
     experiment_name: str
     "Name of experiment."
@@ -199,7 +202,7 @@ class MlflowSchema(BaseModel):
     "Activate system metrics."
     terminal: bool
     "Log terminal logs to MLflow."
-    run_name: str | None
+    run_name: Union[str, None]
     "Name of run."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
@@ -250,7 +253,7 @@ class Snapshot(BaseModel):
 class Profiling(BaseModel):
     enabled: bool = Field(example=False)
     "Enable component profiler. Default to false."
-    verbose: bool | None = None
+    verbose: Union[bool, None] = None
     "Set to true to include the full list of profiled action or false to keep it concise."
 
 
@@ -270,7 +273,7 @@ class BenchmarkProfilerSchema(BaseModel):
 
 
 class DiagnosticsSchema(BaseModel):
-    plot: PlotSchema | None = None
+    plot: Union[PlotSchema, None] = None
     "Plot schema."
     callbacks: list = Field(default_factory=list, example=[])
     "Callbacks schema."

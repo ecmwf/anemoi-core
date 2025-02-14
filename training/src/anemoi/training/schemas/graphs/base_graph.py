@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
@@ -29,7 +30,7 @@ LOGGER = logging.getLogger(__name__)
 class NodeSchema(BaseModel):
     node_builder: NodeBuilderSchemas
     "Node builder schema."
-    attributes: dict[str, NodeAttributeSchemas] | None = None
+    attributes: Union[dict[str, NodeAttributeSchemas], None] = None
     "Dictionary of attributes with names as keys and anemoi.graphs.nodes.attributes objects as values."
 
 
@@ -45,9 +46,9 @@ class EdgeSchema(BaseModel):
 
 
 class BaseGraphSchema(PydanticBaseModel):
-    nodes: dict[str, NodeSchema] | None = Field(default=None)
+    nodes: Union[dict[str, NodeSchema], None] = Field(default=None)
     "Nodes schema for all types of nodes (ex. data, hidden)."
-    edges: list[EdgeSchema] | None = Field(default=None)
+    edges: Union[list[EdgeSchema], None] = Field(default=None)
     "List of edges schema."
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."

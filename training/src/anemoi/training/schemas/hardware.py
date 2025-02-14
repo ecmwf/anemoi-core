@@ -12,6 +12,7 @@ from __future__ import annotations
 from functools import partial
 from pathlib import Path  # noqa: TC003
 from typing import Annotated
+from typing import Union
 
 from pydantic import AfterValidator
 from pydantic import BaseModel as PydanticBaseModel
@@ -33,21 +34,21 @@ class Checkpoint(BaseModel):
 
 
 class FilesSchema(PydanticBaseModel):
-    dataset: Path | dict[str, Path]  # dict option for multiple datasets
+    dataset: Union[Path, dict[str, Path]]  # dict option for multiple datasets
     "Path to the dataset file."
-    graph: Path | None = Field(default=None)
+    graph: Union[Path, None] = Field(default=None)
     "Path to the graph file."
     checkpoint: dict[str, str]
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
-    warm_start: str | None = None
+    warm_start: Union[str, None] = None
 
 
 class Logs(PydanticBaseModel):
-    wandb: Path | None = None
+    wandb: Union[Path, None] = None
     "Path to output wandb logs."
-    mlflow: Path | None = None
+    mlflow: Union[Path, None] = None
     "Path to output mlflow logs."
-    tensorboard: Path | None = None
+    tensorboard: Union[Path, None] = None
     "Path to output tensorboard logs."
 
 

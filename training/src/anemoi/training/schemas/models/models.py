@@ -13,6 +13,7 @@ import logging
 from enum import Enum
 from typing import Annotated
 from typing import Literal
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
@@ -101,7 +102,7 @@ class NormalizedReluBounding(BaseModel):
 
 
 Bounding = Annotated[
-    ReluBoundingSchema | FractionBoundingSchema | HardtanhBoundingSchema | NormalizedReluBounding,
+    Union[ReluBoundingSchema, FractionBoundingSchema, HardtanhBoundingSchema, NormalizedReluBounding],
     Field(discriminator="target_"),
 ]
 
@@ -116,15 +117,15 @@ class ModelSchema(PydanticBaseModel):
     "Learnable node and edge parameters."
     bounding: list[Bounding]
     "List of bounding configuration applied in order to the specified variables."
-    output_mask: str | None = Field(example=None)  # !TODO CHECK!
+    output_mask: Union[str, None] = Field(example=None)  # !TODO CHECK!
     "Output mask, it must be a node attribute of the output nodes"
 
-    processor: GNNProcessorSchema | GraphTransformerProcessorSchema | TransformerProcessorSchema = Field(
+    processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
         ...,
         discriminator="target_",
     )
     "GNN processor schema."
-    encoder: GNNEncoderSchema | GraphTransformerEncoderSchema = Field(..., discriminator="target_")
+    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema] = Field(..., discriminator="target_")
     "GNN encoder schema."
-    decoder: GNNDecoderSchema | GraphTransformerDecoderSchema = Field(..., discriminator="target_")
+    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema] = Field(..., discriminator="target_")
     "GNN decoder schema."
