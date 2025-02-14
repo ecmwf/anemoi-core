@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 import os
 import random
+from collections.abc import Callable
 from functools import cached_property
 from typing import TYPE_CHECKING
-from collections.abc import Callable
 
 import numpy as np
 import torch

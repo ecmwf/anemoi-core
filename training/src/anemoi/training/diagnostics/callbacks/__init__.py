@@ -10,11 +10,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from collections.abc import Iterable
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import Any
-from collections.abc import Callable
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig

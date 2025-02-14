@@ -13,11 +13,11 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Callable
 from datetime import datetime
 from datetime import timezone
 from functools import wraps
 from getpass import getpass
-from collections.abc import Callable
 
 import requests
 from requests.exceptions import HTTPError
