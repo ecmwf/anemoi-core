@@ -148,7 +148,7 @@ class ConfigGenerator(Command):
         ]
         replaces = ["${{oc.env:{match}}}", "${{oc.decode:${{oc.env:{match}}}}}"]
         # Find all matches in the raw_cfg string
-        for pattern, replace in zip(patterns, replaces):
+        for pattern, replace in zip(patterns, replaces, strict=False):
             matches = re.findall(pattern, raw_cfg)
             # Find the corresponding type hints for each extracted key
             for extracted_key, match in matches:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from functools import cached_property
 from typing import TYPE_CHECKING
-from typing import Callable
+from collections.abc import Callable
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate

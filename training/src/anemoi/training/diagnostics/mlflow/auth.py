@@ -17,7 +17,7 @@ from datetime import datetime
 from datetime import timezone
 from functools import wraps
 from getpass import getpass
-from typing import Callable
+from collections.abc import Callable
 
 import requests
 from requests.exceptions import HTTPError

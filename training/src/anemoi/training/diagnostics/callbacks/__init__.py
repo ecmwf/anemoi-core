@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Callable
+from collections.abc import Callable
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
