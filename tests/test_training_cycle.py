@@ -21,19 +21,7 @@ from anemoi.training.train.train import AnemoiTrainer
 LOGGER = logging.getLogger(__name__)
 
 
-@pytest.mark.parametrize(
-    "hydra_overrides", [["model=gnn"], ["model=graphtransformer"], ["model=transformer", "graph=encoder_decoder_only"]]
-)
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
-def test_training_cycle_debug_gnn_config(hydra_overrides) -> None:
-
-    with initialize(version_base=None, config_path="", job_name="test_training"):
-        cfg = compose(config_name="basic_config", overrides=hydra_overrides)
-        OmegaConf.resolve(cfg)
-
-        AnemoiTrainer(cfg).train()
-        shutil.rmtree(cfg.hardware.paths.output)
-
-def test_fixtures(debug_config) -> None:
-    print(debug_config)
-    assert debug_config
+def test_training_cycle_debug_config(debug_config) -> None:
+    AnemoiTrainer(debug_config).train()
+    shutil.rmtree(debug_config.hardware.paths.output)
