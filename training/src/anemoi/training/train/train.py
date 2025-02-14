@@ -15,6 +15,7 @@ import logging
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
+import importlib
 
 import hydra
 import numpy as np
@@ -31,7 +32,7 @@ from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
-from anemoi.training.train.forecaster import GraphForecaster
+#from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -143,7 +144,7 @@ class AnemoiTrainer:
         )
 
     @cached_property
-    def model(self) -> GraphForecaster:
+    def model(self) -> pl.LightningModule: #GraphForecaster:
         """Provide the model instance."""
         kwargs = {
             "config": self.config,
@@ -154,7 +155,10 @@ class AnemoiTrainer:
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model = GraphForecaster(**kwargs)
+        train_module = importlib.import_module(getattr(self.config.training, "train_module", "anemoi.training.train.forecaster"))
+        train_func = getattr(train_module, getattr(self.config.training, "train_function", "GraphForecaster"))
+        model = train_func(**kwargs)
+        #NOTE: This should be replaced with instantiate
 
         # Load the model weights
         if self.load_weights_only:
@@ -165,11 +169,11 @@ class AnemoiTrainer:
                     model = transfer_learning_loading(model, self.last_checkpoint)
                 else:
                     LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                    model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                    model = train_func.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = train_func.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
