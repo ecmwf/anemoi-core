@@ -91,13 +91,8 @@ class Coastlines:
         lines = []
         for feature in self.data["features"]:
             coordinates = self.extract_coordinates(feature)
-            x, y = zip(*coordinates, strict=False)  # Unzip the coordinates into separate x and y lists
-            iterables = self.projection(x, y)
-            lengths = {len(it) for it in iterables}  # Get unique lengths
-            if len(lengths) > 1:
-                msg = "zip() argument sizes do not match"
-                raise ValueError(msg)
-            lines.append(list(zip(*iterables)))  # Convert lat/lon to Cartesian coordinates
+            x, y = zip(*coordinates)  # Unzip the coordinates into separate x and y lists
+            lines.append(list(zip(*self.projection(x, y))))  # Convert lat/lon to Cartesian coordinates
         self.lines = LineCollection(lines, linewidth=0.5, color="black")
 
     def plot_continents(self, ax: plt.Axes) -> None:
