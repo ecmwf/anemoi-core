@@ -175,7 +175,7 @@ class GraphForecaster(pl.LightningModule):
     @staticmethod
     def get_loss_function(
         config: DictConfig,
-        scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None],  # noqa: FA100
+        scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None] = None,  # noqa: FA100
         **kwargs,
     ) -> Union[BaseWeightedLoss, torch.nn.ModuleList]:  # noqa: FA100
         """Get loss functions from config.
