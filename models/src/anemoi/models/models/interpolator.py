@@ -37,6 +37,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        latent_skip: bool = True,
+        grid_skip: int | None = 0,
+
     ) -> None:
         """Initializes the graph neural network.
 
@@ -52,6 +55,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.num_target_forcings = len(model_config.training.target_forcing.data) + 1
         self.input_times = len(model_config.training.explicit_times.input)
         super().__init__(model_config = model_config, data_indices = data_indices, statistics = statistics, graph_data = graph_data)
+
+        self.latent_skip = latent_skip
+        self.grid_skip = grid_skip
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.internal_model.input)
@@ -97,7 +103,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         )
 
         # add skip connection (hidden -> hidden)
-        x_latent_proc = x_latent_proc + x_latent
+        if self.latent_skip:
+            x_latent_proc = x_latent_proc + x_latent
 
         # Run decoder
         x_out = self._run_mapper(
@@ -120,8 +127,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         )
 
         # residual connection (just for the prognostic variables)
-        #x_out[..., self._internal_output_idx] += x[:, -1, :, :, self._internal_input_idx]
-        #x_out[..., self._internal_output_idx] += x[:, 0, :, :, self._internal_input_idx]
+        if self.grid_skip is not None:
+            x_out[..., self._internal_output_idx] += x[:, self.grid_skip, :, :, self._internal_input_idx]
 
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
