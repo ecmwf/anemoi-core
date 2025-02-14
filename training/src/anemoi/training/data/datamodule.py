@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -29,6 +28,8 @@ from anemoi.utils.dates import frequency_to_seconds
 LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch_geometric.data import HeteroData
 
     from anemoi.training.data.grid_indices import BaseGridIndices
