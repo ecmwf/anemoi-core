@@ -181,7 +181,7 @@ def test_register_attributes(
     config = {"test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}}
 
     graph = nodes.register_attributes(graph_with_nodes, config)
-    
+
     assert graph["test_nodes"]["_grid_filename"] is not None
     assert isinstance(graph["test_nodes"]["_multi_mesh"], ICONMultiMesh)
     assert isinstance(graph["test_nodes"]["_cell_grid"], ICONCellDataGrid)
