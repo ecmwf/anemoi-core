@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
@@ -25,31 +26,31 @@ class NormalizerSchema(BaseModel):
     """Normalizer default method to apply"""
     remap: dict[str, str] | None = Field(default_factory=dict)
     """Dictionary for remapping variables"""
-    std: list[str] | None = Field(default_factory=list)
+    std: Union[list[str], None] = Field(default_factory=list)
     """Variables to normalise with std"""
-    mean_std: list[str] | None = Field(default_factory=list, alias="mean-std")
+    mean_std: Union[list[str], None] = Field(default_factory=list, alias="mean-std")
     """Variables to mormalize with mean-std"""
-    min_max: list[str] | None = Field(default_factory=list, alias="min-max")
+    min_max: Union[list[str], None] = Field(default_factory=list, alias="min-max")
     """Variables to normalize with min-max."""
-    max: list[str] | None = Field(default_factory=list)
+    max: Union[list[str], None] = Field(default_factory=list)
     """Variables to normalize with max."""
-    none: list[str] | None = Field(default_factory=list)
+    none: Union[list[str], None] = Field(default_factory=list)
     """Variables not to be normalized."""
 
 
 class ImputerSchema(BaseModel):
     default: str = Field(literals=["none", "mean", "stdev"])
     "Imputer default method to apply."
-    maximum: list[str] | None
-    minimum: list[str] | None
-    none: list[str] | None = Field(default_factory=list)
+    maximum: Union[list[str], None]
+    minimum: Union[list[str], None]
+    none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be imputed."
 
 
 class RemapperSchema(BaseModel):
     default: str = Field(literals=["none", "cos_sin"])
     "Remapper default method to apply."
-    none: list[str] | None = Field(default_factory=list)
+    none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be remapped."
 
 
@@ -116,7 +117,7 @@ class DataSchema(PydanticBaseModel):
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
     diagnostic: list[str]
     "Features that are only part of the forecast state and are not used as an input to the model."
-    remapped: dict | None
+    remapped: Union[dict, None]
     "Dictionary of remapped names for variables."
-    num_features: int | None
+    num_features: Union[int, None]
     "Number of features in the forecast state. To be set in the code."

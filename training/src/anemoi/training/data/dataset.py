@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import os
 import random
-from collections.abc import Callable
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -28,6 +27,8 @@ from anemoi.training.utils.usable_indices import get_usable_indices
 LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from anemoi.training.data.grid_indices import BaseGridIndices
 
 

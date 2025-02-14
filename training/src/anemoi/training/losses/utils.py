@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Sequence
 
 LOGGER = logging.getLogger(__name__)
