@@ -77,7 +77,7 @@ jobs:
 
 
     - name: Install packages
-      if: ${{ steps.changed-packages.outputs.integration_changed == 'true' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true' }}
+      if: ${{matrix.install-mode == 'all' || steps.changed-packages.outputs.integration_changed == 'true' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true' }}
       run: |
         PACKAGES=""
 
