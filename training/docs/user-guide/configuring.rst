@@ -163,7 +163,7 @@ run using the following command:
 
 .. code:: bash
 
-   anemoi-training validate --name debug.yaml
+   anemoi-training config validate --name debug.yaml
 
 This will check that the configuration is valid and that all the
 required fields are present. If your config is correctly defined then
@@ -179,9 +179,37 @@ the command will show an output similar to:
    2025-01-28 09:37:23 INFO Config files validated.
 
 Otherwise if there is an issue with some of your configuration fields,
-Pydantic will report an error message. See below example where we have a
-`debug.yaml` file with a field not correctly indented (in this case the
-`diagnostics.log` field):
+Pydantic will report an error message. If your config is missing the
+definition of a required field, then the validation will also fail. This
+can be the case if you pull the defaults anemoi configs and do not
+replace the empty fields (usually represented by '??') with the actual
+values. Similarly if you have a field that is expected to use an
+environment variable and you do not have it set, the validation will
+fail. To overcome this issue and still be able to validate the config,
+you can use the `----mask_env_vars` flag, which will skip the validation
+of the environment variables. When using this flag, the validation will
+still be performed, but the environment variables will be masked with
+the default values. See below an example output where we have 5
+environment variables that are not set and are masked with the default
+values:
+
+.. code:: bash
+
+   (anemoi_core_venv)[] $ anemoi-training config validate --name=debug --mask_env_vars
+   2025-02-16 17:48:38 INFO Validating configs.
+   2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has a no_validation flag.So this command will validate the config regardless of the flag.
+   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
+   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-02-16 17:48:39 WARNING Environment variable EXP_NAME not found, masking with default
+   2025-02-16 17:48:39 WARNING Environment variable RUN_NAME not found, masking with default
+   2025-02-16 17:48:39 WARNING Environment variable SLURM_GPUS_PER_NODE not found, masking with 0
+   2025-02-16 17:48:39 WARNING Environment variable SLURM_NNODES not found, masking with 0
+   2025-02-16 17:48:39 WARNING Environment variable LOCAL_LR not found, masking with 0
+   2025-02-16 17:48:39 INFO Config files validated.
+
+See example below where we have a `debug.yaml` file with a field not
+correctly indented (in this case the `diagnostics.log` field):
 
 .. code:: yaml
 
