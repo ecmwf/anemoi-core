@@ -151,6 +151,9 @@ All extra kwargs passed to ``CombinedLoss`` are passed to each of the
 loss functions, and the loss weights are used to scale the individual
 losses before combining them.
 
+If ``scalars`` is not given in the underlying loss functions, all the
+scalars given to the ``CombinedLoss`` are used.
+
 If different scalars are required for each loss, the root level scalars
 of the ``CombinedLoss`` should contain all the scalars required by the
 individual losses. Then the scalars for each loss can be set in the

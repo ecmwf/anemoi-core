@@ -42,10 +42,6 @@ class CombinedLoss(BaseWeightedLoss):
         Allows multiple losses to be combined into a single loss function,
         and the components weighted.
 
-        If a sub loss function requires additional weightings or code created tensors,
-        that must be `included_` for this function, and then controlled by the underlying
-        loss function configuration.
-
         Parameters
         ----------
         losses: tuple[dict[str, Any]]
