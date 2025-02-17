@@ -132,7 +132,9 @@ class HuberLossSchema(BaseLossSchema):
 
 class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
     inside_lam: bool = True
+    "Whether to compute the MSE inside or outside the limited area."
     wmse_contribution: bool = False
+    "Whether to compute the contribution to the MSE or not."
 
 
 class CombinedLossSchema(BaseModel):
