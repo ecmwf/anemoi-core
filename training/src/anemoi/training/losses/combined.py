@@ -42,7 +42,7 @@ class CombinedLoss(BaseWeightedLoss):
         Allows multiple losses to be combined into a single loss function,
         and the components weighted.
 
-        As the losses are designed for use within the context of the 
+        As the losses are designed for use within the context of the
         anemoi-training configuration, `losses` work best as a dictionary.
 
         If `losses` is a `tuple[dict]`, the `scalars` key will be extracted
@@ -52,7 +52,7 @@ class CombinedLoss(BaseWeightedLoss):
         If `losses` is a `tuple[Callable]`, all `scalars` added to this class
         will be added to all underlying losses.
         And if `losses` is a `tuple[WeightedLoss]`, no scalars added to
-        this class will be added to the underlying losses, as it is 
+        this class will be added to the underlying losses, as it is
         assumed that will be done by the parent function.
 
         Parameters
@@ -139,9 +139,7 @@ class CombinedLoss(BaseWeightedLoss):
 
             if isinstance(loss, (DictConfig, dict)):
                 self._loss_scalar_specification[i] = loss.pop("scalars", ["*"])
-                self.losses.append(
-                        GraphForecaster.get_loss_function(loss, scalars={}, **dict(kwargs))
-                )
+                self.losses.append(GraphForecaster.get_loss_function(loss, scalars={}, **dict(kwargs)))
             elif isinstance(loss, Callable):
                 self._loss_scalar_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))
