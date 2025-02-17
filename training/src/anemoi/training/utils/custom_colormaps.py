@@ -43,6 +43,15 @@ class MatplotlibColormap(CustomColormap):
     """Class for Matplotlib colormaps."""
 
     def __init__(self, name: str, variables: list | None = None) -> None:
+        """Initializes the custom colormap with a Matplotlib colormap.
+
+        Parameters
+        ----------
+        name : str
+            The name of the Matplotlib colormap.
+        variables : list, optional
+            A list of strings representing the variables for which the colormap is used.
+        """
         super().__init__(variables)
         self.name = name
         self.colormap = cm.get_cmap(self.name)

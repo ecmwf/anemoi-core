@@ -62,6 +62,41 @@ class PlotLossSchema(BaseModel):
     "Batch frequency to plot at."
 
 
+class MatplotlibColormapSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormap"] = Field(..., alias="_target_")
+    "CustomColormap object from anemoi training utils."
+    name: str
+    "Name of the Matplotlib colormap."
+    variables: Union[list[str], None] = Field(default=None)
+    "A list of strings representing the variables for which the colormap is used, by default None."
+
+
+class MatplotlibColormapClevelsSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels"] = Field(..., alias="_target_")
+    "CustomColormap object from anemoi training utils."
+    clevels: list
+    "The custom color levels for the colormap."
+    variables: Union[list[str], None] = Field(default=None)
+    "A list of strings representing the variables for which the colormap is used, by default None."
+
+
+class DistinctipyColormapSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.custom_colormaps.DistinctipyColormap"] = Field(..., alias="_target_")
+    "CustomColormap object from anemoi training utils."
+    n_colors: int
+    "The number of colors in the colormap."
+    variables: Union[list[str], None] = Field(default=None)
+    "A list of strings representing the variables for which the colormap is used, by default None."
+    colorblind_type: Union[str, None] = Field(default=None)
+    "The type of colorblindness to simulate. If None, the default colorblindness from distinctipy is applied."
+
+
+ColormapSchema = Annotated[
+    Union[MatplotlibColormapSchema, MatplotlibColormapClevelsSchema, DistinctipyColormapSchema],
+    Field(discriminator="target_"),
+]
+
+
 class PlotSampleSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
@@ -71,14 +106,16 @@ class PlotSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str]
-    "Colors of the accumulation levels."
+    cmap_accumulation: Union[list[str], None] = Field(default=None)
+    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: Union[list[str], None] = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
     every_n_batches: Union[int, None] = Field(default=None)
     "Batch frequency to plot at, by default None."
+    colormaps: Union[dict[str, ColormapSchema], None] = Field(default=None)
+    "List of colormaps to use, by default None."
 
 
 class PlotSpectrumSchema(BaseModel):
@@ -131,6 +168,8 @@ class PlotSchema(BaseModel):
     "List of parameters to plot."
     precip_and_related_fields: list[str]
     "List of precipitation related fields from the parameters list."
+    colormaps: dict[str, ColormapSchema] = Field(default_factory=dict)
+    "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
 
