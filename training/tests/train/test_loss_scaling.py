@@ -134,7 +134,11 @@ def test_variable_loss_scaling_vals(
 ) -> None:
     config, data_indices = fake_data
 
-    variable_loss_scaling = GraphForecaster.get_variable_scaling(config, data_indices)
+    variable_loss_scaling = GraphForecaster.get_variable_scaling(
+        config.training.variable_loss_scaling,
+        config.training.pressure_level_scaler,
+        data_indices,
+    )
 
     assert torch.allclose(variable_loss_scaling, expected_scaling)
 
@@ -142,8 +146,7 @@ def test_variable_loss_scaling_vals(
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices = fake_data
-
-    metric_range, metric_ranges_validation = GraphForecaster.get_val_metric_ranges(config, data_indices)
+    metric_range, metric_ranges_validation = GraphForecaster.get_val_metric_ranges(config.training, data_indices)
 
     del metric_range["all"]
     del metric_ranges_validation["all"]

@@ -10,14 +10,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from collections.abc import Iterable
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Callable
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from pydantic import BaseModel
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
@@ -28,10 +29,12 @@ from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 if TYPE_CHECKING:
     from pytorch_lightning.callbacks import Callback
 
+    from anemoi.training.schemas.base_schema import BaseSchema
+
 LOGGER = logging.getLogger(__name__)
 
 
-def nestedget(conf: DictConfig, key: str, default: Any) -> Any:
+def nestedget(config: DictConfig, key: str, default: Any) -> Any:
     """Get a nested key from a DictConfig object.
 
     E.g.
@@ -39,10 +42,10 @@ def nestedget(conf: DictConfig, key: str, default: Any) -> Any:
     """
     keys = key.split(".")
     for k in keys:
-        conf = conf.get(k, default)
-        if not isinstance(conf, (dict, DictConfig)):
+        config = getattr(config, k, default)
+        if not isinstance(config, (BaseModel, dict, DictConfig)):
             break
-    return conf
+    return config
 
 
 # Callbacks to add according to flags in the config
@@ -57,9 +60,9 @@ CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bo
 ]
 
 
-def _get_checkpoint_callback(config: DictConfig) -> list[AnemoiCheckpoint]:
+def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
     """Get checkpointing callbacks."""
-    if not config.diagnostics.get("enable_checkpointing", True):
+    if not config.diagnostics.enable_checkpointing:
         return []
 
     checkpoint_settings = {
@@ -77,11 +80,11 @@ def _get_checkpoint_callback(config: DictConfig) -> list[AnemoiCheckpoint]:
     ckpt_frequency_save_dict = {}
 
     for key, frequency_dict in config.diagnostics.checkpoint.items():
-        frequency = frequency_dict["save_frequency"]
-        n_saved = frequency_dict["num_models_saved"]
-        if key == "every_n_minutes" and frequency_dict["save_frequency"] is not None:
+        frequency = frequency_dict.save_frequency
+        n_saved = frequency_dict.num_models_saved
+        if key == "every_n_minutes" and frequency_dict.save_frequency is not None:
             target = "train_time_interval"
-            frequency = timedelta(minutes=frequency_dict["save_frequency"])
+            frequency = timedelta(minutes=frequency_dict.save_frequency)
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
@@ -183,14 +186,10 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     trainer_callbacks.extend(_get_checkpoint_callback(config))
 
     # Base callbacks
-    trainer_callbacks.extend(
-        instantiate(callback, config) for callback in config.diagnostics.get("callbacks", None) or []
-    )
+    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
 
     # Plotting callbacks
-    trainer_callbacks.extend(
-        instantiate(callback, config) for callback in config.diagnostics.plot.get("callbacks", None) or []
-    )
+    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(config))

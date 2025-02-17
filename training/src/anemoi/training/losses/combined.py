@@ -10,12 +10,15 @@
 from __future__ import annotations
 
 import functools
+from typing import TYPE_CHECKING
 from typing import Any
-from typing import Callable
 
 import torch
 
 from anemoi.training.train.forecaster import GraphForecaster
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class CombinedLoss(torch.nn.Module):

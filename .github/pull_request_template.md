@@ -28,7 +28,6 @@
 -   [ ] I have run the Benchmark Profiler against the old version of the code
 -   [ ] If the new feature introduces modifications at the config level, I have made sure to update Pydantic Schemas and default configs accordingly
 
-
 <!-- In case this affects the model sharding or other specific components please describe these here. -->
 
 ### Dependencies

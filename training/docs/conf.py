@@ -70,6 +70,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinxarg.ext",
     "sphinx.ext.autosectionlabel",
+    "sphinxcontrib.autodoc_pydantic",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -133,3 +134,10 @@ html_css_files = ["style.css"]
 todo_include_todos = not read_the_docs_build
 
 autodoc_member_order = "bysource"  # Keep file order
+
+
+# https://autodoc-pydantic.readthedocs.io/en/stable/users/configuration.html
+
+autodoc_pydantic_model_show_json = True
+autodoc_pydantic_model_show_field_summary = False
+autodoc_pydantic_model_member_order = "bysource"
