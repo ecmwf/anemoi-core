@@ -42,7 +42,7 @@ class StochasticWeightAveraging(pl_StochasticWeightAveraging):
         config: DictConfig,
         swa_lrs: int | None = None,
         swa_epoch_start: int | None = None,
-        annealing_epoch: int | None = None,
+        annealing_epochs: int | None = None,
         annealing_strategy: str | None = None,
         device: str | None = None,
         **kwargs,
@@ -57,7 +57,7 @@ class StochasticWeightAveraging(pl_StochasticWeightAveraging):
             Stochastic Weight Averaging Learning Rate, by default None
         swa_epoch_start : int, optional
             Epoch start, by default 0.75 * config.training.max_epochs
-        annealing_epoch : int, optional
+        annealing_epochs : int, optional
             Annealing Epoch, by default 0.25 * config.training.max_epochs
         annealing_strategy : str, optional
             Annealing Strategy, by default 'cos'
@@ -69,7 +69,7 @@ class StochasticWeightAveraging(pl_StochasticWeightAveraging):
             int(0.75 * config.training.max_epochs),
             config.training.max_epochs - 1,
         )
-        kwargs["annealing_epoch"] = annealing_epoch or max(int(0.25 * config.training.max_epochs), 1)
+        kwargs["annealing_epochs"] = annealing_epochs or max(int(0.25 * config.training.max_epochs), 1)
         kwargs["annealing_strategy"] = annealing_strategy or "cos"
         kwargs["device"] = device
 

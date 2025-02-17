@@ -11,7 +11,7 @@ This module is used to inspect graphs. This inspection includes:
 -  Interactive plot of isolated nodes.
 -  Description of the graph in the console.
 
-.. automodule:: anemoi.graphs.inspector
+.. automodule:: anemoi.graphs.inspect
    :members:
    :no-undoc-members:
    :show-inheritance:

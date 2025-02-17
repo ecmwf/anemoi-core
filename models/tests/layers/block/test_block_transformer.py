@@ -11,6 +11,7 @@
 import logging
 
 import torch
+from hydra.utils import instantiate
 from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -21,6 +22,7 @@ from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.conv import GraphConv
+from anemoi.models.layers.utils import load_layer_kernels
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,17 +35,27 @@ class TestTransformerProcessorBlock:
         activation=st.sampled_from(["ReLU", "GELU", "Tanh"]),
         window_size=st.integers(min_value=1, max_value=512),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
+        softcap=st.floats(min_value=0.0, max_value=1.0),
     )
     @settings(max_examples=10)
-    def test_init(self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p):
+    def test_init(self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p, softcap):
         num_channels = num_heads * factor_attention_heads
+        layer_kernels = instantiate(load_layer_kernels())
         block = TransformerProcessorBlock(
-            num_channels, hidden_dim, num_heads, activation, window_size, dropout_p=dropout_p
+            num_channels,
+            hidden_dim,
+            num_heads,
+            activation,
+            window_size,
+            dropout_p=dropout_p,
+            layer_kernels=layer_kernels,
+            attention_implementation="scaled_dot_product_attention",
+            softcap=softcap,
         )
         assert isinstance(block, TransformerProcessorBlock)
 
-        assert isinstance(block.layer_norm1, nn.LayerNorm)
-        assert isinstance(block.layer_norm2, nn.LayerNorm)
+        assert isinstance(block.layer_norm_attention, nn.LayerNorm)
+        assert isinstance(block.layer_norm_mlp, nn.LayerNorm)
         assert isinstance(block.mlp, nn.Sequential)
         assert isinstance(block.attention, MultiHeadSelfAttention)
 
@@ -56,6 +68,7 @@ class TestTransformerProcessorBlock:
         shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
         batch_size=st.integers(min_value=1, max_value=40),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
+        softcap=st.floats(min_value=0.0, max_value=1.0),
     )
     @settings(max_examples=10)
     def test_forward_output(
@@ -68,14 +81,23 @@ class TestTransformerProcessorBlock:
         shapes,
         batch_size,
         dropout_p,
+        softcap,
     ):
         num_channels = num_heads * factor_attention_heads
+        layer_kernels = instantiate(load_layer_kernels())
         block = TransformerProcessorBlock(
-            num_channels, hidden_dim, num_heads, activation, window_size, dropout_p=dropout_p
+            num_channels,
+            hidden_dim,
+            num_heads,
+            activation,
+            window_size,
+            dropout_p=dropout_p,
+            layer_kernels=layer_kernels,
+            attention_implementation="scaled_dot_product_attention",
+            softcap=softcap,
         )
 
-        x = torch.randn((batch_size, num_channels))
-
+        x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
         output = block.forward(x, shapes, batch_size)
         assert isinstance(output, torch.Tensor)
         assert output.shape == (batch_size, num_channels)
@@ -100,9 +122,11 @@ class TestGraphConvProcessorBlock:
         update_src_nodes,
         num_chunks,
     ):
+        layer_kernels = instantiate(load_layer_kernels())
         block = GraphConvProcessorBlock(
             in_channels=in_channels,
             out_channels=out_channels,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation=activation,
             update_src_nodes=update_src_nodes,

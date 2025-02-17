@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
+from omegaconf import ListConfig
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
@@ -25,10 +26,25 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaling.scaling import create_scalers
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.utils.jsonify import map_config_to_primitives
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.schemas.training import LossScalingSchema  # noqa: TC001
+from anemoi.training.schemas.training import PressureLevelScalerSchema  # noqa: TC001
+from anemoi.training.schemas.training import TrainingSchema  # noqa: TC001
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.utils.config import DotDict
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from collections.abc import Mapping
+
+    from torch.distributed.distributed_c10d import ProcessGroup
+    from torch_geometric.data import HeteroData
+
+    from anemoi.models.data_indices.collection import IndexCollection
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -48,7 +64,7 @@ class GraphForecaster(pl.LightningModule):
     def __init__(
         self,
         *,
-        config: DictConfig,
+        config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -78,7 +94,7 @@ class GraphForecaster(pl.LightningModule):
 
         graph_data = graph_data.to(self.device)
 
-        if config.model.get("output_mask", None) is not None:
+        if config.model.output_mask is not None:
             self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
         else:
             self.output_mask = NoOutputMask()
@@ -89,7 +105,7 @@ class GraphForecaster(pl.LightningModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
             graph_data=graph_data,
-            config=DotDict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True))),
+            config=convert_to_omegaconf(config),
         )
         self.config = config
         self.data_indices = data_indices
@@ -97,6 +113,7 @@ class GraphForecaster(pl.LightningModule):
         self.save_hyperparameters()
 
         self.latlons_data = graph_data[config.graph.data].x
+        #self.node_weights = self.get_node_weights(config.model_dump(by_alias=True).training, graph_data)
         self.statistics_tendencies = statistics_tendencies
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
@@ -142,7 +159,8 @@ class GraphForecaster(pl.LightningModule):
             * config.training.lr.rate
             / config.hardware.num_gpus_per_model
         )
-        self.warmup_t = getattr(config.training.lr, "warmup_t", 1000)
+
+        self.warmup_t = config.training.lr.warmup_t
         self.lr_iterations = config.training.lr.iterations
         self.lr_min = config.training.lr.min
         self.rollout = config.training.rollout.start

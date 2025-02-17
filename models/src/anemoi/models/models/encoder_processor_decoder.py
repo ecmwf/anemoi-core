@@ -22,6 +22,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class AnemoiModelEncProcDec(nn.Module):
         *,
         model_config: DotDict,
         data_indices: dict,
+        statistics: dict,
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
@@ -49,7 +51,7 @@ class AnemoiModelEncProcDec(nn.Module):
             Graph definition
         """
         super().__init__()
-
+        model_config = DotDict(model_config)
         self._graph_data = graph_data
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
@@ -57,6 +59,7 @@ class AnemoiModelEncProcDec(nn.Module):
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self.data_indices = data_indices
+        self.statistics = statistics
 
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
@@ -64,6 +67,9 @@ class AnemoiModelEncProcDec(nn.Module):
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+
+        # read config.model.layer_kernels to get the implementation for certain layers
+        self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", {}))
 
         # Encoder data -> hidden
         self.encoder = instantiate(
@@ -74,6 +80,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            layer_kernels=self.layer_kernels,
         )
 
         # Processor hidden -> hidden
@@ -83,6 +90,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            layer_kernels=self.layer_kernels,
         )
 
         # Decoder hidden -> data
@@ -95,12 +103,18 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            layer_kernels=self.layer_kernels,
         )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
             [
-                instantiate(cfg, name_to_index=self.data_indices.internal_model.output.name_to_index)
+                instantiate(
+                    cfg,
+                    name_to_index=self.data_indices.internal_model.output.name_to_index,
+                    statistics=self.statistics,
+                    name_to_index_stats=self.data_indices.data.input.name_to_index,
+                )
                 for cfg in getattr(model_config.model, "bounding", [])
             ]
         )

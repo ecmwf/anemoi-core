@@ -1,0 +1,48 @@
+# This workflow assigns labels to a pull request based on the Conventional Commits format.
+# This is necessary for release-please to work properly.
+name: "[Pull Request] Label Conventional Commits"
+
+on:
+  pull_request:
+    branches: [main]
+    types:
+      [opened, reopened, labeled, unlabeled]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  assign-labels:
+    runs-on: ubuntu-latest
+    name: Assign labels in pull request
+    if: github.event.pull_request.merged == false
+    steps:
+      - uses: actions/checkout@v3
+      - name: Assign labels from Conventional Commits
+        id: action-assign-labels
+        uses: mauroalderete/action-assign-labels@v1
+        with:
+          pull-request-number: ${{ github.event.pull_request.number }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          conventional-commits: |
+            conventional-commits:
+              - type: 'fix'
+                nouns: ['FIX', 'Fix', 'fix', 'FIXED', 'Fixed', 'fixed']
+                labels: ['bug']
+              - type: 'feature'
+                nouns: ['FEATURE', 'Feature', 'feature', 'FEAT', 'Feat', 'feat']
+                labels: ['enhancement']
+              - type: 'breaking_change'
+                nouns: ['BREAKING CHANGE', 'BREAKING', 'MAJOR']
+                labels: ['breaking change']
+              - type: 'documentation'
+                nouns: ['doc','docs','docu','document','documentation']
+                labels: ['documentation']
+              - type: 'build'
+                nouns: ['build','rebuild','ci']
+                labels: ['CI/CD']
+              - type: 'config'
+                nouns: ['config', 'conf', 'configuration']
+                labels: ['config']
+          maintain-labels-not-matched: true
+          apply-changes: true
