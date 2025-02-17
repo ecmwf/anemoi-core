@@ -10,11 +10,12 @@
 
 from __future__ import annotations
 
+from contextlib import chdir
 import importlib.resources as pkg_resources
 import logging
 import os
 import shutil
-import time
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -110,9 +111,9 @@ class ConfigGenerator(Command):
 
     def copy_files(self, source_directory: Path, target_directory: Path) -> None:
         """Copies directory files to a target directory."""
-        for data in source_directory.rglob("*"):  # Recursively walk through all files and directories
+        for data in source_directory.rglob("*yaml"):  # Recursively walk through all files and directories
             item = Path(data)
-            if item.is_file() and item.suffix == ".yaml":
+            if item.is_file():
                 file_path = Path(target_directory, item.relative_to(source_directory))
 
                 file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,29 +126,28 @@ class ConfigGenerator(Command):
     def dump_config(self, config_path: Path, name: str, output: Path) -> None:
         """Dump config files in one YAML file."""
         # Copy config files in tmp, use absolute path to avoid issues with hydra and shutil
-        tmp_dir = Path(f"./.tmp_{time.time()}").absolute()
-        output = output.absolute()
+        tmp_dir = Path(tempfile.TemporaryDirectory().name)
         self.copy_files(config_path, tmp_dir)
         if not tmp_dir.exists():
             LOGGER.error("No files found in  %s", config_path.absolute())
             raise FileNotFoundError
 
         # Move to config directory to be able to handle hydra
-        os.chdir(tmp_dir)
-        with initialize(version_base=None, config_path="./"):
-            cfg = compose(config_name=name)
+        with chdir(tmp_dir):
+            with initialize(version_base=None, config_path="./"):
+                cfg = compose(config_name=name)
 
         # Dump configuration in output file
+        output = output.absolute()
         LOGGER.info("Dumping file in %s.", output)
         with output.open("w") as f:
             f.write(OmegaConf.to_yaml(cfg))
 
         # Remove tmp dir
-        os.chdir(tmp_dir.absolute().parent)
-        for fp in tmp_dir.rglob("*"):
+        for fp in tmp_dir.rglob("*yaml"):
             if fp.is_file():
                 fp.unlink()
-        LOGGER.info("Remove temporary directory %s.", output)
+        LOGGER.info("Remove temporary directory %s.", tmp_dir)
         shutil.rmtree(tmp_dir)
 
 
