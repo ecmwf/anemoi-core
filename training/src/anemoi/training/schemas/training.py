@@ -106,35 +106,28 @@ class PressureLevelScalerSchema(BaseModel):
     "Slope of the scaling function."
 
 
-PossibleScalars = Annotated[str, AfterValidator(partial(allowed_values, values=["variable", "loss_weights_mask"]))]
+PossibleScalers = Annotated[str, AfterValidator(partial(allowed_values, values=["variable", "loss_weights_mask"]))]
 
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
-    rmse = "anemoi.training.losses.rmse.WeightedRMSELoss"
-    mse = "anemoi.training.losses.mse.WeightedMSELoss"
-    mae = "anemoi.training.losses.mae.WeightedMAELoss"
-    logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
+    rmse = "anemoi.training.losses.rmse.RMSELoss"
+    mse = "anemoi.training.losses.mse.MSELoss"
+    mae = "anemoi.training.losses.mae.MAELoss"
+    logcosh = "anemoi.training.losses.logcosh.LogCoshLoss"
 
 
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
-    scalars: list[PossibleScalars] = Field(example=["variable"])
+    scalers: list[PossibleScalers] = Field(example=["variable"])
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
 
 
-class HuberLossSchema(BaseLossSchema):
+class HuberLossSchema(BaseModel):
     delta: float = 1.0
     "Threshold for Huber loss."
-
-
-class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
-    inside_lam: bool = True
-    "Whether to compute the MSE inside or outside the limited area."
-    wmse_contribution: bool = False
-    "Whether to compute the contribution to the MSE or not."
 
 
 class CombinedLossSchema(BaseModel):
@@ -151,21 +144,12 @@ class CombinedLossSchema(BaseModel):
         return values
 
 
-LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
+LossSchemas = Union[BaseLossSchema, HuberLossSchema, CombinedLossSchema]
 
 
 class NodeLossWeightsTargets(str, Enum):
     graph_node_attribute = "anemoi.training.losses.nodeweights.GraphNodeAttribute"
     reweighted_graph_node_attributes = "anemoi.training.losses.ReweightedGraphNodeAttribute"
-
-
-class NodeLossWeightsSchema(BaseModel):
-    target_: NodeLossWeightsTargets = Field(..., alias="_target_")
-    "Node loss weights object from anemoi.training.losses."
-    target_nodes: str = Field(examples=["data"])
-    "name of target nodes, key in HeteroData graph object."
-    node_attribute: str = Field(examples=["area_weight"])
-    "name of node weight attribute, key in HeteroData graph object."
 
 
 class ScaleValidationMetrics(BaseModel):
@@ -216,7 +200,7 @@ class TrainingSchema(BaseModel):
     "Training loss configuration."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
-    validation_metrics: list[LossSchemas]
+    validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations. These metrics "
     scale_validation_metrics: ScaleValidationMetrics
     """Configuration for scaling validation metrics."""
@@ -228,11 +212,5 @@ class TrainingSchema(BaseModel):
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     lr: LR = Field(default_factory=LR)
     "Learning rate configuration."
-    variable_loss_scaling: LossScalingSchema
-    "Configuration of the variable scaling used in the loss computation."
-    pressure_level_scaler: PressureLevelScalerSchema
-    "Configuration of the pressure level scaler apllied in the loss computation."
     metrics: list[str]
     "List of metrics"
-    node_loss_weights: NodeLossWeightsSchema
-    "Node loss weights configuration."
