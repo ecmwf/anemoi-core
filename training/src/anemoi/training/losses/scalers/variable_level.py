@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from anemoi.training.losses.scaling.variable import BaseVariableLossScaler
+from anemoi.training.losses.scalers.variable import BaseVariableLossScaler
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig

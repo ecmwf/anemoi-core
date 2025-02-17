@@ -15,7 +15,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses.scaling.variable import get_final_variable_scaling
+from anemoi.training.losses.scalers.scaling import get_final_variable_scaling
 from anemoi.training.train.forecaster import GraphForecaster
 
 

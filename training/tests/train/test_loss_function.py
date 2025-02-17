@@ -11,19 +11,19 @@
 import torch
 from omegaconf import DictConfig
 
-from anemoi.training.losses.mse import WeightedMSELoss
-from anemoi.training.losses.weightedloss import BaseLoss
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.losses import MSELoss
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.loss import get_loss_function
 
 
 def test_manual_init() -> None:
-    loss = WeightedMSELoss(torch.ones(1))
+    loss = MSELoss(torch.ones(1))
     assert loss.node_weights == torch.ones(1)
 
 
 def test_dynamic_init_include() -> None:
-    loss = GraphForecaster.get_loss_function(
-        DictConfig({"_target_": "anemoi.training.losses.mse.WeightedMSELoss"}),
+    loss = get_loss_function(
+        DictConfig({"_target_": "anemoi.training.losses.MSELoss"}),
         node_weights=torch.ones(1),
     )
     assert isinstance(loss, BaseLoss)
@@ -34,7 +34,7 @@ def test_dynamic_init_scaler() -> None:
     loss = GraphForecaster.get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.mse.WeightedMSELoss",
+                "_target_": "anemoi.training.losses.MSELoss",
                 "scalers": ["test"],
             },
         ),
@@ -52,7 +52,7 @@ def test_dynamic_init_add_all() -> None:
     loss = GraphForecaster.get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.mse.WeightedMSELoss",
+                "_target_": "anemoi.training.losses.MSELoss",
                 "scalers": ["*"],
             },
         ),
@@ -70,7 +70,7 @@ def test_dynamic_init_scaler_not_add() -> None:
     loss = GraphForecaster.get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.mse.WeightedMSELoss",
+                "_target_": "anemoi.training.losses.MSELoss",
                 "scalers": [],
             },
         ),
@@ -86,7 +86,7 @@ def test_dynamic_init_scaler_exclude() -> None:
     loss = GraphForecaster.get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.mse.WeightedMSELoss",
+                "_target_": "anemoi.training.losses.MSELoss",
                 "scalers": ["*", "!test"],
             },
         ),
