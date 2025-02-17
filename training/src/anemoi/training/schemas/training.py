@@ -106,8 +106,7 @@ class PressureLevelScalerSchema(BaseModel):
     "Slope of the scaling function."
 
 
-PossibleScalers = Annotated[str, AfterValidator(partial(allowed_values, values=["variable", "loss_weights_mask"]))]
-
+ScalerSchema = Union[]
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
     rmse = "anemoi.training.losses.rmse.RMSELoss"
@@ -200,6 +199,8 @@ class TrainingSchema(BaseModel):
     "Training loss configuration."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
+    scalers: dict[str, ScalerSchema]
+    "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations. These metrics "
     scale_validation_metrics: ScaleValidationMetrics

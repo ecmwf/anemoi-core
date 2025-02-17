@@ -19,9 +19,6 @@ from anemoi.training.losses.loss import get_loss_function
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 
 class CombinedLoss(torch.nn.Module):
     """Combined Loss function."""

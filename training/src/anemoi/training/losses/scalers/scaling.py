@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from hydra.utils import instantiate
 
-from anemoi.training.losses.scaling import BaseDelayedScaler
+from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
 
 if TYPE_CHECKING:
     import torch
