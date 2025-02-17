@@ -10,12 +10,11 @@
 
 from __future__ import annotations
 
-from contextlib import chdir
 import importlib.resources as pkg_resources
 import logging
-import os
 import shutil
 import tempfile
+from contextlib import chdir
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -133,9 +132,8 @@ class ConfigGenerator(Command):
             raise FileNotFoundError
 
         # Move to config directory to be able to handle hydra
-        with chdir(tmp_dir):
-            with initialize(version_base=None, config_path="./"):
-                cfg = compose(config_name=name)
+        with chdir(tmp_dir), initialize(version_base=None, config_path="./"):
+            cfg = compose(config_name=name)
 
         # Dump configuration in output file
         output = output.absolute()
