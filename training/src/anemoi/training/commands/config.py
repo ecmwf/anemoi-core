@@ -69,13 +69,15 @@ class ConfigGenerator(Command):
         self.overwrite = args.overwrite
 
         if args.subcommand == "generate":
-            LOGGER.info("Generating configs, please wait.",)
+            LOGGER.info(
+                "Generating configs, please wait.",
+            )
             self.traverse_config(args.output)
             return
 
         if args.subcommand == "training-home":
             anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
-            
+
             LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
             self.traverse_config(anemoi_home)
             return
@@ -118,13 +120,13 @@ class ConfigGenerator(Command):
                 if not file_path.exists() or self.overwrite:
                     self.copy_file(item, file_path)
                 else:
-                    LOGGER.info("File %s already exists, skipping", file_path)        
+                    LOGGER.info("File %s already exists, skipping", file_path)
 
     def dump_config(self, config_path: Path, name: str, output: Path) -> None:
         """Dump config files in one YAML file."""
         # Copy config files in tmp, use absolute path to avoid issues with hydra and shutil
         tmp_dir = Path(f"./.tmp_{time.time()}").absolute()
-        output = output.absolute()    
+        output = output.absolute()
         self.copy_files(config_path, tmp_dir)
         if not tmp_dir.exists():
             raise FileNotFoundError(f"No config files found in {config_path.absolute()}.")
@@ -132,19 +134,19 @@ class ConfigGenerator(Command):
         # Move to config directory to be able to handle hydra
         os.chdir(tmp_dir)
         with initialize(version_base=None, config_path="./"):
-            cfg = compose(config_name=name)     
+            cfg = compose(config_name=name)
 
         # Dump configuration in output file
-        LOGGER.info("Dumping file in %s.", output)  
+        LOGGER.info("Dumping file in %s.", output)
         with output.open("w") as f:
-            f.write(OmegaConf.to_yaml(cfg))              
-        
+            f.write(OmegaConf.to_yaml(cfg))
+
         # Remove tmp dir
         os.chdir(tmp_dir.absolute().parent)
         for fp in tmp_dir.rglob("*"):
             if fp.is_file():
                 os.remove(fp)
-        LOGGER.info("Remove temporary directory %s.", output)  
+        LOGGER.info("Remove temporary directory %s.", output)
         shutil.rmtree(tmp_dir)
 
 
