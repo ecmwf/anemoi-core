@@ -42,8 +42,8 @@ from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
-from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
 from anemoi.training.losses.weightedloss import BaseLoss
+from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
 
 if TYPE_CHECKING:
     from typing import Any

@@ -13,9 +13,6 @@ from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
 import torch
-from omegaconf import DictConfig
-from omegaconf import ListConfig
-from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
@@ -26,15 +23,10 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaling.scaling import create_scalers
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.schemas.training import LossScalingSchema  # noqa: TC001
-from anemoi.training.schemas.training import PressureLevelScalerSchema  # noqa: TC001
-from anemoi.training.schemas.training import TrainingSchema  # noqa: TC001
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -113,7 +105,6 @@ class GraphForecaster(pl.LightningModule):
         self.save_hyperparameters()
 
         self.latlons_data = graph_data[config.graph.data].x
-        #self.node_weights = self.get_node_weights(config.model_dump(by_alias=True).training, graph_data)
         self.statistics_tendencies = statistics_tendencies
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
