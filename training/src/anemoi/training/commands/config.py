@@ -61,7 +61,7 @@ class ConfigGenerator(Command):
             description=help_msg,
         )
         dump.add_argument("--config-path", "-i", default=Path.cwd(), type=Path, help="Configuration directory")
-        dump.add_argument("--name", "-n", default="config", help="Name of the configuration")
+        dump.add_argument("--config-name", "-n", default="dev", help="Name of the configuration")
         dump.add_argument("--output", "-o", default="./config.yaml", type=Path, help="Output file path")
         dump.add_argument("--overwrite", "-f", action="store_true")
 
@@ -84,7 +84,7 @@ class ConfigGenerator(Command):
 
         if args.subcommand == "dump":
             LOGGER.info("Dumping config to %s", args.output)
-            self.dump_config(args.config_path, args.name, args.output)
+            self.dump_config(args.config_path, args.config_name, args.output)
             return
 
     def traverse_config(self, destination_dir: Path | str) -> None:
@@ -124,7 +124,7 @@ class ConfigGenerator(Command):
 
     def dump_config(self, config_path: Path, name: str, output: Path) -> None:
         """Dump config files in one YAML file."""
-        # Copy config files in tmp, use absolute path to avoid issues with hydra and shutil
+        # Copy config files in temporary directory
         tmp_dir = Path(tempfile.TemporaryDirectory().name)
         self.copy_files(config_path, tmp_dir)
         if not tmp_dir.exists():
@@ -136,7 +136,6 @@ class ConfigGenerator(Command):
             cfg = compose(config_name=name)
 
         # Dump configuration in output file
-        output = output.absolute()
         LOGGER.info("Dumping file in %s.", output)
         with output.open("w") as f:
             f.write(OmegaConf.to_yaml(cfg))
