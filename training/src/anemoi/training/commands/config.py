@@ -129,7 +129,8 @@ class ConfigGenerator(Command):
         output = output.absolute()
         self.copy_files(config_path, tmp_dir)
         if not tmp_dir.exists():
-            raise FileNotFoundError(f"No config files found in {config_path.absolute()}.")
+            LOGGER.error("No files found in  %s", config_path.absolute())
+            raise FileNotFoundError
 
         # Move to config directory to be able to handle hydra
         os.chdir(tmp_dir)
@@ -145,7 +146,7 @@ class ConfigGenerator(Command):
         os.chdir(tmp_dir.absolute().parent)
         for fp in tmp_dir.rglob("*"):
             if fp.is_file():
-                os.remove(fp)
+                fp.unlink()
         LOGGER.info("Remove temporary directory %s.", output)
         shutil.rmtree(tmp_dir)
 
