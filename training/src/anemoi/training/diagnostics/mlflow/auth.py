@@ -17,7 +17,7 @@ from datetime import datetime
 from datetime import timezone
 from functools import wraps
 from getpass import getpass
-from typing import Callable
+from typing import TYPE_CHECKING
 
 import requests
 from requests.exceptions import HTTPError
@@ -27,6 +27,10 @@ from anemoi.utils.config import save_config
 from anemoi.utils.timer import Timer
 
 REFRESH_EXPIRE_DAYS = 29
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class TokenAuth:

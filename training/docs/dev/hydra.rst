@@ -2,9 +2,64 @@
  Configuration
 ###############
 
-Anemoi Training uses Hydra for configuration management, allowing for
-flexible and modular configuration of the training pipeline. This guide
-explains how to use Hydra effectively in the project.
+Anemoi Training uses Hydra and Pydantic for configuration management,
+allowing for flexible and modular configuration of the training pipeline
+while provide robustness through validation. This guide explains how to
+use Hydra and Pydantic effectively in the project.
+
+***************************************
+ Pydantic and Configuration Validation
+***************************************
+
+Pydantic is a package designed for data validation and settings
+management. It provides a simple way to define schemas which can be used
+to validate configuration files. For example, the following schema can
+be used to validate a training configuration:
+
+.. code:: python
+
+   from pydantic import BaseModel, Field, PositiveFloat, Literal
+
+   class TrainingSchema(BaseModel):
+      model: Literal{"AlexNet", "ResNet", "VGG"} = Field(default="AlexNet")
+      """Model architecture to use for training."""
+      learning_rate: PositiveFloat = Field(default=0.01)
+      """Learning rate."""
+      loss: str = Field(default="mse")
+      """Loss function."""
+
+To allow more complex configurations, Pydantic also supports nested
+schemas. For example, the following schema can be used to validate a
+configuration with a configurable model:
+
+.. code:: python
+
+   from pydantic import BaseModel, Field, PositiveFloat, Literal
+
+   from enum import StrEnum
+
+   class ActivationFunctions(StrEnum):
+       relu = "relu"
+       sigmoid = "sigmoid"
+       tanh = "tanh"
+
+   class ModelSchema(BaseModel):
+       num_layers: PositiveInt = Field(default=3)
+       """Number of layers in the model."""
+       activation: ActivationFunctions = Field(default="relu")
+       """Activation function to use."""
+
+   class TrainingSchema(BaseModel):
+       model: ModelSchema
+       """Model configuration."""
+       learning_rate: PositiveFloat = Field(default=0.01)
+       """Learning rate."""
+       loss: str = Field(default="mse")
+       """Loss function."""
+
+If your new feature requires a new configuration parameter, you should
+add it to the appropriate schemas and update the configuration files
+accordingly.
 
 **************
  Hydra Basics
@@ -48,13 +103,23 @@ Configuration in YAML:
      algorithm: SGD
      learning_rate: 0.01
 
+Pydantic schema:
+
+.. code:: python
+
+   from pydantic import BaseModel
+
+   class OptimizerSchema(BaseModel):
+       algorithm: str
+       learning_rate: float
+
 Instantiating in code:
 
 .. code:: python
 
    from hydra.utils import instantiate
 
-   optimizer = instantiate(config.optimizer)
+   optimizer = instantiate(config.optimizer.model_dump())
 
 ********************************************
  Configurable Components in Anemoi Training

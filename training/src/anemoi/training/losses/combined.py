@@ -12,7 +12,6 @@ from __future__ import annotations
 import functools
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Callable
 
 from omegaconf import DictConfig
 
@@ -21,6 +20,8 @@ from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.train.forecaster import GraphForecaster
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
 
 
@@ -47,12 +48,12 @@ class CombinedLoss(BaseWeightedLoss):
 
         Parameters
         ----------
-        losses: tuple[dict[str, Any]| Callable]
+        losses: tuple[dict[str, Any]]
             Tuple of losses to initialise with `GraphForecaster.get_loss_function`.
             Allows for kwargs to be passed, and weighings controlled.
             If a loss should only have some of the scalars, set `scalars` in the loss config.
             If no scalars are set, all scalars will be included.
-        *extra_losses: dict[str, Any] | Callable
+        *extra_losses: dict[str, Any]
             Additional arg form of losses to include in the combined loss.
         loss_weights : optional, tuple[int, ...] | None
             Weights of each loss function in the combined loss.
