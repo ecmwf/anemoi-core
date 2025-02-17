@@ -44,6 +44,12 @@ class BaseWeightedLoss(nn.Module, ABC):
         - self.node_weights: torch.Tensor of shape (N, )
         - self.scalar: ScaleTensor modified with `add_scalar` and `update_scalar`
 
+        These losses are designed for use within the context of 
+        the anemoi-training configuration, where scalars are added
+        after initialisation. If being used outside of this
+        context, call `add_scalar` and `update_scalar` to add or 
+        update the scale tensors.
+
         Parameters
         ----------
         node_weights : torch.Tensor of shape (N, )
