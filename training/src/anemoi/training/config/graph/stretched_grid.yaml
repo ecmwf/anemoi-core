@@ -64,6 +64,7 @@ attributes:
     lam_area_weight:
       _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights
       mask_attr_node_name: cutout_mask
+      norm: unit-max
 
   edges:
     edge_length:

@@ -61,9 +61,6 @@ post_processors:
 attributes:
   nodes:
     # Attributes for data nodes
-    area_weight:
-      _target_: anemoi.graphs.nodes.attributes.PlanarAreaWeights # options: Area, Uniform
-      norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
     cutout_mask:
       _target_: anemoi.graphs.nodes.attributes.CutOutMask
     boundary_mask:
@@ -73,6 +70,7 @@ attributes:
     area_weight:
       _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights # options: Uniform
       mask_attr_node_name: cutout_mask
+      norm: unit-max
   edges:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength
