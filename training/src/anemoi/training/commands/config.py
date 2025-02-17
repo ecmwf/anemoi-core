@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import logging
+import os
 import shutil
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -58,32 +60,29 @@ class ConfigGenerator(Command):
             help=help_msg,
             description=help_msg,
         )
-        dump.add_argument("--config-dir", "-i", default=Path.cwd(), help="Configuration directory")
+        dump.add_argument("--config-path", "-i", default=Path.cwd(), type=Path, help="Configuration directory")
         dump.add_argument("--name", "-n", default="config", help="Name of the configuration")
-        dump.add_argument("--output", "-o", default="./config.yaml", help="Output file path")
+        dump.add_argument("--output", "-o", default="./config.yaml", type=Path, help="Output file path")
         dump.add_argument("--overwrite", "-f", action="store_true")
 
     def run(self, args: argparse.Namespace) -> None:
-        LOGGER.info(
-            "Generating configs, please wait.",
-        )
-
         self.overwrite = args.overwrite
 
         if args.subcommand == "generate":
+            LOGGER.info("Generating configs, please wait.",)
             self.traverse_config(args.output)
-            LOGGER.info("Inference checkpoint saved to %s", args.output)
             return
 
         if args.subcommand == "training-home":
             anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
-            self.traverse_config(anemoi_home)
+            
             LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
+            self.traverse_config(anemoi_home)
             return
 
         if args.subcommand == "dump":
-            self.dump_config(args.config_dir, args.name, args.output)
             LOGGER.info("Dumping config to %s", args.output)
+            self.dump_config(args.config_path, args.name, args.output)
             return
 
     def traverse_config(self, destination_dir: Path | str) -> None:
@@ -96,17 +95,7 @@ class ConfigGenerator(Command):
 
         # Traverse through the package's config directory
         with pkg_resources.as_file(pkg_resources.files(config_package)) as config_path:
-            for data in config_path.rglob("*"):  # Recursively walk through all files and directories
-                item = Path(data)
-                if item.is_file() and item.suffix == ".yaml":
-                    file_path = Path(destination_dir, item.relative_to(config_path))
-
-                    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    if not file_path.exists() or self.overwrite:
-                        self.copy_file(item, file_path)
-                    else:
-                        LOGGER.info("File %s already exists, skipping", file_path)
+            self.copy_files(config_path, destination_dir)
 
     @staticmethod
     def copy_file(item: Path, file_path: Path) -> None:
@@ -117,14 +106,46 @@ class ConfigGenerator(Command):
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
 
-    def dump_config(self, config_dir: str, name: str, output: str) -> None:
-        """Dump config files in one YAML file."""
-        with initialize(version_base=None, config_path=config_dir):
-            cfg = compose(config_name=name)
+    def copy_files(self, source_directory: Path, target_directory: Path) -> None:
+        """Copies directory files to a target directory."""
+        for data in source_directory.rglob("*"):  # Recursively walk through all files and directories
+            item = Path(data)
+            if item.is_file() and item.suffix == ".yaml":
+                file_path = Path(target_directory, item.relative_to(source_directory))
 
-        fp = Path(output)
-        with fp.open("w") as f:
-            f.write(OmegaConf.to_yaml(cfg))
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                if not file_path.exists() or self.overwrite:
+                    self.copy_file(item, file_path)
+                else:
+                    LOGGER.info("File %s already exists, skipping", file_path)        
+
+    def dump_config(self, config_path: Path, name: str, output: Path) -> None:
+        """Dump config files in one YAML file."""
+        # Copy config files in tmp, use absolute path to avoid issues with hydra and shutil
+        tmp_dir = Path(f"./.tmp_{time.time()}").absolute()
+        output = output.absolute()    
+        self.copy_files(config_path, tmp_dir)
+        if not tmp_dir.exists():
+            raise FileNotFoundError(f"No config files found in {config_path.absolute()}.")
+
+        # Move to config directory to be able to handle hydra
+        os.chdir(tmp_dir)
+        with initialize(version_base=None, config_path="./"):
+            cfg = compose(config_name=name)     
+
+        # Dump configuration in output file
+        LOGGER.info("Dumping file in %s.", output)  
+        with output.open("w") as f:
+            f.write(OmegaConf.to_yaml(cfg))              
+        
+        # Remove tmp dir
+        os.chdir(tmp_dir.absolute().parent)
+        for fp in tmp_dir.rglob("*"):
+            if fp.is_file():
+                os.remove(fp)
+        LOGGER.info("Remove temporary directory %s.", output)  
+        shutil.rmtree(tmp_dir)
 
 
 command = ConfigGenerator
