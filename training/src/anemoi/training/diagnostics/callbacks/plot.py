@@ -42,6 +42,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
 
 if TYPE_CHECKING:
     from typing import Any
@@ -58,7 +59,7 @@ LOGGER = logging.getLogger(__name__)
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
-    def __init__(self, config: OmegaConf) -> None:
+    def __init__(self, config: BaseSchema) -> None:
         """Initialise the BasePlotCallback abstract base class.
 
         Parameters
@@ -803,7 +804,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         # set x-ticks
         x_tick_positions = np.cumsum(group_counts) - group_counts / 2 - 0.5
-        xticks = dict(zip(unique_group_list, x_tick_positions))
+        xticks = dict(zip(unique_group_list, x_tick_positions, strict=False))
 
         legend_patches = []
         for group_idx, group in enumerate(unique_group_list):

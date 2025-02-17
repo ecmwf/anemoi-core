@@ -16,12 +16,10 @@ num_workers:
   training: 8
   validation: 8
   test: 8
-  predict: 8
 batch_size:
   training: 2
   validation: 4
   test: 4
-  predict: 4
 
 # ============
 # Default effective batch_size for training is 16
@@ -38,7 +36,6 @@ limit_batches:
   training: null
   validation: null
   test: 20
-  predict: 20
 
 # set a custom mask for grid points.
 # Useful for LAM (dropping unconnected nodes from forcing dataset)
@@ -76,3 +73,4 @@ test:
   start: 2022
   end: null
   frequency: ${data.frequency}
+  drop:  []

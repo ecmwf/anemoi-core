@@ -92,7 +92,6 @@ class Coastlines:
         for feature in self.data["features"]:
             coordinates = self.extract_coordinates(feature)
             x, y = zip(*coordinates)  # Unzip the coordinates into separate x and y lists
-
             lines.append(list(zip(*self.projection(x, y))))  # Convert lat/lon to Cartesian coordinates
         self.lines = LineCollection(lines, linewidth=0.5, color="black")
 
