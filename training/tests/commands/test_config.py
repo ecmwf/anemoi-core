@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# ruff: noqa: ANN001, ANN201
+from __future__ import annotations
 
-# from anemoi.training.commands.config import dump_config
+
 import tempfile
 from pathlib import Path
 from unittest import mock
