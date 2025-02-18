@@ -155,6 +155,7 @@ class CombinedLossSchema(BaseLossSchema):
         validate_assignment = True
         validate_default = True
         extra = "allow"  # Allow extra kwargs to be passed to underlying losses
+        # Will also allow typos, but this is a trade-off for flexibility
 
     @field_validator("losses", mode="before")
     @classmethod

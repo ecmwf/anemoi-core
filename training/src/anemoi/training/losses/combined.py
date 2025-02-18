@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -20,8 +21,6 @@ from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.train.forecaster import GraphForecaster
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     import torch
 
 
