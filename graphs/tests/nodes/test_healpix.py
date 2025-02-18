@@ -11,7 +11,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import AreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.nodes.builders.from_healpix import HEALPixNodes
@@ -46,7 +46,7 @@ def test_register_nodes(resolution: int):
     assert graph["test_nodes"].node_type == "HEALPixNodes"
 
 
-@pytest.mark.parametrize("attr_class", [UniformWeights, AreaWeights])
+@pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])
 @pytest.mark.parametrize("resolution", [2, 5, 7])
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class, resolution: int):
     """Test HEALPixNodes register correctly the weights."""

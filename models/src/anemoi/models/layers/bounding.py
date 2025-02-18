@@ -135,6 +135,8 @@ class NormalizedReluBounding(BaseBounding):
                 "The length of the min_val list must match the number of variables in NormalizedReluBounding."
             )
 
+        # Compute normalized min values
+        self.data_index = [name_to_index[var] for var in variables]
         self.norm_min_val = torch.zeros(len(variables))
         for ii, variable in enumerate(variables):
             stat_index = self.name_to_index_stats[variable]

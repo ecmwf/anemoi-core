@@ -1,8 +1,10 @@
 activation: GELU
 num_channels: 1024
+cpu_offload: False
+output_mask: null
 
 model:
-  _target_: anemoi.models.models.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
 layer_kernels:
     LayerNorm:
@@ -24,6 +26,11 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0 # GraphTransformer
+  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
+  cpu_offload: ${model.cpu_offload}
+
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -34,6 +41,7 @@ encoder:
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  cpu_offload: ${model.cpu_offload}
 
 
 decoder:
@@ -45,6 +53,8 @@ decoder:
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  cpu_offload: ${model.cpu_offload}
+
 
 trainable_parameters:
   data: 8

@@ -1,8 +1,8 @@
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
-load_weights_only: null # only load model weights, do not restore optimiser states etc.
-transfer_learning: null # activate to perform transfer learning
+transfer_learning: False # activate to perform transfer learning
+load_weights_only: False # only load model weights, do not restore optimiser states etc.
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -140,3 +140,5 @@ node_loss_weights:
   _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
   target_nodes: ${graph.data}
   node_attribute: area_weight
+
+submodules_to_freeze: []
