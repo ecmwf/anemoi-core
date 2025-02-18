@@ -9,15 +9,10 @@
 
 from __future__ import annotations
 
-import logging
+from abc import ABC
+from abc import abstractmethod
 
-import networkx as nx
-import numpy as np
-import torch
-import importlib
-from abc import ABC, abstractmethod
 from torch_geometric.data.storage import NodeStorage
-
 
 
 class BaseIcosahedronEdgeStrategy(ABC):
@@ -32,7 +27,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
 
     def add_edges(self, nodes: NodeStorage, x_hops: int) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
-        
+
         nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
             nodes["_nx_graph"],
             resolutions=nodes["_resolutions"],
@@ -47,7 +42,7 @@ class HexNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
 
     def add_edges(self, nodes: NodeStorage, x_hops: int) -> NodeStorage:
         from anemoi.graphs.generate import hex_icosahedron
-        
+
         nodes["_nx_graph"] = hex_icosahedron.add_edges_to_nx_graph(
             nodes["_nx_graph"],
             resolutions=nodes["_resolutions"],
@@ -73,4 +68,3 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
             area_mask_builder=all_points_mask_builder,
         )
         return nodes
-

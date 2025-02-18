@@ -54,10 +54,7 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
             "area_mask_builder",
         }
         if not hasattr(self, "multi_scale_edge_cls"):
-            raise AttributeError(
-                "Classes inheriting from IcosahedralNodes must set 'multi_scale_edge_cls' attribute."
-            )
-        
+            raise AttributeError("Classes inheriting from IcosahedralNodes must set 'multi_scale_edge_cls' attribute.")
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -106,6 +103,7 @@ class TriNodes(IcosahedralNodes):
 
     It depends on the trimesh Python library.
     """
+
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
@@ -117,6 +115,7 @@ class HexNodes(IcosahedralNodes):
 
     It depends on the h3 Python library.
     """
+
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.HexNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
@@ -133,6 +132,7 @@ class LimitedAreaTriNodes(LimitedAreaIcosahedralNodes):
     area_mask_builder: KNNAreaMaskBuilder
         The area of interest mask builder.
     """
+
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
@@ -149,6 +149,7 @@ class LimitedAreaHexNodes(LimitedAreaIcosahedralNodes):
     area_mask_builder: KNNAreaMaskBuilder
         The area of interest mask builder.
     """
+
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.HexNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
@@ -191,6 +192,7 @@ class StretchedTriNodes(StretchedIcosahedronNodes):
 
     It depends on the trimesh Python library.
     """
+
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.StretchedTriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
