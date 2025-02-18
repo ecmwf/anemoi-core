@@ -10,23 +10,18 @@
 from __future__ import annotations
 
 import logging
-
+from typing import TYPE_CHECKING, Type
 import networkx as nx
 import numpy as np
 import torch
-from torch_geometric.data import HeteroData
+import importlib
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
-from anemoi.graphs.generate import hex_icosahedron
-from anemoi.graphs.generate import tri_icosahedron
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
-from anemoi.graphs.nodes.builders.from_refined_icosahedron import HexNodes
-from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaHexNodes
-from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaTriNodes
-from anemoi.graphs.nodes.builders.from_refined_icosahedron import StretchedTriNodes
-from anemoi.graphs.nodes.builders.from_refined_icosahedron import TriNodes
-from anemoi.utils.config import DotDict
+
+if TYPE_CHECKING:
+    from anemoi.graphs.generate.multi_scale_edges import BaseIcosahedronEdgeStrategy
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,15 +47,11 @@ class MultiScaleEdges(BaseEdgeBuilder):
         Register attributes in the edges of the graph.
     update_graph(graph, attrs_config)
         Update the graph with the edges.
-    """
 
-    VALID_NODES = [
-        TriNodes,
-        HexNodes,
-        LimitedAreaTriNodes,
-        LimitedAreaHexNodes,
-        StretchedTriNodes,
-    ]
+    Note
+    ----
+    `MultiScaleEdges` only supports computing the edges within a set of nodes built by an `Type[IcosahedronNodes]`.
+    """
 
     def __init__(self, source_name: str, target_name: str, x_hops: int, **kwargs):
         super().__init__(source_name, target_name)
@@ -69,57 +60,26 @@ class MultiScaleEdges(BaseEdgeBuilder):
         assert x_hops > 0, "Number of x_hops must be positive"
         self.x_hops = x_hops
 
-    def add_edges_from_tri_nodes(self, nodes: NodeStorage) -> NodeStorage:
-        nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
-            nodes["_nx_graph"],
-            resolutions=nodes["_resolutions"],
-            x_hops=self.x_hops,
-            area_mask_builder=nodes.get("_area_mask_builder", None),
-        )
+    @staticmethod
+    def get_edge_builder_class(node_type: str) -> Type[BaseIcosahedronEdgeStrategy]:
+        # All node builders inheriting from IcosahedronNodes have an attribute multi_scale_edge_cls
+        module = importlib.import_module("anemoi.graphs.nodes.builders.from_refined_icosahedron")
+        edge_cls_str = getattr(module, node_type, None).multi_scale_edge_cls
 
-        return nodes
+        # Instantiate the BaseIcosahedronEdgeStrategy based on the node type
+        module_name = ".".join(edge_cls_str.split(".")[:-1])
+        class_name = edge_cls_str.split(".")[-1]
 
-    def add_edges_from_stretched_tri_nodes(self, nodes: NodeStorage) -> NodeStorage:
-        all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
-        all_points_mask_builder.fit_coords(nodes.x.numpy())
+        edge_builder_cls = getattr(importlib.import_module(module_name), class_name)
 
-        nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
-            nodes["_nx_graph"],
-            resolutions=nodes["_resolutions"],
-            x_hops=self.x_hops,
-            area_mask_builder=all_points_mask_builder,
-        )
-        return nodes
+        return edge_builder_cls
 
-    def add_edges_from_hex_nodes(self, nodes: NodeStorage) -> NodeStorage:
-        nodes["_nx_graph"] = hex_icosahedron.add_edges_to_nx_graph(
-            nodes["_nx_graph"],
-            resolutions=nodes["_resolutions"],
-            x_hops=self.x_hops,
-        )
-
-        return nodes
-
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        if source_nodes.node_type in [TriNodes.__name__, LimitedAreaTriNodes.__name__]:
-            source_nodes = self.add_edges_from_tri_nodes(source_nodes)
-        elif source_nodes.node_type in [HexNodes.__name__, LimitedAreaHexNodes.__name__]:
-            source_nodes = self.add_edges_from_hex_nodes(source_nodes)
-        elif source_nodes.node_type == StretchedTriNodes.__name__:
-            source_nodes = self.add_edges_from_stretched_tri_nodes(source_nodes)
-        else:
-            raise ValueError(f"Invalid node type {source_nodes.node_type}")
-
+    def compute_edge_index(self, source_nodes: NodeStorage, _target_nodes: NodeStorage) -> torch.Tensor:
+        edge_builder_cls = MultiScaleEdges.get_edge_builder_class(source_nodes.node_type)
+        source_nodes = edge_builder_cls().add_edges(source_nodes, self.x_hops)
         adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
 
         # Get source & target indices of the edges
         edge_index = np.stack([adjmat.col, adjmat.row], axis=0)
 
         return torch.from_numpy(edge_index).to(torch.int32)
-
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
-        node_type = graph[self.source_name].node_type
-        valid_node_names = [n.__name__ for n in self.VALID_NODES]
-        assert node_type in valid_node_names, f"{self.__class__.__name__} requires {','.join(valid_node_names)} nodes."
-
-        return super().update_graph(graph, attrs_config)

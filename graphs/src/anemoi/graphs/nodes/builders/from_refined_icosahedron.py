@@ -53,6 +53,11 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
             "node_ordering",
             "area_mask_builder",
         }
+        if not hasattr(self, "multi_scale_edge_cls"):
+            raise AttributeError(
+                "Classes inheriting from IcosahedralNodes must set 'multi_scale_edge_cls' attribute."
+            )
+        
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -69,7 +74,7 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
     def create_nodes(self) -> tuple[nx.DiGraph, np.ndarray, list[int]]: ...
 
 
-class LimitedAreaIcosahedralNodes(IcosahedralNodes):
+class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
     """Nodes based on iterative refinements of an icosahedron using an area of interest.
 
     Attributes
@@ -101,6 +106,7 @@ class TriNodes(IcosahedralNodes):
 
     It depends on the trimesh Python library.
     """
+    multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         return create_tri_nodes(resolution=max(self.resolutions))
@@ -111,6 +117,7 @@ class HexNodes(IcosahedralNodes):
 
     It depends on the h3 Python library.
     """
+    multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.HexNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         return create_hex_nodes(resolution=max(self.resolutions))
@@ -126,6 +133,7 @@ class LimitedAreaTriNodes(LimitedAreaIcosahedralNodes):
     area_mask_builder: KNNAreaMaskBuilder
         The area of interest mask builder.
     """
+    multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         return create_tri_nodes(resolution=max(self.resolutions), area_mask_builder=self.area_mask_builder)
@@ -141,12 +149,13 @@ class LimitedAreaHexNodes(LimitedAreaIcosahedralNodes):
     area_mask_builder: KNNAreaMaskBuilder
         The area of interest mask builder.
     """
+    multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.HexNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         return create_hex_nodes(resolution=max(self.resolutions), area_mask_builder=self.area_mask_builder)
 
 
-class StretchedIcosahedronNodes(IcosahedralNodes):
+class StretchedIcosahedronNodes(IcosahedralNodes, ABC):
     """Nodes based on iterative refinements of an icosahedron with 2
     different resolutions.
 
@@ -182,6 +191,7 @@ class StretchedTriNodes(StretchedIcosahedronNodes):
 
     It depends on the trimesh Python library.
     """
+    multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.StretchedTriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         return create_stretched_tri_nodes(
