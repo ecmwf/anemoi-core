@@ -11,27 +11,6 @@ import numpy as np
 import torch
 
 
-def cartesian_to_latlon_degrees(xyz: np.ndarray) -> np.ndarray:
-    """3D to lat-lon (in degrees) conversion.
-
-    Convert 3D coordinates of points to the (lat, lon) on the sphere containing
-    them.
-
-    Parameters
-    ----------
-    xyz : np.ndarray
-        The 3D coordinates of points.
-
-    Returns
-    -------
-    np.ndarray
-        A 2D array of lat-lon coordinates of shape (N, 2).
-    """
-    lat = np.arcsin(xyz[..., 2] / (xyz**2).sum(axis=1)) * 180.0 / np.pi
-    lon = np.arctan2(xyz[..., 1], xyz[..., 0]) * 180.0 / np.pi
-    return np.array((lat, lon), dtype=np.float32).transpose()
-
-
 def cartesian_to_latlon_rad(xyz: np.ndarray) -> np.ndarray:
     """3D to lat-lon (in radians) conversion.
 
@@ -51,42 +30,6 @@ def cartesian_to_latlon_rad(xyz: np.ndarray) -> np.ndarray:
     lat = np.arcsin(xyz[..., 2] / (xyz**2).sum(axis=1))
     lon = np.arctan2(xyz[..., 1], xyz[..., 0])
     return np.array((lat, lon), dtype=np.float32).transpose()
-
-
-def sincos_to_latlon_rad(sincos: np.ndarray) -> np.ndarray:
-    """Sine & cosine components to lat-lon coordinates.
-
-    Parameters
-    ----------
-    sincos : np.ndarray
-        The sine and cosine componenets of the latitude and longitude. Shape: (N, 4).
-        The dimensions correspond to: sin(lat), cos(lat), sin(lon) and cos(lon).
-
-    Returns
-    -------
-    np.ndarray
-        A 2D array of the coordinates of shape (N, 2) in radians.
-    """
-    latitudes = np.arctan2(sincos[:, 0], sincos[:, 1])
-    longitudes = np.arctan2(sincos[:, 2], sincos[:, 3])
-    return np.stack([latitudes, longitudes], axis=-1)
-
-
-def sincos_to_latlon_degrees(sincos: np.ndarray) -> np.ndarray:
-    """Sine & cosine components to lat-lon coordinates.
-
-    Parameters
-    ----------
-    sincos : np.ndarray
-        The sine and cosine componenets of the latitude and longitude. Shape: (N, 4).
-        The dimensions correspond to: sin(lat), cos(lat), sin(lon) and cos(lon).
-
-    Returns
-    -------
-    np.ndarray
-        A 2D array of the coordinates of shape (N, 2) in degrees.
-    """
-    return np.rad2deg(sincos_to_latlon_rad(sincos))
 
 
 def latlon_rad_to_cartesian(locations: torch.Tensor, radius: float = 1) -> torch.Tensor:

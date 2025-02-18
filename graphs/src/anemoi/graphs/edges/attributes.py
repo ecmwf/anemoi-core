@@ -119,14 +119,18 @@ class Azimuth(BasePositionalBuilder):
         return edge_dirs
 
 
-class BooleanBaseEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
+class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
     """Base class for boolean edge attributes."""
 
     def __init__(self) -> None:
         super().__init__(norm=None, dtype="bool")
+        if not hasattr(self, 'node_idx'):
+            raise AttributeError(
+                "Classes inheriting from BaseEdgeAttributeFromNodeBuilder must set 'node_idx' attribute"
+            )
 
 
-class BaseAttributeFromNodeBuilder(BooleanBaseEdgeAttributeBuilder, ABC):
+class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
     """Base class for propagating an attribute from the nodes to the edges."""
 
     def __init__(self, node_attr_name: str) -> None:
@@ -143,7 +147,7 @@ class BaseAttributeFromNodeBuilder(BooleanBaseEdgeAttributeBuilder, ABC):
         return (x_i, x_j)[self.node_idx][self.node_attr_name]
 
 
-class AttributeFromSourceNode(BaseAttributeFromNodeBuilder):
+class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
     """
     Copy an attribute of the source node to the edge.
     Used for example to identify if an encoder edge originates from a LAM or global node.
@@ -157,7 +161,7 @@ class AttributeFromSourceNode(BaseAttributeFromNodeBuilder):
     node_idx: int = 0
 
 
-class AttributeFromTargetNode(BaseAttributeFromNodeBuilder):
+class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     """Copy an attribute of the target node to the edge.
 
     Used for example to identify if an encoder edge ends at a LAM or global node.
