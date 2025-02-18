@@ -66,14 +66,16 @@ class MultiScaleEdges(BaseEdgeBuilder):
     def get_edge_builder_class(node_type: str) -> Type[BaseIcosahedronEdgeStrategy]:
         # All node builders inheriting from IcosahedronNodes have an attribute multi_scale_edge_cls
         module = importlib.import_module("anemoi.graphs.nodes.builders.from_refined_icosahedron")
-        edge_cls_str = getattr(module, node_type, None).multi_scale_edge_cls
+        node_cls = getattr(module, node_type, None)
+
+        if node_cls is None:
+            raise ValueError(f"Invalid node_type, {node_type}, for building multi scale edges.")
 
         # Instantiate the BaseIcosahedronEdgeStrategy based on the node type
-        module_name = ".".join(edge_cls_str.split(".")[:-1])
-        class_name = edge_cls_str.split(".")[-1]
+        module_name = ".".join(node_cls.multi_scale_edge_cls.split(".")[:-1])
+        class_name = node_cls.multi_scale_edge_cls.split(".")[-1]
 
         edge_builder_cls = getattr(importlib.import_module(module_name), class_name)
-
         return edge_builder_cls
 
     def compute_edge_index(self, source_nodes: NodeStorage, _target_nodes: NodeStorage) -> torch.Tensor:
