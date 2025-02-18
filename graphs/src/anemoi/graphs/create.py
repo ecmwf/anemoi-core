@@ -83,6 +83,8 @@ class GraphCreator:
 
         for edges_cfg in self.config.get("edges", {}):
             for edge_builder_cfg in edges_cfg.edge_builders:
+                print("Building Edges: ", edge_builder_cfg)
+
                 edge_builder = instantiate(
                     edge_builder_cfg, source_name=edges_cfg.source_name, target_name=edges_cfg.target_name
                 )

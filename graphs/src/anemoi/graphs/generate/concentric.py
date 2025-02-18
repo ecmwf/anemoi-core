@@ -14,7 +14,7 @@ from typing import Tuple
 
 import networkx as nx
 import numpy as np
-from geopy.distance import geodesic
+import math
 
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian, cartesian_to_latlon_rad
@@ -24,55 +24,98 @@ from anemoi.graphs.generate.utils import get_coordinates_ordering
 
 LOGGER = logging.getLogger(__name__)
 
-def find_geographical_center(coords):
+import numpy as np
+
+def central_point_on_sphere(latlons: np.ndarray) -> np.ndarray:
     """
-    Compute the central point (geometric centroid) of a set of latitude and longitude coordinates.
+    Compute the central point of a set of points on a sphere.
 
-    Parameters:
-        cords : list of (lat, lon) tuples
+    Parameters
+    ----------
+    latlons : np.ndarray
+        Array of shape (N, 2) containing latitude and longitude in radians.
 
-    Returns:
-        (lat, lon) tuple representing the central point.
+    Returns
+    -------
+    np.ndarray
+        Central point (latitude, longitude) in radians.
     """
-    cartesian_coords = np.array([latlon_rad_to_cartesian(coord) for coord in coords])
-
-    # Compute mean Cartesian coordinates
-    center = cartesian_coords.mean(axis=0)
-
-    # Normalize the vector to project back onto the sphere
-    center /= np.linalg.norm(center)
-
-    # Convert back to latitude and longitude
-    return cartesian_to_latlon_rad(np.array([center]))[0]
-
+    # Convert lat-lon to Cartesian
+    xyz = latlon_rad_to_cartesian((latlons[:, 0], latlons[:, 1]))
+    
+    # Compute mean of Cartesian coordinates
+    mean_xyz = xyz.mean(axis=0)
+    
+    # Normalize to project back onto the sphere
+    mean_xyz /= np.linalg.norm(mean_xyz)
+    
+    # Convert back to lat-lon
+    return cartesian_to_latlon_rad(mean_xyz[np.newaxis, :])[0]
 
 def get_latlon_coords_concentric(
-    center_coords: Tuple[int, int], n_circles: int, base_dist: float, min_n_points: int, max_n_points: int
+    center_coords: Tuple[float, float],
+    n_circles: int,
+    base_dist: float,
+    min_n_points: int,
+    max_n_points: int,
+    sphere_radius: float = 6371.0  # default Earth's radius in km
 ) -> np.ndarray:
+    """
+    Generate concentric geodesic circles (lat, lon in radians) around a given center on Earth.
 
-    result = []
-    max_distance_km = 20000  # Half of Earth's circumference
+    Uses the spherical destination formulas:
+      lat2 = arcsin( sin(lat1)*cos(d/R) + cos(lat1)*sin(d/R)*cos(theta) )
+      lon2 = lon1 + atan2( sin(theta)*sin(d/R)*cos(lat1),
+                           cos(d/R) - sin(lat1)*sin(lat2) )
+    
+    Parameters
+    ----------
+    center_coords : Tuple[float, float]
+        Center point (lat, lon) in radians.
+    n_circles : int
+        Number of concentric circles to generate.
+    base_dist : float
+        Distance (in km) for the smallest circle.
+    min_n_points : int
+        Minimum number of points on each circle.
+    max_n_points : int
+        Maximum number of points on each circle.
+    sphere_radius : float, optional
+        Radius of the sphere (default is 6371.0 km for Earth).
 
+    Returns
+    -------
+    np.ndarray
+        Array of shape (N, 2) containing (lat, lon) points in radians.
+    """
+    # Limit the outer circle to a reasonable distance (e.g., 2000 km) so the rings remain local.
+    max_distance_km = 20000.0
     distances = np.geomspace(base_dist, max_distance_km, n_circles)[:-1]
+    num_points_arr = np.linspace(min_n_points, max_n_points, n_circles)[::-1][:-1]
 
-    points = np.linspace(min_n_points, max_n_points, n_circles)[::-1][:-1]
+    # Assume center_coords are already in radians.
+    lat_center, lon_center = center_coords
 
-    prev_r = 0
-    for i, (r, num_points) in enumerate(zip(distances, points)):
-        num_points = int(num_points)
-
-        for j in range(num_points):
-            angle = 360 * j / num_points  # Equally spaced points
-            new_point = geodesic(kilometers=r).destination(center_coords, angle)
-            result.append((new_point.latitude, new_point.longitude))
-
-        LOGGER.info(f"\nCircle {i} has a distance from the center of: {r}.")
-        LOGGER.info(f"Distance from previous circle: {r-prev_r} km.")
-        LOGGER.info(f"Number of points: {num_points}.")
-
+    result_points = []
+    prev_r = 0.0
+    for i, (r, n_pts) in enumerate(zip(distances, num_points_arr)):
+        n_pts = int(n_pts)
+        d_over_R = r / sphere_radius  # Angular distance in radians.
+        for j in range(n_pts):
+            theta = 2.0 * math.pi * j / n_pts  # Bearing in radians.
+            lat2 = math.asin(math.sin(lat_center) * math.cos(d_over_R) +
+                             math.cos(lat_center) * math.sin(d_over_R) * math.cos(theta))
+            lon2 = lon_center + math.atan2(
+                math.sin(theta) * math.sin(d_over_R) * math.cos(lat_center),
+                math.cos(d_over_R) - math.sin(lat_center) * math.sin(lat2)
+            )
+            # Normalize longitude to the range [-pi, pi]
+            lon2 = (lon2 + math.pi) % (2 * math.pi) - math.pi
+            result_points.append((lat2, lon2))
+        LOGGER.info(f"Circle {i}: radius={r:.2f} km, Δ from prev={r - prev_r:.2f} km, points={n_pts}")
         prev_r = r
 
-    return np.array(result)
+    return np.array(result_points)
 
 
 def create_concentric_mesh(
@@ -177,7 +220,8 @@ def create_stretched_concentric(
     lam_area_mask = area_mask_builder.get_mask(lam_coords_rad)
 
     # Compute center of AOI
-    center_coords = find_geographical_center(lam_coords_rad)
+    center_coords = central_point_on_sphere(lam_coords_rad[lam_area_mask])
+    # LOGGER.info("Computed Centre of LAM (in rads): ", center_coords)
 
     # Get the low resolution nodes outside the AOI
     base_coords_rad = get_latlon_coords_concentric(center_coords, n_circles, base_dist, min_n_points, max_n_points)

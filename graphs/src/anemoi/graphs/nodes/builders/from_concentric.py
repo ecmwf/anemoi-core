@@ -129,7 +129,7 @@ class StretchedConcentricNodes(IcosahedralNodes):
         self.min_n_points = min_n_points
         self.max_n_points = max_n_points
 
-        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {
+        self.hidden_attributes = self.hidden_attributes | {
             "n_circles",
             "base_dist",
             "min_n_points",
