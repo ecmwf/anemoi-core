@@ -104,7 +104,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
             Configuration of groups for variable loss scaling.
         data_indices : IndexCollection
             Collection of data indices.
-        weights_config : DictConfig
+        weights : DictConfig
             Configuration for variable loss scaling.
         scale_dim : int
             Dimension to scale

@@ -87,38 +87,89 @@ class LossScalingSchema(BaseModel):
     "Scaling value associated to each surface variable loss."
 
 
+class GeneralVariableLossScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.GeneralVariableLossScaler"] = Field(..., alias="_target_")
+    weights: dict[str, float]
+    "Weight of each variable." #TODO: Check keys (variables) are read ???
+
+
+class NaNMaskScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.NaNMaskScalerSchema"] = Field(..., alias="_target_")
+
+
+class TendencyScalerTargets(str, Enum):
+    stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
+    var = "anemoi.training.losses.scalers.VarTendencyScaler"
+
+
+class TendencyScalerSchema(BaseModel):
+    target_: TendencyScalerTargets = Field(
+        example="anemoi.training.losses.scalers.StdevTendencyScaler",
+        alias="_target_",
+    )
+
+
 class PressureLevelScalerTargets(str, Enum):
 
-    relu_scaler = "anemoi.training.data.scaling.ReluPressureLevelScaler"
-    linear_scaler = "anemoi.training.data.scaling.LinearPressureLevelScaler"
-    polynomial_sclaer = "anemoi.training.data.scaling.PolynomialPressureLevelScaler"
-    no_scaler = "anemoi.training.data.scaling.NoPressureLevelScaler"
+    relu_scaler = "anemoi.training.losses.scalers.ReluPressureLevelScaler"
+    linear_scaler = "anemoi.training.losses.scalers.LinearPressureLevelScaler"
+    polynomial_sclaer = "anemoi.training.losses.scalers.PolynomialPressureLevelScaler"
+    no_scaler = "anemoi.training.losses.scalers.NoPressureLevelScaler"
 
 
 class PressureLevelScalerSchema(BaseModel):
     target_: PressureLevelScalerTargets = Field(
-        example="anemoi.training.data.scaling.ReluPressureLevelScaler",
+        example="anemoi.training.losses.scalers.ReluPressureLevelScaler",
         alias="_target_",
     )
+    group: str = Field(example="pl")
+    "Group of variables to scale.""
     minimum: float = Field(example=0.2)
     "Minimum value of the scaling function."
-    slope: float = 0.001
-    "Slope of the scaling function."
+    y_intercept: float = 0.001
+    "Y-axis shift of scaling function."
 
 
-ScalerSchema = Union[]
+class GraphNodeAttributeScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.GraphNodeAttributeScaler"] = Field(..., alias="_target_")
+    nodes_name: str = Field(example="data")
+    nodes_attribute_name: str = Field(example="area_weight")
+    apply_output_mask: bool = Field(example=False)
+    norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")
+    "Normalisation method applied to the node attribute."
+
+class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScalerSchema"] = Field(..., alias="_target_")
+    nodes_name: str = Field(example="data")
+    nodes_attribute_name: str = Field(example="area_weight")
+    scaling_mask_attribute_name: str = Field(example="cutout_mask")
+    weight_frac_of_total: float = Field(example=0.5)
+    apply_output_mask: bool = Field(example=False)
+    norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")
+    "Normalisation method applied to the node attribute."
+
+
+ScalerSchema = Union[
+    GeneralVariableLossScalerSchema, 
+    PressureLevelScalerSchema, 
+    TendencyScalerSchema, 
+    NaNMaskScalerSchema,
+    GraphNodeAttributeScalerSchema,
+    ReweightedGraphNodeAttributeScalerSchema,
+]
+
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
-    rmse = "anemoi.training.losses.rmse.RMSELoss"
-    mse = "anemoi.training.losses.mse.MSELoss"
-    mae = "anemoi.training.losses.mae.MAELoss"
-    logcosh = "anemoi.training.losses.logcosh.LogCoshLoss"
+    rmse = "anemoi.training.losses.RMSELoss"
+    mse = "anemoi.training.losses.MSELoss"
+    mae = "anemoi.training.losses.MAELoss"
+    logcosh = "anemoi.training.losses.LogCoshLoss"
 
 
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
-    scalers: list[PossibleScalers] = Field(example=["variable"])
+    scalers: list[str] = Field(example=["variable"])
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
@@ -130,7 +181,7 @@ class HuberLossSchema(BaseModel):
 
 
 class CombinedLossSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.losses.CombinedLoss"] = Field(..., alias="_target_")
     losses: list[BaseLossSchema] = Field(min_length=1)
     loss_weights: list[Union[int, float]] = Field(min_length=1)
 
