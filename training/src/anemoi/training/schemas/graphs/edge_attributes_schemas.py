@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
-from typing import Literal, Union
+from typing import Literal
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
+
 
 class ImplementedEdgeAttributeSchema(str, Enum):
     edge_length = "anemoi.graphs.edges.attributes.EdgeLength"
@@ -27,10 +29,12 @@ class BaseEdgeAttributeSchema(BaseModel):
     norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
     "Normalisation method applied to the edge attribute."
 
+
 class EdgeAttributeFromNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.edges.attributes.AttributeFromSourceNode", "anemoi.graphs.edges.attributes.AttributeFromTargetNode"] = (
-        Field(..., alias="_target_")
-    )
+    target_: Literal[
+        "anemoi.graphs.edges.attributes.AttributeFromSourceNode",
+        "anemoi.graphs.edges.attributes.AttributeFromTargetNode",
+    ] = Field(..., alias="_target_")
     "Edge attributes from node attribute"
     norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
     "Normalisation method applied to the edge attribute."
