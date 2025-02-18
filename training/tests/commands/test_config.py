@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -24,10 +23,12 @@ from anemoi.training.commands.config import ConfigGenerator
 def config_generator():
     return ConfigGenerator()
 
+
 @pytest.fixture
 def temp_dir():
     with tempfile.TemporaryDirectory() as tmpdirname:
         yield Path(tmpdirname)
+
 
 class TestConfig:
 
@@ -38,9 +39,9 @@ class TestConfig:
 
         output_file = temp_dir / "output.yaml"
 
-        with mock.patch("anemoi.training.commands.config.chdir"), \
-                mock.patch("anemoi.training.commands.config.initialize"), \
-                mock.patch("anemoi.training.commands.config.compose", return_value=OmegaConf.create({"test": "value"})):
+        with mock.patch("anemoi.training.commands.config.chdir"), mock.patch(
+            "anemoi.training.commands.config.initialize",
+        ), mock.patch("anemoi.training.commands.config.compose", return_value=OmegaConf.create({"test": "value"})):
             config_generator.dump_config(config_path, "test", output_file)
 
         assert output_file.exists()

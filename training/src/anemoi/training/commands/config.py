@@ -26,10 +26,6 @@ from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from hydra import compose
-from hydra import initialize
-from omegaconf import OmegaConf
-
 from anemoi.training.commands import Command
 from anemoi.training.schemas.base_schema import BaseSchema
 
@@ -233,6 +229,7 @@ class ConfigGenerator(Command):
                 fp.unlink()
         LOGGER.info("Remove temporary directory %s.", tmp_dir)
         shutil.rmtree(tmp_dir)
+
 
 def extract_primitive_type_hints(model: type[BaseModel], prefix: str = "") -> dict[str, Any]:
     field_types = {}
