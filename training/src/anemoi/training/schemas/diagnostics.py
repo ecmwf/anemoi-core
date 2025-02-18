@@ -154,7 +154,7 @@ class TimeLimitSchema(BaseModel):
 
 class EarlyStoppingSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.stopping.EarlyStopping"] = Field(alias="_target_")
-    monitor: str
+    monitor: str = Field(examples=["val_wmse_epoch", "val_wmse/sfc_2t/1"])
     "Metric to monitor"
     min_delta: float = 0.0
     "Minimum change in the monitored quantity to qualify as an improvement."
@@ -163,7 +163,7 @@ class EarlyStoppingSchema(BaseModel):
     verbose: bool = False
     "If True, prints a message for each improvement."
     mode: Literal["min", "max"] = "min"
-    "One of {'min', 'max'}"
+    "One of {'min', 'max'}, changes if minimisation or maximimisation of the metric is 'good'."
     strict: bool = True
     "Whether to crash the training if the monitored quantity is not found."
     check_finite: bool = True
