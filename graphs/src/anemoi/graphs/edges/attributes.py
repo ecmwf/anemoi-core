@@ -125,10 +125,6 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
 
     def __init__(self) -> None:
         super().__init__(norm=None, dtype="bool")
-        if not hasattr(self, "node_idx"):
-            raise AttributeError(
-                "Classes inheriting from BaseEdgeAttributeFromNodeBuilder must set 'node_idx' attribute"
-            )
 
 
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
@@ -137,15 +133,16 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
     def __init__(self, node_attr_name: str) -> None:
         self.node_attr_name = node_attr_name
         super().__init__()
+        if not hasattr(self, "node_idx"):
+            raise AttributeError(
+                "Classes inheriting from BaseEdgeAttributeFromNodeBuilder must set 'node_idx' attribute"
+            )
 
-    def compute(self, x_i: torch.Tensor, _x_j: torch.Tensor) -> torch.Tensor:
-        return x_i
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        return (x_j, x_i)[self.node_idx][self.node_attr_name]
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
         return self.propagate(edge_index, x=x, size=size)
-
-    def message(self, x_i: NodeStorage, x_j: NodeStorage) -> torch.Tensor:
-        return (x_i, x_j)[self.node_idx][self.node_attr_name]
 
 
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
