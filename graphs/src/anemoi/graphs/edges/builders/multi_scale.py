@@ -9,12 +9,14 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
-from typing import TYPE_CHECKING, Type
+from typing import TYPE_CHECKING
+from typing import Type
+
 import networkx as nx
 import numpy as np
 import torch
-import importlib
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
