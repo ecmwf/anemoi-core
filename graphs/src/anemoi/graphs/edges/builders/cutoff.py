@@ -42,6 +42,8 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
         The name of the target mask attribute to filter edge connections.
+    max_num_neighbours : int
+        The maximum number of nearest neighbours to consider when building edges.
 
     Methods
     -------
