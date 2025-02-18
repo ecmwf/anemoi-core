@@ -12,20 +12,32 @@ from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import logging
+import os
+import re
 import shutil
 import tempfile
 from contextlib import chdir
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import Any
+
+from hydra import compose
+from hydra import initialize
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
 
 from anemoi.training.commands import Command
+from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     import argparse
+
+    from pydantic import BaseModel
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +66,18 @@ class ConfigGenerator(Command):
         )
         anemoi_training_home.add_argument("--overwrite", "-f", action="store_true")
 
+        help_msg = "Validate the Anemoi training configs."
+        validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
+
+        validate.add_argument("--name", help="Name of the primary config file")
+        validate.add_argument("--overwrite", "-f", action="store_true")
+        validate.add_argument(
+            "--mask_env_vars",
+            "-m",
+            help="Mask environment variables from config. Default False",
+            action="store_true",
+        )
+
         help_msg = "Dump Anemoi configs to a YAML file."
         dump = subparsers.add_parser(
             "dump",
@@ -66,6 +90,7 @@ class ConfigGenerator(Command):
         dump.add_argument("--overwrite", "-f", action="store_true")
 
     def run(self, args: argparse.Namespace) -> None:
+
         self.overwrite = args.overwrite
 
         if args.subcommand == "generate":
@@ -77,9 +102,18 @@ class ConfigGenerator(Command):
 
         if args.subcommand == "training-home":
             anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
-
             LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
             self.traverse_config(anemoi_home)
+            return
+
+        if args.subcommand == "validate":
+            LOGGER.info("Validating configs.")
+            LOGGER.warning(
+                "Note that this command is not taking into account if your config has a no_validation flag."
+                "So this command will validate the config regardless of the flag.",
+            )
+            self.validate_config(args.name, args.mask_env_vars)
+            LOGGER.info("Config files validated.")
             return
 
         if args.subcommand == "dump":
@@ -122,6 +156,59 @@ class ConfigGenerator(Command):
                 else:
                     LOGGER.info("File %s already exists, skipping", file_path)
 
+    def _mask_slurm_env_variables(self, cfg: DictConfig) -> None:
+        """Mask environment variables are set."""
+        # Convert OmegaConf dict to YAML format (raw string)
+        raw_cfg = OmegaConf.to_yaml(cfg)
+        # To extract and replace environment variables, loop through the matches
+        updated_cfg = raw_cfg
+        primitive_type_hints = extract_primitive_type_hints(BaseSchema)
+
+        patterns = [
+            r"(\w+):\s*\$\{oc\.env:([A-Z0-9_]+)\}(?!\})",
+            r"(\w+):\s*\$\{oc\.decode:\$\{oc\.env:([A-Z0-9_]+)\}\}",
+        ]
+        replaces = ["${{oc.env:{match}}}", "${{oc.decode:${{oc.env:{match}}}}}"]
+        # Find all matches in the raw_cfg string
+        for pattern, replace in zip(patterns, replaces, strict=False):
+            matches = re.findall(pattern, raw_cfg)
+            # Find the corresponding type hints for each extracted key
+            for extracted_key, match in matches:
+                corresponding_keys = next(iter([key for key in primitive_type_hints if extracted_key in key]))
+                # Check if the environment variable exists
+                env_value = os.getenv(match)
+
+                # If environment variable doesn't exist, replace with default string
+                if env_value is None:
+                    def_str = "default"
+                    def_int = 0
+                    def_bool = True
+                    if primitive_type_hints[corresponding_keys] is str:
+                        env_value = def_str
+                    elif primitive_type_hints[corresponding_keys] in [int, float]:
+                        env_value = def_int
+                    elif primitive_type_hints[corresponding_keys] is bool:
+                        env_value = def_bool
+                    elif primitive_type_hints[corresponding_keys] is Path:
+                        env_value = Path(def_str)
+                    else:
+                        msg = "Type not supported for masking environment variables"
+                        raise TypeError(msg)
+                    LOGGER.warning("Environment variable %s not found, masking with %s", match, env_value)
+                    # Replace the pattern with the actual value or the default string
+                    updated_cfg = updated_cfg.replace(replace.format(match=match), str(env_value))
+
+        return OmegaConf.create(updated_cfg)
+
+    def validate_config(self, name: Path | str, mask_env_vars: bool) -> None:
+        """Validates the configuration files in the given directory."""
+        with initialize(version_base=None, config_path=""):
+            cfg = compose(config_name=name)
+            if mask_env_vars:
+                cfg = self._mask_slurm_env_variables(cfg)
+            OmegaConf.resolve(cfg)
+            BaseSchema(**cfg)
+
     def dump_config(self, config_path: Path, name: str, output: Path) -> None:
         """Dump config files in one YAML file."""
         # Copy config files in temporary directory
@@ -146,6 +233,24 @@ class ConfigGenerator(Command):
                 fp.unlink()
         LOGGER.info("Remove temporary directory %s.", tmp_dir)
         shutil.rmtree(tmp_dir)
+
+def extract_primitive_type_hints(model: type[BaseModel], prefix: str = "") -> dict[str, Any]:
+    field_types = {}
+
+    for field_name, field_info in model.model_fields.items():
+        field_type = field_info.annotation
+        full_field_name = f"{prefix}.{field_name}" if prefix else field_name
+
+        # Check if the field type has 'model_fields' (indicating a nested Pydantic model)
+        if hasattr(field_type, "model_fields"):
+            field_types.update(extract_primitive_type_hints(field_type, full_field_name))
+        else:
+            try:
+                field_types[full_field_name] = field_type.__args__[0]
+            except AttributeError:
+                field_types[full_field_name] = field_type
+
+    return field_types
 
 
 command = ConfigGenerator

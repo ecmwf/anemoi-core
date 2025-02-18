@@ -1,8 +1,12 @@
 ---
 defaults:
   - plot: detailed
-  - callbacks: pretraining
+  - callbacks: placeholder
   - benchmark_profiler: detailed
+
+# another alternative if you don't have any callbacks is to remove it from the
+# defaults list and just use
+# callbacks: []
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
@@ -52,6 +56,7 @@ log:
     on_resume_create_child: True
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
+    http_max_retries: 35
   interval: 100
 
 enable_progress_bar: True

@@ -1,4 +1,5 @@
 asynchronous: True # Whether to plot asynchronously
+datashader: True # Choose which technique to use for plotting
 frequency: # Frequency of the plotting
   batch: 750
   epoch: 5
@@ -22,6 +23,13 @@ sample_idx: 0
 # Precipitation and related fields
 precip_and_related_fields: [tp, cp]
 
+# select special colormap for precip fields
+colormaps:
+  precip:
+    _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+    clevels: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
+    variables: ${diagnostics.plot.precip_and_related_fields}
+
 callbacks:
   # Add plot callbacks here
   - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
@@ -38,8 +46,8 @@ callbacks:
     parameters: ${diagnostics.plot.parameters}
     #Defining the accumulation levels for precipitation related fields and the colormap
     accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
-    cmap_accumulation: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
     precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+    colormaps: ${diagnostics.plot.colormaps}
 
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
     # every_n_batches: 100 # Override for batch frequency
@@ -67,3 +75,4 @@ callbacks:
     every_n_epochs: 20
     sample_idx: ${diagnostics.plot.sample_idx}
     parameters: ${diagnostics.plot.parameters}
+    colormaps: ${diagnostics.plot.colormaps}
