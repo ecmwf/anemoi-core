@@ -31,7 +31,7 @@ def test_dynamic_init_include() -> None:
 
 
 def test_dynamic_init_scaler() -> None:
-    loss = GraphForecaster.get_loss_function(
+    loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.MSELoss",
@@ -49,7 +49,7 @@ def test_dynamic_init_scaler() -> None:
 
 
 def test_dynamic_init_add_all() -> None:
-    loss = GraphForecaster.get_loss_function(
+    loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.MSELoss",
@@ -67,7 +67,7 @@ def test_dynamic_init_add_all() -> None:
 
 
 def test_dynamic_init_scaler_not_add() -> None:
-    loss = GraphForecaster.get_loss_function(
+    loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.MSELoss",
@@ -83,7 +83,7 @@ def test_dynamic_init_scaler_not_add() -> None:
 
 
 def test_dynamic_init_scaler_exclude() -> None:
-    loss = GraphForecaster.get_loss_function(
+    loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.MSELoss",
