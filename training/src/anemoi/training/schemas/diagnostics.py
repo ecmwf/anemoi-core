@@ -34,16 +34,18 @@ class LongRolloutPlotsSchema(BaseModel):
     "List of parameters to plot."
     video_rollout: int = Field(example=0)
     "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: Union[list[float], None] = Field(example=None)
+    accumulation_levels_plot: Union[list[float], None] = Field(default=None)
     "Accumulation levels to plot, by default None."
-    cmap_accumulation: Union[list[str], None] = Field(example=None)
-    "Colors of the accumulation levels, by default None."
-    per_sample: int = Field(example=6)
+    cmap_accumulation: Union[list[str], None] = Field(default=None)
+    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
+    per_sample: Union[int, None] = Field(default=None)
     "Number of plots per sample, by default 6."
     every_n_epochs: int = Field(example=1)
     "Epoch frequency to plot at, by default 1."
-    animation_interval: int = Field(example=400)
+    animation_interval: Union[int, None] = Field(default=None)
     "Delay between frames in the animation in milliseconds, by default 400."
+    colormaps: Union[dict[str, ColormapSchema], None] = Field(default=None)
+    "List of colormaps to use, by default None."
 
 
 class GraphTrainableFeaturesPlotSchema(BaseModel):
