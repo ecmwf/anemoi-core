@@ -68,15 +68,15 @@ class TextNodes(BaseNodeBuilder):
 
     Attributes
     ----------
-    dataset : str | DictConfig
-        The path to txt file containing the coordinates of the nodes.
+    dataset : str | Path
+        The path including filename to txt file containing the coordinates of the nodes.
     idx_lon : int
         The index of the longitude in the dataset.
     idx_lat : int
         The index of the latitude in the dataset.
     """
 
-    def __init__(self, dataset, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
+    def __init__(self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset
         self.idx_lon = idx_lon
