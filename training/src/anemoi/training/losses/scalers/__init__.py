@@ -9,17 +9,22 @@
 
 from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
-from .variable_level import LinearVariableLevelScaler, ReluVariableLevelScaler, PolynomialVariableLevelScaler, NoVariableLevelScaler
-from .variable_tendency import NoTendencyScaler, StdevTendencyScaler, VarTendencyScaler
+from .variable_level import LinearVariableLevelScaler
+from .variable_level import NoVariableLevelScaler
+from .variable_level import PolynomialVariableLevelScaler
+from .variable_level import ReluVariableLevelScaler
+from .variable_tendency import NoTendencyScaler
+from .variable_tendency import StdevTendencyScaler
+from .variable_tendency import VarTendencyScaler
 
 __all__ = [
-    "NaNMaskScaler",
     "GraphNodeAttributeScaler",
     "LinearVariableLevelScaler",
-    "ReluVariableLevelScaler", 
-    "PolynomialVariableLevelScaler",
-    "NoVariableLevelScaler",
+    "NaNMaskScaler",
     "NoTendencyScaler",
+    "NoVariableLevelScaler",
+    "PolynomialVariableLevelScaler",
+    "ReluVariableLevelScaler",
     "StdevTendencyScaler",
-    "VarTendencyScaler"
+    "VarTendencyScaler",
 ]

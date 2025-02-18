@@ -7,20 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .combined import CombinedLoss
+from .huber import HuberLoss
+from .logcosh import LogCoshLoss
 from .mae import MAELoss
 from .mse import MSELoss
 from .rmse import RMSELoss
-from .logcosh import LogCoshLoss
-from .huber import HuberLoss
-from .combined import CombinedLoss
 
 __all__ = [
+    "CombinedLoss",
+    "HuberLoss",
+    "LogCoshLoss",
     "MAELoss",
     "MSELoss",
     "RMSELoss",
-    "LogCoshLoss", 
-    "HuberLoss",
-    "CombinedLoss",
 ]
-
-

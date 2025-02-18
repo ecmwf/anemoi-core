@@ -47,9 +47,10 @@ builders:
 
   # Scalers from node attributes
   node_weights:
-    _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+    _target_: anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler
     nodes_name: ${graph.data}
     nodes_attribute_name: area_weight
+    scaling_mask_attribute_name: cutout_mask
     apply_output_mask: True
     norm: "unit-sum"
 
