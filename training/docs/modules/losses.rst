@@ -165,9 +165,9 @@ individual loss config.
       _target_: anemoi.training.losses.combined.CombinedLoss
       losses:
             - _target_: anemoi.training.losses.mse.WeightedMSELoss
-            scalars: ['ocean']
+              scalars: ['ocean']
             - _target_: anemoi.training.losses.mae.WeightedMAELoss
-            scalars: ['atmosphere']
+              scalars: ['atmosphere']
       loss_weights: [1.0, 1.0]
       scalars: ['*']
 
