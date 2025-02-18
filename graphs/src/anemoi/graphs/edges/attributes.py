@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -124,7 +125,7 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
 
     def __init__(self) -> None:
         super().__init__(norm=None, dtype="bool")
-        if not hasattr(self, 'node_idx'):
+        if not hasattr(self, "node_idx"):
             raise AttributeError(
                 "Classes inheriting from BaseEdgeAttributeFromNodeBuilder must set 'node_idx' attribute"
             )
