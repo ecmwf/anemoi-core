@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+import warnings
+from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -21,6 +23,8 @@ from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 LOGGER = logging.getLogger(__name__)
+
+TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 
 
 class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
@@ -108,11 +112,9 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
             self.target_name,
         )
 
-        try:
+        if TORCH_CLUSTER_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_nodes, target_nodes)
-        except ImportError:
-            import warnings
-
+        else:
             warnings.warn(
                 "The 'torch-cluster' library is not installed. Installing 'torch-cluster' can significantly improve "
                 "performance for graph creation. You can install it using 'pip install torch-cluster'.",

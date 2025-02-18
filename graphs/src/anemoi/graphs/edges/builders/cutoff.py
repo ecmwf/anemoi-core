@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+import warnings
+from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -23,6 +25,9 @@ from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.utils import get_grid_reference_distance
+
+TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -177,11 +182,9 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
             self.target_name,
         )
 
-        try:
+        if TORCH_CLUSTER_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_nodes, target_nodes)
-        except ImportError:
-            import warnings
-
+        else:
             warnings.warn(
                 "The 'torch-cluster' library is not installed. Installing 'torch-cluster' can significantly improve "
                 "performance for graph creation. You can install it using 'pip install torch-cluster'.",
