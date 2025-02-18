@@ -242,8 +242,6 @@ class NonmissingZarrVariable(BooleanBaseNodeAttribute):
     ----------
     variable : str
         Variable to read from the Zarr dataset.
-    norm : str
-        Normalization of the weights.
 
     Methods
     -------

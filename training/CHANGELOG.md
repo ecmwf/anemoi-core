@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.3.3](https://github.com/ecmwf/anemoi-core/compare/training-0.3.2...training-0.3.3) (2025-02-05)
+
+
+### Features
+
+* make flash attention configurable ([#60](https://github.com/ecmwf/anemoi-core/issues/60)) ([41fcab6](https://github.com/ecmwf/anemoi-core/commit/41fcab6335b334fdbebeb944c904cdbea6388889))
+* Model Freezing ❄️  ([#61](https://github.com/ecmwf/anemoi-core/issues/61)) ([54e42cf](https://github.com/ecmwf/anemoi-core/commit/54e42cf42a47e00be96b464f501f6a462cd1bca4))
+* **models:** normalization layers ([#47](https://github.com/ecmwf/anemoi-core/issues/47)) ([0e1c7c4](https://github.com/ecmwf/anemoi-core/commit/0e1c7c4840138debf877bb954b45f4c3a1cd0e33))
+
+
+### Bug Fixes
+
+* cancel RTD builds on no change ([#97](https://github.com/ecmwf/anemoi-core/issues/97)) ([36522d8](https://github.com/ecmwf/anemoi-core/commit/36522d87cdd95a5cb54b4c865eca67a64e22fffa))
+* only load shards of grid into cpu mem if possible ([#83](https://github.com/ecmwf/anemoi-core/issues/83)) ([abbef4b](https://github.com/ecmwf/anemoi-core/commit/abbef4bf505af553584d9e0d4825db544d1c9ca7))
+* pin dask version to 2024.12.1  ([#94](https://github.com/ecmwf/anemoi-core/issues/94)) ([074c0f2](https://github.com/ecmwf/anemoi-core/commit/074c0f226bf6541df977e43eff626a68d2f1f1fe))
+* **training:** profiler 'Model Summary' works when sharding models over multiple GPUs ([#90](https://github.com/ecmwf/anemoi-core/issues/90)) ([9d9e89a](https://github.com/ecmwf/anemoi-core/commit/9d9e89a8fd6b90ecd62f799d942c84a4e984b9ed))
+* update configs to avoid DeprecationWarning ([#53](https://github.com/ecmwf/anemoi-core/issues/53)) ([3560290](https://github.com/ecmwf/anemoi-core/commit/356029039e8406bc02a2b22f56107babbf2e7551))
+
+
+### Documentation
+
+* **graphs:** Refactor anemoi-graphs documentation ([#49](https://github.com/ecmwf/anemoi-core/issues/49)) ([29942b6](https://github.com/ecmwf/anemoi-core/commit/29942b6c088c7a2c6ff3f8ac13277041086cda9f))
+* Improve installation docs ([#91](https://github.com/ecmwf/anemoi-core/issues/91)) ([0b5f8fb](https://github.com/ecmwf/anemoi-core/commit/0b5f8fb8b93555d76ebe3316c430121350bf5243))
+* point RTD to right subfolder ([5a80cb6](https://github.com/ecmwf/anemoi-core/commit/5a80cb6047e864ea97bed06a76ddc54507e5fcbe))
+* Tidy for core ([b24c521](https://github.com/ecmwf/anemoi-core/commit/b24c521c447272afd1b209745b24d16794cdb85a))
+
 ## [Unreleased](https://github.com/ecmwf/anemoi-training/compare/0.3.2...HEAD)
 
 ### Fixed
