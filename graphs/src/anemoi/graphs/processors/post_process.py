@@ -16,6 +16,11 @@ from abc import abstractmethod
 import torch
 from torch_geometric.data import HeteroData
 
+import numpy as np
+
+from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs import EARTH_RADIUS
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -26,8 +31,8 @@ class PostProcessor(ABC):
         raise NotImplementedError(f"The {self.__class__.__name__} class does not implement the method update_graph().")
 
 
-class BaseMaskingProcessor(PostProcessor, ABC):
-    """Base class for mask based processor."""
+class BaseNodeMaskingProcessor(PostProcessor, ABC):
+    """Base class for mask based node processor."""
 
     def __init__(
         self,
@@ -95,7 +100,7 @@ class BaseMaskingProcessor(PostProcessor, ABC):
         return graph
 
 
-class RemoveUnconnectedNodes(BaseMaskingProcessor):
+class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
     """Remove unconnected nodes in the graph.
 
     Attributes
@@ -147,3 +152,92 @@ class RemoveUnconnectedNodes(BaseMaskingProcessor):
                 connected_mask[edges.edge_index[1]] = True
 
         return connected_mask
+
+class BaseEdgeMaskingProcessor(PostProcessor, ABC):
+    """Base class for mask based node processor."""
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+    ) -> None:
+        self.source_name = source_name
+        self.target_name = target_name
+        self.edges_name = (self.source_name, 'to', self.target_name)
+        self.mask: torch.Tensor = None
+
+    def removing_edges(self, graph: HeteroData) -> HeteroData:
+        """Remove edges based on the mask passed."""
+        for attr_name in graph[self.edges_name].edge_attrs():
+            if attr_name == "edge_index":
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask] 
+            else:
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask, :]
+
+        return graph
+
+    @abstractmethod
+    def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
+
+    def update_attributes(self, graph: HeteroData) -> torch.Tensor:
+        return graph
+
+    def update_graph(self, graph: HeteroData) -> HeteroData:
+        """Post-process the graph.
+
+        Parameters
+        ----------
+        graph: HeteroData
+            The graph to post-process.
+
+        Returns
+        -------
+        HeteroData
+            The post-processed graph.
+        """
+        self.mask = self.compute_mask(graph)
+        LOGGER.info(f"Removing {(~self.mask).sum()} edges from {self.edges_name}.")
+        graph = self.removing_edges(graph)
+        graph = self.update_attributes(graph)
+        return graph
+    
+class RestrictEdgeLength(BaseEdgeMaskingProcessor):
+    """Remove edges longer than a given treshold from the graph.
+
+    Attributes
+    ----------
+    source_name: str
+        Name of the source nodes of edges to remove.
+    target_name: str
+        Name of the target nodes of edges to remove.
+    ignore: dict, optional
+        Attribute and value pairs that will be ignored when removing edges. 
+        Edges with at least one attribute that matches the corresponindign value not be removed.
+
+    Methods
+    -------
+    compute_mask(graph)
+        Compute the mask of the connected nodes.
+    """
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+        threshold: float,
+        source_mask_attr_name: str | None = None,
+    ) -> None:
+        super().__init__(source_name, target_name)
+        self.treshold = threshold
+        self.source_mask_attr_name = source_mask_attr_name
+
+    def compute_mask(self, graph: HeteroData) -> torch.Tensor:
+        """Compute the mask of connected nodes."""
+        lengths = EdgeLength().get_raw_values(graph, self.source_name, self.target_name)*EARTH_RADIUS
+        mask = np.where(lengths < self.treshold, True, False)
+        if self.source_mask_attr_name:
+            source_attr_mask = graph[self.source_name][self.source_mask_attr_name][:,0]
+            source_indices = graph[self.edges_name]['edge_index'][0] 
+            source_mask = np.vectorize(lambda i: source_attr_mask[i])(source_indices)
+            mask = np.logical_or(mask, ~source_mask)    
+        return mask
