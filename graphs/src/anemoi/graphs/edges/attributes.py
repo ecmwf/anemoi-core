@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC
+from abc import ABC, abstractmethod
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -26,7 +26,7 @@ from anemoi.graphs.utils import haversine_distance
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
+class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
     """Base class for edge attribute builders."""
 
     node_attr_name: str = None
@@ -47,22 +47,8 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin):
         x = self.subset_node_information(*x)
         return self.propagate(edge_index, x=x, size=size)
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        """Compute edge features.
-
-        Parameters
-        ----------
-        x_i : torch.Tensor
-            Coordinates of the source nodes.
-        x_j : torch.Tensor
-            Coordinates of the target nodes.
-
-        Returns
-        -------
-        torch.Tensor
-            Edge features.
-        """
-        raise NotImplementedError("Method `compute` must be implemented.")
+    @abstractmethod
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
 
     def message(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_features = self.compute(x_i, x_j)
