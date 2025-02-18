@@ -114,11 +114,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetSchema
+    training: DatasetSchema | dict
     "Training DatasetSchema."
-    validation: DatasetSchema
+    validation: DatasetSchema | dict
     "Validation DatasetSchema."
-    test: DatasetSchema
+    test: DatasetSchema | dict
     "Test DatasetSchema."
     validation_rollout: PositiveInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
