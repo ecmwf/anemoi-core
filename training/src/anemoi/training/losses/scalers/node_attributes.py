@@ -103,7 +103,7 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
             apply_output_mask=apply_output_mask,
             inverse=inverse,
             norm=norm,
-            **kwargs
+            **kwargs,
         )
         if self.scaling_mask_attribute_name not in self.nodes:
             error_msg = f"scaling_mask_attribute_name {self.scaling_mask_attribute_name} not found in graph_object"
@@ -112,7 +112,9 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
     def reweight_attribute_values(self, values: np.ndarray) -> np.ndarray:
         scaling_mask = self.nodes[self.scaling_mask_attribute_name]
         unmasked_sum = torch.sum(values[~scaling_mask])
-        weight_per_masked_node = self.weight_frac_of_total / (1 - self.weight_frac_of_total) * unmasked_sum / sum(scaling_mask)
+        weight_per_masked_node = (
+            self.weight_frac_of_total / (1 - self.weight_frac_of_total) * unmasked_sum / sum(scaling_mask)
+        )
         values[scaling_mask] = weight_per_masked_node
 
         LOGGER.info(
