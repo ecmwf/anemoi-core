@@ -10,25 +10,30 @@
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 from typing import Any
 
-import torch
+from omegaconf import DictConfig
 
+from anemoi.training.losses.utils import ScaleTensor
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.train.forecaster import GraphForecaster
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    import torch
 
 
-class CombinedLoss(torch.nn.Module):
+class CombinedLoss(BaseWeightedLoss):
     """Combined Loss function."""
+
+    _initial_set_scalar: bool = False
 
     def __init__(
         self,
-        *extra_losses: dict[str, Any] | Callable,
-        losses: tuple[dict[str, Any] | Callable] | None = None,
-        loss_weights: tuple[int, ...],
+        *extra_losses: dict[str, Any] | Callable | BaseWeightedLoss,
+        loss_weights: tuple[int, ...] | None = None,
+        losses: tuple[dict[str, Any] | Callable | BaseWeightedLoss] | None = None,
         **kwargs,
     ):
         """Combined loss function.
@@ -36,29 +41,55 @@ class CombinedLoss(torch.nn.Module):
         Allows multiple losses to be combined into a single loss function,
         and the components weighted.
 
-        If a sub loss function requires additional weightings or code created tensors,
-        that must be `included_` for this function, and then controlled by the underlying
-        loss function configuration.
+        As the losses are designed for use within the context of the
+        anemoi-training configuration, `losses` work best as a dictionary.
+
+        If `losses` is a `tuple[dict]`, the `scalars` key will be extracted
+        before being passed to `get_loss_function`, and the `scalars` defined
+        in each loss only applied to the respective loss. Thereby `scalars`
+        added to this class will be routed correctly.
+        If `losses` is a `tuple[Callable]`, all `scalars` added to this class
+        will be added to all underlying losses.
+        And if `losses` is a `tuple[WeightedLoss]`, no scalars added to
+        this class will be added to the underlying losses, as it is
+        assumed that will be done by the parent function.
 
         Parameters
         ----------
-        losses: tuple[dict[str, Any]| Callable]
-            Tuple of losses to initialise with `GraphForecaster.get_loss_function`.
-            Allows for kwargs to be passed, and weighings controlled.
-        *extra_losses: dict[str, Any] | Callable
+        losses: tuple[dict[str, Any] | Callable | BaseWeightedLoss],
+            if a `tuple[dict]`:
+                Tuple of losses to initialise with `GraphForecaster.get_loss_function`.
+                Allows for kwargs to be passed, and weighings controlled.
+                If a loss should only have some of the scalars, set `scalars` in the loss config.
+                If no scalars are set, all scalars added to this class will be included.
+            if a `tuple[Callable]`:
+                Will be called with `kwargs`, and all scalars added to this class added.
+            if a `tuple[BaseWeightedLoss]`:
+                Added to the loss function, and no scalars passed through.
+        *extra_losses: dict[str, Any]  | Callable | BaseWeightedLoss],
             Additional arg form of losses to include in the combined loss.
-        loss_weights : tuple[int, ...]
+        loss_weights : optional, tuple[int, ...] | None
             Weights of each loss function in the combined loss.
+            Must be the same length as the number of losses.
+            If None, all losses are weighted equally.
+            by default None.
         kwargs: Any
-            Additional arguments to pass to the loss functions
+            Additional arguments to pass to the loss functions, if not Loss.
 
         Examples
         --------
         >>> CombinedLoss(
-                {"__target__": "anemoi.training.losses.mse.WeightedMSELoss"},
+                {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
                 loss_weights=(1.0,),
                 node_weights=node_weights
             )
+        >>> CombinedLoss(
+                {"_target_": "anemoi.training.losses.mse.WeightedMSELoss", "scalars":['scalar_1']},
+                loss_weights=(1.0,),
+                node_weights=node_weights
+            )
+            CombinedLoss.add_scalar(name = 'scalar_1', ...)
+            # Only added to the `WeightedMSELoss` if specified in it's `scalars`.
         --------
         >>> CombinedLoss(
                 losses = [anemoi.training.losses.mse.WeightedMSELoss],
@@ -69,25 +100,53 @@ class CombinedLoss(torch.nn.Module):
 
         ```
         training_loss:
-            __target__: anemoi.training.losses.combined.CombinedLoss
+            _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-                - __target__: anemoi.training.losses.mse.WeightedMSELoss
-                - __target__: anemoi.training.losses.mae.WeightedMAELoss
-            scalars: ['variable']
-            loss_weights: [1.0,0.5]
+                - _target_: anemoi.training.losses.mse.WeightedMSELoss
+                - _target_: anemoi.training.losses.mae.WeightedMAELoss
+            scalars: ['*']
+            loss_weights: [1.0, 0.6]
+            # All scalars passed to this class will be added to each underlying loss
+        ```
+
+        ```
+        training_loss:
+            _target_: anemoi.training.losses.combined.CombinedLoss
+            losses:
+                - _target_: anemoi.training.losses.mse.WeightedMSELoss
+                  scalars: ['variable']
+                - _target_: anemoi.training.losses.mae.WeightedMAELoss
+                  scalars: ['loss_weights_mask']
+            scalars: ['*']
+            loss_weights: [1.0, 1.0]
+            # Only the specified scalars will be added to each loss
         ```
         """
-        super().__init__()
+        super().__init__(node_weights=None)
+
+        self.losses: list[BaseWeightedLoss] = []
+        self._loss_scalar_specification: dict[int, list[str]] = {}
 
         losses = (*(losses or []), *extra_losses)
+        if loss_weights is None:
+            loss_weights = (1.0,) * len(losses)
 
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
-        self.losses = [
-            GraphForecaster.get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
-            for loss in losses
-        ]
+        for i, loss in enumerate(losses):
+
+            if isinstance(loss, (DictConfig, dict)):
+                self._loss_scalar_specification[i] = loss.pop("scalars", ["*"])
+                self.losses.append(GraphForecaster.get_loss_function(loss, scalars={}, **dict(kwargs)))
+            elif isinstance(loss, Callable):
+                self._loss_scalar_specification[i] = ["*"]
+                self.losses.append(loss(**kwargs))
+            else:
+                self._loss_scalar_specification[i] = []
+                self.losses.append(loss)
+
+            self.add_module(self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
 
     def forward(
@@ -125,14 +184,31 @@ class CombinedLoss(torch.nn.Module):
     def name(self) -> str:
         return "combined_" + "_".join(getattr(loss, "name", loss.__class__.__name__.lower()) for loss in self.losses)
 
-    def __getattr__(self, name: str) -> Callable:
-        """Allow access to underlying attributes of the loss functions."""
-        if not all(hasattr(loss, name) for loss in self.losses):
-            error_msg = f"Attribute {name} not found in all loss functions"
-            raise AttributeError(error_msg)
+    @property
+    def scalar(self) -> ScaleTensor:
+        """Get union of underlying scalars."""
+        scalars = {}
+        for loss in self.losses:
+            scalars.update(loss.scalar.tensors)
+        return ScaleTensor(scalars)
 
-        @functools.wraps(getattr(self.losses[0], name))
-        def hidden_func(*args, **kwargs) -> list[Any]:
-            return [getattr(loss, name)(*args, **kwargs) for loss in self.losses]
+    @scalar.setter
+    def scalar(self, _: Any) -> None:
+        """Set underlying loss scalars."""
+        if not self._initial_set_scalar:  # Allow parent class to 'initialise' the scalar
+            self._initial_set_scalar = True
+            return
+        excep_msg = "Cannot set `CombinedLoss` scalar directly, use `add_scalar` or `update_scalar`."
+        raise AttributeError(excep_msg)
 
-        return hidden_func
+    @functools.wraps(ScaleTensor.add_scalar, assigned=("__doc__", "__annotations__"))
+    def add_scalar(self, dimension: int | tuple[int], scalar: torch.Tensor, *, name: str | None = None) -> None:
+        for i, spec in self._loss_scalar_specification.items():
+            if "*" in spec or name in spec:
+                self.losses[i].scalar.add_scalar(dimension, scalar, name=name)
+
+    @functools.wraps(ScaleTensor.update_scalar, assigned=("__doc__", "__annotations__"))
+    def update_scalar(self, name: str, scalar: torch.Tensor, *, override: bool = False) -> None:
+        for i, spec in self._loss_scalar_specification.items():
+            if "*" in spec or name in spec:
+                self.losses[i].scalar.update_scalar(name, scalar=scalar, override=override)
