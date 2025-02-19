@@ -123,7 +123,7 @@ class PressureLevelScalerSchema(BaseModel):
         alias="_target_",
     )
     group: str = Field(example="pl")
-    "Group of variables to scale.""
+    "Group of variables to scale."
     minimum: float = Field(example=0.2)
     "Minimum value of the scaling function."
     y_intercept: float = 0.001
