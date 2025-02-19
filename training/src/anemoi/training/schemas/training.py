@@ -153,7 +153,8 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     scaling_mask_attribute_name: str = Field(example="cutout_mask")
     "Name of the node attribute to use as a mask to reweight the reference values."
     weight_frac_of_total: float = Field(example=0.5)
-    "Fraction of total weight to assign to nodes within the scaling mask. The remaining weight is distributed among nodes outside the mask."
+    "Fraction of total weight to assign to nodes within the scaling mask. The remaining weight is distributed among "
+    "nodes outside the mask."
     apply_output_mask: bool = Field(example=False)
     "Whether to apply the output mask to the node attribute values."
     norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")

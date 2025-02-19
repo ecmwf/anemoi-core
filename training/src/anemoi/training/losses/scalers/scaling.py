@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from typing import Tuple
 
 import numpy as np
 from hydra.utils import instantiate
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
     from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
-SCALER_DTYPE = Tuple[Tuple[int], np.ndarray]
+SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 
 
 def create_scalers(

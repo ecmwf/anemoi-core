@@ -38,7 +38,7 @@ def datamodule() -> AnemoiDatasetsDataModule:
 
 @pytest.fixture
 def graph_with_nodes() -> HeteroData:
-    """Graph with 12 nodes over the globe, stored in \"test_nodes\"."""
+    """Graph with 12 nodes."""
     lats = [-0.15, 0, 0.15]
     lons = [0, 0.25, 0.5, 0.75]
     coords = np.array([[lat, lon] for lat in lats for lon in lons])
