@@ -18,6 +18,39 @@ dataloader:
     adjust: all
     min_distance_km: 0
 
+data:
+  forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  - "lsm"
+  # features that are only part of the forecast state
+  # but are not used as the input to the model
+  diagnostic:
+  - tp
+  remapped:
+  normalizer:
+    default: "mean-std"
+    std:
+    - "tp"
+    min-max:
+    max:
+    none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "lsm"
+
 training:
   loss_scaling:
     spatial:
@@ -52,7 +85,7 @@ graph:
           cutout:
           - dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
             thinning: 25
-          - dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+          - forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
           adjust: all
       attributes:
         weights:
@@ -74,13 +107,36 @@ graph:
       edge_builders:
       - _target_: anemoi.graphs.edges.KNNEdges
         num_nearest_neighbours: 12
+      attributes: ${graph.attributes.edges}
     - source_name: hidden
       target_name: hidden
       edge_builders:
       - _target_: anemoi.graphs.edges.MultiScaleEdges
         x_hops: 1
+      attributes: ${graph.attributes.edges}
     - source_name: hidden
       target_name: data
       edge_builders:
       - _target_: anemoi.graphs.edges.KNNEdges
         num_nearest_neighbours: 3
+      attributes: ${graph.attributes.edges}
+
+  # attributes:
+  #   nodes:
+  #     # Attributes for data nodes
+  #     area_weight:
+  #       _target_: anemoi.graphs.nodes.attributes.AreaWeights
+  #       norm: unit-max
+  #     cutout:
+  #       _target_: anemoi.graphs.nodes.attributes.CutOutMask
+  #   edges:
+  #     edge_length:
+  #       _target_: anemoi.graphs.edges.attributes.EdgeLength
+  #       norm: unit-max
+  #     edge_dirs:
+  #       _target_: anemoi.graphs.edges.attributes.EdgeDirection
+  #       norm: unit-std
+
+  model:
+    attributes:
+      edges: []
