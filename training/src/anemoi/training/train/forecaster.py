@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl

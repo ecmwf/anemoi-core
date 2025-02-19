@@ -150,9 +150,9 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 
 
 ScalerSchema = Union[
-    GeneralVariableLossScalerSchema, 
-    PressureLevelScalerSchema, 
-    TendencyScalerSchema, 
+    GeneralVariableLossScalerSchema,
+    PressureLevelScalerSchema,
+    TendencyScalerSchema,
     NaNMaskScalerSchema,
     GraphNodeAttributeScalerSchema,
     ReweightedGraphNodeAttributeScalerSchema,
