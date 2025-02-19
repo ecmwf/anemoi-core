@@ -141,7 +141,8 @@ class GraphNodeAttributeScalerSchema(BaseModel):
 
 class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScalerSchema"] = Field(
-        ..., alias="_target_",
+        ...,
+        alias="_target_",
     )
     nodes_name: str = Field(example="data")
     nodes_attribute_name: str = Field(example="area_weight")
