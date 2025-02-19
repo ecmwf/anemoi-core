@@ -8,11 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 
+import numpy as np
 import pytest
+import torch
 from _pytest.fixtures import SubRequest
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
@@ -31,3 +34,16 @@ def datamodule() -> AnemoiDatasetsDataModule:
         # config is relative to a module
         cfg = compose(config_name="config")
     return AnemoiDatasetsDataModule(cfg)
+
+
+@pytest.fixture
+def graph_with_nodes() -> HeteroData:
+    """Graph with 12 nodes over the globe, stored in \"test_nodes\"."""
+    lats = [-0.15, 0, 0.15]
+    lons = [0, 0.25, 0.5, 0.75]
+    coords = np.array([[lat, lon] for lat in lats for lon in lons])
+    graph = HeteroData()
+    graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
+    graph["test_nodes"].test_attr = (torch.tensor(coords) ** 2).sum(1)
+    graph["test_nodes"].mask = torch.tensor([True] * len(coords))
+    return graph

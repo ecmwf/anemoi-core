@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from typing import Tuple
 
 import numpy as np
 from hydra.utils import instantiate
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+SCALER_DTYPE = Tuple[Tuple[int], np.ndarray]
 
 
 def create_scalers(
@@ -32,7 +34,7 @@ def create_scalers(
     data_indices: IndexCollection,
     output_mask: BaseMask,
     **kwargs,
-) -> tuple[dict, dict]:
+) -> tuple[dict[str, SCALER_DTYPE], dict[str, SCALER_DTYPE]]:
     scalers, delayed_scaler_builders = {}, {}
     for name, config in scalers_config.items():
         scaler_builder = instantiate(config, data_indices=data_indices, **kwargs)
@@ -57,7 +59,7 @@ def create_scalers(
     return scalers, delayed_scaler_builders
 
 
-def get_final_variable_scaling(scalers: dict[str, tuple[tuple[int, ...] | torch.Tensor]]) -> torch.Tensor:
+def get_final_variable_scaling(scalers: dict[str, SCALER_DTYPE]) -> torch.Tensor:
     """Get the final variable scaling.
 
     All variable scalings have scale_dim -1, so we can get the right scalar for printing across the variable dimension.
@@ -81,10 +83,7 @@ def get_final_variable_scaling(scalers: dict[str, tuple[tuple[int, ...] | torch.
     return final_variable_scaling
 
 
-def print_final_variable_scaling(
-    scalers: dict[str, tuple[tuple[int] | torch.Tensor]],
-    data_indices: IndexCollection,
-) -> None:
+def print_final_variable_scaling(scalers: dict[str, SCALER_DTYPE], data_indices: IndexCollection) -> None:
     final_variable_scaling = get_final_variable_scaling(scalers)
     log_text = "Final Variable Scaling: "
     for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):

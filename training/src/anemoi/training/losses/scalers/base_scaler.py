@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC
+from abc import ABCMeta
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class ScaleDimMeta(type):
+class ScaleDimABCMeta(ABCMeta):
     def __new__(cls, name: str, bases: tuple, class_dict: dict):
         if "scale_dims" not in class_dict:
             error_msg = f"Class {name} must define 'scale_dims'"
@@ -46,7 +46,7 @@ class ScaleDimMeta(type):
         return super().__new__(cls, name, bases, class_dict)
 
 
-class BaseScaler(ABC, metaclass=ScaleDimMeta):
+class BaseScaler(metaclass=ScaleDimABCMeta):
     """Base class for all loss scalers."""
 
     def __init__(self, data_indices: IndexCollection, norm: str | None = None) -> None:
@@ -95,5 +95,10 @@ class BaseScaler(ABC, metaclass=ScaleDimMeta):
         raise ValueError(error_msg)
 
 
-class BaseDelayedScaler(BaseScaler, ABC):
-    pass
+class BaseDelayedScaler(BaseScaler):
+    """Base class for delayed Scalers.
+
+    The delayed scalers are only initialise when creating all the scalers, but its value is
+    computed during the first iteration of the training loop. This delayed scalers are suitable
+    for scalers requiring information from the `model.pre_processors`.
+    """

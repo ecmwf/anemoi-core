@@ -11,12 +11,14 @@
 import pytest
 import torch
 from _pytest.fixtures import SubRequest
-from hydra.utils import instantiate
 from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses.scalers.scaling import create_scalers
+from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers.scaling import get_final_variable_scaling
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.utils.masks import NoOutputMask
 
 
 @pytest.fixture
@@ -62,48 +64,53 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
 
 
 linear_scaler = {
-    "_target_": "anemoi.training.losses.scaling.variable_level.LinearVariableLevelScaler",
+    "_target_": "anemoi.training.losses.scalers.LinearVariableLevelScaler",
     "group": "pl",
     "y_intercept": 0.0,
     "slope": 0.001,
-    "scale_dim": -1,
 }
 
 relu_scaler = {
-    "_target_": "anemoi.training.losses.scaling.variable_level.ReluVariableLevelScaler",
+    "_target_": "anemoi.training.losses.scalers.ReluVariableLevelScaler",
     "group": "pl",
     "y_intercept": 0.2,
     "slope": 0.001,
-    "scale_dim": -1,
 }
 
 constant_scaler = {
-    "_target_": "anemoi.training.losses.scaling.variable_level.NoVariableLevelScaler",
+    "_target_": "anemoi.training.losses.scalers.NoVariableLevelScaler",
     "group": "pl",
-    "scale_dim": -1,
 }
 polynomial_scaler = {
-    "_target_": "anemoi.training.losses.scaling.variable_level.PolynomialVariableLevelScaler",
+    "_target_": "anemoi.training.losses.scalers.PolynomialVariableLevelScaler",
     "group": "pl",
     "y_intercept": 0.2,
     "slope": 0.001,
-    "scale_dim": -1,
 }
 
 
-std_dev_scaler = {
-    "_target_": "anemoi.training.losses.scaling.variable_tendency.StdevTendencyScaler",
-    "scale_dim": -1,
+std_dev_scaler = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler"}
+
+var_scaler = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler"}
+
+no_tend_scaler = {"_target_": "anemoi.training.losses.scalers.NoTendencyScaler"}
+
+graph_node_scaler = {
+    "_target_": "anemoi.training.losses.scalers.GraphNodeAttributeScaler",
+    "nodes_name": "test_nodes",
+    "nodes_attribute_name": "test_attr",
+    "apply_output_mask": False,
+    "norm": "unit-sum",
 }
 
-var_scaler = {
-    "_target_": "anemoi.training.losses.scaling.variable_tendency.VarTendencyScaler",
-    "scale_dim": -1,
-}
-
-no_tend_scaler = {
-    "_target_": "anemoi.training.losses.scaling.variable_tendency.NoTendencyScaler",
-    "scale_dim": -1,
+reweighted_graph_node_scaler = {
+    "_target_": "anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler",
+    "nodes_name": "test_nodes",
+    "nodes_attribute_name": "test_attr",
+    "scaling_mask_attribute_name": "mask",
+    "weight_frac_of_total": 0.4,
+    "apply_output_mask": False,
+    "norm": "unit-sum",
 }
 
 expected_linear_scaling = torch.Tensor(
@@ -211,25 +218,20 @@ expected_var_tendency_scaling = torch.Tensor(
 def test_variable_loss_scaling_vals(
     fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
     expected_scaling: torch.Tensor,
+    graph_with_nodes: HeteroData,
 ) -> None:
     config, data_indices, statistics, statistics_tendencies = fake_data
-    scalers_from_config = [
-        [
-            name,
-            instantiate(
-                scaler_config,
-                group_config=config.training.scalers.variable_groups,
-                data_indices=data_indices,
-                statistics=statistics,
-                statistics_tendencies=statistics_tendencies,
-            ),
-        ]
-        for name, scaler_config in config.training.scalers.builders.items()
-    ]
 
-    # add addtional user-defined scalers
-    scalers = {}
-    [scalers.update({name: (scale.scale_dim, scale.get_scaling())}) for name, scale in scalers_from_config]
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        group_config=config.training.scalers.variable_groups,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        # metadata_variables=metadata["dataset"].get("variables_metadata"),
+        output_mask=NoOutputMask(),
+    )
 
     final_variable_scaling = get_final_variable_scaling(scalers)
 
@@ -240,7 +242,7 @@ def test_variable_loss_scaling_vals(
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices, _, _ = fake_data
 
-    metric_range, metric_ranges_validation = GraphForecaster.get_val_metric_ranges(config, data_indices)
+    metric_range, metric_ranges_validation = get_metric_ranges(config, data_indices)
 
     del metric_range["all"]
     del metric_ranges_validation["all"]
