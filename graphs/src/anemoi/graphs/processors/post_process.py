@@ -13,13 +13,16 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 
+from hydra.utils import instantiate
+
 import torch
 from torch_geometric.data import HeteroData
 
 import numpy as np
 
-from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.edges.attributes import EdgeLength, BaseEdgeAttribute
 from anemoi.graphs import EARTH_RADIUS
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -160,10 +163,12 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self,
         source_name: str,
         target_name: str,
+        update_attributes: dict | None = {},
     ) -> None:
         self.source_name = source_name
         self.target_name = target_name
         self.edges_name = (self.source_name, 'to', self.target_name)
+        self.update_attrs = update_attributes
         self.mask: torch.Tensor = None
 
     def removing_edges(self, graph: HeteroData) -> HeteroData:
@@ -179,7 +184,10 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     @abstractmethod
     def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
 
-    def update_attributes(self, graph: HeteroData) -> torch.Tensor:
+    def update_attributes(self, graph: HeteroData) -> HeteroData:
+        for attr_name, EdgeAttr in self.update_attrs.items():
+            assert isinstance(EdgeAttr, BaseEdgeAttribute), "{attr_name} should point to a known edge builder."
+            graph[self.edges_name][attr_name] = EdgeAttr.compute(graph, self.edges_name)
         return graph
 
     def update_graph(self, graph: HeteroData) -> HeteroData:
@@ -226,8 +234,9 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         target_name: str,
         threshold: float,
         source_mask_attr_name: str | None = None,
+        update_attributes: dict | None = {},
     ) -> None:
-        super().__init__(source_name, target_name)
+        super().__init__(source_name, target_name, update_attributes)
         self.treshold = threshold
         self.source_mask_attr_name = source_mask_attr_name
 
