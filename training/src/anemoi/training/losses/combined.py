@@ -9,13 +9,12 @@
 
 from __future__ import annotations
 
-import functools
 from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
 
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.losses.loss import get_loss_function
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,7 +42,7 @@ class CombinedLoss(torch.nn.Module):
         Parameters
         ----------
         losses: tuple[dict[str, Any]| Callable]
-            Tuple of losses to initialise with `GraphForecaster.get_loss_function`.
+            Tuple of losses to initialise with `get_loss_function`.
             Allows for kwargs to be passed, and weighings controlled.
         *extra_losses: dict[str, Any] | Callable
             Additional arg form of losses to include in the combined loss.
@@ -55,15 +54,13 @@ class CombinedLoss(torch.nn.Module):
         Examples
         --------
         >>> CombinedLoss(
-                {"__target__": "anemoi.training.losses.mse.WeightedMSELoss"},
+                {"__target__": "anemoi.training.losses.mse.MSELoss"},
                 loss_weights=(1.0,),
-                node_weights=node_weights
             )
         --------
         >>> CombinedLoss(
-                losses = [anemoi.training.losses.mse.WeightedMSELoss],
+                losses = [anemoi.training.losses.mse.MSELoss],
                 loss_weights=(1.0,),
-                node_weights=node_weights
             )
         Or from the config,
 
@@ -71,8 +68,8 @@ class CombinedLoss(torch.nn.Module):
         training_loss:
             __target__: anemoi.training.losses.combined.CombinedLoss
             losses:
-                - __target__: anemoi.training.losses.mse.WeightedMSELoss
-                - __target__: anemoi.training.losses.mae.WeightedMAELoss
+                - __target__: anemoi.training.losses.mse.MSELoss
+                - __target__: anemoi.training.losses.mae.MAELoss
             scalers: ['variable']
             loss_weights: [1.0,0.5]
         ```
@@ -85,8 +82,7 @@ class CombinedLoss(torch.nn.Module):
         assert len(losses) > 0, "At least one loss must be provided"
 
         self.losses = [
-            GraphForecaster.get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
-            for loss in losses
+            get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs) for loss in losses
         ]
         self.loss_weights = loss_weights
 
@@ -120,19 +116,3 @@ class CombinedLoss(torch.nn.Module):
             else:
                 loss = self.loss_weights[i] * loss_fn(pred, target, **kwargs)
         return loss
-
-    @property
-    def name(self) -> str:
-        return "combined_" + "_".join(getattr(loss, "name", loss.__class__.__name__.lower()) for loss in self.losses)
-
-    def __getattr__(self, name: str) -> Callable:
-        """Allow access to underlying attributes of the loss functions."""
-        if not all(hasattr(loss, name) for loss in self.losses):
-            error_msg = f"Attribute {name} not found in all loss functions"
-            raise AttributeError(error_msg)
-
-        @functools.wraps(getattr(self.losses[0], name))
-        def hidden_func(*args, **kwargs) -> list[Any]:
-            return [getattr(loss, name)(*args, **kwargs) for loss in self.losses]
-
-        return hidden_func

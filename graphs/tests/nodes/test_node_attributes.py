@@ -11,6 +11,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.nodes.attributes import MaskedPlanarAreaWeights
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 
@@ -49,4 +50,11 @@ def test_area_weights_fail(graph_with_nodes: HeteroData, radius: float):
     """Test attribute builder for SphericalAreaWeights with invalid radius."""
     with pytest.raises(ValueError):
         node_attr_builder = SphericalAreaWeights(radius=radius)
+        node_attr_builder.compute(graph_with_nodes, "test_nodes")
+
+
+def test_masked_area_weights_fail(graph_with_nodes: HeteroData):
+    """Test attribute builder for AreaWeights with invalid radius."""
+    with pytest.raises(KeyError):
+        node_attr_builder = MaskedPlanarAreaWeights(mask_node_attr_name="nonexisting")
         node_attr_builder.compute(graph_with_nodes, "test_nodes")

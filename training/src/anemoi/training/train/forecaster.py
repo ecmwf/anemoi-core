@@ -9,31 +9,24 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import ListConfig
-from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.interface import AnemoiModelInterface
-from anemoi.training.losses.scaling.variable import get_final_variable_scaling
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.loss import get_metric_ranges
+from anemoi.training.losses.scalers.scaling import create_scalers
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.schemas.training import LossScalingSchema  # noqa: TC001
-from anemoi.training.schemas.training import PressureLevelScalerSchema  # noqa: TC001
-from anemoi.training.schemas.training import TrainingSchema  # noqa: TC001
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -112,68 +105,38 @@ class GraphForecaster(pl.LightningModule):
         self.save_hyperparameters()
 
         self.latlons_data = graph_data[config.graph.data].x
-        self.node_weights = self.get_node_weights(config.model_dump(by_alias=True).training, graph_data)
-        self.node_weights = self.output_mask.apply(self.node_weights, dim=0, fill_value=0.0)
         self.statistics_tendencies = statistics_tendencies
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Instantiate all scalers with the training configuration
-        scalers = [
-            [
-                name,
-                instantiate(
-                    scaler_config,
-                    group_config=config.training.scalers.variable_groups,
-                    data_indices=data_indices,
-                    statistics=statistics,
-                    statistics_tendencies=statistics_tendencies,
-                    metadata_variables=metadata["dataset"].get("variables_metadata"),
-                ),
-            ]
-            for name, scaler_config in config.training.scalers.builders.items()
-        ]
+        self.scalers, self.delayed_scaler_builders = create_scalers(
+            config.training.scalers.builders,
+            group_config=config.training.scalers.variable_groups,
+            data_indices=data_indices,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            metadata_variables=metadata["dataset"].get("variables_metadata"),
+            output_mask=self.output_mask,
+        )
 
-        self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(
+        self.internal_metric_ranges, self.val_metric_ranges = get_metric_ranges(
             config,
             data_indices,
             metadata["dataset"].get("variables_metadata"),
         )
 
-        # Check if the model is a stretched grid
-        if graph_data["hidden"].node_type == "StretchedTriNodes":
-            mask_name = config.graph.nodes.hidden.node_builder.mask_attr_name
-            limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
-        else:
-            limited_area_mask = torch.ones((1,))
+        self.is_first_step = True
 
-        # Kwargs to pass to the loss function
-        loss_kwargs = {"node_weights": self.node_weights}
-        # scalers to include in the loss function, must be of form (dim, scaler)
-        # Use -1 for the variable dimension, -2 for the latlon dimension
-        self.scalers = {
-            "limited_area_mask": (2, limited_area_mask),
-        }
-        # add addtional user-defined scalers
-        [self.scalers.update({name: (scale.scale_dim, scale.get_scaling())}) for name, scale in scalers]
+        self.loss = get_loss_function(config.training.training_loss, scalers=self.scalers)
 
-        # print final variable scaling
-        final_variable_scaling = get_final_variable_scaling(self.scalers)
-        log_text = "Final Variable Scaling: "
-        for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):
-            log_text += f"{name}: {final_variable_scaling[idx]:.4g}, "
-        LOGGER.debug(log_text)
-
-        self.updated_loss_mask = False
-
-        self.loss = self.get_loss_function(config.training.training_loss, scalers=self.scalers, **loss_kwargs)
-
-        assert isinstance(self.loss, BaseWeightedLoss) and not isinstance(
+        assert isinstance(self.loss, BaseLoss) and not isinstance(
             self.loss,
             torch.nn.ModuleList,
-        ), f"Loss function must be a `BaseWeightedLoss`, not a {type(self.loss).__name__!r}"
+        ), f"Loss function must be a `BaseLoss`, not a {type(self.loss).__name__!r}"
 
-        self.metrics = self.get_loss_function(config.training.validation_metrics, scalers=self.scalers, **loss_kwargs)
+        self.metrics = get_loss_function(config.training.validation_metrics, scalers=self.scalers)
         if not isinstance(self.metrics, torch.nn.ModuleList):
             self.metrics = torch.nn.ModuleList([self.metrics])
 
@@ -216,147 +179,13 @@ class GraphForecaster(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x, self.model_comm_group)
 
-    # Future import breaks other type hints TODO Harrison Cook
-    @staticmethod
-    def get_loss_function(
-        config: DictConfig,
-        scalers: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None,
-        **kwargs,
-    ) -> BaseWeightedLoss | torch.nn.ModuleList:
-    ) -> BaseWeightedLoss | torch.nn.ModuleList:
-        """Get loss functions from config.
-
-        Can be ModuleList if multiple losses are specified.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Loss function configuration, should include `scalers` if scalers are to be added to the loss function.
-        scalers : dict[str, tuple[int | tuple[int, ...] | torch.Tensor]], optional
-            Scalers which can be added to the loss function. Defaults to None., by default None
-            If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config
-            E.g.
-                If `scalers: ['variable']` is set in the config, and `variable` in `scalers`
-                `variable` will be added to the scaler of the loss function.
-        kwargs : Any
-            Additional arguments to pass to the loss function
-
-        Returns
-        -------
-        Union[BaseWeightedLoss, torch.nn.ModuleList]
-            Loss function, or list of metrics
-
-        Raises
-        ------
-        TypeError
-            If not a subclass of `BaseWeightedLoss`
-        ValueError
-            If scaler is not found in valid scalers
-        """
-        if isinstance(config, ListConfig):
-            return torch.nn.ModuleList(
-                [
-                    GraphForecaster.get_loss_function(
-                        OmegaConf.create(loss_config),
-                        scalers=scalers,
-                        **kwargs,
-                    )
-                    for loss_config in config
-                ],
-            )
-
-        loss_config = OmegaConf.to_container(config, resolve=True)
-        scalers_to_include = loss_config.pop("scalers", [])
-
-        if "*" in scalers_to_include:
-            scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
-
-        # Instantiate the loss function with the loss_init_config
-        loss_function = instantiate(loss_config, **kwargs)
-
-        if not isinstance(loss_function, BaseWeightedLoss):
-            error_msg = f"Loss must be a subclass of 'BaseWeightedLoss', not {type(loss_function)}"
-            raise TypeError(error_msg)
-
-        for key in scalers_to_include:
-            if key not in scalers or []:
-                error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
-                raise ValueError(error_msg)
-            loss_function.add_scaler(*scalers[key], name=key)
-
-        return loss_function
-
-    def training_weights_for_imputed_variables(
-        self,
-        batch: torch.Tensor,
-    ) -> None:
-        """Update the loss weights mask for imputed variables."""
-        if "nan_mask_weights" in self.loss.scaler:
-            loss_weights_mask = torch.ones((1, 1), device=batch.device)
-            found_loss_mask_training = False
-            # iterate over all pre-processors and check if they have a loss_mask_training attribute
-            for pre_processor in self.model.pre_processors.processors.values():
-                if hasattr(pre_processor, "loss_mask_training"):
-                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
-                    found_loss_mask_training = True
-                # if transform_loss_mask function exists for preprocessor apply it
-                if hasattr(pre_processor, "transform_loss_mask") and found_loss_mask_training:
-                    loss_weights_mask = pre_processor.transform_loss_mask(loss_weights_mask)
-            # update scaler with loss_weights_mask retrieved from preprocessors
-            self.loss.update_scaler(scaler=loss_weights_mask.cpu(), name="nan_mask_weights")
-            self.scalers["nan_mask_weights"] = ((-2, -1), loss_weights_mask.cpu())
-
-        self.updated_loss_mask = True
-
-    @staticmethod
-    def get_val_metric_ranges(
-        config: DictConfig,
-        data_indices: IndexCollection,
-        metadata_variables: dict | None = None,
-    ) -> tuple[dict, dict]:
-
-        metric_ranges = defaultdict(list)
-        metric_ranges_validation = defaultdict(list)
-        variable_groups = config.training.scalers.variable_groups
-
-        extract_variable_group_and_level = ExtractVariableGroupAndLevel(
-            variable_groups,
-            metadata_variables,
-        )
-
-        for key, idx in data_indices.internal_model.output.name_to_index.items():
-            variable_group, variable_ref, _ = extract_variable_group_and_level.get_group_and_level(key)
-
-            # Add metrics for grouped variables and variables in default group
-            metric_ranges[f"{variable_group}_{variable_ref}"].append(idx)
-
-            # Specific metrics from hydra to log in logger
-            if key in config.metrics:
-                metric_ranges[key] = [idx]
-
-        # Add the full list of output indices
-        metric_ranges["all"] = data_indices.internal_model.output.full.tolist()
-
-        # metric for validation, after postprocessing
-        for key, idx in data_indices.model.output.name_to_index.items():
-            variable_group, variable_ref, _ = extract_variable_group_and_level.get_group_and_level(key)
-
-            # Add metrics for grouped variables and variables in default group
-            metric_ranges_validation[f"{variable_group}_{variable_ref}"].append(idx)
-
-            # Create specific metrics from hydra to log in logger
-            if key in config.metrics:
-                metric_ranges_validation[key] = [idx]
-
-        # Add the full list of output indices
-        metric_ranges_validation["all"] = data_indices.model.output.full.tolist()
-
-        return metric_ranges, metric_ranges_validation
-
-    @staticmethod
-    def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
-        node_weighting = instantiate(config.node_loss_weights)
-        return node_weighting.weights(graph_data)
+    def define_delayed_scalers(self) -> None:
+        """Update delayed scalers such as the loss weights mask for imputed variables."""
+        for name, scaler_builder in self.delayed_scaler_builders.items():
+            scaler_values = scaler_builder.get_scaling(model=self.model)
+            scaler_values = scaler_builder.normalise(scaler_values)
+            self.scalers[name] = (scaler_builder.scale_dims, scaler_values)
+            self.loss.update_scaler(scaler=scaler_values, name=name)
 
     def set_model_comm_group(
         self,
@@ -449,9 +278,9 @@ class GraphForecaster(pl.LightningModule):
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
 
-        if not self.updated_loss_mask:
-            # update loss scaler after first application and initialization of preprocessors
-            self.training_weights_for_imputed_variables(batch)
+        if self.is_first_step:  # only runs in the first step
+            self.define_delayed_scalers()
+            self.is_first_step = False
 
         # start rollout of preprocessed batch
         x = batch[
@@ -478,11 +307,7 @@ class GraphForecaster(pl.LightningModule):
 
             metrics_next = {}
             if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred,
-                    y,
-                    rollout_step,
-                )
+                metrics_next = self.calculate_val_metrics(y_pred, y, rollout_step)
             yield loss, metrics_next, y_pred
 
     def _step(
@@ -575,18 +400,15 @@ class GraphForecaster(pl.LightningModule):
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
 
-        for metric in self.metrics:
-            metric_name = getattr(metric, "name", metric.__class__.__name__.lower())
+        for metric_name, metric in self.metrics.items():
 
-            if not isinstance(metric, BaseWeightedLoss):
+            if not isinstance(metric, BaseLoss):
                 # If not a weighted loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}/{rollout_step + 1}"] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                )
+                metrics[f"{metric_name}/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():
+                metric_step_name = f"{metric_name}/{mkey}/{rollout_step + 1}"
                 if "scale_validation_metrics" in self.config.training and (
                     mkey in self.config.training.scale_validation_metrics.metrics
                     or "*" in self.config.training.scale_validation_metrics.metrics
@@ -597,12 +419,7 @@ class GraphForecaster(pl.LightningModule):
 
                         # Use internal model space indices
                         internal_model_indices = self.internal_metric_ranges[mkey]
-
-                        metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
-                            y_pred,
-                            y,
-                            scaler_indices=[..., internal_model_indices],
-                        )
+                        metrics[metric_step_name] = metric(y_pred, y, scaler_indices=[..., internal_model_indices])
                 else:
                     if -1 in metric.scaler:
                         exception_msg = (
@@ -612,7 +429,7 @@ class GraphForecaster(pl.LightningModule):
                         )
                         raise ValueError(exception_msg)
 
-                    metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
+                    metrics[metric_step_name] = metric(
                         y_pred_postprocessed,
                         y_postprocessed,
                         scaler_indices=[..., indices],
@@ -623,7 +440,7 @@ class GraphForecaster(pl.LightningModule):
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
-            f"train_{getattr(self.loss, 'name', self.loss.__class__.__name__.lower())}",
+            "train_loss",
             train_loss,
             on_epoch=True,
             on_step=True,
@@ -681,7 +498,7 @@ class GraphForecaster(pl.LightningModule):
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
 
         self.log(
-            f"val_{getattr(self.loss, 'name', self.loss.__class__.__name__.lower())}",
+            "val_loss",
             val_loss,
             on_epoch=True,
             on_step=True,

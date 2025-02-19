@@ -14,36 +14,13 @@ import logging
 
 import torch
 
-from anemoi.training.losses.mse import BaseWeightedLoss
+from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedRMSELoss(BaseWeightedLoss):
-    """Node-weighted RMSE loss."""
-
-    name = "wrmse"
-
-    def __init__(
-        self,
-        node_weights: torch.Tensor,
-        ignore_nans: bool = False,
-        **kwargs,
-    ) -> None:
-        """Node- and (inverse-)variance-weighted RMSE Loss.
-
-        Parameters
-        ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
-        ignore_nans : bool, optional
-            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-        """
-        super().__init__(
-            node_weights=node_weights,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
+class RMSELoss(MSELoss):
+    """RMSE loss."""
 
     def forward(
         self,
@@ -53,7 +30,7 @@ class WeightedRMSELoss(BaseWeightedLoss):
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted RMSE loss.
+        """Calculates the RMSE loss.
 
         Parameters
         ----------
@@ -72,7 +49,7 @@ class WeightedRMSELoss(BaseWeightedLoss):
         Returns
         -------
         torch.Tensor
-            Weighted RMSE loss
+            RMSE loss
         """
         mse = super().forward(
             pred=pred,
