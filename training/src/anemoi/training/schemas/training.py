@@ -173,12 +173,10 @@ class CombinedLossSchema(BaseLossSchema):
     def check_length_of_weights_and_losses(self) -> CombinedLossSchema:
         """Check that the number of losses and weights match, or if not set, skip."""
         losses, loss_weights = self.losses, self.loss_weights
-        if loss_weights is None:
-            return
-
-        if len(losses) != len(loss_weights):
+        if loss_weights is not None and len(losses) != len(loss_weights):
             error_msg = "Number of losses and weights must match"
             raise ValueError(error_msg)
+        return self
 
 
 LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
