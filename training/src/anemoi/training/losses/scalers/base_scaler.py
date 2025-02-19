@@ -24,10 +24,6 @@ LOGGER = logging.getLogger(__name__)
 
 class ScaleDimABCMeta(ABCMeta):
     def __new__(cls, name: str, bases: tuple, class_dict: dict):
-        if "scale_dims" not in class_dict or class_dict["scale_dims"] is None:
-            error_msg = f"Class {name} must define 'scale_dims'"
-            raise TypeError(error_msg)
-
         # Convert scale_dims to a tuple if it's an int
         if isinstance(class_dict["scale_dims"], int):
             class_dict["scale_dims"] = (class_dict["scale_dims"],)
@@ -70,6 +66,12 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
             "unit-mean",
         ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls.scale_dims is None:
+            error_msg = f"Class {cls.__name__} must define 'scale_dims'"
+            raise TypeError(error_msg)
+
     @property
     def is_variable_dim_scaled(self) -> bool:
         return -1 in self.scale_dims or 3 in self.scale_dims
@@ -104,5 +106,3 @@ class BaseDelayedScaler(BaseScaler):
     computed during the first iteration of the training loop. This delayed scalers are suitable
     for scalers requiring information from the `model.pre_processors`.
     """
-
-    scale_dims: tuple[int] = None
