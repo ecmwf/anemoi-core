@@ -12,9 +12,9 @@ defaults:
 dataloader:
   dataset:
     cutout:
-      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      - dataset: ${hardware.files.dataset}
         thinning: 25
-      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+      - dataset: ${hardware.files.forcing_dataset}
     adjust: all
     min_distance_km: 0
 
@@ -26,6 +26,7 @@ training:
       scaled_attribute: area_weight # it must be a node attribute of the output nodes
       cutout_weight_frac_of_global: 2
   max_epochs: 2
+  max_batch: 2
 
 hardware:
   files:

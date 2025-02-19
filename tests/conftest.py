@@ -15,7 +15,7 @@ def architecture_config(request) -> None:
 
 @pytest.fixture()
 def stretched_config() -> None:
-    with initialize(version_base=None, config_path="", job_name="test_training"):
+    with initialize(version_base=None, config_path="", job_name="test_stretched"):
         cfg = compose(config_name="stretched_config")
         OmegaConf.resolve(cfg)
         return cfg
