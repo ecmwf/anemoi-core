@@ -187,6 +187,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     def update_attributes(self, graph: HeteroData) -> HeteroData:
         for attr_name, EdgeAttr in self.update_attrs.items():
             assert isinstance(EdgeAttr, BaseEdgeAttribute), "{attr_name} should point to a known edge builder."
+            LOGGER.info(f"Updating edge attribute {attr_name}.")
             graph[self.edges_name][attr_name] = EdgeAttr.compute(graph, self.edges_name)
         return graph
 
