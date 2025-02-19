@@ -38,15 +38,6 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
 
 
-if TYPE_CHECKING:
-    from collections.abc import Generator
-    from collections.abc import Mapping
-
-    from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
-
-    from anemoi.models.data_indices.collection import IndexCollection
-
 LOGGER = logging.getLogger(__name__)
 
 

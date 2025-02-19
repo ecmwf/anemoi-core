@@ -35,7 +35,7 @@ class NaNMaskScaler(BaseDelayedScaler):
         data_indices : IndexCollection
             Collection of data indices.
         norm : str, optional
-            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
+            Type of normalisation to apply. Options are None, unit-sum, unit-mean and l1.
         """
         super().__init__(data_indices, norm=norm)
         del kwargs

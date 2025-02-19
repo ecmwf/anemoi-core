@@ -28,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 class BaseVariableLossScaler(BaseScaler):
     """Base class for all variable loss scalers."""
 
-    scale_dims: int = 3
+    scale_dims: int = -1
 
     def __init__(
         self,

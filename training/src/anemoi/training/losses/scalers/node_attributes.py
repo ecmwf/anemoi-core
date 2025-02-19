@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphNodeAttributeScaler(BaseScaler, ABC):
+class GraphNodeAttributeScaler(BaseScaler):
     """Class for extracting scalers from node attributes."""
 
     scale_dims: int = 2

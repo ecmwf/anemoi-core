@@ -12,12 +12,14 @@ from __future__ import annotations
 import logging
 from abc import ABCMeta
 from abc import abstractmethod
+from typing import Type
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,10 +27,11 @@ LOGGER = logging.getLogger(__name__)
 class ScaleDimABCMeta(ABCMeta):
     def __new__(cls, name: str, bases: tuple, class_dict: dict):
         # Convert scale_dims to a tuple if it's an int
-        if isinstance(class_dict["scale_dims"], int):
-            class_dict["scale_dims"] = (class_dict["scale_dims"],)
+        scale_dims = class_dict.get("scale_dims", None)
+        if scale_dims is not None and isinstance(scale_dims, int):
+            scale_dims = (scale_dims,)
 
-        if class_dict["scale_dims"] is not None and not all(-4 <= d <= 3 for d in class_dict["scale_dims"]):
+        if scale_dims is not None and not all(-4 <= d <= 3 for d in scale_dims):
             error_msg = (
                 "Invalid dimension for scaling in 'scale_dims'. Expected dimensions are:"
                 "\n  0 (or -4): batch dimension"
@@ -39,6 +42,7 @@ class ScaleDimABCMeta(ABCMeta):
             )
             raise ValueError(error_msg)
 
+        class_dict["scale_dims"] = None
         return super().__new__(cls, name, bases, class_dict)
 
 
@@ -68,7 +72,7 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        if cls.scale_dims is None and not isinstance(cls, ABCMeta):
+        if not isinstance(cls, ABCMeta) and cls.scale_dims is None:
             error_msg = f"Class {cls.__name__} must define 'scale_dims'"
             raise TypeError(error_msg)
 
@@ -79,6 +83,9 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
     @property
     def is_spatial_dim_scaled(self) -> bool:
         return -2 in self.scale_dims or 2 in self.scale_dims
+
+    def apply_output_mask(self, output_mask: Type[BaseMask]):
+        return None
 
     @abstractmethod
     def get_scaling(self, **kwargs) -> np.ndarray:
@@ -99,7 +106,7 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
         raise ValueError(error_msg)
 
 
-class BaseDelayedScaler(BaseScaler):
+class BaseDelayedScaler(BaseScaler, metaclass=ScaleDimABCMeta):
     """Base class for delayed Scalers.
 
     The delayed scalers are only initialise when creating all the scalers, but its value is
