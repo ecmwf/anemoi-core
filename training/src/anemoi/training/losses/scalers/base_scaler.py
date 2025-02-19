@@ -68,7 +68,7 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        if cls.scale_dims is None:
+        if cls.scale_dims is None and not isinstance(cls, ABCMeta):
             error_msg = f"Class {cls.__name__} must define 'scale_dims'"
             raise TypeError(error_msg)
 
@@ -106,5 +106,3 @@ class BaseDelayedScaler(BaseScaler):
     computed during the first iteration of the training loop. This delayed scalers are suitable
     for scalers requiring information from the `model.pre_processors`.
     """
-
-    scale_dims: tuple[int] = None
