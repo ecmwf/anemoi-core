@@ -90,7 +90,7 @@ class LossScalingSchema(BaseModel):
 class GeneralVariableLossScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.GeneralVariableLossScaler"] = Field(..., alias="_target_")
     weights: dict[str, float]
-    "Weight of each variable."  # TODO: Check keys (variables) are read ???
+    "Weight of each variable."  # Check keys (variables) are read ???
 
 
 class NaNMaskScalerSchema(BaseModel):
