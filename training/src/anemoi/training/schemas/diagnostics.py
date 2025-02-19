@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 from pydantic import Field
@@ -190,6 +191,30 @@ class TimeLimitSchema(BaseModel):
     "Time limit, if int, assumed to be hours, otherwise must be a string with units (e.g. '1h', '30m')."
     record_file: Union[str, None] = Field(default=None)
     "File to record the last checkpoint to on exit, if set."
+
+
+class EarlyStoppingSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.stopping.EarlyStopping"] = Field(alias="_target_")
+    monitor: str = Field(examples=["val_wmse_epoch", "val_wmse/sfc_2t/1"])
+    "Metric to monitor"
+    min_delta: float = 0.0
+    "Minimum change in the monitored quantity to qualify as an improvement."
+    patience: int = 3
+    "Number of epochs with no improvement after which training will be stopped."
+    verbose: bool = False
+    "If True, prints a message for each improvement."
+    mode: Literal["min", "max"] = "min"
+    "One of {'min', 'max'}, changes if minimisation or maximimisation of the metric is 'good'."
+    strict: bool = True
+    "Whether to crash the training if the monitored quantity is not found."
+    check_finite: bool = True
+    "Whether to check for NaNs and Infs in the monitored quantity."
+    stopping_threshold: Optional[float] = None
+    "Stop training immediately once the monitored quantity reaches this threshold."
+    divergence_threshold: Optional[float] = None
+    "Stop training as soon as the monitored quantity becomes worse than this threshold.."
+    check_on_train_epoch_end: Optional[bool] = None
+    "Whether to check the stopping criteria at the end of each training epoch."
 
 
 class Debug(BaseModel):
