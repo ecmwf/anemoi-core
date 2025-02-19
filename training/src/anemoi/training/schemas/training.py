@@ -90,7 +90,7 @@ class LossScalingSchema(BaseModel):
 class GeneralVariableLossScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.GeneralVariableLossScaler"] = Field(..., alias="_target_")
     weights: dict[str, float]
-    "Weight of each variable." #TODO: Check keys (variables) are read ???
+    "Weight of each variable."  # TODO: Check keys (variables) are read ???
 
 
 class NaNMaskScalerSchema(BaseModel):
@@ -138,8 +138,11 @@ class GraphNodeAttributeScalerSchema(BaseModel):
     norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
+
 class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScalerSchema"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScalerSchema"] = Field(
+        ..., alias="_target_",
+    )
     nodes_name: str = Field(example="data")
     nodes_attribute_name: str = Field(example="area_weight")
     scaling_mask_attribute_name: str = Field(example="cutout_mask")
