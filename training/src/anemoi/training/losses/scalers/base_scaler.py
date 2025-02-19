@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 class ScaleDimABCMeta(ABCMeta):
     def __new__(cls, name: str, bases: tuple, class_dict: dict):
-        if "scale_dims" not in class_dict:
+        if "scale_dims" not in class_dict or class_dict["scale_dims"] = None:
             error_msg = f"Class {name} must define 'scale_dims'"
             raise TypeError(error_msg)
 
@@ -48,6 +48,8 @@ class ScaleDimABCMeta(ABCMeta):
 
 class BaseScaler(metaclass=ScaleDimABCMeta):
     """Base class for all loss scalers."""
+
+    scale_dims: tuple[int] = None
 
     def __init__(self, data_indices: IndexCollection, norm: str | None = None) -> None:
         """Initialise BaseScaler.
@@ -102,3 +104,5 @@ class BaseDelayedScaler(BaseScaler):
     computed during the first iteration of the training loop. This delayed scalers are suitable
     for scalers requiring information from the `model.pre_processors`.
     """
+
+    scale_dims: tuple[int] = None
