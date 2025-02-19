@@ -147,16 +147,6 @@ class CombinedLossSchema(BaseLossSchema):
     loss_weights: Union[list[Union[int, float]], None] = None
     "Weightings of losses, if not set, all losses are weighted equally."
 
-    class Config:
-        """Pydantic configuration."""
-
-        use_attribute_docstrings = True
-        use_enum_values = True
-        validate_assignment = True
-        validate_default = True
-        extra = "allow"  # Allow extra kwargs to be passed to underlying losses
-        # Will also allow typos, but this is a trade-off for flexibility
-
     @field_validator("losses", mode="before")
     @classmethod
     def add_empty_scalars(cls, losses: Any) -> Any:
