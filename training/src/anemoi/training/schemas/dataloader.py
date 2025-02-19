@@ -14,6 +14,7 @@ import datetime  # noqa: TC003
 from pathlib import Path  # noqa: TC003
 from typing import Any
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 from omegaconf import DictConfig  # noqa: TC002
@@ -62,7 +63,7 @@ class Frequency(RootModel):
 class DatasetSchema(PydanticBaseModel):
     """Dataset configuration schema."""
 
-    dataset: Union[str, dict, Path, list[dict]] | None = None
+    dataset: Optional[Union[str, dict, Path, list[dict]]] = None
     "Dataset, see anemoi-datasets"
     start: Union[str, int, None] = Field(default=None)
     "Starting datetime for sample of the dataset."
