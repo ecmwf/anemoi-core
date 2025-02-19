@@ -157,7 +157,21 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
         return connected_mask
 
 class BaseEdgeMaskingProcessor(PostProcessor, ABC):
-    """Base class for mask based node processor."""
+    """Base class for mask based edge processor.
+
+    Attributes
+    ----------
+    source_name: str
+        Name of the source nodes of edges to remove.
+    target_name: str
+        Name of the target nodes of edges to remove.
+    source_mask_attr_name: str , optional
+         the postprocessing will be restricted to edges with source node having True in this mask_attr
+    target_mask_attr_name: str, optional
+        the postprocessing will be restricted to edges with target node having True in this mask_attr
+    update_attributes: dict , optional
+        edge attributes to be updated after removal of edges
+    """
 
     def __init__(
         self,
@@ -219,14 +233,16 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         Name of the source nodes of edges to remove.
     target_name: str
         Name of the target nodes of edges to remove.
-    ignore: dict, optional
-        Attribute and value pairs that will be ignored when removing edges. 
-        Edges with at least one attribute that matches the corresponindign value not be removed.
-
+    source_mask_attr_name: str , optional
+         the postprocessing will be restricted to edges with source node having True in this mask_attr
+    target_mask_attr_name: str, optional
+        the postprocessing will be restricted to edges with target node having True in this mask_attr
+    update_attributes: dict , optional
+        edge attributes to be updated after removal of edges
     Methods
     -------
     compute_mask(graph)
-        Compute the mask of the connected nodes.
+        Compute the mask of the relevant edges longer than the threshold.
     """
 
     def __init__(
@@ -235,6 +251,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         target_name: str,
         threshold: float,
         source_mask_attr_name: str | None = None,
+        target_mask_attr_name: str | None = None,
         update_attributes: dict | None = {},
     ) -> None:
         super().__init__(source_name, target_name, update_attributes)
@@ -249,5 +266,10 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
             source_attr_mask = graph[self.source_name][self.source_mask_attr_name][:,0]
             source_indices = graph[self.edges_name]['edge_index'][0] 
             source_mask = np.vectorize(lambda i: source_attr_mask[i])(source_indices)
-            mask = np.logical_or(mask, ~source_mask)    
+            mask = np.logical_or(mask, ~source_mask)
+        if self.target_mask_attr_name:
+            target_attr_mask = graph[self.target_name][self.target_mask_attr_name][:,0]
+            target_indices = graph[self.edges_name]['edge_index'][1] 
+            target_mask = np.vectorize(lambda i: target_attr_mask[i])(target_indices)
+            mask = np.logical_or(mask, ~target_mask)    
         return mask
