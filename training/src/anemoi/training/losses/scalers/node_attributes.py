@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC
 from typing import TYPE_CHECKING
 
 import torch

@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 from abc import ABCMeta
 from abc import abstractmethod
-from typing import Type
 from typing import TYPE_CHECKING
+from typing import Type
 
 import numpy as np
 
@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 class ScaleDimABCMeta(ABCMeta):
     def __new__(cls, name: str, bases: tuple, class_dict: dict):
         # Convert scale_dims to a tuple if it's an int
-        scale_dims = class_dict.get("scale_dims", None)
+        scale_dims = class_dict.get("scale_dims")
         if scale_dims is not None and isinstance(scale_dims, int):
             scale_dims = (scale_dims,)
 
