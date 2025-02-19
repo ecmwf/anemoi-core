@@ -28,7 +28,7 @@ class ScaleDimABCMeta(ABCMeta):
         if isinstance(class_dict["scale_dims"], int):
             class_dict["scale_dims"] = (class_dict["scale_dims"],)
 
-        if not all(-4 <= d <= 3 for d in class_dict["scale_dims"]):
+        if class_dict["scale_dims"] is not None and not all(-4 <= d <= 3 for d in class_dict["scale_dims"]):
             error_msg = (
                 "Invalid dimension for scaling in 'scale_dims'. Expected dimensions are:"
                 "\n  0 (or -4): batch dimension"
