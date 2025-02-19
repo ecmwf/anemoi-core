@@ -10,13 +10,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.resources as pkg_resources
 import logging
 import os
 import re
 import shutil
 import tempfile
-from contextlib import chdir
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -31,6 +31,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Generator
 
     from pydantic import BaseModel
 
@@ -208,27 +209,32 @@ class ConfigGenerator(Command):
     def dump_config(self, config_path: Path, name: str, output: Path) -> None:
         """Dump config files in one YAML file."""
         # Copy config files in temporary directory
-        tmp_dir = Path(tempfile.TemporaryDirectory().name)
-        self.copy_files(config_path, tmp_dir)
-        if not tmp_dir.exists():
-            LOGGER.error("No files found in  %s", config_path.absolute())
-            raise FileNotFoundError
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            tmp_dir = Path(tmpdirname)
+            self.copy_files(config_path, tmp_dir)
+            if not tmp_dir.exists():
+                LOGGER.error("No files found in  %s", config_path.absolute())
+                raise FileNotFoundError
 
-        # Move to config directory to be able to handle hydra
-        with chdir(tmp_dir), initialize(version_base=None, config_path="./"):
-            cfg = compose(config_name=name)
+            # Move to config directory to be able to handle hydra
+            with change_directory(tmp_dir), initialize(version_base=None, config_path="./"):
+                cfg = compose(config_name=name)
 
-        # Dump configuration in output file
-        LOGGER.info("Dumping file in %s.", output)
-        with output.open("w") as f:
-            f.write(OmegaConf.to_yaml(cfg))
+            # Dump configuration in output file
+            LOGGER.info("Dumping file in %s.", output)
+            with output.open("w") as f:
+                f.write(OmegaConf.to_yaml(cfg))
 
-        # Remove tmp dir
-        for fp in tmp_dir.rglob("*yaml"):
-            if fp.is_file():
-                fp.unlink()
-        LOGGER.info("Remove temporary directory %s.", tmp_dir)
-        shutil.rmtree(tmp_dir)
+
+@contextlib.contextmanager
+def change_directory(destination: Path) -> Generator[None, None, None]:
+    """A context manager to temporarily change the current working directory."""
+    original_directory = Path.cwd()
+    try:
+        os.chdir(destination)
+        yield
+    finally:
+        os.chdir(original_directory)
 
 
 def extract_primitive_type_hints(model: type[BaseModel], prefix: str = "") -> dict[str, Any]:
