@@ -106,3 +106,5 @@ class BaseDelayedScaler(BaseScaler):
     computed during the first iteration of the training loop. This delayed scalers are suitable
     for scalers requiring information from the `model.pre_processors`.
     """
+
+    scale_dims: tuple[int] = None
