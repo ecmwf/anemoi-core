@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 class ScaleDimABCMeta(ABCMeta):
     def __new__(cls, name: str, bases: tuple, class_dict: dict):
-        if "scale_dims" not in class_dict or class_dict["scale_dims"] = None:
+        if "scale_dims" not in class_dict or class_dict["scale_dims"] is None:
             error_msg = f"Class {name} must define 'scale_dims'"
             raise TypeError(error_msg)
 
