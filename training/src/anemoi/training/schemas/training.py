@@ -110,7 +110,6 @@ class TendencyScalerSchema(BaseModel):
 
 
 class PressureLevelScalerTargets(str, Enum):
-
     relu_scaler = "anemoi.training.losses.scalers.ReluPressureLevelScaler"
     linear_scaler = "anemoi.training.losses.scalers.LinearPressureLevelScaler"
     polynomial_sclaer = "anemoi.training.losses.scalers.PolynomialPressureLevelScaler"
@@ -133,8 +132,11 @@ class PressureLevelScalerSchema(BaseModel):
 class GraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.GraphNodeAttributeScaler"] = Field(..., alias="_target_")
     nodes_name: str = Field(example="data")
+    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
+    "Name of the node attribute to return."
     apply_output_mask: bool = Field(example=False)
+    "Whether to apply the output mask to the node attribute values."
     norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
@@ -145,10 +147,15 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
         alias="_target_",
     )
     nodes_name: str = Field(example="data")
+    "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
+    "Name of the node attribute to return."
     scaling_mask_attribute_name: str = Field(example="cutout_mask")
+    "Name of the node attribute to use as a mask to reweight the reference values."
     weight_frac_of_total: float = Field(example=0.5)
+    "Fraction of total weight to assign to nodes within the scaling mask. The remaining weight is distributed among nodes outside the mask."
     apply_output_mask: bool = Field(example=False)
+    "Whether to apply the output mask to the node attribute values."
     norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
@@ -199,11 +206,6 @@ class CombinedLossSchema(BaseModel):
 
 
 LossSchemas = Union[BaseLossSchema, HuberLossSchema, CombinedLossSchema]
-
-
-class NodeLossWeightsTargets(str, Enum):
-    graph_node_attribute = "anemoi.training.losses.nodeweights.GraphNodeAttribute"
-    reweighted_graph_node_attributes = "anemoi.training.losses.ReweightedGraphNodeAttribute"
 
 
 class ScaleValidationMetrics(BaseModel):
