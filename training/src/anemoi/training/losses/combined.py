@@ -114,9 +114,9 @@ class CombinedLoss(BaseWeightedLoss):
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
                 - _target_: anemoi.training.losses.mse.WeightedMSELoss
-                  scalars: ['ocean']
+                  scalars: ['variable']
                 - _target_: anemoi.training.losses.mae.WeightedMAELoss
-                  scalars: ['atmosphere']
+                  scalars: ['loss_weights_mask']
             scalars: ['*']
             loss_weights: [1.0, 1.0]
             # Only the specified scalars will be added to each loss
