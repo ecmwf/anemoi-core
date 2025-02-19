@@ -12,9 +12,6 @@ import shutil
 
 import pytest
 import torch
-from hydra import compose
-from hydra import initialize
-from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -22,6 +19,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
-def test_training_cycle_debug_config(debug_config) -> None:
-    AnemoiTrainer(debug_config).train()
-    shutil.rmtree(debug_config.hardware.paths.output)
+def test_training_cycle_architecture_configs(architecture_config) -> None:
+    AnemoiTrainer(architecture_config).train()
+    shutil.rmtree(architecture_config.hardware.paths.output)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
+def test_training_cycle_grid_configs(stretched_config) -> None:
+    AnemoiTrainer(stretched_config).train()
+    shutil.rmtree(stretched_config.hardware.paths.output)

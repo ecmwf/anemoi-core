@@ -1,0 +1,85 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- hardware: example
+- graph: stretched_grid
+- model: graphtransformer
+- training: default
+- _self_
+
+
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+        thinning: 25
+      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+    adjust: all
+    min_distance_km: 0
+
+training:
+  loss_scaling:
+    spatial:
+      _target_: anemoi.training.data.scaling.ReweightedGraphAttribute
+      target_nodes: ${graph.data}
+      scaled_attribute: area_weight # it must be a node attribute of the output nodes
+      cutout_weight_frac_of_global: 2
+  max_epochs: 2
+
+hardware:
+  files:
+    dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
+    forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+    graph: test_stretched_graph.pt
+  paths:
+    grids: null
+    output: ${oc.env:PWD}/tmp_output/
+    
+  # number of GPUs per node and number of nodes (for DDP)
+  accelerator: auto
+  num_gpus_per_node: 1
+  num_nodes: 1
+  num_gpus_per_model: 1
+
+graph:
+  nodes:
+    data:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+        dataset:     
+          cutout:
+          - dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
+            thinning: 25
+          - dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+          adjust: all
+      attributes:
+        weights:
+          _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+          norm: unit-max
+        cutout_mask:
+          _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    hidden:
+      node_builder:
+        _target_: anemoi.graphs.nodes.StretchedTriNodes
+        lam_resolution: 5
+        global_resolution: 3
+        reference_node_name: data
+        mask_attr_name: cutout_mask
+  
+  edges:
+    - source_name: data
+      target_name: hidden
+      edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: 12
+    - source_name: hidden
+      target_name: hidden
+      edge_builders:
+      - _target_: anemoi.graphs.edges.MultiScaleEdges
+        x_hops: 1
+    - source_name: hidden
+      target_name: data
+      edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: 3
