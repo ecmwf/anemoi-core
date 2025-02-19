@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 import torch
+from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.mse import BaseWeightedLoss
 
@@ -52,6 +53,8 @@ class WeightedRMSELoss(BaseWeightedLoss):
         squash: bool = True,
         scalar_indices: tuple[int, ...] | None = None,
         without_scalars: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         """Calculates the lat-weighted RMSE loss.
 
@@ -80,5 +83,7 @@ class WeightedRMSELoss(BaseWeightedLoss):
             squash=squash,
             scalar_indices=scalar_indices,
             without_scalars=without_scalars,
+            grid_shard_slice=grid_shard_slice,
+            group=group,
         )
         return torch.sqrt(mse)

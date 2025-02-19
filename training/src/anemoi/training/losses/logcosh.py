@@ -14,6 +14,7 @@ import logging
 
 import numpy as np
 import torch
+from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 
@@ -69,6 +70,8 @@ class WeightedLogCoshLoss(BaseWeightedLoss):
         squash: bool = True,
         scalar_indices: tuple[int, ...] | None = None,
         without_scalars: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         """Calculates the lat-weighted LogCosh loss.
 
@@ -85,6 +88,10 @@ class WeightedLogCoshLoss(BaseWeightedLoss):
         without_scalars: list[str] | list[int] | None, optional
             list of scalars to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
+        grid_shard_slice: slice, optional
+            Slice of this gpus grid shard if sharded, by default None
+        group: ProcessGroup, optional
+            Distributed group, by default None
 
         Returns
         -------
@@ -94,4 +101,4 @@ class WeightedLogCoshLoss(BaseWeightedLoss):
         """
         out = LogCosh.apply(pred - target)
         out = self.scale(out, scalar_indices, without_scalars=without_scalars)
-        return self.scale_by_node_weights(out, squash)
+        return self.scale_by_node_weights(out, squash, grid_shard_slice, group)
