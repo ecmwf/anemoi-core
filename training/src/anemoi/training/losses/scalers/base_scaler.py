@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from abc import ABCMeta
 from abc import abstractmethod
-from typing import Type
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -83,9 +82,6 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
     @property
     def is_spatial_dim_scaled(self) -> bool:
         return -2 in self.scale_dims or 2 in self.scale_dims
-
-    def apply_output_mask(self, output_mask: Type[BaseMask]):
-        return None
 
     @abstractmethod
     def get_scaling(self, **kwargs) -> np.ndarray:
