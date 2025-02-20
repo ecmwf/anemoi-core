@@ -10,11 +10,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.resources as pkg_resources
 import logging
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -29,6 +31,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Generator
 
     from pydantic import BaseModel
 
@@ -72,25 +75,32 @@ class ConfigGenerator(Command):
             action="store_true",
         )
 
+        help_msg = "Dump Anemoi configs to a YAML file."
+        dump = subparsers.add_parser(
+            "dump",
+            help=help_msg,
+            description=help_msg,
+        )
+        dump.add_argument("--config-path", "-i", default=Path.cwd(), type=Path, help="Configuration directory")
+        dump.add_argument("--config-name", "-n", default="dev", help="Name of the configuration")
+        dump.add_argument("--output", "-o", default="./config.yaml", type=Path, help="Output file path")
+        dump.add_argument("--overwrite", "-f", action="store_true")
+
     def run(self, args: argparse.Namespace) -> None:
 
         self.overwrite = args.overwrite
+
         if args.subcommand == "generate":
             LOGGER.info(
                 "Generating configs, please wait.",
             )
             self.traverse_config(args.output)
-
-            LOGGER.info("Inference checkpoint saved to %s", args.output)
             return
 
         if args.subcommand == "training-home":
             anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
-            LOGGER.info(
-                "Generating configs, please wait.",
-            )
-            self.traverse_config(anemoi_home)
             LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
+            self.traverse_config(anemoi_home)
             return
 
         if args.subcommand == "validate":
@@ -103,6 +113,11 @@ class ConfigGenerator(Command):
             LOGGER.info("Config files validated.")
             return
 
+        if args.subcommand == "dump":
+            LOGGER.info("Dumping config to %s", args.output)
+            self.dump_config(args.config_path, args.config_name, args.output)
+            return
+
     def traverse_config(self, destination_dir: Path | str) -> None:
         """Writes the given configuration data to the specified file path."""
         config_package = "anemoi.training.config"
@@ -113,17 +128,7 @@ class ConfigGenerator(Command):
 
         # Traverse through the package's config directory
         with pkg_resources.as_file(pkg_resources.files(config_package)) as config_path:
-            for data in config_path.rglob("*"):  # Recursively walk through all files and directories
-                item = Path(data)
-                if item.is_file() and item.suffix == ".yaml":
-                    file_path = Path(destination_dir, item.relative_to(config_path))
-
-                    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    if not file_path.exists() or self.overwrite:
-                        self.copy_file(item, file_path)
-                    else:
-                        LOGGER.info("File %s already exists, skipping", file_path)
+            self.copy_files(config_path, destination_dir)
 
     @staticmethod
     def copy_file(item: Path, file_path: Path) -> None:
@@ -133,6 +138,20 @@ class ConfigGenerator(Command):
             LOGGER.info("Copied %s to %s", item.name, file_path)
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
+
+    def copy_files(self, source_directory: Path, target_directory: Path) -> None:
+        """Copies directory files to a target directory."""
+        for data in source_directory.rglob("*yaml"):  # Recursively walk through all files and directories
+            item = Path(data)
+            if item.is_file():
+                file_path = Path(target_directory, item.relative_to(source_directory))
+
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                if not file_path.exists() or self.overwrite:
+                    self.copy_file(item, file_path)
+                else:
+                    LOGGER.info("File %s already exists, skipping", file_path)
 
     def _mask_slurm_env_variables(self, cfg: DictConfig) -> None:
         """Mask environment variables are set."""
@@ -186,6 +205,36 @@ class ConfigGenerator(Command):
                 cfg = self._mask_slurm_env_variables(cfg)
             OmegaConf.resolve(cfg)
             BaseSchema(**cfg)
+
+    def dump_config(self, config_path: Path, name: str, output: Path) -> None:
+        """Dump config files in one YAML file."""
+        # Copy config files in temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            tmp_dir = Path(tmpdirname)
+            self.copy_files(config_path, tmp_dir)
+            if not tmp_dir.exists():
+                LOGGER.error("No files found in  %s", config_path.absolute())
+                raise FileNotFoundError
+
+            # Move to config directory to be able to handle hydra
+            with change_directory(tmp_dir), initialize(version_base=None, config_path="./"):
+                cfg = compose(config_name=name)
+
+            # Dump configuration in output file
+            LOGGER.info("Dumping file in %s.", output)
+            with output.open("w") as f:
+                f.write(OmegaConf.to_yaml(cfg))
+
+
+@contextlib.contextmanager
+def change_directory(destination: Path) -> Generator[None, None, None]:
+    """A context manager to temporarily change the current working directory."""
+    original_directory = Path.cwd()
+    try:
+        os.chdir(destination)
+        yield
+    finally:
+        os.chdir(original_directory)
 
 
 def extract_primitive_type_hints(model: type[BaseModel], prefix: str = "") -> dict[str, Any]:
