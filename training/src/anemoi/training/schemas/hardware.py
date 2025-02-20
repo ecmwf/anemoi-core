@@ -34,7 +34,7 @@ class Checkpoint(BaseModel):
 
 
 class FilesSchema(PydanticBaseModel):
-    dataset: Union[Path, dict[str, Path]] | None = Field(default=None)  # dict option for multiple datasets
+    dataset: Union[Path, dict[str, Path], None] = Field(default=None)  # dict option for multiple datasets
     "Path to the dataset file."
     graph: Union[Path, None] = None
     "Path to the graph file."
@@ -53,19 +53,19 @@ class Logs(PydanticBaseModel):
 
 
 class PathsSchema(BaseModel):
-    data: Path | None = None
+    data: Union[Path, None] = None
     "Path to the data directory."
-    graph: Path | None = None
+    graph: Union[Path, None] = None
     "Path to the graph directory."
-    output: Path | None = None
+    output: Union[Path, None] = None
     "Path to the output directory."
-    logs: Logs | None = None
+    logs: Union[Logs, None] = None
     "Logging directories."
     checkpoints: Path
     "Path to the checkpoints directory."
-    plots: Path | None = None
+    plots: Union[Path, None] = None
     "Path to the plots directory."
-    profiler: Path | None
+    profiler: Union[Path, None]
     "Path to the profiler directory."
 
 
