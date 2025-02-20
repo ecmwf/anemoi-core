@@ -82,6 +82,7 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     assert "test" not in loss.scaler
 
 
+@pytest.mark.parametrize("loss_cls", [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss])
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
         DictConfig(
