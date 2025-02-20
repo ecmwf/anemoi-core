@@ -49,7 +49,7 @@ class BaseScaler(ABC):
         assert self.scale_dims is not None, f"Class {self.__class__.__name__} must define 'scale_dims'"
         if isinstance(self.scale_dims, int):
             self.scale_dims = (self.scale_dims,)
-        assert not all(
+        assert all(
             -4 <= d <= 3 for d in self.scale_dims
         ), f"Invalid dimension for scaling in 'scale_dims': {self.scale_dims}"
 
