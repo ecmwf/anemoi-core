@@ -72,7 +72,7 @@ optional-dependencies.docs = [
   "autodoc-pydantic",
   "nbsphinx",
   "pandoc",
-  "sphinx",
+  "sphinx<8.2",       # Fixed until nbsphinx updates
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
