@@ -118,8 +118,6 @@ class GraphForecaster(pl.LightningModule):
             metadata["dataset"].get("variables_metadata"),
         )
 
-        self.is_first_step = True
-
         self.loss = get_loss_function(config.training.training_loss, scalers=self.scalers)
 
         assert isinstance(self.loss, BaseLoss) and not isinstance(
@@ -127,13 +125,14 @@ class GraphForecaster(pl.LightningModule):
             torch.nn.ModuleList,
         ), f"Loss function must be a `BaseLoss`, not a {type(self.loss).__name__!r}"
 
-        self.metrics = get_loss_function(config.training.validation_metrics, scalers=self.scalers)
-        if not isinstance(self.metrics, torch.nn.ModuleList):
-            self.metrics = torch.nn.ModuleList([self.metrics])
+        self.metrics = torch.nn.ModuleDict({
+            metric_name: get_loss_function(val_metric_config, scalers=self.scalers) for metric_name, val_metric_config in config.training.validation_metrics.items()
+        })
 
         if config.training.loss_gradient_scaling:
             self.loss.register_full_backward_hook(grad_scaler, prepend=False)
 
+        self.is_first_step = True
         self.multi_step = config.training.multistep_input
         self.lr = (
             config.hardware.num_nodes

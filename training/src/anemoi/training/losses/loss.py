@@ -35,7 +35,7 @@ def get_loss_function(
     config: DictConfig,
     scalers: dict[str, tuple[tuple[int] | np.ndarray]] | None = None,
     **kwargs,
-) -> BaseLoss | torch.nn.ModuleDict:
+) -> BaseLoss:
     """Get loss functions from config.
 
     Can be ModuleList if multiple losses are specified.
@@ -65,15 +65,6 @@ def get_loss_function(
     ValueError
         If scaler is not found in valid scalers
     """
-    config_container = OmegaConf.to_container(config, resolve=False)
-    if isinstance(config_container, dict):
-        return torch.nn.ModuleDict(
-            {
-                name: get_loss_function(OmegaConf.create(loss_config), scalers=scalers, **kwargs)
-                for name, loss_config in config.items()
-            },
-        )
-
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
 
