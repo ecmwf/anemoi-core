@@ -11,7 +11,11 @@
 import torch
 from omegaconf import DictConfig
 
-from anemoi.training.losses import MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss
+from anemoi.training.losses import HuberLoss
+from anemoi.training.losses import LogCoshLoss
+from anemoi.training.losses import MAELoss
+from anemoi.training.losses import MSELoss
+from anemoi.training.losses import RMSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 

@@ -13,13 +13,11 @@ import logging
 from abc import ABCMeta
 from abc import abstractmethod
 from typing import TYPE_CHECKING
-from typing import Type
 
 import numpy as np
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
 
