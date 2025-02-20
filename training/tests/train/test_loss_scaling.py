@@ -229,7 +229,6 @@ def test_variable_loss_scaling_vals(
         graph_data=graph_with_nodes,
         statistics=statistics,
         statistics_tendencies=statistics_tendencies,
-        # metadata_variables=metadata["dataset"].get("variables_metadata"),
         output_mask=NoOutputMask(),
     )
 

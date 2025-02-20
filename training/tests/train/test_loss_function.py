@@ -9,6 +9,7 @@
 
 
 import torch
+import pytest
 from omegaconf import DictConfig
 
 from anemoi.training.losses import HuberLoss
