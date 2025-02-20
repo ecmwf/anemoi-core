@@ -11,20 +11,39 @@ yaml matches the BaseSchema.
    :no-undoc-members:
    :show-inheritance:
 
+The below schemas are organised below identically to the training config
+files,
+
+******
+ Data
+******
+
 .. automodule:: anemoi.training.schemas.data
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+************
+ Dataloader
+************
 
 .. automodule:: anemoi.training.schemas.dataloader
    :members:
    :no-undoc-members:
    :show-inheritance:
 
+**********
+ Hardware
+**********
+
 .. automodule:: anemoi.training.schemas.hardware
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+*******
+ Graph
+*******
 
 .. automodule:: anemoi.training.schemas.graphs.basegraph
    :members:
@@ -40,6 +59,10 @@ yaml matches the BaseSchema.
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+*******
+ Model
+*******
 
 .. automodule:: anemoi.training.schemas.models.models
    :members:
@@ -60,6 +83,10 @@ yaml matches the BaseSchema.
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+**********
+ Training
+**********
 
 .. automodule:: anemoi.training.schemas.training
    :members:
