@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from abc import ABCMeta
+from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
@@ -23,29 +23,7 @@ LOGGER = logging.getLogger(__name__)
 SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 
 
-class ScaleDimABCMeta(ABCMeta):
-    def __new__(cls, name: str, bases: tuple, class_dict: dict):
-        # Convert scale_dims to a tuple if it's an int
-        scale_dims = class_dict.get("scale_dims")
-        if scale_dims is not None and isinstance(scale_dims, int):
-            scale_dims = (scale_dims,)
-
-        if scale_dims is not None and not all(-4 <= d <= 3 for d in scale_dims):
-            error_msg = (
-                "Invalid dimension for scaling in 'scale_dims'. Expected dimensions are:"
-                "\n  0 (or -4): batch dimension"
-                "\n  1 (or -3): ensemble dimension"
-                "\n  2 (or -2): spatial dimension"
-                "\n  3 (or -1): variable dimension"
-                "\nInput tensor shape: (batch_size, n_ensemble, n_grid_points, n_variables)"
-            )
-            raise ValueError(error_msg)
-
-        class_dict["scale_dims"] = scale_dims
-        return super().__new__(cls, name, bases, class_dict)
-
-
-class BaseScaler(metaclass=ScaleDimABCMeta):
+class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
     scale_dims: tuple[int] = None
@@ -68,12 +46,10 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
             "l1",
             "unit-mean",
         ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        if not isinstance(cls, ABCMeta) and cls.scale_dims is None:
-            error_msg = f"Class {cls.__name__} must define 'scale_dims'"
-            raise TypeError(error_msg)
+        assert self.scale_dims is not None, f"Class {self.__class__.__name__} must define 'scale_dims'"
+        if isinstance(self.scale_dims, int):
+            self.scale_dims = (self.scale_dims,)
+        assert not all(-4 <= d <= 3 for d in self.scale_dims), "Invalid dimension for scaling in 'scale_dims'"
 
     @property
     def is_spatial_dim_scaled(self) -> bool:
