@@ -26,9 +26,12 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
     cutoff_factor: 0.6 # only for cutoff method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
   - _target_: anemoi.graphs.edges.CutOffEdges # connects only boundary nodes
     cutoff_factor: 1.5 # only for cutoff method
     source_mask_attr_name: boundary_mask
+    target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Processor configuration
 - source_name: ${graph.hidden}
@@ -36,14 +39,17 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
+    source_mask_attr_name: null
+    target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
 # Decoder configuration
 - source_name: ${graph.hidden}
   target_name: ${graph.data}
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
-    target_mask_attr_name: cutout_mask
     num_nearest_neighbours: 3 # only for knn method
+    source_mask_attr_name: null
+    target_mask_attr_name: cutout_mask
   attributes: ${graph.attributes.edges}
 
 post_processors:
@@ -56,7 +62,7 @@ attributes:
   nodes:
     # Attributes for data nodes
     area_weight:
-      _target_: anemoi.graphs.nodes.attributes.AreaWeights # options: Area, Uniform
+      _target_: anemoi.graphs.nodes.attributes.PlanarAreaWeights # options: Area, Uniform
       norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
     cutout_mask:
       _target_: anemoi.graphs.nodes.attributes.CutOutMask

@@ -14,7 +14,6 @@ import os
 import random
 from functools import cached_property
 from typing import TYPE_CHECKING
-from typing import Callable
 
 import numpy as np
 import torch
@@ -28,6 +27,8 @@ from anemoi.training.utils.usable_indices import get_usable_indices
 LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from anemoi.training.data.grid_indices import BaseGridIndices
 
 
@@ -279,8 +280,15 @@ class NativeGridDataset(IterableDataset):
             end = i + (self.rollout + 1) * self.timeincrement
 
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            x = self.data[start : end : self.timeincrement, :, :, :]
-            x = x[..., grid_shard_indices]  # select the grid shard
+            if isinstance(grid_shard_indices, slice):
+                # Load only shards into CPU memory
+                x = self.data[start : end : self.timeincrement, :, :, grid_shard_indices]
+            else:
+                # Load full grid in CPU memory, select grid_shard after
+                # Note that anemoi-datasets currently doesn't support slicing + indexing
+                # in the same operation.
+                x = self.data[start : end : self.timeincrement, :, :, :]
+                x = x[..., grid_shard_indices]  # select the grid shard
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
 

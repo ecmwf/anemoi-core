@@ -12,22 +12,34 @@ import hypothesis.strategies as st
 import pytest
 import torch
 import torch.nn as nn
+from hydra.utils import instantiate
 from hypothesis import given
 from hypothesis import settings
 
 from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 @given(
-    num_heads=st.integers(min_value=1, max_value=50),
-    embed_dim_multiplier=st.integers(min_value=1, max_value=10),
+    num_heads=st.sampled_from([1, 2, 4, 8, 16]),
+    embed_dim_multiplier=st.sampled_from([16, 32, 64]),
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
+    softcap=st.floats(min_value=0.0, max_value=1.0),
+    attention_implementation=st.sampled_from(["scaled_dot_product_attention"]),
 )
-def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout_p):
+def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout_p, softcap, attention_implementation):
     embed_dim = (
         num_heads * embed_dim_multiplier
     )  # TODO: Make assert in MHSA to check if embed_dim is divisible by num_heads
-    mhsa = MultiHeadSelfAttention(num_heads, embed_dim, dropout_p=dropout_p)
+    layer_kernels = instantiate(load_layer_kernels())
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation=attention_implementation,
+        softcap=softcap,
+    )
 
     assert isinstance(mhsa, nn.Module)
     assert mhsa.num_heads == num_heads
@@ -44,9 +56,17 @@ def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
 @settings(deadline=None)
-def test_multi_head_self_attention_forward(batch_size, num_heads, embed_dim_multiplier, dropout_p):
+def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
-    mhsa = MultiHeadSelfAttention(num_heads, embed_dim, dropout_p=dropout_p)
+
+    layer_kernels = instantiate(load_layer_kernels())
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation="scaled_dot_product_attention",
+    )
 
     x = torch.randn(batch_size * 2, embed_dim)
     shapes = [list(x.shape)]
@@ -62,9 +82,18 @@ def test_multi_head_self_attention_forward(batch_size, num_heads, embed_dim_mult
     embed_dim_multiplier=st.integers(min_value=1, max_value=10),
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
-def test_multi_head_self_attention_backward(batch_size, num_heads, embed_dim_multiplier, dropout_p):
+@settings(deadline=None)
+def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
-    mhsa = MultiHeadSelfAttention(num_heads, embed_dim, dropout_p=dropout_p)
+
+    layer_kernels = instantiate(load_layer_kernels())
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation="scaled_dot_product_attention",
+    )
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
     shapes = [list(x.shape)]

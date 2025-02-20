@@ -24,8 +24,9 @@ from anemoi.graphs.utils import haversine_distance
 class BaseEdgeAttribute(ABC, NormaliserMixin):
     """Base class for edge attributes."""
 
-    def __init__(self, norm: str | None = None) -> None:
+    def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         self.norm = norm
+        self.dtype = dtype
 
     @abstractmethod
     def get_raw_values(self, graph: HeteroData, source_name: str, target_name: str, *args, **kwargs) -> np.ndarray: ...
@@ -35,9 +36,9 @@ class BaseEdgeAttribute(ABC, NormaliserMixin):
         if values.ndim == 1:
             values = values[:, np.newaxis]
 
-        normed_values = self.normalise(values)
+        normalised_values = self.normalise(values)
 
-        return torch.tensor(normed_values, dtype=torch.float32)
+        return torch.tensor(normalised_values.astype(self.dtype))
 
     def compute(self, graph: HeteroData, edges_name: tuple[str, str, str], *args, **kwargs) -> torch.Tensor:
         """Compute the edge attributes."""
@@ -155,3 +156,81 @@ class EdgeLength(BaseEdgeAttribute):
             values = 1 - values
 
         return values
+
+
+class BooleanBaseEdgeAttribute(BaseEdgeAttribute, ABC):
+    """Base class for boolean edge attributes."""
+
+    def __init__(self) -> None:
+        super().__init__(norm=None, dtype="bool")
+
+
+class BaseAttributeFromNode(BooleanBaseEdgeAttribute, ABC):
+    """
+    Base class for Attribute from Node.
+
+    Copy an attribute of either the source or target node to the edge.
+    Accesses source/target node attribute and propagates it to the edge.
+    Used for example to identify if an encoder edge originates from a LAM or global node.
+
+    Attributes
+    ----------
+    node_attr_name : str
+        Name of the node attribute to propagate.
+
+    Methods
+    -------
+    get_node_name(source_name, target_name)
+        Return the name of the node to copy.
+
+    get_raw_values(graph, source_name, target_name)
+        Computes the edge attribute from the source or target node attribute.
+
+    """
+
+    def __init__(self, node_attr_name: str) -> None:
+        super().__init__()
+        self.node_attr_name = node_attr_name
+        self.idx = None
+
+    @abstractmethod
+    def get_node_name(self, source_name: str, target_name: str): ...
+
+    def get_raw_values(self, graph: HeteroData, source_name: str, target_name: str) -> np.ndarray:
+
+        node_name = self.get_node_name(source_name, target_name)
+
+        edge_index = graph[(source_name, "to", target_name)].edge_index
+        try:
+            return graph[node_name][self.node_attr_name].numpy()[edge_index[self.idx]]
+
+        except KeyError:
+            raise KeyError(
+                f"{self.__class__.__name__} failed because the attribute '{self.node_attr_name}' is not defined for the nodes."
+            )
+
+
+class AttributeFromSourceNode(BaseAttributeFromNode):
+    """
+    Copy an attribute of the source node to the edge.
+    """
+
+    def __init__(self, node_attr_name: str) -> None:
+        super().__init__(node_attr_name)
+        self.idx = 0
+
+    def get_node_name(self, source_name: str, target_name: str):
+        return source_name
+
+
+class AttributeFromTargetNode(BaseAttributeFromNode):
+    """
+    Copy an attribute of the target node to the edge.
+    """
+
+    def __init__(self, node_attr_name: str) -> None:
+        super().__init__(node_attr_name)
+        self.idx = 1
+
+    def get_node_name(self, source_name: str, target_name: str):
+        return target_name
