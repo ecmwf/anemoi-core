@@ -79,7 +79,7 @@ class BaseScaler(ABC):
         return self.scale_dims, scaler_values
 
 
-class BaseDelayedScaler(BaseScaler, metaclass=ScaleDimABCMeta):
+class BaseDelayedScaler(BaseScaler):
     """Base class for delayed Scalers.
 
     The delayed scalers are only initialise when creating all the scalers, but its value is
