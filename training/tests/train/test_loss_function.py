@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
-import torch
 import pytest
+import torch
 from omegaconf import DictConfig
 
 from anemoi.training.losses import HuberLoss
