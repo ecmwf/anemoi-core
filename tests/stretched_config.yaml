@@ -17,6 +17,17 @@ dataloader:
       - dataset: ${hardware.files.forcing_dataset}
     adjust: all
     min_distance_km: 0
+  num_workers:
+    training: 1
+  limit_batches:
+      training: 100
+      validation: 100
+  training:
+    start: "2017-01"
+    end: "2017-02"
+  validation:
+    start: "2018-01"
+    end: "2018-02"
 
 data:
   forcing:
@@ -59,7 +70,6 @@ training:
       scaled_attribute: area_weight # it must be a node attribute of the output nodes
       cutout_weight_frac_of_global: 2
   max_epochs: 2
-  max_batch: 2
 
 hardware:
   files:
@@ -77,16 +87,12 @@ hardware:
   num_gpus_per_model: 1
 
 graph:
+  overwrite: True
   nodes:
     data:
       node_builder:
         _target_: anemoi.graphs.nodes.ZarrDatasetNodes
-        dataset:     
-          cutout:
-          - dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
-            thinning: 25
-          - forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
-          adjust: all
+        dataset: ${dataloader.dataset}
       attributes:
         weights:
           _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
@@ -121,22 +127,6 @@ graph:
         num_nearest_neighbours: 3
       attributes: ${graph.attributes.edges}
 
-  # attributes:
-  #   nodes:
-  #     # Attributes for data nodes
-  #     area_weight:
-  #       _target_: anemoi.graphs.nodes.attributes.AreaWeights
-  #       norm: unit-max
-  #     cutout:
-  #       _target_: anemoi.graphs.nodes.attributes.CutOutMask
-  #   edges:
-  #     edge_length:
-  #       _target_: anemoi.graphs.edges.attributes.EdgeLength
-  #       norm: unit-max
-  #     edge_dirs:
-  #       _target_: anemoi.graphs.edges.attributes.EdgeDirection
-  #       norm: unit-std
-
-  model:
-    attributes:
-      edges: []
+  # model:
+  #   attributes:
+  #     edges: []
