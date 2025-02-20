@@ -41,7 +41,7 @@ class ScaleDimABCMeta(ABCMeta):
             )
             raise ValueError(error_msg)
 
-        class_dict["scale_dims"] = None
+        class_dict["scale_dims"] = scale_dims
         return super().__new__(cls, name, bases, class_dict)
 
 
