@@ -125,9 +125,12 @@ class GraphForecaster(pl.LightningModule):
             torch.nn.ModuleList,
         ), f"Loss function must be a `BaseLoss`, not a {type(self.loss).__name__!r}"
 
-        self.metrics = torch.nn.ModuleDict({
-            metric_name: get_loss_function(val_metric_config, scalers=self.scalers) for metric_name, val_metric_config in config.training.validation_metrics.items()
-        })
+        self.metrics = torch.nn.ModuleDict(
+            {
+                metric_name: get_loss_function(val_metric_config, scalers=self.scalers)
+                for metric_name, val_metric_config in config.training.validation_metrics.items()
+            },
+        )
 
         if config.training.loss_gradient_scaling:
             self.loss.register_full_backward_hook(grad_scaler, prepend=False)

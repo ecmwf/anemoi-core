@@ -12,7 +12,6 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
