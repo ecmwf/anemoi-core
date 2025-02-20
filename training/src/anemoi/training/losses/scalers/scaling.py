@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import numpy as np
 from hydra.utils import instantiate
 
 from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
@@ -21,17 +20,15 @@ if TYPE_CHECKING:
     import torch
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.utils.masks import BaseMask
+    from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
     from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
-SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 
 
 def create_scalers(
     scalers_config: DotDict,
     data_indices: IndexCollection,
-    output_mask: BaseMask,
     **kwargs,
 ) -> tuple[dict[str, SCALER_DTYPE], dict[str, SCALER_DTYPE]]:
     scalers, delayed_scaler_builders = {}, {}
@@ -40,18 +37,8 @@ def create_scalers(
 
         if isinstance(scaler_builder, BaseDelayedScaler):
             delayed_scaler_builders[name] = scaler_builder
-            scalers[name] = (scaler_builder.scale_dims, np.ones(tuple([1] * len(scaler_builder.scale_dims))))
-            continue
 
-        scaler_values = scaler_builder.get_scaling()
-
-        # If a scaler needs to apply the output mask (LAM) after its creation,
-        # it must include the apply_output_mask attribue.
-        if scaler_builder.is_spatial_dim_scaled and getattr(scaler_builder, "apply_output_mask", False):
-            scaler_values = output_mask.apply(scaler_values, dim=0, fill_value=0.0)
-
-        scaler_values = scaler_builder.normalise(scaler_values)
-        scalers[name] = (scaler_builder.scale_dims, scaler_values)
+        scalers[name] = scaler_builder.get_scaling()
 
     print_final_variable_scaling(scalers, data_indices)
 

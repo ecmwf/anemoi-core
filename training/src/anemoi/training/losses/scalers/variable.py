@@ -79,9 +79,7 @@ class BaseVariableLossScaler(BaseScaler):
             Variable level, i.e. pressure level or model level
 
         """
-        return self.extract_variable_group_and_level.get_group_and_level(
-            variable_name,
-        )
+        return self.extract_variable_group_and_level.get_group_and_level(variable_name)
 
 
 class GeneralVariableLossScaler(BaseVariableLossScaler):
@@ -117,7 +115,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         self.weights = weights
         del kwargs
 
-    def get_scaling(self, **_kwargs) -> np.ndarray:
+    def get_scaling_values(self, **_kwargs) -> np.ndarray:
         """Get loss scaling.
 
         Retrieve the loss scaling for each variable from the config file.

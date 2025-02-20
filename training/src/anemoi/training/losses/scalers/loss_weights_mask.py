@@ -40,7 +40,10 @@ class NaNMaskScaler(BaseDelayedScaler):
         super().__init__(data_indices, norm=norm)
         del kwargs
 
-    def get_scaling(self, model: AnemoiModelInterface) -> np.ndarray:
+    def get_scaling_values(self) -> np.ndarray:
+        return np.ones(tuple([1] * len(self.scale_dims)))
+
+    def get_delayed_scaling_values(self, model: AnemoiModelInterface) -> np.ndarray:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.

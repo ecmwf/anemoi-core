@@ -175,10 +175,8 @@ class GraphForecaster(pl.LightningModule):
     def define_delayed_scalers(self) -> None:
         """Update delayed scalers such as the loss weights mask for imputed variables."""
         for name, scaler_builder in self.delayed_scaler_builders.items():
-            scaler_values = scaler_builder.get_scaling(model=self.model)
-            scaler_values = scaler_builder.normalise(scaler_values)
-            self.scalers[name] = (scaler_builder.scale_dims, scaler_values)
-            self.loss.update_scaler(scaler=scaler_values, name=name)
+            self.scalers[name] = scaler_builder.get_delayed_scaling(model=self.model)
+            self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
 
     def set_model_comm_group(
         self,

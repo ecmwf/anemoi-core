@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
+SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 
 
 class ScaleDimABCMeta(ABCMeta):
@@ -75,15 +76,11 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
             raise TypeError(error_msg)
 
     @property
-    def is_variable_dim_scaled(self) -> bool:
-        return -1 in self.scale_dims or 3 in self.scale_dims
-
-    @property
     def is_spatial_dim_scaled(self) -> bool:
-        return -2 in self.scale_dims or 2 in self.scale_dims
+        return self.scale_dims is not None and (-2 in self.scale_dims or 2 in self.scale_dims)
 
     @abstractmethod
-    def get_scaling(self, **kwargs) -> np.ndarray:
+    def get_scaling_values(self, **kwargs) -> np.ndarray:
         """Abstract method to get loss scaling."""
         ...
 
@@ -100,6 +97,11 @@ class BaseScaler(metaclass=ScaleDimABCMeta):
         error_msg = f"{self.norm} must be one of: None, unit-sum, l1, unit-mean."
         raise ValueError(error_msg)
 
+    def get_scaling(self) -> SCALER_DTYPE:
+        scaler_values = self.get_scaling_values()
+        scaler_values = self.normalise(scaler_values)
+        return self.scale_dims, scaler_values
+
 
 class BaseDelayedScaler(BaseScaler, metaclass=ScaleDimABCMeta):
     """Base class for delayed Scalers.
@@ -108,3 +110,11 @@ class BaseDelayedScaler(BaseScaler, metaclass=ScaleDimABCMeta):
     computed during the first iteration of the training loop. This delayed scalers are suitable
     for scalers requiring information from the `model.pre_processors`.
     """
+
+    @abstractmethod
+    def get_delayed_scaling_values(self, **kwargs) -> np.ndarray: ...
+
+    def get_delayed_scaling(self) -> SCALER_DTYPE:
+        scaler_values = self.get_delayed_scaling_values()
+        scaler_values = self.normalise(scaler_values)
+        return self.scale_dims, scaler_values

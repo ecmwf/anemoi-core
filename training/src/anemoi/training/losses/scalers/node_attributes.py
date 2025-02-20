@@ -15,12 +15,14 @@ from typing import TYPE_CHECKING
 import torch
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.utils.masks import NoOutputMask
 
 if TYPE_CHECKING:
     import numpy as np
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ class GraphNodeAttributeScaler(BaseScaler):
         graph_data: HeteroData,
         nodes_name: str,
         nodes_attribute_name: str | None = None,
-        apply_output_mask: bool = False,
+        output_mask: type[BaseMask] = None,
         inverse: bool = False,
         norm: str | None = None,
         **kwargs,
@@ -51,25 +53,24 @@ class GraphNodeAttributeScaler(BaseScaler):
             Name of the nodes in the graph.
         nodes_attribute_name : str | None, optional
             Name of the node attribute to use for scaling, by default None
-        apply_output_mask : bool, optional
+        output_mask : type[BaseMask], optional
             Whether to apply output mask to the scaling, by default False
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         **kwargs : dict
             Additional keyword arguments.
         """
-        self.apply_output_mask = apply_output_mask
+        self.output_mask = output_mask if output_mask is not None else NoOutputMask()
         self.nodes = graph_data[nodes_name]
         self.nodes_attribute_name = nodes_attribute_name
         self.inverse = inverse
         super().__init__(data_indices, norm=norm)
         del kwargs
 
-    def get_scaling(self, **_kwargs) -> np.ndarray:
-        if self.inverse:
-            return ~self.nodes[self.nodes_attribute_name].squeeze().numpy()
-
-        return self.nodes[self.nodes_attribute_name].squeeze().numpy()
+    def get_scaling_values(self) -> np.ndarray:
+        scaler_values = self.nodes[self.nodes_attribute_name].squeeze().numpy()
+        scaler_values = ~scaler_values if self.inverse else scaler_values
+        return self.output_mask.apply(scaler_values, dim=0, fill_value=0.0)
 
 
 class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
@@ -123,6 +124,6 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
         )
         return values
 
-    def get_scaling(self, **kwargs) -> np.ndarray:
-        attribute_values = super().get_scaling(**kwargs)
+    def get_scaling_values(self, **kwargs) -> np.ndarray:
+        attribute_values = super().get_scaling_values(**kwargs)
         return self.reweight_attribute_values(attribute_values)
