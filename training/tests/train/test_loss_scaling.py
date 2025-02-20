@@ -41,7 +41,7 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
                     "builders": {
                         "additional_scaler": request.param,
                         "general_variable": {
-                            "_target_": "anemoi.training.losses.scaling.variable.GeneralVariableLossScaler",
+                            "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
                             "scale_dim": -1,  # dimension on which scaling applied
                             "weights": {
                                 "default": 1,

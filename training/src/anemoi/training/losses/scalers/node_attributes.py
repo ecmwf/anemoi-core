@@ -38,7 +38,7 @@ class GraphNodeAttributeScaler(BaseScaler):
         graph_data: HeteroData,
         nodes_name: str,
         nodes_attribute_name: str | None = None,
-        output_mask: type[BaseMask] = None,
+        output_mask: type[BaseMask] | None = None,
         inverse: bool = False,
         norm: str | None = None,
         **kwargs,
