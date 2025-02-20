@@ -42,7 +42,6 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
                         "additional_scaler": request.param,
                         "general_variable": {
                             "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
-                            "scale_dim": -1,  # dimension on which scaling applied
                             "weights": {
                                 "default": 1,
                                 "z": 0.1,
@@ -99,7 +98,6 @@ graph_node_scaler = {
     "_target_": "anemoi.training.losses.scalers.GraphNodeAttributeScaler",
     "nodes_name": "test_nodes",
     "nodes_attribute_name": "test_attr",
-    "apply_output_mask": False,
     "norm": "unit-sum",
 }
 
@@ -109,7 +107,6 @@ reweighted_graph_node_scaler = {
     "nodes_attribute_name": "test_attr",
     "scaling_mask_attribute_name": "mask",
     "weight_frac_of_total": 0.4,
-    "apply_output_mask": False,
     "norm": "unit-sum",
 }
 
