@@ -211,8 +211,8 @@ class GraphForecaster(pl.LightningModule):
         ----------
         config : DictConfig
             Loss function configuration, should include `scalars` if scalars are to be added to the loss function.
-        scalars : Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None], optional
-            Scalars which can be added to the loss function. Defaults to None., by default None
+        scalars : dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]] | None,
+            Scalars which can be added to the loss function. Defaults to None.,
             If a scalar is to be added to the loss, ensure it is in `scalars` in the loss config
             E.g.
                 If `scalars: ['variable']` is set in the config, and `variable` in `scalars`
@@ -232,6 +232,8 @@ class GraphForecaster(pl.LightningModule):
         ValueError
             If scalar is not found in valid scalars
         """
+        scalars = scalars or {}
+
         if isinstance(config, ListConfig):
             return torch.nn.ModuleList(
                 [
@@ -249,14 +251,15 @@ class GraphForecaster(pl.LightningModule):
         scalars_to_include = loss_config.pop("scalars", [])
 
         # Instantiate the loss function with the loss_init_config
+        kwargs["_recursive_"] = kwargs.get("_recursive_", False)
         loss_function = instantiate(loss_config, **kwargs)
 
         if not isinstance(loss_function, BaseWeightedLoss):
-            error_msg = f"Loss must be a subclass of 'BaseWeightedLoss', not {type(loss_function)}"
+            error_msg = f"Loss must be a subclass of `BaseWeightedLoss`, not {type(loss_function)}"
             raise TypeError(error_msg)
 
         for key in scalars_to_include:
-            if key not in scalars or []:
+            if key not in scalars:
                 error_msg = f"Scalar {key!r} not found in valid scalars: {list(scalars.keys())}"
                 raise ValueError(error_msg)
             loss_function.add_scalar(*scalars[key], name=key)
