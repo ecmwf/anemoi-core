@@ -347,7 +347,7 @@ class GraphForecaster(pl.LightningModule):
         for name, mod in modifiers.items():
             LOGGER.info("Modifying Node Weights with a %s", name)
             if node_weights is not None:
-                node_weights = mod.weights(graph_data=None, attr_weight=node_weights)
+                node_weights = mod.weights(graph_data=graph_data, attr_weight=node_weights)
             else:
                 node_weights = mod.weights(graph_data=graph_data, attr_weight=None)
 
