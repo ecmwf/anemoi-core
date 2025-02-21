@@ -5,9 +5,10 @@ on:
     - cron: "0 22 * * *"  # every day at 22pm on default branch
   workflow_dispatch:
 
+
 jobs:
   integration_tests:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gpu]
 
     steps:
     - name: Checkout repository
@@ -16,7 +17,7 @@ jobs:
         ref: develop
 
     - name: Set up Python
-      uses: actions/setup-python@5v
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
