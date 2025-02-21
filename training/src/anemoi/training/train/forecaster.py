@@ -721,4 +721,4 @@ class GraphForecaster(pl.LightningModule):
             t_initial=self.lr_iterations,
             warmup_t=self.warmup_t,
         )
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}].inf
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
