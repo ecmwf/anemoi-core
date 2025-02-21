@@ -18,6 +18,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import AnemoiModelInterface
 
 LOGGER = logging.getLogger(__name__)
 SCALER_DTYPE = tuple[tuple[int], np.ndarray]
@@ -102,7 +103,7 @@ class BaseDelayedScaler(BaseScaler):
     @abstractmethod
     def get_delayed_scaling_values(self, **kwargs) -> np.ndarray: ...
 
-    def get_delayed_scaling(self, **kwargs) -> SCALER_DTYPE:
-        scaler_values = self.get_delayed_scaling_values(**kwargs)
+    def get_delayed_scaling(self, model: AnemoiModelInterface) -> SCALER_DTYPE:
+        scaler_values = self.get_delayed_scaling_values(model)
         scaler_values = self.normalise(scaler_values)
         return self.scale_dims, scaler_values
