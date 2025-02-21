@@ -4,7 +4,17 @@ from hydra import initialize
 from omegaconf import OmegaConf
 
 
-@pytest.fixture(params=[["model=gnn"], ["model=graphtransformer"], ["model=transformer", "graph=encoder_decoder_only", "model.processor.attention_implementation=scaled_dot_product_attention"]])
+@pytest.fixture(
+    params=[
+        ["model=gnn"],
+        ["model=graphtransformer"],
+        [
+            "model=transformer",
+            "graph=encoder_decoder_only",
+            "model.processor.attention_implementation=scaled_dot_product_attention",
+        ],
+    ]
+)
 def architecture_config(request) -> None:
     overrides = request.param
     with initialize(version_base=None, config_path="", job_name="test_training"):
