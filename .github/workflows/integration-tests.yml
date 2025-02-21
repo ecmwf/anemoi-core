@@ -2,7 +2,7 @@ name: nightly-ci-integration-tests
 
 on:
   schedule:
-    - cron: "0 22 * * *"  # every day at 22pm on default branch
+    - cron: "0 23 * * *"  # every day at 22pm on default branch
   workflow_dispatch:
   push:
     branches:
