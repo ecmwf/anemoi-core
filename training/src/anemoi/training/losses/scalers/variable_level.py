@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from anemoi.training.losses.scaling.variable import BaseVariableLossScaler
+from anemoi.training.losses.scalers.variable import BaseVariableLossScaler
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -35,8 +35,8 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         group: str,
         y_intercept: float,
         slope: float,
-        scale_dim: int,
         metadata_variables: dict | None = None,
+        norm: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.
@@ -53,12 +53,12 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
             Y-axis shift of scaling function.
         slope : float
             Slope of scaling function.
-        scale_dim : int
-            Dimension to scale
         metadata_variables : dict
             Metadata of the dataset.
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(group_config, data_indices, scale_dim, metadata_variables)
+        super().__init__(group_config, data_indices, metadata_variables=metadata_variables, norm=norm)
         del kwargs
         self.scaling_group = group
         self.y_intercept = y_intercept
@@ -80,7 +80,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         """
         ...
 
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling_values(self, **_kwargs) -> np.ndarray:
         variable_level_scaling = np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32)
 
         LOGGER.info(
@@ -131,7 +131,6 @@ class NoVariableLevelScaler(BaseVariableLevelScaler):
         group_config: DictConfig,
         data_indices: IndexCollection,
         group: str,
-        scale_dim: int | None = None,
         metadata_variables: dict | None = None,
         **kwargs,
     ) -> None:
@@ -143,7 +142,6 @@ class NoVariableLevelScaler(BaseVariableLevelScaler):
             group,
             y_intercept=1.0,
             slope=0.0,
-            scale_dim=scale_dim,
             metadata_variables=metadata_variables,
         )
 

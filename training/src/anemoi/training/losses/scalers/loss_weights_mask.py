@@ -9,47 +9,41 @@
 
 from __future__ import annotations
 
-import ast
 import logging
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from anemoi.training.losses.scaling import BaseScaler
+from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
 
 if TYPE_CHECKING:
-
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import AnemoiModelInterface
 
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseLossMaskScaler(BaseScaler):
-    """Base class for all loss masks that are more than one-dimensional."""
+class NaNMaskScaler(BaseDelayedScaler):
 
-    def __init__(
-        self,
-        data_indices: IndexCollection,
-        scale_dim: str,
-        **kwargs,
-    ) -> None:
-        """Initialise Scaler.
+    scale_dims: tuple[int] = (-2, -1)
+
+    def __init__(self, data_indices: IndexCollection, norm: str | None = None, **kwargs) -> None:
+        """Initialise NanMaskScaler.
 
         Parameters
         ----------
         data_indices : IndexCollection
             Collection of data indices.
-        scale_dim : str
-            Dimensions to scale in the format of a string.
+        norm : str, optional
+            Type of normalisation to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        scale_dim = ast.literal_eval(scale_dim)
-        super().__init__(data_indices, scale_dim)
+        super().__init__(data_indices, norm=norm)
         del kwargs
 
+    def get_scaling_values(self) -> np.ndarray:
+        return np.ones(tuple([1] * len(self.scale_dims)))
 
-class NaNMaskScaler(BaseLossMaskScaler):
-
-    def get_scaling(self) -> np.ndarray:
+    def get_delayed_scaling_values(self, model: AnemoiModelInterface) -> np.ndarray:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.
@@ -57,4 +51,10 @@ class NaNMaskScaler(BaseLossMaskScaler):
         When calling the imputer for the first time, the NaN positions are available.
         Before first application of loss function, the mask is replaced.
         """
-        return np.ones((1, 1))
+        loss_weights_mask = np.ones((1, 1))
+        # iterate over all pre-processors and check if they have a loss_mask_training attribute
+        for pre_processor in model.pre_processors.processors.values():
+            if hasattr(pre_processor, "loss_mask_training"):
+                loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
+
+        return loss_weights_mask

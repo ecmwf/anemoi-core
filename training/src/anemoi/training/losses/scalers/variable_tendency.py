@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from anemoi.training.losses.scaling.variable import BaseVariableLossScaler
+from anemoi.training.losses.scalers.variable import BaseVariableLossScaler
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -35,7 +35,7 @@ class BaseTendencyScaler(BaseVariableLossScaler):
         data_indices: IndexCollection,
         statistics: dict,
         statistics_tendencies: dict,
-        scale_dim: int,
+        norm: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.
@@ -50,10 +50,10 @@ class BaseTendencyScaler(BaseVariableLossScaler):
             Data statistics dictionary
         statistics_tendencies : dict
             Data statistics dictionary for tendencies
-        scale_dim : int
-            Dimension to scale
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(group_config, data_indices, scale_dim)
+        super().__init__(group_config, data_indices, norm=norm)
         del kwargs
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
@@ -64,7 +64,7 @@ class BaseTendencyScaler(BaseVariableLossScaler):
     @abstractmethod
     def get_level_scaling(self, variable_level: int) -> float: ...
 
-    def get_scaling(self) -> np.ndarray:
+    def get_scaling_values(self, **_kwargs) -> np.ndarray:
         variable_level_scaling = np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32)
 
         LOGGER.info("Variable Level Scaling: Applying %s scaling to prognostic variables", self.__class__.__name__)

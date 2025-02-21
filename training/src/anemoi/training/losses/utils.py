@@ -305,6 +305,9 @@ class ScaleTensor:
         override : bool, optional
             Whether to override the scaler ignoring dimension compatibility, by default False
         """
+        if not isinstance(scaler, torch.Tensor):
+            scaler = torch.tensor([scaler]) if isinstance(scaler, (int, float)) else torch.tensor(scaler)
+
         if name not in self.tensors:
             msg = f"scaler {name!r} not found in scalers."
             raise ValueError(msg)
