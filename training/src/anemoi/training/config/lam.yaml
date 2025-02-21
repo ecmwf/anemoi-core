@@ -5,7 +5,7 @@ defaults:
 - hardware: example
 - graph: limited_area
 - model: graphtransformer
-- training: default
+- training: lam
 - _self_
 
 no_validation: False

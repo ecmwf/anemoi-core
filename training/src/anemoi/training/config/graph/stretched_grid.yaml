@@ -1,7 +1,7 @@
 # Stretched grid graph config intended to be used with a cutout dataset.
 # The stretched mesh resolution used here is intended for o96 global resolution with 10km
 # limited area resolution.
-overwrite: False
+overwrite: True
 
 data: "data"
 hidden: "hidden"
