@@ -72,7 +72,7 @@ class TestMultiScaleEdgesTransform:
     def test_transform_fail_nodes(self, tri_ico_graph: HeteroData):
         """Test MultiScaleEdges update method with wrong node type."""
         edges = MultiScaleEdges("fail_nodes", "fail_nodes", 1)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             edges.update_graph(tri_ico_graph)
 
 
