@@ -1,7 +1,7 @@
 activation: GELU
 num_channels: 1024
 cpu_offload: False
-output_mask: 
+output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:

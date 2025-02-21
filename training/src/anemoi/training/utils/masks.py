@@ -21,9 +21,9 @@ if TYPE_CHECKING:
 
 class BaseMask:
     """Base class for masking model output."""
+
     def __init__(self, *_args, **_kwargs) -> None:
         """Initialize base mask."""
-        pass
 
     @property
     def supporting_arrays(self) -> dict:

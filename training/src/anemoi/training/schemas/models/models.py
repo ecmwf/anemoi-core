@@ -106,6 +106,7 @@ Bounding = Annotated[
     Field(discriminator="target_"),
 ]
 
+
 class NoOutputMaskSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.NoOutputMask"] = Field(..., alias="_target_")
 
@@ -129,7 +130,7 @@ class ModelSchema(PydanticBaseModel):
     "Learnable node and edge parameters."
     bounding: list[Bounding]
     "List of bounding configuration applied in order to the specified variables."
-    output_mask: OutputMaskSchemas # !TODO CHECK!
+    output_mask: OutputMaskSchemas  # !TODO CHECK!
     "Output mask"
 
     processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(

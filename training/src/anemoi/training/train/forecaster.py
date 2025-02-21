@@ -13,21 +13,19 @@ from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
 import torch
+from hydra.utils import instantiate
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.base import BaseLoss
-from hydra.utils import instantiate
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers.scaling import create_scalers
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.utils.masks import Boolean1DMask
-from anemoi.training.utils.masks import NoOutputMask
 
 if TYPE_CHECKING:
     from collections.abc import Generator
