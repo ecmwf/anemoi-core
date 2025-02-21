@@ -30,8 +30,8 @@ hardware:
 
 model:
   num_channels: 16
-  processor:
-    attention_implementation: scaled_dot_product_attention
+  # processor:
+  #   attention_implementation: scaled_dot_product_attention
 
 dataloader:
   limit_batches:
