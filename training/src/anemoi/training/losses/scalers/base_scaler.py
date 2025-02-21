@@ -63,6 +63,7 @@ class BaseScaler(ABC):
         ...
 
     def normalise(self, values: np.ndarray) -> np.ndarray:
+        """Normalise the scaler values."""
         if self.norm is None:
             return values
 
@@ -76,6 +77,15 @@ class BaseScaler(ABC):
         raise ValueError(error_msg)
 
     def get_scaling(self) -> SCALER_DTYPE:
+        """Get scaler.
+        
+        Returns
+        -------
+        scale_dims : tuple[int]
+            Dimensions over which the scalers are applied.
+        scaler_values : np.ndarray
+            Scaler values
+        """
         scaler_values = self.get_scaling_values()
         scaler_values = self.normalise(scaler_values)
         return self.scale_dims, scaler_values
@@ -84,7 +94,7 @@ class BaseScaler(ABC):
 class BaseDelayedScaler(BaseScaler):
     """Base class for delayed Scalers.
 
-    The delayed scalers are only initialise when creating all the scalers, but its value is
+    The delayed scalers are only initialised when creating all the scalers, but its value is
     computed during the first iteration of the training loop. This delayed scalers are suitable
     for scalers requiring information from the `model.pre_processors`.
     """

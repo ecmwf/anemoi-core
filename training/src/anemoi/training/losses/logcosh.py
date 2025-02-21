@@ -15,7 +15,7 @@ import logging
 import numpy as np
 import torch
 
-from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class LogCosh(torch.autograd.Function):
         return grad_output * torch.tanh(inp)
 
 
-class LogCoshLoss(FunctionalLoss):
+class LogCoshLoss(BaseLoss):
     """LogCosh loss."""
 
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

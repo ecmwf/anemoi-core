@@ -14,12 +14,12 @@ import logging
 
 import torch
 
-from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class MAELoss(FunctionalLoss):
+class MAELoss(BaseLoss):
     """MAE loss."""
 
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

@@ -60,6 +60,10 @@ class BaseLoss(nn.Module, ABC):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
 
+    @abstractmethod
+    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calculate Difference between prediction and target."""
+
     def scale(
         self,
         x: torch.Tensor,
@@ -101,70 +105,13 @@ class BaseLoss(nn.Module, ABC):
 
         scaler = scaler.expand_as(x)
         return x[subset_indices] * scaler[subset_indices]
-
-    @abstractmethod
-    def forward(
-        self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
-        squash: bool = True,
-        *,
-        scaler_indices: tuple[int, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = None,
-    ) -> torch.Tensor:
-        """Calculates the lat-weighted scaled loss.
-
-        Parameters
-        ----------
-        pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
-        target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
-        squash : bool, optional
-            Average last dimension, by default True
-        scaler_indices: tuple[int,...], optional
-            Indices to subset the calculated scaler with, by default None
-        without_scalers: list[str] | list[int] | None, optional
-            list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
-            By default None
-
-        Returns
-        -------
-        torch.Tensor
-            Weighted loss
-        """
-        out = pred - target
-
-        out = self.scale(out, scaler_indices, without_scalers=without_scalers)
-
+    
+    def reduce(self, out: torch.Tensor, squash: bool = True) -> torch.Tensor:
         if squash:
             out = self.avg_function(out, dim=-1)
 
         return self.sum_function(out, dim=(0, 1, 2))
-
-
-class FunctionalLoss(BaseLoss):
-    """Loss which a user can subclass and provide `calculate_difference`.
-
-    `calculate_difference` should calculate the difference between the prediction and target.
-    All scaling and weighting is handled by the parent class.
-
-    Example:
-    --------
-    ```python
-    class MyLoss(FunctionalLoss):
-        def calculate_difference(self, pred, target):
-            return pred - target
-    ```
-    """
-
-    def __init__(self, ignore_nans: bool = False) -> None:
-        super().__init__(ignore_nans)
-
-    @abstractmethod
-    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Calculate Difference between prediction and target."""
-
+    
     def forward(
         self,
         pred: torch.Tensor,
@@ -189,7 +136,6 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None, optional
             list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
-
 
         Returns
         -------
@@ -197,10 +143,5 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         out = self.calculate_difference(pred, target)
-
         out = self.scale(out, scaler_indices, without_scalers=without_scalers)
-
-        if squash:
-            out = self.avg_function(out, dim=-1)
-
-        return self.sum_function(out, dim=(0, 1, 2))
+        return self.reduce(out, squash)
