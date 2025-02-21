@@ -11,7 +11,7 @@ on:
 
 jobs:
   integration_tests:
-    runs-on: [self-hosted, gpu]
+    runs-on: ubuntu-latest #[self-hosted, gpu]
 
     steps:
     - name: Checkout repository
