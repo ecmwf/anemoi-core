@@ -33,7 +33,7 @@ builders:
 
   # mask NaNs with zeros in the loss function
   nan_mask_weights:
-    _target_: anemoi.training.losses.scaling.loss_weights_mask.NaNMaskScaler
+    _target_: anemoi.training.losses.scalers.NaNMaskScaler
 
   # tendency scalers
   # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
