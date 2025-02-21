@@ -63,7 +63,7 @@ class GraphNodeAttribute:
         """
         return AreaWeights(norm="unit-max", fill_value=0).compute(graph_data, self.target)
 
-    def weights(self, graph_data: HeteroData) -> torch.Tensor:
+    def weights(self, graph_data: HeteroData, attr_weight: torch.Tensor = None) -> torch.Tensor:
         """Returns weight of type self.node_attribute for nodes self.target.
 
         Attempts to load from graph_data and calculates area weights for the target
@@ -74,11 +74,17 @@ class GraphNodeAttribute:
         graph_data: HeteroData
             graph object
 
+        attr_weight: torch.Tensor
+            weight of target nodes
+
         Returns
         -------
         torch.Tensor
             weight of target nodes
         """
+        if attr_weight is not None:
+            return attr_weight
+
         if self.node_attribute in graph_data[self.target]:
             attr_weight = graph_data[self.target][self.node_attribute].squeeze()
 
@@ -120,8 +126,8 @@ class ReweightedGraphNodeAttribute(GraphNodeAttribute):
         self.scaled_attribute = scaled_attribute
         self.fraction = weight_frac_of_total
 
-    def weights(self, graph_data: HeteroData) -> torch.Tensor:
-        attr_weight = super().weights(graph_data)
+    def weights(self, graph_data: HeteroData, attr_weight: torch.Tensor = None) -> torch.Tensor:
+        attr_weight = super().weights(graph_data, attr_weight)
 
         if self.scaled_attribute in graph_data[self.target]:
             mask = graph_data[self.target][self.scaled_attribute].squeeze().bool()
@@ -169,8 +175,9 @@ class ScaledGraphNodeAttribute(GraphNodeAttribute):
         self.scaled_attribute = scaled_attribute
         self.inverse = inverse
 
-    def weights(self, graph_data: HeteroData) -> torch.Tensor:
-        attr_weight = super().weights(graph_data)
+    def weights(self, graph_data: HeteroData, attr_weight: torch.Tensor = None) -> torch.Tensor:
+
+        attr_weight = super().weights(graph_data, attr_weight)
 
         if self.scaled_attribute in graph_data[self.target]:
             attr_values = graph_data[self.target][self.scaled_attribute].squeeze().flatten()
@@ -189,7 +196,7 @@ class ScaledGraphNodeAttribute(GraphNodeAttribute):
         scaled_values = 1 - norm_values if self.inverse else norm_values
 
         # Define minimum weight threshold (e.g., 0.1)
-        min_threshold = 0.01
+        min_threshold = 0.1
         scaled_values = torch.clamp(scaled_values, min=min_threshold)  # Ensure weights are at least min_threshold
 
         # Ensure shapes match and apply scaling
