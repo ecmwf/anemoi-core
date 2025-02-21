@@ -92,7 +92,7 @@ class BaseDelayedScaler(BaseScaler):
     @abstractmethod
     def get_delayed_scaling_values(self, **kwargs) -> np.ndarray: ...
 
-    def get_delayed_scaling(self) -> SCALER_DTYPE:
-        scaler_values = self.get_delayed_scaling_values()
+    def get_delayed_scaling(self, **kwargs) -> SCALER_DTYPE:
+        scaler_values = self.get_delayed_scaling_values(**kwargs)
         scaler_values = self.normalise(scaler_values)
         return self.scale_dims, scaler_values
