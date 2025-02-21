@@ -24,9 +24,10 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install -e [training].
-        pip install -e [models].
-        pip install -e [graphs].
+
+        cd anemoi-training & pip install -e .
+        cd ../anemoi-models & pip install -e .
+        cd ../anemoi-graphs & pip install -e .
 
     - name: Run integration tests
       run: |
