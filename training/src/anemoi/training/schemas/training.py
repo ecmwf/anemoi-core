@@ -209,14 +209,14 @@ class CombinedLossSchema(BaseModel):
 LossSchemas = Union[BaseLossSchema, HuberLossSchema, CombinedLossSchema]
 
 
-class ScaleValidationMetrics(BaseModel):
+class ScaleValidationMetricsSchema(BaseModel):
     """Configuration for scaling validation metrics.
 
     Here variable scaling is possible due to the metrics being calculated in the same way as the
     training loss, within internal model space.
     """
 
-    scalars_to_apply: list[str] = Field(example=["variable"])
+    scalers_to_apply: list[str] = Field(example=["variable"])
     """List of scalars to be applied."""
     metrics: list[str]
     """List of metrics to keep in normalised space.."""
@@ -261,7 +261,7 @@ class TrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations. These metrics "
-    scale_validation_metrics: ScaleValidationMetrics
+    scale_validation_metrics: ScaleValidationMetricsSchema
     """Configuration for scaling validation metrics."""
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
