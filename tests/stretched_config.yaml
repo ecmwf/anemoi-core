@@ -80,7 +80,7 @@ hardware:
   paths:
     grids: null
     output: ${oc.env:PWD}/tmp_output/
-    
+
   # number of GPUs per node and number of nodes (for DDP)
   accelerator: auto
   num_gpus_per_node: 1
@@ -107,7 +107,7 @@ graph:
         global_resolution: 3
         reference_node_name: data
         mask_attr_name: cutout_mask
-  
+
   edges:
     - source_name: data
       target_name: hidden
