@@ -105,13 +105,13 @@ class BaseLoss(nn.Module, ABC):
 
         scaler = scaler.expand_as(x)
         return x[subset_indices] * scaler[subset_indices]
-    
+
     def reduce(self, out: torch.Tensor, squash: bool = True) -> torch.Tensor:
         if squash:
             out = self.avg_function(out, dim=-1)
 
         return self.sum_function(out, dim=(0, 1, 2))
-    
+
     def forward(
         self,
         pred: torch.Tensor,

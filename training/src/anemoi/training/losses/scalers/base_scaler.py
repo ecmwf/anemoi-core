@@ -78,7 +78,7 @@ class BaseScaler(ABC):
 
     def get_scaling(self) -> SCALER_DTYPE:
         """Get scaler.
-        
+
         Returns
         -------
         scale_dims : tuple[int]
