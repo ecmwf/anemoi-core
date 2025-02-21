@@ -69,11 +69,15 @@ class BaseSchema(BaseModel):
     @model_validator(mode="after")
     def check_log_paths_available_for_loggers(self) -> BaseSchema:
         logger = []
-        if self.diagnostics.log.wandb.enabled and not self.hardware.paths.logs.wandb:
+        if self.diagnostics.log.wandb.enabled and (not self.hardware.paths.logs or not self.hardware.paths.logs.wandb):
             logger.append("wandb")
-        if self.diagnostics.log.mlflow.enabled and not self.hardware.paths.logs.mlflow:
+        if self.diagnostics.log.mlflow.enabled and (
+            not self.hardware.paths.logs or not self.hardware.paths.logs.mlflow
+        ):
             logger.append("mlflow")
-        if self.diagnostics.log.tensorboard.enabled and not self.hardware.paths.logs.tensorboard:
+        if self.diagnostics.log.tensorboard.enabled and (
+            not self.hardware.paths.logs or not self.hardware.paths.logs.tensorboard
+        ):
             logger.append("tensorboard")
 
         if logger:
