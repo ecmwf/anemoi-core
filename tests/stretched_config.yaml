@@ -8,6 +8,7 @@ defaults:
 - training: default
 - _self_
 
+no_validation: True
 
 dataloader:
   dataset:
@@ -23,8 +24,8 @@ dataloader:
       training: 100
       validation: 100
   training:
-    start: "2017-01"
-    end: "2017-02"
+    start: "2017-01-01"
+    end: "2017-01-07"
   validation:
     start: "2018-01"
     end: "2018-02"
