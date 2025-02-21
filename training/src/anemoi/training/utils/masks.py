@@ -16,6 +16,7 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
+    from torch_geometric.data import HeteroData
     from anemoi.models.data_indices.collection import IndexCollection
 
 
