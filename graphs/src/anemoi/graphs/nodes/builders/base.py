@@ -94,7 +94,9 @@ class BaseNodeBuilder(ABC):
     @abstractmethod
     def get_coordinates(self) -> torch.Tensor: ...
 
-    def reshape_coords(self, latitudes: np.ndarray, longitudes: np.ndarray) -> torch.Tensor:
+    def reshape_coords(
+        self, latitudes: np.ndarray | torch.Tensor, longitudes: np.ndarray | torch.Tensor
+    ) -> torch.Tensor:
         """Reshape latitude and longitude coordinates.
 
         Parameters
@@ -109,9 +111,14 @@ class BaseNodeBuilder(ABC):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
-        coords = np.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
-        coords = np.deg2rad(coords)
-        return torch.tensor(coords, dtype=torch.float32)
+        if isinstance(latitudes, np.ndarray):
+            latitudes = torch.from_numpy(latitudes)
+
+        if isinstance(longitudes, np.ndarray):
+            longitudes = torch.from_numpy(longitudes)
+
+        coords = torch.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
+        return torch.deg2rad(coords)
 
     def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
         """Update the graph with new nodes.
