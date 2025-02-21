@@ -13,6 +13,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Sequence
+from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Union
 
@@ -36,16 +37,23 @@ class BaseGridIndices(ABC):
     def setup(self, graph: HeteroData) -> None:
         self.grid_size = self.compute_grid_size(graph)
 
-    def split_seq_in_shards(self, reader_group_rank: int) -> tuple[int, int]:
-        """Get the indices to split a sequence into equal size shards."""
-        grid_shard_size = self.grid_size // self.reader_group_size
-        grid_start = reader_group_rank * grid_shard_size
-        if reader_group_rank == self.reader_group_size - 1:
-            grid_end = self.grid_size
-        else:
-            grid_end = (reader_group_rank + 1) * grid_shard_size
+    def split_seq_in_shards(self, reader_group_rank: int) -> slice:
+        """Get the grid shard slice according to the reader rank."""
+        assert (
+            0 <= reader_group_rank < self.reader_group_size
+        ), f"Invalid reader group rank {reader_group_rank}, expected in [0, {self.reader_group_size})"
+        start = sum(self.shard_shapes[:reader_group_rank])
+        end = start + self.shard_shapes[reader_group_rank]
 
-        return slice(grid_start, grid_end)
+        return slice(start, end)
+
+    @cached_property
+    def shard_shapes(self) -> list:
+        # equivalent to torch.tensor_split(torch.arange(self.grid_size), self.reader_group_size)
+        mod = self.grid_size % self.reader_group_size
+        return [self.grid_size // self.reader_group_size + 1] * mod + [self.grid_size // self.reader_group_size] * (
+            self.reader_group_size - mod
+        )
 
     @property
     def supporting_arrays(self) -> dict:
@@ -64,7 +72,7 @@ class FullGrid(BaseGridIndices):
     def compute_grid_size(self, graph: HeteroData) -> int:
         return graph[self.nodes_name].num_nodes
 
-    def get_shard_indices(self, reader_group_rank: int) -> ArrayIndex:
+    def get_shard_indices(self, reader_group_rank: int) -> slice:
         return self.split_seq_in_shards(reader_group_rank)
 
 
