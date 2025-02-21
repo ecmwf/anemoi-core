@@ -52,14 +52,12 @@ builders:
     nodes_attribute_name: area_weight
     scaling_mask_attribute_name: cutout_mask
     weight_frac_of_total: 0.25
-    apply_output_mask: True
     norm: "unit-sum"
 
   lam_node_weights:
     _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
     nodes_name: ${graph.data}
     nodes_attribute_name: lam_area_weight
-    apply_output_mask: True
     norm: "unit-sum"
 
   limited_area_mask:

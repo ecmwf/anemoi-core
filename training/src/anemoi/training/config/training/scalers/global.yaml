@@ -51,5 +51,4 @@ builders:
     _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
     nodes_name: ${graph.data}
     nodes_attribute_name: area_weight
-    apply_output_mask: True
     norm: unit-sum
