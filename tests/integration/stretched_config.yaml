@@ -8,7 +8,8 @@ defaults:
 - training: default
 - _self_
 
-no_validation: True
+no_validation: False
+
 
 dataloader:
   dataset:
@@ -64,12 +65,12 @@ data:
     - "lsm"
 
 training:
-  loss_scaling:
-    spatial:
-      _target_: anemoi.training.data.scaling.ReweightedGraphAttribute
-      target_nodes: ${graph.data}
-      scaled_attribute: area_weight # it must be a node attribute of the output nodes
-      cutout_weight_frac_of_global: 2
+  # loss_scaling:
+  #   spatial:
+  #     _target_: anemoi.training.data.scaling.ReweightedGraphAttribute
+  #     target_nodes: ${graph.data}
+  #     scaled_attribute: area_weight # it must be a node attribute of the output nodes
+  #     cutout_weight_frac_of_global: 2
   max_epochs: 2
 
 hardware:
@@ -97,6 +98,7 @@ graph:
       attributes:
         weights:
           _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+          fill_value: 0
           norm: unit-max
         cutout_mask:
           _target_: anemoi.graphs.nodes.attributes.CutOutMask
