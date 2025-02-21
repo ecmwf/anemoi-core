@@ -9,7 +9,6 @@
 
 import pytest
 import torch
-import zarr
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
