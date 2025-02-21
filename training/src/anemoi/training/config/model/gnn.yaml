@@ -1,7 +1,8 @@
 activation: GELU
 num_channels: 512
 cpu_offload: False
-output_mask: null
+output_mask: 
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec

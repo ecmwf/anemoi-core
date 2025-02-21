@@ -106,6 +106,18 @@ Bounding = Annotated[
     Field(discriminator="target_"),
 ]
 
+class NoOutputMaskSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.masks.NoOutputMask"] = Field(..., alias="_target_")
+
+
+class Boolean1DSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.masks.Boolean1DMask"] = Field(..., alias="_target_")
+    nodes_name: str = Field(examples="data")
+    attribute_name: str = Field(example="cutout_mask")
+
+
+OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
+
 
 class ModelSchema(PydanticBaseModel):
 
@@ -117,8 +129,8 @@ class ModelSchema(PydanticBaseModel):
     "Learnable node and edge parameters."
     bounding: list[Bounding]
     "List of bounding configuration applied in order to the specified variables."
-    output_mask: Union[str, None] = Field(example=None)  # !TODO CHECK!
-    "Output mask, it must be a node attribute of the output nodes"
+    output_mask: OutputMaskSchemas # !TODO CHECK!
+    "Output mask"
 
     processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
         ...,

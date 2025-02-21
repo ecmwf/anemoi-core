@@ -19,6 +19,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.base import BaseLoss
+from hydra.utils import instantiate
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers.scaling import create_scalers
@@ -77,10 +78,7 @@ class GraphForecaster(pl.LightningModule):
 
         graph_data = graph_data.to(self.device)
 
-        if config.model.output_mask is not None:
-            self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
-        else:
-            self.output_mask = NoOutputMask()
+        self.output_mask = instantiate(config.model.output_mask, graph_data=graph_data)
 
         self.model = AnemoiModelInterface(
             statistics=statistics,

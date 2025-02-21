@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 class BaseMask:
     """Base class for masking model output."""
+    def __init__(self, *_args, **_kwargs) -> None:
+        """Initialize base mask."""
+        pass
 
     @property
     def supporting_arrays(self) -> dict:
@@ -40,8 +43,8 @@ class BaseMask:
 class Boolean1DMask(BaseMask):
     """1D Boolean mask."""
 
-    def __init__(self, values: torch.Tensor) -> None:
-        self.mask = values.bool().squeeze()
+    def __init__(self, graph_data: HeteroData, nodes_name: str, attribute_name: str) -> None:
+        self.mask = graph_data[nodes_name][attribute_name].bool().squeeze()
 
     @property
     def supporting_arrays(self) -> dict:
