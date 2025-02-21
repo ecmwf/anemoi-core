@@ -25,9 +25,9 @@ jobs:
     - name: Install dependencies
       run: |
 
-        cd training && pip install -e .[tests]
-        cd ../models && pip install -e .[tests]
-        cd ../graphs && pip install -e .[tests]
+        pip install -e ./training[all,tests]
+        pip install -e ./models[all,tests]
+        pip install -e ./graphs[all, tests]
 
     - name: Run integration tests
       run: |
