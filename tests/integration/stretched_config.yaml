@@ -8,7 +8,7 @@ defaults:
 - training: default
 - _self_
 
-no_validation: False
+no_validation: True
 
 
 dataloader:
@@ -22,8 +22,8 @@ dataloader:
   num_workers:
     training: 1
   limit_batches:
-      training: 100
-      validation: 100
+      training: 8
+      validation: 8
   training:
     start: "2017-01-01"
     end: "2017-01-07"
@@ -79,7 +79,6 @@ hardware:
     forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
     graph: test_stretched_graph.pt
   paths:
-    grids: null
     output: ${oc.env:PWD}/tmp_output/
 
   # number of GPUs per node and number of nodes (for DDP)

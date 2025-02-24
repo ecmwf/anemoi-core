@@ -28,3 +28,12 @@ def test_training_cycle_architecture_configs(architecture_config) -> None:
 def test_training_cycle_grid_configs(stretched_config) -> None:
     AnemoiTrainer(stretched_config).train()
     shutil.rmtree(stretched_config.hardware.paths.output)
+
+if __name__ == "__main__":
+    from omegaconf import OmegaConf
+    from hydra import compose
+    from hydra import initialize
+    with initialize(version_base=None, config_path="", job_name="test_training"):
+        cfg = compose(config_name="stretched_config", overrides=[])
+        OmegaConf.resolve(cfg)
+        test_training_cycle_architecture_configs(cfg)
