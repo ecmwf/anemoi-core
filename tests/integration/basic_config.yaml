@@ -8,7 +8,7 @@ defaults:
 - training: default
 - _self_
 
-no_validation: True
+no_validation: False
 # diagnostics:
 #   plot:
 #     callbacks: []
@@ -18,7 +18,6 @@ hardware:
     graph: test_graph.pt
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
-    grids: null
     output: ${oc.env:PWD}/tmp_output/
 
   # number of GPUs per node and number of nodes (for DDP)
