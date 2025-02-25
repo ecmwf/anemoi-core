@@ -163,7 +163,7 @@ run using the following command:
 
 .. code:: bash
 
-   anemoi-training config validate --name debug.yaml
+   anemoi-training config validate --config-name debug.yaml
 
 This will check that the configuration is valid and that all the
 required fields are present. If your config is correctly defined then
@@ -195,7 +195,7 @@ values:
 
 .. code:: bash
 
-   (anemoi_core_venv)[] $ anemoi-training config validate --name=debug --mask_env_vars
+   (anemoi_core_venv)[] $ anemoi-training config validate --config-name=debug --mask_env_vars
    2025-02-16 17:48:38 INFO Validating configs.
    2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has a no_validation flag.So this command will validate the config regardless of the flag.
    2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
