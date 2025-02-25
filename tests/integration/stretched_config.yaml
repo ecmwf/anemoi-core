@@ -10,6 +10,9 @@ defaults:
 
 no_validation: True
 
+diagnostics:
+  plot:
+    callbacks: []
 
 dataloader:
   dataset:
@@ -21,15 +24,19 @@ dataloader:
     min_distance_km: 0
   num_workers:
     training: 1
+    validation: 1
+  batch_size:
+    training: 2
+    validation: 2
   limit_batches:
-      training: 8
-      validation: 8
+      training: 2
+      validation: 1
   training:
-    start: "2017-01-01"
-    end: "2017-01-07"
+    start: "2017-02-01"
+    end: "2017-02-07"
   validation:
-    start: "2018-01"
-    end: "2018-02"
+    start: "2018-01-01"
+    end: "2018-01-04"
 
 data:
   forcing:
