@@ -66,8 +66,6 @@ class AnemoiModelEncProcDec(nn.Module):
         self.data_indices = data_indices
         self.statistics = statistics
 
-
-
         # read config.model.layer_kernels to get the implementation for certain layers
         self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", {}))
 
@@ -124,7 +122,9 @@ class AnemoiModelEncProcDec(nn.Module):
         self.num_output_channels = len(data_indices.internal_model.output)
         self._internal_input_idx = data_indices.internal_model.input.prognostic
         self._internal_output_idx = data_indices.internal_model.output.prognostic
-        self.input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        self.input_dim = (
+            self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
 

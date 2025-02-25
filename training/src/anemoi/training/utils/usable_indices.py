@@ -48,7 +48,7 @@ def get_usable_indices(
 
     # Missing indices
     for i in missing_indices:
-        rel_missing = i - relative_indices #indices which have their relative indices match the missing.
-        usable_indices = usable_indices[np.all(usable_indices != rel_missing[:,np.newaxis], axis = 0)]
+        rel_missing = i - relative_indices  # indices which have their relative indices match the missing.
+        usable_indices = usable_indices[np.all(usable_indices != rel_missing[:, np.newaxis], axis=0)]
 
     return usable_indices

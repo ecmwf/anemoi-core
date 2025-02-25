@@ -12,15 +12,11 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
-from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
-from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -39,7 +35,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         graph_data: HeteroData,
         latent_skip: bool = True,
         grid_skip: int | None = 0,
-
     ) -> None:
         """Initializes the graph neural network.
 
@@ -54,7 +49,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         """
         self.num_target_forcings = len(model_config.training.target_forcing.data) + 1
         self.input_times = len(model_config.training.explicit_times.input)
-        super().__init__(model_config = model_config, data_indices = data_indices, statistics = statistics, graph_data = graph_data)
+        super().__init__(
+            model_config=model_config, data_indices=data_indices, statistics=statistics, graph_data=graph_data
+        )
 
         self.latent_skip = latent_skip
         self.grid_skip = grid_skip
@@ -64,9 +61,15 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.num_output_channels = len(data_indices.internal_model.output)
         self._internal_input_idx = data_indices.internal_model.input.prognostic
         self._internal_output_idx = data_indices.internal_model.output.prognostic
-        self.input_dim = self.input_times * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data] + self.num_target_forcings
+        self.input_dim = (
+            self.input_times * self.num_input_channels
+            + self.node_attributes.attr_ndims[self._graph_name_data]
+            + self.num_target_forcings
+        )
 
-    def forward(self, x: Tensor, target_forcing: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
+    def forward(
+        self, x: Tensor, target_forcing: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None
+    ) -> Tensor:
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
 
