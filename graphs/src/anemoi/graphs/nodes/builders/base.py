@@ -57,7 +57,7 @@ class BaseNodeBuilder(ABC):
         HeteroData
             The graph with the registered nodes.
         """
-        graph[self.name].x = self.get_coordinates()
+        graph[self.name].x = self.get_coordinates().to(torch.float32)
         graph[self.name].node_type = type(self).__name__
 
         if graph[self.name].num_nodes >= 2:
