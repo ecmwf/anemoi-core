@@ -13,6 +13,7 @@ import torch
 from hydra.errors import InstantiationException
 from omegaconf import DictConfig
 
+from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import HuberLoss
 from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import MAELoss
@@ -100,13 +101,13 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
 
 def test_combined_loss() -> None:
     """Test the combined loss function."""
-    loss = GraphForecaster.get_loss_function(
+    loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
-                    {"_target_": "anemoi.training.losses.mae.WeightedMAELoss"},
+                    {"_target_": "anemoi.training.losses.MSELoss"},
+                    {"_target_": "anemoi.training.losses.MAELoss"},
                 ],
                 "scalars": ["test"],
                 "loss_weights": [1.0, 0.5],
@@ -118,23 +119,23 @@ def test_combined_loss() -> None:
     assert isinstance(loss, CombinedLoss)
     assert "test" in loss.scalar
 
-    assert isinstance(loss.losses[0], WeightedMSELoss)
+    assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scalar
 
-    assert isinstance(loss.losses[1], WeightedMAELoss)
+    assert isinstance(loss.losses[1], MAELoss)
     assert "test" in loss.losses[1].scalar
 
 
 def test_combined_loss_invalid_loss_weights() -> None:
     """Test the combined loss function with invalid loss weights."""
     with pytest.raises(InstantiationException):
-        GraphForecaster.get_loss_function(
+        get_loss_function(
             DictConfig(
                 {
                     "_target_": "anemoi.training.losses.combined.CombinedLoss",
                     "losses": [
-                        {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
-                        {"_target_": "anemoi.training.losses.mae.WeightedMAELoss"},
+                        {"_target_": "anemoi.training.losses.MSELoss"},
+                        {"_target_": "anemoi.training.losses.MAELoss"},
                     ],
                     "scalars": ["test"],
                     "loss_weights": [1.0, 0.5, 1],
@@ -146,14 +147,14 @@ def test_combined_loss_invalid_loss_weights() -> None:
 
 
 def test_combined_loss_invalid_behaviour() -> None:
-    """Test the combined loss function and setting the scalrs."""
-    loss = GraphForecaster.get_loss_function(
+    """Test the combined loss function and setting the scalers."""
+    loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
-                    {"_target_": "anemoi.training.losses.mae.WeightedMAELoss"},
+                    {"_target_": "anemoi.training.losses.MSELoss"},
+                    {"_target_": "anemoi.training.losses.MAELoss"},
                 ],
                 "scalars": ["test"],
                 "loss_weights": [1.0, 0.5],
@@ -168,13 +169,13 @@ def test_combined_loss_invalid_behaviour() -> None:
 
 def test_combined_loss_equal_weighting() -> None:
     """Test equal weighting when not given."""
-    loss = GraphForecaster.get_loss_function(
+    loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.mse.WeightedMSELoss"},
-                    {"_target_": "anemoi.training.losses.mae.WeightedMAELoss"},
+                    {"_target_": "anemoi.training.losses.mse.MSELoss"},
+                    {"_target_": "anemoi.training.losses.mae.MAELoss"},
                 ],
             },
         ),
@@ -186,13 +187,13 @@ def test_combined_loss_equal_weighting() -> None:
 
 def test_combined_loss_seperate_scalars() -> None:
     """Test that scalars are passed to the correct loss function."""
-    loss = GraphForecaster.get_loss_function(
+    loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.mse.WeightedMSELoss", "scalars": ["test"]},
-                    {"_target_": "anemoi.training.losses.mae.WeightedMAELoss", "scalars": ["test2"]},
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalars": ["test"]},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalars": ["test2"]},
                 ],
                 "scalars": ["test", "test2"],
                 "loss_weights": [1.0, 0.5],
@@ -205,10 +206,10 @@ def test_combined_loss_seperate_scalars() -> None:
     assert "test" in loss.scalar
     assert "test2" in loss.scalar
 
-    assert isinstance(loss.losses[0], WeightedMSELoss)
+    assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scalar
     assert "test2" not in loss.losses[0].scalar
 
-    assert isinstance(loss.losses[1], WeightedMAELoss)
+    assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scalar
     assert "test2" in loss.losses[1].scalar

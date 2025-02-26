@@ -9,30 +9,31 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 from typing import Any
 
 from omegaconf import DictConfig
 
+from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import ScaleTensor
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.train.forecaster import GraphForecaster
 
 if TYPE_CHECKING:
     import torch
 
 
-class CombinedLoss(BaseWeightedLoss):
+class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
     _initial_set_scalar: bool = False
 
     def __init__(
         self,
-        *extra_losses: dict[str, Any] | Callable | BaseWeightedLoss,
+        *extra_losses: dict[str, Any] | Callable | BaseLoss,
         loss_weights: tuple[int, ...] | None = None,
-        losses: tuple[dict[str, Any] | Callable | BaseWeightedLoss] | None = None,
+        losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
         **kwargs,
     ):
         """Combined loss function.
@@ -49,7 +50,7 @@ class CombinedLoss(BaseWeightedLoss):
         added to this class will be routed correctly.
         If `losses` is a `tuple[Callable]`, all `scalars` added to this class
         will be added to all underlying losses.
-        And if `losses` is a `tuple[WeightedLoss]`, no scalars added to
+        And if `losses` is a `tuple[BaseLoss]`, no scalars added to
         this class will be added to the underlying losses, as it is
         assumed that will be done by the parent function.
 
@@ -94,8 +95,8 @@ class CombinedLoss(BaseWeightedLoss):
         training_loss:
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-                - _target_: anemoi.training.losses.mse.WeightedMSELoss
-                - _target_: anemoi.training.losses.mae.WeightedMAELoss
+                - _target_: anemoi.training.losses.MSELoss
+                - _target_: anemoi.training.losses.MAELoss
             scalars: ['*']
             loss_weights: [1.0, 0.6]
             # All scalars passed to this class will be added to each underlying loss
@@ -115,7 +116,7 @@ class CombinedLoss(BaseWeightedLoss):
         """
         super().__init__(node_weights=None)
 
-        self.losses: list[BaseWeightedLoss] = []
+        self.losses: list[BaseLoss] = []
         self._loss_scalar_specification: dict[int, list[str]] = {}
 
         losses = (*(losses or []), *extra_losses)
