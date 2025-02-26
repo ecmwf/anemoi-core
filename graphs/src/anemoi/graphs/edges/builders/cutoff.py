@@ -149,9 +149,9 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
 
     def _compute_edge_index_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
-        nearest_neighbour.fit(latlon_rad_to_cartesian(source_nodes.x))
+        nearest_neighbour.fit(latlon_rad_to_cartesian(source_nodes.x).cpu())
         adj_matrix = nearest_neighbour.radius_neighbors_graph(
-            latlon_rad_to_cartesian(target_nodes.x), radius=self.radius, mode="distance"
+            latlon_rad_to_cartesian(target_nodes.x).cpu(), radius=self.radius, mode="distance"
         ).tocoo()
 
         adj_matrix = self._crop_to_max_num_neighbours(adj_matrix)

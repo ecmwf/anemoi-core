@@ -78,9 +78,9 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
 
     def _compute_edge_index_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
-        nearest_neighbour.fit(latlon_rad_to_cartesian(source_nodes.x))
+        nearest_neighbour.fit(latlon_rad_to_cartesian(source_nodes.x).cpu())
         adj_matrix = nearest_neighbour.kneighbors_graph(
-            latlon_rad_to_cartesian(target_nodes.x),
+            latlon_rad_to_cartesian(target_nodes.x).cpu(),
             n_neighbors=self.num_nearest_neighbours,
         ).tocoo()
 
