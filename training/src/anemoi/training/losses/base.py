@@ -39,6 +39,12 @@ class BaseLoss(nn.Module, ABC):
         Registers:
         - self.scaler: ScaleTensor modified with `add_scaler` and `update_scaler`
 
+        These losses are designed for use within the context of
+        the anemoi-training configuration, where scalars are added
+        after initialisation. If being used outside of this
+        context, call `add_scalar` and `update_scalar` to add or
+        update the scale tensors.
+
         Parameters
         ----------
         ignore_nans : bool, optional

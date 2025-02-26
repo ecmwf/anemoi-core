@@ -141,16 +141,37 @@ losses above.
 .. code:: yaml
 
    training_loss:
-      __target__: anemoi.training.losses.combined.CombinedLoss
+      _target_: anemoi.training.losses.combined.CombinedLoss
       losses:
          - __target__: anemoi.training.losses.mse.WeightedMSELoss
          - __target__: anemoi.training.losses.mae.WeightedMAELoss
       scalers: ['variable']
       loss_weights: [1.0,0.5]
+      scalars: ['variable']
 
-All kwargs passed to ``CombinedLoss`` are passed to each of the loss
-functions, and the loss weights are used to scale the individual losses
-before combining them.
+All extra kwargs passed to ``CombinedLoss`` are passed to each of the
+loss functions, and the loss weights are used to scale the individual
+losses before combining them.
+
+If ``scalars`` is not given in the underlying loss functions, all the
+scalars given to the ``CombinedLoss`` are used.
+
+If different scalars are required for each loss, the root level scalars
+of the ``CombinedLoss`` should contain all the scalars required by the
+individual losses. Then the scalars for each loss can be set in the
+individual loss config.
+
+.. code:: yaml
+
+   training_loss:
+      _target_: anemoi.training.losses.combined.CombinedLoss
+      losses:
+            - _target_: anemoi.training.losses.mse.WeightedMSELoss
+              scalars: ['variable']
+            - _target_: anemoi.training.losses.mae.WeightedMAELoss
+              scalars: ['loss_weights_mask']
+      loss_weights: [1.0, 1.0]
+      scalars: ['*']
 
 .. automodule:: anemoi.training.losses.combined
    :members:

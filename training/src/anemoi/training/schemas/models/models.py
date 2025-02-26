@@ -84,14 +84,14 @@ class HardtanhBoundingSchema(BaseModel):
     "The maximum value for the HardTanh activation."
 
 
-class NormalizedReluBounding(BaseModel):
+class NormalizedReluBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(..., alias="_target_")
     variables: list[str]
     min_val: list[float]
     normalizer: list[str]
 
     @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBounding:
+    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBoundingSchema:
         error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
         match the number of variables ({len(self.variables)})"""
         assert len(self.normalizer) == len(self.variables), error_msg
@@ -102,7 +102,7 @@ class NormalizedReluBounding(BaseModel):
 
 
 Bounding = Annotated[
-    Union[ReluBoundingSchema, FractionBoundingSchema, HardtanhBoundingSchema, NormalizedReluBounding],
+    Union[ReluBoundingSchema, FractionBoundingSchema, HardtanhBoundingSchema, NormalizedReluBoundingSchema],
     Field(discriminator="target_"),
 ]
 
