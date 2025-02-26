@@ -144,13 +144,6 @@ Turn off plotting callbacks to isolate non-visualization related issues:
      plot:
        callbacks: []
 
-Or set the plot config to none, (in diagnostics.evaluation)
-
-.. code:: yaml
-
-   defaults:
-     plot: none
-
 **********************************
  Debugging C10 Distributed Errors
 **********************************
