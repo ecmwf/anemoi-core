@@ -10,21 +10,21 @@ on:
 jobs:
   deploy-training:
     if: contains(github.ref, 'training')
-    uses: ecmwf-actions/reusable-workflows/.github/workflows/cd-pypi.yml@v2
+    uses: ecmwf/reusable-workflows/.github/workflows/cd-pypi.yml@v2
     with:
       working-directory: ./training
     secrets: inherit
 
   deploy-models:
     if: contains(github.ref, 'models')
-    uses: ecmwf-actions/reusable-workflows/.github/workflows/cd-pypi.yml@v2
+    uses: ecmwf/reusable-workflows/.github/workflows/cd-pypi.yml@v2
     with:
       working-directory: ./models
     secrets: inherit
 
   deploy-graphs:
     if: contains(github.ref, 'graphs')
-    uses: ecmwf-actions/reusable-workflows/.github/workflows/cd-pypi.yml@v2
+    uses: ecmwf/reusable-workflows/.github/workflows/cd-pypi.yml@v2
     with:
       working-directory: ./graphs
     secrets: inherit
