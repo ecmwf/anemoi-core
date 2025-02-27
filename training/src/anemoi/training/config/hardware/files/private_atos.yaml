@@ -1,0 +1,9 @@
+dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v7.zarr #on atos and leonardo no pertubations
+dataset_ic: aifs-ea-an-enda-0001-mars-${data.resolution}-1979-2023-6h-v2-recentered-on-oper.zarr
+graph: graph_mappings_normed_edge_attrs_20231121125206_${data.resolution}_h_o48.pt
+checkpoint:
+  every_n_epochs: aifs-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+  every_n_train_steps: aifs-by_step-epoch_{epoch:03d}-step_{step:06d}
+  every_n_minutes: aifs-by_time-epoch_{epoch:03d}-step_{step:06d}
+warm_start: null
+

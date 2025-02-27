@@ -1,0 +1,14 @@
+data: /home/mlx/ai-ml/datasets/
+output: ${oc.env:SCRATCH}/aifs/${data.resolution}
+logs:
+  base: ${hardware.paths.output}/logs
+  wandb: ${hardware.paths.logs.base}
+  mlflow: ${hardware.paths.logs.base}/mlflow
+  tensorboard: ${hardware.paths.logs.base}/tensorboard
+
+checkpoints: ${hardware.paths.output}/checkpoint
+plots: ${hardware.paths.output}/plots
+profiler: ${hardware.paths.output}/profiler
+graph: /home/mlx/data/graphs/
+patches: /hpcperm/ecm9156/aifs/data/patches
+grids: ${oc.env:SCRATCH}/aifs/grids

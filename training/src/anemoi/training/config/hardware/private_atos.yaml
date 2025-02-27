@@ -1,0 +1,13 @@
+defaults:
+  - paths: private_atos
+  - files: private_atos
+
+# parallel strategy
+# if running on a single device set to "null" [Lightning < 2] or "auto" [Lightning 2.0]
+accelerator: auto
+
+# number of GPUs per node and group, and number of nodes (for DDP)
+num_gpus_per_node: 1
+num_nodes: 1
+num_gpus_per_model: 1
+num_gpus_per_ensemble: 1
