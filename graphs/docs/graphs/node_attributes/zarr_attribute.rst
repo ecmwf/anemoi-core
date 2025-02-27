@@ -1,6 +1,6 @@
-###################
- From Zarr dataset
-###################
+#####################
+ From anemoi dataset
+#####################
 
 Zarr datasets are the standard format to define data nodes in
 :ref:`anemoi-graphs <anemoi-graphs:index-page>`. The user can define

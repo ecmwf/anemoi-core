@@ -34,7 +34,7 @@ categories:
 data nodes
    A set of nodes representing one or multiple datasets. The `data
    nodes` may correspond to the input/output of our data-driven model.
-   They can be defined from Zarr datasets and this method supports all
+   They can be defined from anemoi datasets and this method supports all
    :ref:`anemoi-datasets <anemoi-datasets:index-page>` operations such
    as `cutout` or `thinning`.
 
@@ -42,7 +42,7 @@ hidden nodes
    The `hidden nodes` capture intermediate representations of the model,
    which are used to learn the dynamics of the system considered
    (atmosphere, ocean, etc, ...). These nodes can be generated from
-   existing locations (Zarr datasets or NPZ files) or algorithmically
+   existing locations (Anemoi datasets or NPZ files) or algorithmically
    from iterative refinements of polygons over the globe.
 
 Another important term that can refer to both data and hidden nodes is

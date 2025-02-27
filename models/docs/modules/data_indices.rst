@@ -59,7 +59,7 @@ remapper-preprocessor.
 
 There are two main Index-levels:
 
--  Data: The data at "Zarr"-level provided by Anemoi-Datasets
+-  Data: The data at "anemoi-datasets"-level provided by Anemoi-Datasets
 -  Model: The "squeezed" tensors with irrelevant parts missing.
 
 Additionally, there are two internal model levels (After preprocessor

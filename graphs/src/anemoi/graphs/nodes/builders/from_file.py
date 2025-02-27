@@ -26,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ZarrDatasetNodes(BaseNodeBuilder):
-    """Nodes from Zarr dataset.
+    """Nodes from an anemoi dataset.
 
     Attributes
     ----------
