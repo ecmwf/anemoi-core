@@ -23,14 +23,14 @@ dataloader:
     adjust: all
     min_distance_km: 0
   num_workers:
-    training: 1
-    validation: 1
+    training: 2
+    validation: 2
   batch_size:
     training: 2
     validation: 2
   limit_batches:
       training: 2
-      validation: 1
+      validation: 2
   training:
     start: "2017-02-01"
     end: "2017-02-07"
@@ -72,12 +72,12 @@ data:
     - "lsm"
 
 training:
-  # loss_scaling:
-  #   spatial:
-  #     _target_: anemoi.training.data.scaling.ReweightedGraphAttribute
-  #     target_nodes: ${graph.data}
-  #     scaled_attribute: area_weight # it must be a node attribute of the output nodes
-  #     cutout_weight_frac_of_global: 2
+  loss_scaling:
+    spatial:
+      _target_: anemoi.training.data.scaling.ReweightedGraphAttribute
+      target_nodes: ${graph.data}
+      scaled_attribute: area_weight # it must be a node attribute of the output nodes
+      cutout_weight_frac_of_global: 2
   max_epochs: 2
 
 hardware:
