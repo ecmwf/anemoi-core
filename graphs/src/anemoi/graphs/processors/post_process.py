@@ -257,6 +257,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         super().__init__(source_name, target_name, update_attributes)
         self.treshold = threshold
         self.source_mask_attr_name = source_mask_attr_name
+        self.target_mask_attr_name = target_mask_attr_name
 
     def compute_mask(self, graph: HeteroData) -> torch.Tensor:
         lengths = EdgeLength().get_raw_values(graph, self.source_name, self.target_name)*EARTH_RADIUS
