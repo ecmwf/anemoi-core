@@ -32,6 +32,8 @@ training:
       target_nodes: ${graph.data}
       scaled_attribute: area_weight # it must be a node attribute of the output nodes
       cutout_weight_frac_of_global: ???
+model:
+  keep_batch_sharded: False # not yet supported for stretched grid
 hardware:
   files:
     dataset: ???
