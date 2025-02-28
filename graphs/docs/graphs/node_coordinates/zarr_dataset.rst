@@ -1,15 +1,15 @@
 .. _zarr-file:
 
-###################
- From Zarr dataset
-###################
+#####################
+ From anemoi dataset
+#####################
 
-This class builds a set of nodes from a Zarr dataset. The nodes are
+This class builds a set of nodes from a anemoi dataset. The nodes are
 defined by the coordinates of the dataset. The ZarrDataset class
 supports operations compatible with :ref:`anemoi-datasets
 <anemoi-datasets:index-page>`.
 
-To define the `node coordinates` based on a Zarr dataset, you can use
+To define the `node coordinates` based on a anemoi dataset, you can use
 the following YAML configuration:
 
 .. code:: yaml
@@ -21,13 +21,13 @@ the following YAML configuration:
          dataset: /path/to/dataset.zarr
        attributes: ...
 
-where `dataset` is the path to the Zarr dataset.
+where `dataset` is the path to the anemoi dataset.
 
 The ``ZarrDatasetNodes`` class supports operations over multiple
 datasets. For example, the `cutout` operation supports combining a
 regional dataset and a global dataset to enable both limited area and
 stretched grids. To define the `node coordinates` that combine multiple
-Zarr datasets, you can use the following YAML configuration:
+anemoi datasets, you can use the following YAML configuration:
 
 .. code:: yaml
 

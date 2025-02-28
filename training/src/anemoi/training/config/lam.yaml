@@ -8,6 +8,7 @@ defaults:
 - training: default
 - _self_
 
+no_validation: False
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords

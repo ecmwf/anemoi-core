@@ -46,7 +46,10 @@ use indistinctly any of these to create your `data` or `hidden` nodes:
 
 -  :doc:`node_coordinates/zarr_dataset`
 -  :doc:`node_coordinates/npz_file`
+-  :doc:`node_coordinates/reduced_gaussian`
 -  :doc:`node_coordinates/icon_mesh`
+-  :doc:`node_coordinates/text_file`
+-  :doc:`node_coordinates/latlon_arrays`
 -  :doc:`node_coordinates/tri_refined_icosahedron`
 -  :doc:`node_coordinates/hex_refined_icosahedron`
 -  :doc:`node_coordinates/healpix`

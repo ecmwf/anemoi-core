@@ -1,0 +1,17 @@
+# This workflow assigns labels to a pull request based on the files changed in the PR.
+# The labels are defined in the `.github/labels.yml` file.
+name: "[Pull Request] Label File-based"
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  labeler:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Assign labels from file changes
+      uses: actions/labeler@v5

@@ -1,0 +1,30 @@
+# This workflow will upload a Python Package using Twine when a release is created
+# For more information see: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions#publishing-to-package-registries
+
+name: Upload Python Packages to PyPI
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  deploy-training:
+    if: contains(github.ref, 'training')
+    uses: ecmwf/reusable-workflows/.github/workflows/cd-pypi.yml@v2
+    with:
+      working-directory: ./training
+    secrets: inherit
+
+  deploy-models:
+    if: contains(github.ref, 'models')
+    uses: ecmwf/reusable-workflows/.github/workflows/cd-pypi.yml@v2
+    with:
+      working-directory: ./models
+    secrets: inherit
+
+  deploy-graphs:
+    if: contains(github.ref, 'graphs')
+    uses: ecmwf/reusable-workflows/.github/workflows/cd-pypi.yml@v2
+    with:
+      working-directory: ./graphs
+    secrets: inherit
