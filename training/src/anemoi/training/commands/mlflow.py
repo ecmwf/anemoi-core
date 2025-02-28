@@ -105,7 +105,7 @@ class MlFlow(Command):
             action="store_true",
         )
 
-        help_msg = "Create an mlflow run_id."
+        help_msg = "Create an MLflow run_id given a training configuration."
         prepare = subparsers.add_parser(
             "prepare",
             help=help_msg,
@@ -116,7 +116,7 @@ class MlFlow(Command):
             "--config-name",
             "-n",
             default="dev",
-            help="Name of the configuration",
+            help="Name of the training configuration.",
         )
         prepare.add_argument(
             "--verbose",
@@ -186,12 +186,15 @@ class MlFlow(Command):
             run = client.create_run(experiment_id, run_name=cfg.diagnostics.log.mlflow.run_name)
             run_id = run.info.run_id
             LOGGER.info("Creating new run_id: %s", run_id)
+
+            # Log the configuration file as an artifact
             with tempfile.TemporaryDirectory() as tmp_dir:
                 fp = Path(tmp_dir, "config.json")
                 json.dump(OmegaConf.to_container(cfg), Path.open(fp, "w"))
                 client.log_artifact(run.info.run_id, fp)
 
             return run_id
+
         return None
 
 
