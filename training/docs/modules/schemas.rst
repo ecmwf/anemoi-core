@@ -32,6 +32,15 @@ files,
    :no-undoc-members:
    :show-inheritance:
 
+*************
+ Diagnostics
+*************
+
+.. automodule:: anemoi.training.schemas.diagnostics
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
 **********
  Hardware
 **********
