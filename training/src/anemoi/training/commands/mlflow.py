@@ -16,6 +16,7 @@ import logging
 import tempfile
 from pathlib import Path
 
+import mlflow
 from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
@@ -119,13 +120,20 @@ class MlFlow(Command):
             help="Name of the training configuration.",
         )
         prepare.add_argument(
+            "--output",
+            "-o",
+            default="./mlflow_run_id.yaml",
+            type=Path,
+            help="Output file path.",
+        )
+        prepare.add_argument(
             "--verbose",
             "-v",
             action="store_true",
         )
 
     @staticmethod
-    def run(args: argparse.Namespace) -> str | None:
+    def run(args: argparse.Namespace) -> None:
         if args.subcommand == "login":
             from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 
@@ -188,12 +196,18 @@ class MlFlow(Command):
             LOGGER.info("Creating new run_id: %s", run_id)
 
             # Log the configuration file as an artifact
+            mlflow.set_tracking_uri(cfg.diagnostics.log.mlflow.tracking_uri)
             with tempfile.TemporaryDirectory() as tmp_dir:
                 fp = Path(tmp_dir, "config.json")
                 json.dump(OmegaConf.to_container(cfg), Path.open(fp, "w"))
                 client.log_artifact(run.info.run_id, fp)
 
-            return run_id
+            # Dump configuration in output file
+            LOGGER.info("Saving run id in file in %s.", args.output)
+            with args.output.open("w") as f:
+                f.write(run_id)
+
+            return None
 
         return None
 
