@@ -15,34 +15,40 @@ from pydantic import NonNegativeInt
 from anemoi.training.schemas.utils import BaseModel
 
 
-class ActivationFunctons(str, Enum):
-    GELU = "GELU"
-    SiLU = "SiLU"
-    ELU = "ELU"
-    ReLU = "ReLU"
-    Tanh = "Tanh"
-    Sigmoid = "Sigmoid"
-    Hardshrink = "Hardshrink"
-    Hardsigmoid = "Hardsigmoid"
-    Hardtanh = "Hardtanh"
-    Hardswish = "Hardswish"
-    LeakyReLU = "LeakyReLU"
-    LogSigmoid = "LogSigmoid"
-    PReLU = "PReLU"
-    ReLU6 = "ReLU6"
-    SELU = "SELU"
-    CELU = "CELU"
-    Mish = "Mish"
-    Softplus = "Softplus"
-    Softshrink = "Softshrink"
-    Softsign = "Softsign"
-    Tanhshrink = "Tanhshrink"
-    Threshold = "Threshold"
-    GLU = "GLU"
+class ActivationFunctions(str, Enum):
+    GELU = "torch.nn.GELU"
+    SiLU = "torch.nn.SiLU"
+    ELU = "torch.nn.ELU"
+    ReLU = "torch.nn.ReLU"
+    Tanh = "torch.nn.Tanh"
+    Sigmoid = "torch.nn.Sigmoid"
+    Hardshrink = "torch.nn.Hardshrink"
+    Hardsigmoid = "torch.nn.Hardsigmoid"
+    Hardtanh = "torch.nn.Hardtanh"
+    Hardswish = "torch.nn.Hardswish"
+    LeakyReLU = "torch.nn.LeakyReLU"
+    LogSigmoid = "torch.nn.LogSigmoid"
+    PReLU = "torch.nn.PReLU"
+    ReLU6 = "torch.nn.ReLU6"
+    SELU = "torch.nn.SELU"
+    CELU = "torch.nn.CELU"
+    Mish = "torch.nn.Mish"
+    Softplus = "torch.nn.Softplus"
+    Softshrink = "torch.nn.Softshrink"
+    Softsign = "torch.nn.Softsign"
+    Tanhshrink = "torch.nn.Tanhshrink"
+    Threshold = "torch.nn.Threshold"
+
+
+class ActivationFunctionSchema(BaseModel):
+    target_: ActivationFunctions = Field(..., alias="_target_")
+    "Activation function class implementation."
+    partial_: bool = Field(..., alias="_partial_")
+    "Should always be True to avoid using the same activation function object in the different layers."
 
 
 class TransformerModelComponent(BaseModel):
-    activation: ActivationFunctons = Field(example="GELU")
+    activation: ActivationFunctionSchema
     "Activation function to use for the transformer model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
@@ -57,7 +63,7 @@ class TransformerModelComponent(BaseModel):
 
 
 class GNNModelComponent(BaseModel):
-    activation: ActivationFunctons = Field(example="GELU")
+    activation: ActivationFunctionSchema
     "Activation function to use for the GNN model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."

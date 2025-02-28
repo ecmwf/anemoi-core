@@ -77,12 +77,6 @@ class TransformerProcessorBlock(BaseBlock):
     ):
         super().__init__()
 
-        try:
-            act_func = getattr(nn, activation)
-        except AttributeError as ae:
-            LOGGER.error("Activation function %s not supported", activation)
-            raise RuntimeError from ae
-
         self.layer_norm_attention = layer_kernels["LayerNorm"](normalized_shape=num_channels)
         self.layer_norm_mlp = layer_kernels["LayerNorm"](normalized_shape=num_channels)
 
@@ -101,7 +95,7 @@ class TransformerProcessorBlock(BaseBlock):
 
         self.mlp = nn.Sequential(
             layer_kernels["Linear"](num_channels, hidden_dim),
-            act_func(),
+            activation(),
             layer_kernels["Linear"](hidden_dim, num_channels),
         )
 
@@ -365,19 +359,13 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.projection = linear(out_channels, out_channels)
 
-        try:
-            act_func = getattr(nn, activation)
-        except AttributeError as ae:
-            LOGGER.error("Activation function %s not supported", activation)
-            raise RuntimeError from ae
-
         self.layer_norm_attention = layerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp = layerNorm(normalized_shape=out_channels)
 
         self.node_dst_mlp = nn.Sequential(
             self.layer_norm_mlp,
             linear(out_channels, hidden_dim),
-            act_func(),
+            activation(),
             linear(hidden_dim, out_channels),
         )
 
@@ -385,7 +373,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self.node_src_mlp = nn.Sequential(
                 self.layer_norm_mlp,
                 linear(out_channels, hidden_dim),
-                act_func(),
+                activation(),
                 linear(hidden_dim, out_channels),
             )
 
