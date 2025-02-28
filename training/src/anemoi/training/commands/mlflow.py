@@ -8,9 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 
+from __future__ import annotations
+
 import argparse
+import json
+import logging
+import tempfile
+from pathlib import Path
+
+from hydra import compose
+from hydra import initialize
+from omegaconf import OmegaConf
 
 from anemoi.training.commands import Command
+from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MlFlow(Command):
@@ -92,8 +105,27 @@ class MlFlow(Command):
             action="store_true",
         )
 
+        help_msg = "Create an mlflow run_id."
+        prepare = subparsers.add_parser(
+            "prepare",
+            help=help_msg,
+            description=help_msg,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        prepare.add_argument(
+            "--config-name",
+            "-n",
+            default="dev",
+            help="Name of the configuration",
+        )
+        prepare.add_argument(
+            "--verbose",
+            "-v",
+            action="store_true",
+        )
+
     @staticmethod
-    def run(args: argparse.Namespace) -> None:
+    def run(args: argparse.Namespace) -> str | None:
         if args.subcommand == "login":
             from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 
@@ -104,7 +136,7 @@ class MlFlow(Command):
                 raise ValueError(msg)
 
             TokenAuth(url=url).login(force_credentials=args.force_credentials)
-            return
+            return None
 
         if args.subcommand == "sync":
             from anemoi.training.diagnostics.mlflow.utils import health_check
@@ -129,7 +161,38 @@ class MlFlow(Command):
                 args.export_deleted_runs,
                 log_level,
             ).sync()
-            return
+            return None
+
+        if args.subcommand == "prepare":
+            # Load configuration
+            with initialize(version_base=None, config_path="./"):
+                cfg = compose(config_name=args.config_name)
+
+            # Create MLflow client and get experiment
+            client = AnemoiMlflowClient(cfg.diagnostics.log.mlflow.tracking_uri, authentication=True)
+            experiment_id = client.get_experiment_by_name(cfg.diagnostics.log.mlflow.experiment_name).experiment_id
+
+            # Parse configuration
+            if cfg.training.run_id is not None:  # Existing run_id
+                LOGGER.info("Existing run_id: %s", cfg.training.run_id)
+                try:
+                    client.get_run(cfg.training.run_id)
+                except ValueError as e:
+                    e(f"Run_id {cfg.training.run_id} not found. Modify your configuration file.")
+                    return None
+                return cfg.training.run_id
+
+            # Existing fork_id needs a new run_id attached to it
+            run = client.create_run(experiment_id, run_name=cfg.diagnostics.log.mlflow.run_name)
+            run_id = run.info.run_id
+            LOGGER.info("Creating new run_id: %s", run_id)
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                fp = Path(tmp_dir, "config.json")
+                json.dump(OmegaConf.to_container(cfg), Path.open(fp, "w"))
+                client.log_artifact(run.info.run_id, fp)
+
+            return run_id
+        return None
 
 
 command = MlFlow
