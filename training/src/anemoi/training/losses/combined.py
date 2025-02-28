@@ -17,8 +17,8 @@ from typing import Any
 from omegaconf import DictConfig
 
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.utils import ScaleTensor
 from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.utils import ScaleTensor
 
 if TYPE_CHECKING:
     import torch
