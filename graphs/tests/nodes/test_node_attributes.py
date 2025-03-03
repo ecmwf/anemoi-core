@@ -7,26 +7,27 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import numpy as np
 import pytest
 import torch
-import numpy as np
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import BaseNodeAttribute
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import PlanarAreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 
 
 class TestBaseNodeAttribute(BaseNodeAttribute):
     """Test implementation of BaseNodeAttribute."""
+
     def get_raw_values(self, nodes, **_kwargs) -> torch.Tensor:
         return torch.from_numpy(np.array(list(range(nodes.num_nodes))))
 
 
 @pytest.mark.parametrize("nodes_name", ["invalid_nodes", 4])
 def test_base_node_attribute_invalid_nodes_name(graph_with_nodes: HeteroData, nodes_name: str):
-    """Test BaseNodeAttribute raises error with invalid nodes name."""    
+    """Test BaseNodeAttribute raises error with invalid nodes name."""
     with pytest.raises(AssertionError):
         TestBaseNodeAttribute().compute(graph_with_nodes, nodes_name)
 
