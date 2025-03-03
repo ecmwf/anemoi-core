@@ -9,44 +9,92 @@
 
 import pytest
 import torch
+import numpy as np
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.nodes.attributes import BaseNodeAttribute
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
+from anemoi.graphs.nodes.attributes import PlanarAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 
 
-@pytest.mark.parametrize("norm", [None, "l1", "l2", "unit-max", "unit-std"])
-def test_uniform_weights(graph_with_nodes: HeteroData, norm: str):
-    """Test attribute builder for UniformWeights."""
-    node_attr_builder = UniformWeights(norm=norm)
-    weights = node_attr_builder.compute(graph_with_nodes, "test_nodes")
+class TestBaseNodeAttribute(BaseNodeAttribute):
+    """Test implementation of BaseNodeAttribute."""
+    def get_raw_values(self, nodes, **_kwargs) -> torch.Tensor:
+        return torch.from_numpy(np.array(list(range(nodes.num_nodes))))
 
-    assert weights is not None
-    assert isinstance(weights, torch.Tensor)
-    assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+
+@pytest.mark.parametrize("nodes_name", ["invalid_nodes", 4])
+def test_base_node_attribute_invalid_nodes_name(graph_with_nodes: HeteroData, nodes_name: str):
+    """Test BaseNodeAttribute raises error with invalid nodes name."""    
+    with pytest.raises(AssertionError):
+        TestBaseNodeAttribute().compute(graph_with_nodes, nodes_name)
 
 
 @pytest.mark.parametrize("norm", ["l3", "invalide"])
-def test_uniform_weights_fail(graph_with_nodes: HeteroData, norm: str):
-    """Test attribute builder for UniformWeights with invalid norm."""
-    with pytest.raises(ValueError):
-        node_attr_builder = UniformWeights(norm=norm)
-        node_attr_builder.compute(graph_with_nodes, "test_nodes")
+def test_base_node_attribute_invalid_norm(graph_with_nodes: HeteroData, norm: str):
+    """Test BaseNodeAttribute raises error with invalid nodes name."""
+    with pytest.raises(AssertionError):
+        TestBaseNodeAttribute(norm=norm).compute(graph_with_nodes, "test_nodes")
 
 
-def test_area_weights(graph_with_nodes: HeteroData):
-    """Test attribute builder for SphericalAreaWeights."""
-    node_attr_builder = SphericalAreaWeights()
+@pytest.mark.parametrize("norm", [None, "l1", "l2", "unit-max", "unit-std"])
+def test_base_node_attribute_norm(graph_with_nodes: HeteroData, norm: str):
+    """Test attribute builder for UniformWeights."""
+    node_attr_builder = TestBaseNodeAttribute(norm=norm)
     weights = node_attr_builder.compute(graph_with_nodes, "test_nodes")
 
     assert weights is not None
     assert isinstance(weights, torch.Tensor)
     assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+    assert weights.dtype == getattr(torch, node_attr_builder.dtype)
+
+
+def test_uniform_weights(graph_with_nodes: HeteroData):
+    """Test attribute builder for UniformWeights."""
+    node_attr_builder = UniformWeights()
+    weights = node_attr_builder.compute(graph_with_nodes, "test_nodes")
+
+    # All values must be the same. Then, the mean has to be also the same
+    assert torch.max(torch.abs(weights - torch.mean(weights))) == 0
+    assert isinstance(weights, torch.Tensor)
+    assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+    assert weights.dtype == getattr(torch, node_attr_builder.dtype)
+
+
+def test_planar_area_weights(graph_with_nodes: HeteroData):
+    """Test attribute builder for PlanarAreaWeights."""
+    node_attr_builder = PlanarAreaWeights()
+    weights = node_attr_builder.compute(graph_with_nodes, "test_nodes")
+
+    assert weights is not None
+    assert isinstance(weights, torch.Tensor)
+    assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+    assert weights.dtype == getattr(torch, node_attr_builder.dtype)
+
+
+@pytest.mark.parametrize("fill_value", [0.0, -1.0, float("nan")])
+@pytest.mark.parametrize("radius", [0.1, 1, np.pi])
+def test_spherical_area_weights(graph_with_nodes: HeteroData, fill_value: float, radius: float):
+    """Test attribute builder for SphericalAreaWeights with different fill values."""
+    node_attr_builder = SphericalAreaWeights(fill_value=fill_value, radius=radius)
+    weights = node_attr_builder.compute(graph_with_nodes, "test_nodes")
+
+    assert weights is not None
+    assert isinstance(weights, torch.Tensor)
+    assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+    assert weights.dtype == getattr(torch, node_attr_builder.dtype)
 
 
 @pytest.mark.parametrize("radius", [-1.0, "hello", None])
-def test_area_weights_fail(graph_with_nodes: HeteroData, radius: float):
+def test_spherical_area_weights_wrong_radius(radius: float):
     """Test attribute builder for SphericalAreaWeights with invalid radius."""
-    with pytest.raises(ValueError):
-        node_attr_builder = SphericalAreaWeights(radius=radius)
-        node_attr_builder.compute(graph_with_nodes, "test_nodes")
+    with pytest.raises(AssertionError):
+        SphericalAreaWeights(radius=radius)
+
+
+@pytest.mark.parametrize("fill_value", ["invalid", "as"])
+def test_spherical_area_weights_wrong_fill_value(fill_value: str):
+    """Test attribute builder for SphericalAreaWeights with invalid fill_value."""
+    with pytest.raises(AssertionError):
+        SphericalAreaWeights(fill_value=fill_value)
