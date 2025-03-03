@@ -208,6 +208,8 @@ class TrainingSchema(BaseModel):
     "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
     load_weights_only: bool = Field(example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
+    run_id_with_no_checkpoint: bool = Field(example=False)
+    "If True, the run_id is used to create a new run without loading an existing checkpoint."
     transfer_learning: bool = Field(example=False)
     "Flag to activate transfer learning mode when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])

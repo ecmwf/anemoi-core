@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
 import tempfile
@@ -115,13 +116,16 @@ class MlFlow(Command):
         )
         prepare.add_argument(
             "--config-name",
-            "-n",
             default="dev",
             help="Name of the training configuration.",
         )
         prepare.add_argument(
+            "--owner",
+            default=getpass.getuser(),
+            help="Name of the training configuration.",
+        )
+        prepare.add_argument(
             "--output",
-            "-o",
             default="./mlflow_run_id.yaml",
             type=Path,
             help="Output file path.",
@@ -201,6 +205,10 @@ class MlFlow(Command):
                 fp = Path(tmp_dir, "config.json")
                 json.dump(OmegaConf.to_container(cfg), Path.open(fp, "w"))
                 client.log_artifact(run.info.run_id, fp)
+                client.set_tag(run_id, "mlflow.user", args.owner)
+                client.set_tag(run_id, "mlflow.source.name", "anemoi-training train")
+                if cfg.diagnostics.log.mlflow.run_name:
+                    client.set_tag(run_id, "mlflow.runName", "toto")
 
             # Dump configuration in output file
             LOGGER.info("Saving run id in file in %s.", args.output)

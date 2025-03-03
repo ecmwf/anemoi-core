@@ -77,6 +77,7 @@ class AnemoiTrainer:
 
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
         self.load_weights_only = self.config.training.load_weights_only
+        self.run_id_with_no_checkpoint = bool(self.config.training.run_id_with_no_checkpoint)
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id
@@ -432,11 +433,10 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
-
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
-            ckpt_path=None if self.load_weights_only else self.last_checkpoint,
+            ckpt_path=None if (self.load_weights_only or self.run_id_with_no_checkpoint) else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
