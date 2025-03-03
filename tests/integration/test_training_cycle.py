@@ -30,12 +30,12 @@ def test_training_cycle_grid_configs(stretched_config) -> None:
     shutil.rmtree(stretched_config.hardware.paths.output)
 
 
-if __name__ == "__main__":
-    from hydra import compose
-    from hydra import initialize
-    from omegaconf import OmegaConf
+# if __name__ == "__main__":
+#     from hydra import compose
+#     from hydra import initialize
+#     from omegaconf import OmegaConf
 
-    with initialize(version_base=None, config_path="", job_name="test_training"):
-        cfg = compose(config_name="stretched_config", overrides=[])
-        OmegaConf.resolve(cfg)
-        test_training_cycle_architecture_configs(cfg)
+#     with initialize(version_base=None, config_path="", job_name="test_training"):
+#         cfg = compose(config_name="stretched_config", overrides=[])
+#         OmegaConf.resolve(cfg)
+#         test_training_cycle_architecture_configs(cfg)

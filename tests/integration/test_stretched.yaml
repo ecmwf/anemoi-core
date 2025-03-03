@@ -1,0 +1,65 @@
+# Modifications for the stretched grid template "stretched.yaml"
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+        thinning: 25 # need to specify this
+      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+  training:
+    end: "2017-02-07"
+  validation:
+    start: "2018-01-01"
+
+# need this since some variables set in the default zarr config are not part of the dataset
+data:
+  forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  - "lsm"
+  diagnostic:
+  - tp
+  remapped:
+  normalizer:
+    default: "mean-std"
+    std:
+    - "tp"
+    min-max:
+    max:
+    none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "lsm"
+
+training:
+  loss_scaling:
+    spatial:
+      cutout_weight_frac_of_global: 2 # need to specify this
+
+# TODO: upload datasets to S3 (or use existing ones and configure auth) and then adapt filenames and paths here
+hardware:
+  files:
+    dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
+    forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+    graph: test_stretched_graph.pt
+  # paths:
+  #   output: ${oc.env:PWD}/tmp_output/              #included this in general overwrites
+
+graph:
+  # overwrite: True # included this in general overwrites
+  nodes:
+    hidden:
+      node_builder:
+        lam_resolution: 5
+        global_resolution: 3
