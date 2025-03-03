@@ -39,7 +39,7 @@ def mock_zarr_dataset() -> MockZarrDataset:
 def mock_zarr_dataset_cutout() -> MockZarrDataset:
     """Mock zarr dataset with nodes."""
     coords = 2 * torch.pi * np.array([[lat, lon] for lat in lats for lon in lons])
-    grids = int(0.3 * len(coords)), int(0.7 * len(coords))
+    grids = int(0.3 * len(coords)), len(coords) - int(0.3 * len(coords))
     return MockZarrDataset(latitudes=coords[:, 0], longitudes=coords[:, 1], grids=grids)
 
 

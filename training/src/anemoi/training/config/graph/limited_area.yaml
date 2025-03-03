@@ -18,6 +18,7 @@ nodes:
       resolution: 5 # grid resolution for npz (o32, o48, ...)
       reference_node_name: ${graph.data}
       mask_attr_name: cutout_mask
+      margin_radius_km: 10
 
 edges:
 # Encoder configuration
