@@ -3,7 +3,7 @@ dataloader:
   dataset:
     cutout:
       - dataset: ${hardware.paths.data}/${hardware.files.dataset}
-        thinning: 25 # need to specify this
+        thinning: 25 # ??? value in stretched config
       - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
   training:
     end: "2017-02-07"
@@ -45,21 +45,21 @@ data:
 training:
   loss_scaling:
     spatial:
-      cutout_weight_frac_of_global: 2 # need to specify this
+      cutout_weight_frac_of_global: 2 # ??? value in stretched config
 
-# TODO: upload datasets to S3 (or use existing ones and configure auth) and then adapt filenames and paths here
+
 hardware:
   files:
     dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
     forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
     graph: test_stretched_graph.pt
-  # paths:
-  #   output: ${oc.env:PWD}/tmp_output/              #included this in general overwrites
+
 
 graph:
-  # overwrite: True # included this in general overwrites
+  # overwrite: True # included this in test_training_cycle modifications
   nodes:
     hidden:
       node_builder:
+        # use coarser resolution for testing
         lam_resolution: 5
         global_resolution: 3
