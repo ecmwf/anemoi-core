@@ -13,13 +13,10 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import BaseNodeAttribute
+from anemoi.graphs.nodes.attributes import CutOutMask
 from anemoi.graphs.nodes.attributes import PlanarAreaWeights
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
-from anemoi.graphs.nodes.attributes import CutOutMask
-from anemoi.graphs.nodes.attributes import BooleanNot
-from anemoi.graphs.nodes.attributes import BooleanAndMask
-from anemoi.graphs.nodes.attributes import BooleanOrMask
 
 
 class TestBaseNodeAttribute(BaseNodeAttribute):
@@ -109,7 +106,7 @@ def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cut
     """Test attribute builder for CutOutMask."""
     # Add dataset attribute required by CutOutMask
     graph_with_nodes["test_nodes"]["_dataset"] = {"cutout": None}
-    
+
     with mocker.patch("anemoi.graphs.nodes.attributes.open_dataset") as mock_open_dataset:
         mock_open_dataset.return_value = mock_zarr_dataset_cutout
         mask = CutOutMask().compute(graph_with_nodes, "test_nodes")
@@ -121,7 +118,7 @@ def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cut
 
 
 def test_cutout_mask_missing_dataset(graph_with_nodes: HeteroData):
-    """Test CutOutMask fails when dataset attribute is missing."""    
+    """Test CutOutMask fails when dataset attribute is missing."""
     node_attr_builder = CutOutMask()
     with pytest.raises(AssertionError):
         node_attr_builder.compute(graph_with_nodes, "test_nodes")
@@ -130,7 +127,7 @@ def test_cutout_mask_missing_dataset(graph_with_nodes: HeteroData):
 def test_cutout_mask_missing_cutout(graph_with_nodes: HeteroData):
     """Test CutOutMask fails when cutout key is missing."""
     graph_with_nodes["test_nodes"]["_dataset"] = {}
-    
+
     node_attr_builder = CutOutMask()
     with pytest.raises(AssertionError):
         node_attr_builder.compute(graph_with_nodes, "test_nodes")
