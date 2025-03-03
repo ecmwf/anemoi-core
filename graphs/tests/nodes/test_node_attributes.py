@@ -16,6 +16,10 @@ from anemoi.graphs.nodes.attributes import BaseNodeAttribute
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import PlanarAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
+from anemoi.graphs.nodes.attributes import CutOutMask
+from anemoi.graphs.nodes.attributes import BooleanNot
+from anemoi.graphs.nodes.attributes import BooleanAndMask
+from anemoi.graphs.nodes.attributes import BooleanOrMask
 
 
 class TestBaseNodeAttribute(BaseNodeAttribute):
@@ -98,3 +102,34 @@ def test_spherical_area_weights_wrong_fill_value(fill_value: str):
     """Test attribute builder for SphericalAreaWeights with invalid fill_value."""
     with pytest.raises(AssertionError):
         SphericalAreaWeights(fill_value=fill_value)
+
+
+def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cutout):
+    """Test attribute builder for CutOutMask."""
+    # Add dataset attribute required by CutOutMask
+    graph_with_nodes["test_nodes"]["_dataset"] = {"cutout": None}
+    
+    with mocker.patch("anemoi.graphs.nodes.attributes.open_dataset") as mock_open_dataset:
+        mock_open_dataset.return_value = mock_zarr_dataset_cutout
+        mask = CutOutMask().compute(graph_with_nodes, "test_nodes")
+
+    assert mask is not None
+    assert isinstance(mask, torch.Tensor)
+    assert mask.dtype == torch.bool
+    assert mask.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+
+
+def test_cutout_mask_missing_dataset(graph_with_nodes: HeteroData):
+    """Test CutOutMask fails when dataset attribute is missing."""    
+    node_attr_builder = CutOutMask()
+    with pytest.raises(AssertionError):
+        node_attr_builder.compute(graph_with_nodes, "test_nodes")
+
+
+def test_cutout_mask_missing_cutout(graph_with_nodes: HeteroData):
+    """Test CutOutMask fails when cutout key is missing."""
+    graph_with_nodes["test_nodes"]["_dataset"] = {}
+    
+    node_attr_builder = CutOutMask()
+    with pytest.raises(AssertionError):
+        node_attr_builder.compute(graph_with_nodes, "test_nodes")
