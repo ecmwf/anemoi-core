@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from scipy.sparse import coo_matrix
 from torch_geometric.data.storage import NodeStorage
+
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 LOGGER = logging.getLogger(__name__)

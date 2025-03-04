@@ -116,7 +116,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
 
         edge_index = radius(source_coords, target_coords, r=self.radius, max_num_neighbors=self.max_num_neighbours)
-    
+
         return torch.flip(edge_index, [0])
 
     def _crop_to_max_num_neighbours(self, adjmat):

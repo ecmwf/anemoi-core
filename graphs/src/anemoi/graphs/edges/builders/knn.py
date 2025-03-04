@@ -20,7 +20,6 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,8 +64,6 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
         self.num_nearest_neighbours = num_nearest_neighbours
-
-
 
     def _compute_edge_index_pyg(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         from torch_cluster.knn import knn
