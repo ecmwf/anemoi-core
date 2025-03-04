@@ -372,7 +372,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
         tracking_uri: str,
         on_resume_create_child: bool,
     ) -> tuple[str | None, str, dict[str, Any]]:
-
         run_id = None
         tags = {"projectName": project_name}
 
@@ -391,13 +390,22 @@ class AnemoiMLflowLogger(MLFlowLogger):
             self.auth.authenticate()
             mlflow_client = mlflow.MlflowClient(tracking_uri)
 
-            if config_run_id and on_resume_create_child:
+            if config_run_id and on_resume_create_child and not fork_run_id:
                 parent_run_id = config_run_id  # parent_run_id
                 parent_run = mlflow_client.get_run(parent_run_id)
                 run_name = parent_run.info.run_name
                 self._check_server2server_lineage(parent_run)
                 tags["mlflow.parentRunId"] = parent_run_id
                 tags["resumedRun"] = "True"  # tags can't take boolean values
+            elif config_run_id and fork_run_id:
+                parent_run_id = config_run_id  # parent_run_id which is the main run ID
+                parent_run = mlflow_client.get_run(parent_run_id)
+                run_name = parent_run.info.run_name
+                self._check_server2server_lineage(parent_run)
+                tags["mlflow.parentRunId"] = config_run_id  # We want to be linked to the main run ID
+                tags["resumedRun"] = "True"  # We want to be linked to the main run ID
+                tags["forkedRun"] = "True"  # This is a forked run
+                tags["forkedRunId"] = fork_run_id  # This is a forked run
             elif config_run_id and not on_resume_create_child:
                 run_id = config_run_id
                 run = mlflow_client.get_run(run_id)
