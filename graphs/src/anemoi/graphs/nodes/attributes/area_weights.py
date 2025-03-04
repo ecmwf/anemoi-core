@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-
+import scipy
 import numpy as np
 import torch
 from scipy.spatial import ConvexHull
@@ -132,41 +132,47 @@ class PlanarAreaWeights(BaseNodeAttribute):
         hull = ConvexHull(points)
         hull_points = points[hull.vertices]
 
-        # Expand hull slightly (resolution) outward
+        # Expand hull outward
         centroid = np.mean(hull_points, axis=0)
         vectors = hull_points - centroid
-        expanded_hull = hull_points + vectors * (resolution / np.linalg.norm(vectors, axis=1)[:, np.newaxis])
+        expanded_hull = hull_points + vectors * (2 ** 0.5 * resolution / np.linalg.norm(vectors, axis=1)[:, np.newaxis])
 
         # Create points along each hull edge
         boundary_points = []
-        n = len(expanded_hull)
-        for i in range(n):
-            p1 = expanded_hull[i]
-            p2 = expanded_hull[(i + 1) % n]
+        p1 = expanded_hull
+        p2 = np.roll(expanded_hull, 1, axis=0)
 
-            # Calculate number of points needed along this edge
-            edge_length = np.linalg.norm(p2 - p1)
-            num_points = max(2, int(edge_length / resolution))
+        # Calculate number of points needed along this edge
+        edge_length = np.linalg.norm(p2 - p1, axis=1)
+        num_points = np.ceil(edge_length / resolution).astype(int)
 
+        for i in np.where(num_points > 2)[0]:            
             # Create evenly spaced points along the edge
-            t = np.linspace(0, 1, num_points)[:-1]  # Exclude last point to avoid duplicates
-            edge_points = p1[None, :] + t[:, None] * (p2 - p1)[None, :]
+            t = np.linspace(0, 1, num_points[i])[1:-1][:, None]  # Exclude last point to avoid duplicates
+            edge_points = p1[i] + t * (p2[i] - p1[i])
             boundary_points.append(edge_points)
 
-        boundary_points = np.vstack(boundary_points)
+        return np.concatenate([expanded_hull, np.vstack(boundary_points)])
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         points = nodes.x.cpu().numpy()
         resolution = self._compute_mean_nearest_distance(points)
-        extended_points = self._add_boundary_ring(points, resolution)
+        boundary_points = self._get_boundary_ring(points, resolution)
 
+        # Compute convex hull over all points (boundary ring included)
+        extended_points = np.vstack([points, boundary_points])
         v = Voronoi(extended_points, qhull_options="QJ Pp")
+
+        # Compute the area of each node's region, excluding those in the boundary ring
         areas = []
-        for r in v.regions:
-            area = ConvexHull(v.vertices[r, :]).volume
+        for idx in range(len(points)):
+            p_idx = v.point_region[idx]
+            r = v.regions[p_idx]
+            poly_coords = v.vertices[r]
+            area = ConvexHull(poly_coords).volume
             areas.append(area)
-        result = torch.from_numpy(np.asarray(areas))
-        return result
+
+        return torch.from_numpy(np.array(areas))
 
 
 class SphericalAreaWeights(BaseNodeAttribute):
