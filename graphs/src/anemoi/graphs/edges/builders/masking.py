@@ -48,13 +48,13 @@ class NodeMaskingMixin:
 
     def undo_masking(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         if self.target_mask_attr_name is not None:
-            target_mask = target_nodes[self.target_mask_attr_name].squeeze()
+            target_mask = target_nodes[self.target_mask_attr_name].squeeze().cpu()
             assert adj_matrix.shape[0] == target_mask.sum()
             target_mapper = dict(zip(list(range(adj_matrix.shape[0])), np.where(target_mask)[0]))
             adj_matrix.row = np.vectorize(target_mapper.get)(adj_matrix.row)
 
         if self.source_mask_attr_name is not None:
-            source_mask = source_nodes[self.source_mask_attr_name].squeeze()
+            source_mask = source_nodes[self.source_mask_attr_name].squeeze().cpu()
             assert adj_matrix.shape[1] == source_mask.sum()
             source_mapper = dict(zip(list(range(adj_matrix.shape[1])), np.where(source_mask)[0]))
             adj_matrix.col = np.vectorize(source_mapper.get)(adj_matrix.col)
