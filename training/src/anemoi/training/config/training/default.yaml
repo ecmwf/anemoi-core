@@ -1,8 +1,8 @@
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
-load_weights_only: null # only load model weights, do not restore optimiser states etc.
-transfer_learning: null # activate to perform transfer learning
+transfer_learning: False # activate to perform transfer learning
+load_weights_only: False # only load model weights, do not restore optimiser states etc.
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -41,6 +41,7 @@ zero_optimizer: False
 # dynamic rescaling of the loss gradient
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
+loss_gradient_scaling: False
 
 # loss function for the model
 training_loss:
@@ -53,8 +54,6 @@ training_loss:
   scalars: ['variable', 'loss_weights_mask']
 
   ignore_nans: False
-
-loss_gradient_scaling: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
