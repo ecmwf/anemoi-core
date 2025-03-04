@@ -28,8 +28,9 @@ MaskAttributeType = Union[str, Type["BooleanBaseNodeAttribute"]]
 class BooleanOperation(BooleanBaseNodeAttribute, ABC):
     """Base class for boolean operations."""
 
-    def __init__(self, masks: MaskAttributeType | list[MaskAttributeType]) -> None:
+    def __init__(self, masks: MaskAttributeType | list[MaskAttributeType] = None) -> None:
         super().__init__()
+        assert masks is not None
         self.masks = masks if isinstance(masks, list) else [masks]
 
     @staticmethod
