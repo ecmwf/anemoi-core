@@ -141,7 +141,7 @@ class BaseNodeBuilder(ABC):
         LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         if attrs_config is None:
-            return graph
+            attrs_config = {}  # We need to register the hidden attributes
 
         t0 = time.time()
         graph = self.register_attributes(graph, attrs_config)
