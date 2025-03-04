@@ -62,6 +62,7 @@ class BooleanOperationSchema(BaseModel):
         "anemoi.graphs.nodes.attributes.BooleanOrMask",
     ] = Field(..., alias="_target_")
     "Implementation of boolean masks from anemoi.graphs.nodes.attributes"
+    masks: str | list[str]
 
 
 NodeAttributeSchemas = Union[
