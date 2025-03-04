@@ -11,7 +11,9 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import BooleanNot, BooleanAndMask, BooleanOrMask
+from anemoi.graphs.nodes.attributes import BooleanAndMask
+from anemoi.graphs.nodes.attributes import BooleanNot
+from anemoi.graphs.nodes.attributes import BooleanOrMask
 
 
 def test_boolean_not(graph_with_nodes: HeteroData):
@@ -23,6 +25,7 @@ def test_boolean_not(graph_with_nodes: HeteroData):
     assert isinstance(mask, torch.Tensor)
     assert mask.dtype == torch.bool
     assert mask.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+
 
 def test_boolean_fail_multiple_masks(graph_with_nodes: HeteroData):
     """Test attribute builder for BooleanNot."""

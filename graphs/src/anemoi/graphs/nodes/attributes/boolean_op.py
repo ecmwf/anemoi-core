@@ -14,9 +14,9 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Type
 from typing import Union
-from hydra.utils import instantiate
 
 import torch
+from hydra.utils import instantiate
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.nodes.attributes.base_attributes import BooleanBaseNodeAttribute
