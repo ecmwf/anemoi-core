@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-import scipy
+
 import numpy as np
 import torch
 from scipy.spatial import ConvexHull
@@ -135,7 +135,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
         # Expand hull outward
         centroid = np.mean(hull_points, axis=0)
         vectors = hull_points - centroid
-        expanded_hull = hull_points + vectors * (2 ** 0.5 * resolution / np.linalg.norm(vectors, axis=1)[:, np.newaxis])
+        expanded_hull = hull_points + vectors * (2**0.5 * resolution / np.linalg.norm(vectors, axis=1)[:, np.newaxis])
 
         # Create points along each hull edge
         boundary_points = []
@@ -146,7 +146,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
         edge_length = np.linalg.norm(p2 - p1, axis=1)
         num_points = np.ceil(edge_length / resolution).astype(int)
 
-        for i in np.where(num_points > 2)[0]:            
+        for i in np.where(num_points > 2)[0]:
             # Create evenly spaced points along the edge
             t = np.linspace(0, 1, num_points[i])[1:-1][:, None]  # Exclude last point to avoid duplicates
             edge_points = p1[i] + t * (p2[i] - p1[i])
@@ -159,7 +159,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
         resolution = self._compute_mean_nearest_distance(points)
         boundary_points = self._get_boundary_ring(points, resolution)
 
-        # Compute convex hull over all points (boundary ring included)
+        # Compute convex hull over all points (boundary ring included)
         extended_points = np.vstack([points, boundary_points])
         v = Voronoi(extended_points, qhull_options="QJ Pp")
 
