@@ -14,6 +14,7 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Type
 from typing import Union
+from hydra.utils import instantiate
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -34,20 +35,21 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
     @staticmethod
     def get_mask_values(mask: MaskAttributeType, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         if isinstance(mask, str):
+            assert mask in nodes, f"Nodes have no attribute named {mask}."
             attributes = nodes[mask]
             assert (
-                attributes.dtype == "bool"
+                attributes.dtype == torch.bool
             ), f"The mask attribute '{mask}' must be a boolean but is {attributes.dtype}."
             return attributes
 
-        return mask.get_raw_values(nodes, **kwargs)
+        return instantiate(mask).get_raw_values(nodes, **kwargs)
 
     @abstractmethod
     def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor: ...
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         mask_values = [BooleanOperation.get_mask_values(mask, nodes, **kwargs) for mask in self.masks]
-        return self.reduce_op(mask_values)
+        return self.reduce_op(torch.stack(mask_values))
 
 
 class BooleanNot(BooleanOperation):
@@ -62,11 +64,11 @@ class BooleanAndMask(BooleanOperation):
     """Boolean AND mask."""
 
     def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor:
-        return torch.logical_and.reduce(masks)
+        return torch.all(masks, dim=0)
 
 
 class BooleanOrMask(BooleanOperation):
     """Boolean OR mask."""
 
     def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor:
-        return torch.logical_or.reduce(masks)
+        return torch.any(masks, dim=0)
