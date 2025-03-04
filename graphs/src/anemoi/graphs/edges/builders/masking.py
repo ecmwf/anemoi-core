@@ -12,8 +12,10 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+import torch
 from scipy.sparse import coo_matrix
 from torch_geometric.data.storage import NodeStorage
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,9 +25,9 @@ class NodeMaskingMixin:
 
     def get_node_coordinates(
         self, source_nodes: NodeStorage, target_nodes: NodeStorage
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Get the node coordinates."""
-        source_coords, target_coords = source_nodes.x.numpy(), target_nodes.x.numpy()
+        source_coords, target_coords = source_nodes.x, target_nodes.x
 
         if self.source_mask_attr_name is not None:
             source_coords = source_coords[source_nodes[self.source_mask_attr_name].squeeze()]
@@ -33,6 +35,14 @@ class NodeMaskingMixin:
         if self.target_mask_attr_name is not None:
             target_coords = target_coords[target_nodes[self.target_mask_attr_name].squeeze()]
 
+        return source_coords.to(self.device), target_coords.to(self.device)
+
+    def get_cartesian_node_coordinates(
+        self, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        source_coords, target_coords = self.get_node_coordinates(source_nodes, target_nodes)
+        source_coords = latlon_rad_to_cartesian(source_coords)
+        target_coords = latlon_rad_to_cartesian(target_coords)
         return source_coords, target_coords
 
     def undo_masking(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):

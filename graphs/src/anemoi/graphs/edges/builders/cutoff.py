@@ -23,7 +23,6 @@ from torch_geometric.data.storage import NodeStorage
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.utils import get_grid_reference_distance
 
 TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
@@ -114,12 +113,10 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
     def _compute_edge_index_pyg(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         from torch_cluster.radius import radius
 
-        edge_index = radius(
-            latlon_rad_to_cartesian(source_nodes.x.to(self.device)),
-            latlon_rad_to_cartesian(target_nodes.x.to(self.device)),
-            r=self.radius,
-            max_num_neighbors=self.max_num_neighbours,
-        )
+        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+
+        edge_index = radius(source_coords, target_coords, r=self.radius, max_num_neighbors=self.max_num_neighbours)
+    
         return torch.flip(edge_index, [0])
 
     def _crop_to_max_num_neighbours(self, adjmat):
@@ -148,10 +145,11 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
 
     def _compute_edge_index_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
-        nearest_neighbour.fit(latlon_rad_to_cartesian(source_nodes.x).cpu())
+        nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.radius_neighbors_graph(
-            latlon_rad_to_cartesian(target_nodes.x).cpu(), radius=self.radius, mode="distance"
+            target_coords.cpu(), radius=self.radius, mode="distance"
         ).tocoo()
 
         adj_matrix = self._crop_to_max_num_neighbours(adj_matrix)

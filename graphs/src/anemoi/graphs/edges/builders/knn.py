@@ -66,21 +66,23 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
         self.num_nearest_neighbours = num_nearest_neighbours
 
+
+
     def _compute_edge_index_pyg(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         from torch_cluster.knn import knn
 
-        edge_index = knn(
-            latlon_rad_to_cartesian(source_nodes.x.to(self.device)),
-            latlon_rad_to_cartesian(target_nodes.x.to(self.device)),
-            k=self.num_nearest_neighbours,
-        )
+        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+
+        edge_index = knn(source_coords, target_coords, k=self.num_nearest_neighbours)
+
         return torch.flip(edge_index, [0])
 
     def _compute_edge_index_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
-        nearest_neighbour.fit(latlon_rad_to_cartesian(source_nodes.x).cpu())
+        nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.kneighbors_graph(
-            latlon_rad_to_cartesian(target_nodes.x).cpu(),
+            target_coords.cpu(),
             n_neighbors=self.num_nearest_neighbours,
         ).tocoo()
 
