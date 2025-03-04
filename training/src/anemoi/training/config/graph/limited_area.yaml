@@ -15,7 +15,7 @@ nodes:
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
-      resolution: 5 # grid resolution for npz (o32, o48, ...)
+      resolution: 6 # grid resolution for npz (o32, o48, ...)
       reference_node_name: ${graph.data}
       mask_attr_name: cutout_mask
       margin_radius_km: 10
@@ -69,8 +69,7 @@ attributes:
       _target_: anemoi.graphs.nodes.attributes.CutOutMask
     boundary_mask:
       _target_: anemoi.graphs.nodes.attributes.BooleanNot
-      masks:
-        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+      masks: cutout_mask
   edges:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength
