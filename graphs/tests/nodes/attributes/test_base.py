@@ -15,7 +15,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 
-class TestBaseNodeAttribute(BaseNodeAttribute):
+class ExtendedBaseNodeAttribute(BaseNodeAttribute):
     """Test implementation of BaseNodeAttribute."""
 
     def get_raw_values(self, nodes, **_kwargs) -> torch.Tensor:
@@ -26,20 +26,20 @@ class TestBaseNodeAttribute(BaseNodeAttribute):
 def test_base_node_attribute_invalid_nodes_name(graph_with_nodes: HeteroData, nodes_name: str):
     """Test BaseNodeAttribute raises error with invalid nodes name."""
     with pytest.raises(AssertionError):
-        TestBaseNodeAttribute().compute(graph_with_nodes, nodes_name)
+        ExtendedBaseNodeAttribute().compute(graph_with_nodes, nodes_name)
 
 
 @pytest.mark.parametrize("norm", ["l3", "invalide"])
 def test_base_node_attribute_invalid_norm(graph_with_nodes: HeteroData, norm: str):
     """Test BaseNodeAttribute raises error with invalid nodes name."""
     with pytest.raises(ValueError):
-        TestBaseNodeAttribute(norm=norm).compute(graph_with_nodes, "test_nodes")
+        ExtendedBaseNodeAttribute(norm=norm).compute(graph_with_nodes, "test_nodes")
 
 
 @pytest.mark.parametrize("norm", [None, "l1", "l2", "unit-max", "unit-std"])
 def test_base_node_attribute_norm(graph_with_nodes: HeteroData, norm: str):
     """Test attribute builder for UniformWeights."""
-    node_attr_builder = TestBaseNodeAttribute(norm=norm)
+    node_attr_builder = ExtendedBaseNodeAttribute(norm=norm)
     weights = node_attr_builder.compute(graph_with_nodes, "test_nodes")
 
     assert weights is not None
