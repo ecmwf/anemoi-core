@@ -17,13 +17,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-import mlflow
-from hydra import compose
-from hydra import initialize
-from omegaconf import OmegaConf
-
 from anemoi.training.commands import Command
-from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
 
 LOGGER = logging.getLogger(__name__)
 
@@ -176,6 +170,13 @@ class MlFlow(Command):
             return None
 
         if args.subcommand == "prepare":
+            import mlflow
+            from hydra import compose
+            from hydra import initialize
+            from omegaconf import OmegaConf
+
+            from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
+
             # Load configuration
             with initialize(version_base=None, config_path="./"):
                 cfg = compose(config_name=args.config_name)
@@ -190,8 +191,8 @@ class MlFlow(Command):
                 try:
                     client.get_run(cfg.training.run_id)
                 except ValueError as e:
-                    e(f"Run_id {cfg.training.run_id} not found. Modify your configuration file.")
-                    return None
+                    msg = "Invalid run_id provided."
+                    raise ValueError(msg) from e
                 return cfg.training.run_id
 
             # Existing fork_id needs a new run_id attached to it
