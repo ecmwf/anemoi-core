@@ -138,7 +138,7 @@ class CombinedLoss(BaseLoss):
                 self._loss_scaler_specification[i] = []
                 self.losses.append(loss)
 
-            self.add_module(str(i), self.losses[-1]) #(self.losses[-1].name + str(i), self.losses[-1])
+            self.add_module(str(i), self.losses[-1])  # (self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
 
     def forward(
