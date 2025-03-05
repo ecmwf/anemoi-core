@@ -29,3 +29,9 @@ def stretched_config() -> None:
         cfg = compose(config_name="stretched_config")
         OmegaConf.resolve(cfg)
         return cfg
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--longtests", action="store_true", dest="longtests", default=False, help="enable longrundecorated tests"
+    )

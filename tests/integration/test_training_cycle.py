@@ -15,15 +15,18 @@ import torch
 
 from anemoi.training.train.train import AnemoiTrainer
 
+longtests = pytest.mark.skipif("not config.getoption('longtests')", reason="need --longtests option to run")
+
 LOGGER = logging.getLogger(__name__)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
+@longtests
 def test_training_cycle_architecture_configs(architecture_config) -> None:
     AnemoiTrainer(architecture_config).train()
     shutil.rmtree(architecture_config.hardware.paths.output)
 
 
+@longtests
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
 def test_training_cycle_grid_configs(stretched_config) -> None:
     AnemoiTrainer(stretched_config).train()
