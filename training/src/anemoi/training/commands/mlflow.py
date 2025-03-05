@@ -209,7 +209,7 @@ class MlFlow(Command):
                 client.set_tag(run_id, "mlflow.user", args.owner)
                 client.set_tag(run_id, "mlflow.source.name", "anemoi-training train")
                 if cfg.diagnostics.log.mlflow.run_name:
-                    client.set_tag(run_id, "mlflow.runName", "toto")
+                    client.set_tag(run_id, "mlflow.runName", cfg.diagnostics.log.mlflow.run_name)
 
             # Dump configuration in output file
             LOGGER.info("Saving run id in file in %s.", args.output)
