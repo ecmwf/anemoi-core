@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Union
 
 import numpy as np
 import torch
@@ -203,8 +204,8 @@ class SphericalAreaWeights(BaseNodeAttribute):
         fill_value: float = 0.0,
         dtype: str = "float32",
     ) -> None:
-        assert isinstance(fill_value, float | int), f"fill_value must be float or nan but it is {type(fill_value)}"
-        assert isinstance(radius, float | int) and radius > 0, f"radius must be a positive value, but radius={radius}"
+        assert isinstance(fill_value, Union[float, int]), f"fill_value must be float or nan but it is {type(fill_value)}"
+        assert isinstance(radius, Union[float, int]) and radius > 0, f"radius must be a positive value, but radius={radius}"
         super().__init__(norm, dtype)
         self.radius = radius
         self.centre = centre
