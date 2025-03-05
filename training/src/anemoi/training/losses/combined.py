@@ -114,9 +114,9 @@ class CombinedLoss(BaseLoss):
             # Only the specified scalers will be added to each loss
         ```
         """
-        super().__init__(node_weights=None)
+        super().__init__()
 
-        self.losses: list[BaseLoss] = []
+        self.losses: list[type[BaseLoss]] = []
         self._loss_scaler_specification: dict[int, list[str]] = {}
 
         losses = (*(losses or []), *extra_losses)
@@ -131,14 +131,14 @@ class CombinedLoss(BaseLoss):
             if isinstance(loss, (DictConfig, dict)):
                 self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
                 self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
-            elif isinstance(loss, Callable):
+            elif isinstance(loss, type):
                 self._loss_scaler_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))
             else:
                 self._loss_scaler_specification[i] = []
                 self.losses.append(loss)
 
-            self.add_module(self.losses[-1].name + str(i), self.losses[-1])
+            self.add_module(str(i), self.losses[-1]) #(self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
 
     def forward(
@@ -171,10 +171,6 @@ class CombinedLoss(BaseLoss):
             else:
                 loss = self.loss_weights[i] * loss_fn(pred, target, **kwargs)
         return loss
-
-    @property
-    def name(self) -> str:
-        return "combined_" + "_".join(getattr(loss, "name", loss.__class__.__name__.lower()) for loss in self.losses)
 
     @property
     def scaler(self) -> ScaleTensor:

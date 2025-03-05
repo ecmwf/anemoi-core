@@ -109,21 +109,20 @@ def test_combined_loss() -> None:
                     {"_target_": "anemoi.training.losses.MSELoss"},
                     {"_target_": "anemoi.training.losses.MAELoss"},
                 ],
-                "scalars": ["test"],
+                "scalers": ["test"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
-        node_weights=torch.ones(1),
-        scalars={"test": (-1, torch.ones(2))},
+        scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, CombinedLoss)
-    assert "test" in loss.scalar
+    assert "test" in loss.scaler
 
     assert isinstance(loss.losses[0], MSELoss)
-    assert "test" in loss.losses[0].scalar
+    assert "test" in loss.losses[0].scaler
 
     assert isinstance(loss.losses[1], MAELoss)
-    assert "test" in loss.losses[1].scalar
+    assert "test" in loss.losses[1].scaler
 
 
 def test_combined_loss_invalid_loss_weights() -> None:
@@ -137,12 +136,11 @@ def test_combined_loss_invalid_loss_weights() -> None:
                         {"_target_": "anemoi.training.losses.MSELoss"},
                         {"_target_": "anemoi.training.losses.MAELoss"},
                     ],
-                    "scalars": ["test"],
+                    "scalers": ["test"],
                     "loss_weights": [1.0, 0.5, 1],
                 },
             ),
-            node_weights=torch.ones(1),
-            scalars={"test": (-1, torch.ones(2))},
+            scalers={"test": (-1, torch.ones(2))},
         )
 
 
@@ -156,15 +154,14 @@ def test_combined_loss_invalid_behaviour() -> None:
                     {"_target_": "anemoi.training.losses.MSELoss"},
                     {"_target_": "anemoi.training.losses.MAELoss"},
                 ],
-                "scalars": ["test"],
+                "scalers": ["test"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
-        node_weights=torch.ones(1),
-        scalars={"test": (-1, torch.ones(2))},
+        scalers={"test": (-1, torch.ones(2))},
     )
     with pytest.raises(AttributeError):
-        loss.scalar = "test"
+        loss.scaler = "test"
 
 
 def test_combined_loss_equal_weighting() -> None:
@@ -174,42 +171,40 @@ def test_combined_loss_equal_weighting() -> None:
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.mse.MSELoss"},
-                    {"_target_": "anemoi.training.losses.mae.MAELoss"},
+                    {"_target_": "anemoi.training.losses.MSELoss"},
+                    {"_target_": "anemoi.training.losses.MAELoss"},
                 ],
             },
         ),
-        node_weights=torch.ones(1),
-        scalars={},
+        scalers={},
     )
     assert all(weight == 1.0 for weight in loss.loss_weights)
 
 
-def test_combined_loss_seperate_scalars() -> None:
-    """Test that scalars are passed to the correct loss function."""
+def test_combined_loss_seperate_scalers() -> None:
+    """Test that scalers are passed to the correct loss function."""
     loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss", "scalars": ["test"]},
-                    {"_target_": "anemoi.training.losses.MAELoss", "scalars": ["test2"]},
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
                 ],
-                "scalars": ["test", "test2"],
+                "scalers": ["test", "test2"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
-        node_weights=torch.ones(1),
-        scalars={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
+        scalers={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
     )
     assert isinstance(loss, CombinedLoss)
-    assert "test" in loss.scalar
-    assert "test2" in loss.scalar
+    assert "test" in loss.scaler
+    assert "test2" in loss.scaler
 
     assert isinstance(loss.losses[0], MSELoss)
-    assert "test" in loss.losses[0].scalar
-    assert "test2" not in loss.losses[0].scalar
+    assert "test" in loss.losses[0].scaler
+    assert "test2" not in loss.losses[0].scaler
 
     assert isinstance(loss.losses[1], MAELoss)
-    assert "test" not in loss.losses[1].scalar
-    assert "test2" in loss.losses[1].scalar
+    assert "test" not in loss.losses[1].scaler
+    assert "test2" in loss.losses[1].scaler

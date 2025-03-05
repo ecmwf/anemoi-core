@@ -13,12 +13,12 @@ import logging
 
 import torch
 
-from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import FunctionalLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class HuberLoss(BaseLoss):
+class HuberLoss(FunctionalLoss):
     """Huber loss."""
 
     def __init__(

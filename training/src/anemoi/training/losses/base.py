@@ -66,10 +66,6 @@ class BaseLoss(nn.Module, ABC):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
 
-    @abstractmethod
-    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Calculate Difference between prediction and target."""
-
     def scale(
         self,
         x: torch.Tensor,
@@ -117,6 +113,58 @@ class BaseLoss(nn.Module, ABC):
             out = self.avg_function(out, dim=-1)
 
         return self.sum_function(out, dim=(0, 1, 2))
+
+    @abstractmethod
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+    ) -> torch.Tensor:
+        """Calculates the lat-weighted scaled loss.
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+        target : torch.Tensor
+            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+        squash : bool, optional
+            Average last dimension, by default True
+        scaler_indices: tuple[int,...], optional
+            Indices to subset the calculated scaler with, by default None
+        without_scalers: list[str] | list[int] | None, optional
+            list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
+            By default None
+
+        Returns
+        -------
+        torch.Tensor
+            Weighted loss
+        """
+
+
+class FunctionalLoss(BaseLoss):
+    """Loss which a user can subclass and provide `calculate_difference`.
+
+    `calculate_difference` should calculate the difference between the prediction and target.
+    All scaling and weighting is handled by the parent class.
+
+    Example:
+    --------
+    ```python
+    class MyLoss(FunctionalLoss):
+        def calculate_difference(self, pred, target):
+            return pred - target
+    ```
+    """
+
+    @abstractmethod
+    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calculate difference between prediction and target."""
 
     def forward(
         self,
