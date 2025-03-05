@@ -207,8 +207,8 @@ class SphericalAreaWeights(BaseNodeAttribute):
             fill_value, int
         ), f"fill_value must be float or nan but it is {type(fill_value)}"
         assert (
-            (isinstance(radius, float) or isinstance(radius, int)) and radius > 0
-        ), f"radius must be a positive value, but radius={radius}"
+            isinstance(radius, float) or isinstance(radius, int)
+        ) and radius > 0, f"radius must be a positive value, but radius={radius}"
         super().__init__(norm, dtype)
         self.radius = radius
         self.centre = centre
