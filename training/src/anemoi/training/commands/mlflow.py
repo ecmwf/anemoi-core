@@ -207,7 +207,7 @@ class MlFlow(Command):
                 json.dump(OmegaConf.to_container(cfg), Path.open(fp, "w"))
                 client.log_artifact(run.info.run_id, fp)
                 client.set_tag(run_id, "mlflow.user", args.owner)
-                client.set_tag(run_id, "mlflow.source.name", "anemoi-training train")
+                client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
                 if cfg.diagnostics.log.mlflow.run_name:
                     client.set_tag(run_id, "mlflow.runName", cfg.diagnostics.log.mlflow.run_name)
 
