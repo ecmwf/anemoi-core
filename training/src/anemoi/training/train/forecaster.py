@@ -22,8 +22,9 @@ from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
+from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers.scaling import create_scalers
-from anemoi.training.losses.utils import grad_scaler
+from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
@@ -115,11 +116,7 @@ class GraphForecaster(pl.LightningModule):
         )
 
         self.loss = get_loss_function(config.training.training_loss, scalers=self.scalers)
-
-        assert isinstance(self.loss, BaseLoss) and not isinstance(
-            self.loss,
-            torch.nn.ModuleList,
-        ), f"Loss function must be a `BaseLoss`, not a {type(self.loss).__name__!r}"
+        print_variable_scaling(self.loss, data_indices)
 
         self.metrics = torch.nn.ModuleDict(
             {

@@ -17,7 +17,6 @@ from hydra.utils import instantiate
 from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
 
 if TYPE_CHECKING:
-    import torch
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
@@ -40,38 +39,4 @@ def create_scalers(
 
         scalers[name] = scaler_builder.get_scaling()
 
-    print_final_variable_scaling(scalers, data_indices)
-
     return scalers, delayed_scaler_builders
-
-
-def get_final_variable_scaling(scalers: dict[str, SCALER_DTYPE]) -> torch.Tensor:
-    """Get the final variable scaling.
-
-    All variable scalings have scale_dim -1, so we can get the right scalar for printing across the variable dimension.
-
-    Parameters
-    ----------
-    scalers : dict
-        Dictionary of scalers.
-
-    Returns
-    -------
-    torch.Tensor
-        Final variable scaling.
-    """
-    # Subsetting over -1 to get the right scalar for printing across the variable dimension
-    final_variable_scaling = 1.0
-    for scale_dims, scaling in scalers.values():
-        if -1 in scale_dims or 3 in scale_dims:
-            final_variable_scaling = final_variable_scaling * scaling.squeeze()
-
-    return final_variable_scaling
-
-
-def print_final_variable_scaling(scalers: dict[str, SCALER_DTYPE], data_indices: IndexCollection) -> None:
-    final_variable_scaling = get_final_variable_scaling(scalers)
-    log_text = "Final Variable Scaling: "
-    for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):
-        log_text += f"{name}: {final_variable_scaling[idx]:.4g}, "
-    LOGGER.debug(log_text)
