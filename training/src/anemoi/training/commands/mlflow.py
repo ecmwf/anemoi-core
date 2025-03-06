@@ -142,7 +142,7 @@ class MlFlow(Command):
                 raise ValueError(msg)
 
             TokenAuth(url=url).login(force_credentials=args.force_credentials)
-            return None
+            return
 
         if args.subcommand == "sync":
             from anemoi.training.diagnostics.mlflow.utils import health_check
@@ -167,7 +167,7 @@ class MlFlow(Command):
                 args.export_deleted_runs,
                 log_level,
             ).sync()
-            return None
+            return
 
         if args.subcommand == "prepare":
             import mlflow
@@ -193,7 +193,7 @@ class MlFlow(Command):
                 except ValueError as e:
                     msg = "Invalid run_id provided."
                     raise ValueError(msg) from e
-                return cfg.training.run_id
+                return
 
             # Existing fork_id needs a new run_id attached to it
             run = client.create_run(experiment_id, run_name=cfg.diagnostics.log.mlflow.run_name)
@@ -216,9 +216,8 @@ class MlFlow(Command):
             with args.output.open("w") as f:
                 f.write(run_id)
 
-            return None
-
-        return None
+            return
+        return
 
 
 command = MlFlow
