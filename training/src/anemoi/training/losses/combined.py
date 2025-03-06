@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -21,6 +20,8 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.utils import ScaleTensor
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
 
 
