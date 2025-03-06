@@ -13,12 +13,13 @@ import logging
 from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses.scalers.base_scaler import ScalerDim
 
 LOGGER = logging.getLogger(__name__)
 
 
 def print_variable_scaling(loss: type[nn.Module], data_indices: IndexCollection) -> None:
-    variable_scaling = loss.scaler.subset_by_dim(-1)
+    variable_scaling = loss.scaler.subset_by_dim(ScalerDim.VARIABLE.value)
     log_text = "Final Variable Scaling: "
     for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):
         log_text += f"{name}: {variable_scaling[idx]:.4g}, "

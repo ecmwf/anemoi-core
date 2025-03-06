@@ -187,11 +187,11 @@ def test_scaler_subset_without(without_id) -> None:  # noqa: ANN001
     assert 1 in subset
 
 
-@pytest.mark.parametrize("id", [0, 1])
-def test_scaler_subset_by_dim(id: int):
+@pytest.mark.parametrize("subset_id", [0, 1])
+def test_scaler_subset_by_dim(subset_id: int) -> None:
     scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
-    subset1 = scale.subset(id)
-    subset2 = scale.subset(id - 2)
+    subset1 = scale.subset(subset_id)
+    subset2 = scale.subset(subset_id - 2)
     assert subset1 == subset2
 
 

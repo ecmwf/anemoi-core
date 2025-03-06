@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.scalers.base_scaler import ScalerDim
 from anemoi.training.utils.masks import NoOutputMask
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 class GraphNodeAttributeScaler(BaseScaler):
     """Class for extracting scalers from node attributes."""
 
-    scale_dims: int = 2
+    scale_dims: ScalerDim = ScalerDim.GRID
 
     def __init__(
         self,

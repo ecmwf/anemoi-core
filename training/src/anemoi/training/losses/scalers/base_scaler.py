@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from enum import Enum
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -24,10 +25,17 @@ LOGGER = logging.getLogger(__name__)
 SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 
 
+class ScalerDim(Enum):
+    BATCH_SIZE = 0
+    ENSEMBLE_DIM = 1
+    GRID = 2
+    VARIABLE = 3
+
+
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
-    scale_dims: tuple[int] = None
+    scale_dims: tuple[ScalerDim] = None
 
     def __init__(self, data_indices: IndexCollection, norm: str | None = None) -> None:
         """Initialise BaseScaler.
@@ -48,11 +56,8 @@ class BaseScaler(ABC):
             "unit-mean",
         ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
         assert self.scale_dims is not None, f"Class {self.__class__.__name__} must define 'scale_dims'"
-        if isinstance(self.scale_dims, int):
+        if isinstance(self.scale_dims, ScalerDim):
             self.scale_dims = (self.scale_dims,)
-        assert all(
-            -4 <= d <= 3 for d in self.scale_dims
-        ), f"Invalid dimension for scaling in 'scale_dims': {self.scale_dims}"
 
     @abstractmethod
     def get_scaling_values(self, **kwargs) -> np.ndarray:
@@ -102,4 +107,5 @@ class BaseDelayedScaler(BaseScaler):
     def get_delayed_scaling(self, model: AnemoiModelInterface) -> SCALER_DTYPE:
         scaler_values = self.get_delayed_scaling_values(model)
         scaler_values = self.normalise(scaler_values)
-        return self.scale_dims, scaler_values
+        scale_dims = tuple(x.value for x in self.scale_dims)
+        return scale_dims, scaler_values

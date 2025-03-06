@@ -393,7 +393,7 @@ class GraphForecaster(pl.LightningModule):
 
             for mkey, indices in self.val_metric_ranges.items():
                 metric_step_name = f"{metric_name}/{mkey}/{rollout_step + 1}"
-                if "scale_validation_metrics" in self.config.training and (
+                if (
                     mkey in self.config.training.scale_validation_metrics.metrics
                     or "*" in self.config.training.scale_validation_metrics.metrics
                 ):

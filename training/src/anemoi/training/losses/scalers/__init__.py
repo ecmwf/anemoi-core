@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .base_scaler import ScalerDim
 from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
 from .variable import GeneralVariableLossScaler
@@ -27,6 +28,7 @@ __all__ = [
     "NoVariableLevelScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
+    "ScalerDim",
     "StdevTendencyScaler",
     "VarTendencyScaler",
 ]

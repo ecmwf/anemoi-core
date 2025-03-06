@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.scalers.base_scaler import ScalerDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ LOGGER = logging.getLogger(__name__)
 class BaseVariableLossScaler(BaseScaler):
     """Base class for all variable loss scalers."""
 
-    scale_dims: int = -1
+    scale_dims: ScalerDim = ScalerDim.VARIABLE
 
     def __init__(
         self,
