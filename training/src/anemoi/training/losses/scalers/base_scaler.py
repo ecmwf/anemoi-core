@@ -54,10 +54,6 @@ class BaseScaler(ABC):
             -4 <= d <= 3 for d in self.scale_dims
         ), f"Invalid dimension for scaling in 'scale_dims': {self.scale_dims}"
 
-    @property
-    def is_spatial_dim_scaled(self) -> bool:
-        return self.scale_dims is not None and (-2 in self.scale_dims or 2 in self.scale_dims)
-
     @abstractmethod
     def get_scaling_values(self, **kwargs) -> np.ndarray:
         """Abstract method to get loss scaling."""
