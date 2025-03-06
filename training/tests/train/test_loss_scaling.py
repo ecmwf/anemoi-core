@@ -235,8 +235,7 @@ def test_variable_loss_scaling_vals(
 
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
-    final_variable_scaling = loss.scaler.get_scaler(3)
-    # TODO(Harrison): This fails if you use ndim = -1, which should be equivalent to using 3
+    final_variable_scaling = loss.scaler.subset_by_dim(3)
 
     assert torch.allclose(torch.tensor(final_variable_scaling), expected_scaling)
 

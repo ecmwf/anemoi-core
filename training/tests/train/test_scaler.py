@@ -187,6 +187,14 @@ def test_scaler_subset_without(without_id) -> None:  # noqa: ANN001
     assert 1 in subset
 
 
+@pytest.mark.parametrize("id", [0, 1])
+def test_scaler_subset_by_dim(id: int):
+    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+    subset1 = scale.subset(id)
+    subset2 = scale.subset(id - 2)
+    assert subset1 == subset2
+
+
 @pytest.mark.parametrize("without_id", ["test"])
 def test_scaler_subset_without_overlap(without_id) -> None:  # noqa: ANN001
     scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(0, torch.tensor([3.0])))

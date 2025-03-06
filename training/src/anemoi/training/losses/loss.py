@@ -116,7 +116,7 @@ def get_metric_ranges(
 
     metric_ranges = defaultdict(list)
     metric_ranges_validation = defaultdict(list)
-    variable_groups = config.training.scalers.variable_groups
+    variable_groups = config.training.variable_groups
     metrics_to_log = config.training.metrics
 
     extract_variable_group_and_level = ExtractVariableGroupAndLevel(variable_groups, metadata_variables)
