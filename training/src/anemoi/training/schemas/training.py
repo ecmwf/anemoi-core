@@ -184,7 +184,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
-    scalers: list[str] = Field(example=["variable"]) # TODO(Mario): Validate scalers are defined
+    scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
