@@ -71,7 +71,7 @@ def get_loss_function(
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
     # Instantiate the loss function with the loss_init_config
-    loss_function = instantiate(loss_config, **kwargs)
+    loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"

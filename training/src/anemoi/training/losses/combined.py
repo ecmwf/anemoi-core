@@ -127,7 +127,6 @@ class CombinedLoss(BaseLoss):
         assert len(losses) > 0, "At least one loss must be provided"
 
         for i, loss in enumerate(losses):
-
             if isinstance(loss, (DictConfig, dict)):
                 self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
                 self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
@@ -135,7 +134,8 @@ class CombinedLoss(BaseLoss):
                 self._loss_scaler_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))
             else:
-                self._loss_scaler_specification[i] = []
+                assert isinstance(loss, BaseLoss)
+                self._loss_scaler_specification[i] = loss.scaler
                 self.losses.append(loss)
 
             self.add_module(str(i), self.losses[-1]) #(self.losses[-1].name + str(i), self.losses[-1])
