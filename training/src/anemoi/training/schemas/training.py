@@ -173,7 +173,7 @@ LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaS
 
 
 class GraphNodeAttributeSchema(BaseModel):
-    target_: "anemoi.training.losses.nodeweights.GraphNodeAttribute" = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.losses.nodeweights.GraphNodeAttribute"] = Field(..., alias="_target_")
     "Node loss weights object from anemoi.training.losses."
     target_nodes: str = Field(examples=["data"])
     "name of target nodes, key in HeteroData graph object."
@@ -182,7 +182,7 @@ class GraphNodeAttributeSchema(BaseModel):
 
 
 class ReweightedGraphNodeAttributeSchema(BaseModel):
-    target_: "anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute" = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute"] = Field(..., alias="_target_")
     "Node loss weights object from anemoi.training.losses."
     target_nodes: str = Field(examples=["data"])
     "name of target nodes, key in HeteroData graph object."
