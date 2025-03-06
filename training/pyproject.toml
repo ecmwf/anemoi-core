@@ -112,8 +112,8 @@ target-version = "py39"
 line-length = 120
 src = [ "src" ]
 exclude = [ "docs/" ]
-preview = true
 
+preview = true
 lint.select = [
   "A", # flake8 builtins
   # "ANN", # flake8-annotations
@@ -172,6 +172,7 @@ lint.select = [
   "W",   # pycodestyle warning
   "YTT", # flake8-2020
 ]
+
 lint.ignore = [
   "B018",
   "B028",
@@ -187,9 +188,10 @@ lint.ignore = [
   "S101",
   "TD003",
   "UP007",
+  "UP007",
 ]
-lint.flake8-import-conventions = "pl"
-lint.pydocstyle = "numpy"
+lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
+lint.pydocstyle.convention = "numpy"
 # Preserve types, even if a file imports `from __future__ import annotations`.
 # Necessary for supporting PEP 604 and pydantic with python 3.9
-lint.pyupgrade = true
+lint.pyupgrade.keep-runtime-typing = true
