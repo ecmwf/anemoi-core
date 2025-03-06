@@ -188,7 +188,6 @@ lint.ignore = [
   "S101",
   "TD003",
   "UP007",
-  "UP007",
 ]
 lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
 lint.pydocstyle.convention = "numpy"
