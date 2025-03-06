@@ -172,18 +172,29 @@ class CombinedLossSchema(BaseLossSchema):
 LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
 
 
-class NodeLossWeightsTargets(str, Enum):
-    graph_node_attribute = "anemoi.training.losses.nodeweights.GraphNodeAttribute"
-    reweighted_graph_node_attributes = "anemoi.training.losses.ReweightedGraphNodeAttribute"
-
-
-class NodeLossWeightsSchema(BaseModel):
-    target_: NodeLossWeightsTargets = Field(..., alias="_target_")
+class GraphNodeAttributeSchema(BaseModel):
+    target_: anemoi.training.losses.nodeweights.GraphNodeAttribute = Field(..., alias="_target_")
     "Node loss weights object from anemoi.training.losses."
     target_nodes: str = Field(examples=["data"])
     "name of target nodes, key in HeteroData graph object."
     node_attribute: str = Field(examples=["area_weight"])
     "name of node weight attribute, key in HeteroData graph object."
+
+
+class ReweightedGraphNodeAttributeSchema(BaseModel):
+    target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute = Field(..., alias="_target_")
+    "Node loss weights object from anemoi.training.losses."
+    target_nodes: str = Field(examples=["data"])
+    "name of target nodes, key in HeteroData graph object."
+    node_attribute: str = Field(examples=["area_weight"])
+    "name of node weight attribute, key in the nodes object."
+    scaled_attribute: str = Field(examples=["cutout_mask"])
+    "name of node attribute defining the subset of nodes to be scaled, key in the nodes object."
+    weight_frac_of_total: float = Field(examples=[0.3])
+    "sum of weight of subset nodes as a fraction of sum of weight of all nodes after rescaling"
+
+
+NodeLossWeightsSchema = Union[GraphNodeAttributeSchema, ReweightedGraphNodeAttributeSchema]
 
 
 class ScaleValidationMetrics(BaseModel):
