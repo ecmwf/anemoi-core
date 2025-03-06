@@ -190,7 +190,7 @@ class ReweightedGraphNodeAttributeSchema(BaseModel):
     "name of node weight attribute, key in the nodes object."
     scaled_attribute: str = Field(examples=["cutout_mask"])
     "name of node attribute defining the subset of nodes to be scaled, key in the nodes object."
-    weight_frac_of_total: float = Field(examples=[0.3])
+    weight_frac_of_total: float = Field(examples=[0.3], ge=0, le=1)
     "sum of weight of subset nodes as a fraction of sum of weight of all nodes after rescaling"
 
 
