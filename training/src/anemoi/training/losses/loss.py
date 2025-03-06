@@ -89,7 +89,7 @@ def get_loss_function(
 def _get_metric_ranges(
     extract_variable_group_and_level: ExtractVariableGroupAndLevel,
     output_data_indices: OutputTensorIndex,
-    metrics_to_log: list | None = None,
+    metrics_to_log: list,
 ) -> METRIC_RANGE_DTYPE:
     metric_ranges = defaultdict(list)
 
@@ -100,7 +100,7 @@ def _get_metric_ranges(
         metric_ranges[f"{variable_group}_{variable_ref}"].append(idx)
 
         # Specific metrics from hydra to log in logger
-        if metrics_to_log is not None and key in metrics_to_log:
+        if key in metrics_to_log:
             metric_ranges[key] = [idx]
 
     # Add the full list of output indices
@@ -117,17 +117,17 @@ def get_metric_ranges(
     metric_ranges = defaultdict(list)
     metric_ranges_validation = defaultdict(list)
     variable_groups = config.training.variable_groups
-    metrics_to_log = config.training.metrics
+    metrics_to_log = config.training.metrics or []
 
     extract_variable_group_and_level = ExtractVariableGroupAndLevel(variable_groups, metadata_variables)
     metric_ranges = _get_metric_ranges(
         extract_variable_group_and_level,
         data_indices.internal_model.output,
-        metrics_to_log=metrics_to_log,
+        metrics_to_log,
     )
     metric_ranges_validation = _get_metric_ranges(
         extract_variable_group_and_level,
         data_indices.model.output,
-        metrics_to_log=metrics_to_log,
+        metrics_to_log,
     )
     return metric_ranges, metric_ranges_validation
