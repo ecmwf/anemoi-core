@@ -10,7 +10,7 @@
 import pytest
 import torch
 
-from anemoi.training.losses.utils import ScaleTensor
+from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 
 def test_scale_contains() -> None:

@@ -15,9 +15,9 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers.scaling import create_scalers
-from anemoi.training.losses.scalers.scaling import get_final_variable_scaling
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -33,6 +33,10 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
                 },
             },
             "training": {
+                "training_loss": {
+                    "_target_": "anemoi.training.losses.MSELoss",
+                    "scalers": ["general_variable", "additional_scaler"],
+                },
                 "scalers": {
                     "variable_groups": {
                         "default": "sfc",
@@ -229,7 +233,10 @@ def test_variable_loss_scaling_vals(
         output_mask=NoOutputMask(),
     )
 
-    final_variable_scaling = get_final_variable_scaling(scalers)
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+
+    final_variable_scaling = loss.scaler.get_scaler(3)
+    # TODO(Harrison): This fails if you use ndim = -1, which should be equivalent to using 3
 
     assert torch.allclose(torch.tensor(final_variable_scaling), expected_scaling)
 

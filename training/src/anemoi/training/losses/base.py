@@ -18,7 +18,7 @@ from abc import abstractmethod
 import torch
 from torch import nn
 
-from anemoi.training.losses.utils import ScaleTensor
+from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 LOGGER = logging.getLogger(__name__)
 
