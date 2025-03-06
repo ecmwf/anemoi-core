@@ -98,8 +98,8 @@ class GraphForecaster(pl.LightningModule):
 
         # Instantiate all scalers with the training configuration
         self.scalers, self.delayed_scaler_builders = create_scalers(
-            config.training.scalers.builders,
-            group_config=config.training.scalers.variable_groups,
+            config.training.scalers,
+            group_config=config.training.variable_groups,
             data_indices=data_indices,
             graph_data=graph_data,
             statistics=statistics,

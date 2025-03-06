@@ -86,6 +86,9 @@ scale_validation_metrics:
     - 'all'
     # - "*"
 
+variable_groups:
+  default: sfc
+  pl: [q, t, u, v, w, z]
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
