@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.4.2](https://github.com/ecmwf/anemoi-core/compare/models-0.4.1...models-0.4.2) (2025-02-11)
+
+
+### Features
+
+* make flash attention configurable ([#60](https://github.com/ecmwf/anemoi-core/issues/60)) ([41fcab6](https://github.com/ecmwf/anemoi-core/commit/41fcab6335b334fdbebeb944c904cdbea6388889))
+* **models:** Copy Imputer ([#72](https://github.com/ecmwf/anemoi-core/issues/72)) ([4690ed5](https://github.com/ecmwf/anemoi-core/commit/4690ed52b9996bc149417d3724c5cd68c234573f))
+* **models:** normalization layers ([#47](https://github.com/ecmwf/anemoi-core/issues/47)) ([0e1c7c4](https://github.com/ecmwf/anemoi-core/commit/0e1c7c4840138debf877bb954b45f4c3a1cd0e33))
+* **models:** use num_layers of the processor in hierarchical graphs ([#78](https://github.com/ecmwf/anemoi-core/issues/78)) ([7e080ed](https://github.com/ecmwf/anemoi-core/commit/7e080edec94fe5408b45cace339ff6d97f556160))
+
+
+### Bug Fixes
+
+* bug in variables ordering in NormalizedReluBounding ([#98](https://github.com/ecmwf/anemoi-core/issues/98)) ([f1cc2e6](https://github.com/ecmwf/anemoi-core/commit/f1cc2e66486f29f73ec8d805bf32790d19d44804))
+* cancel RTD builds on no change ([#97](https://github.com/ecmwf/anemoi-core/issues/97)) ([36522d8](https://github.com/ecmwf/anemoi-core/commit/36522d87cdd95a5cb54b4c865eca67a64e22fffa))
+* **models:** 74 imputer inference mode ([#127](https://github.com/ecmwf/anemoi-core/issues/127)) ([0a9cfa7](https://github.com/ecmwf/anemoi-core/commit/0a9cfa77f0b438d30fac9153a6c6f4cafa0a1c1b))
+* normalise in place to reduce memory ([#82](https://github.com/ecmwf/anemoi-core/issues/82)) ([40dd1a1](https://github.com/ecmwf/anemoi-core/commit/40dd1a178a09afea58f6cf461e07c72ac8c6f23d))
+
+
+### Documentation
+
+* Improve installation docs ([#91](https://github.com/ecmwf/anemoi-core/issues/91)) ([0b5f8fb](https://github.com/ecmwf/anemoi-core/commit/0b5f8fb8b93555d76ebe3316c430121350bf5243))
+* point RTD to right subfolder ([5a80cb6](https://github.com/ecmwf/anemoi-core/commit/5a80cb6047e864ea97bed06a76ddc54507e5fcbe))
+* Tidy for core ([b24c521](https://github.com/ecmwf/anemoi-core/commit/b24c521c447272afd1b209745b24d16794cdb85a))
+
 ## [Unreleased](https://github.com/ecmwf/anemoi-models/compare/0.4.0...HEAD)
 
 ### Added

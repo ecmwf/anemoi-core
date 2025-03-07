@@ -8,6 +8,7 @@ defaults:
 - training: default
 - _self_
 
+no_validation: False
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords
@@ -25,12 +26,12 @@ dataloader:
     adjust: all
     min_distance_km: 0
 training:
-  loss_scaling:
-    spatial:
-      _target_: anemoi.training.data.scaling.ReweightedGraphAttribute
-      target_nodes: ${graph.data}
-      scaled_attribute: area_weight # it must be a node attribute of the output nodes
-      cutout_weight_frac_of_global: ???
+  node_loss_weights:
+    _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
+    target_nodes: ${graph.data}
+    node_attribute: area_weight
+    scaled_attribute: cutout_mask
+    weight_frac_of_global: ???
 hardware:
   files:
     dataset: ???

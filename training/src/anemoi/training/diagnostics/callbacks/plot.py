@@ -42,11 +42,13 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
 
 if TYPE_CHECKING:
     from typing import Any
 
     import pytorch_lightning as pl
+    from matplotlib.colors import Colormap
     from omegaconf import OmegaConf
 
     from anemoi.models.layers.graph import NamedNodesAttributes
@@ -57,7 +59,7 @@ LOGGER = logging.getLogger(__name__)
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
-    def __init__(self, config: OmegaConf) -> None:
+    def __init__(self, config: BaseSchema) -> None:
         """Initialise the BasePlotCallback abstract base class.
 
         Parameters
@@ -333,7 +335,7 @@ class LongRolloutPlots(BasePlotCallback):
         parameters: list[str],
         video_rollout: int = 0,
         accumulation_levels_plot: list[float] | None = None,
-        cmap_accumulation: list[str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_epochs: int = 1,
         animation_interval: int = 400,
@@ -354,8 +356,8 @@ class LongRolloutPlots(BasePlotCallback):
             Number of rollout steps for video, by default 0 (no video)
         accumulation_levels_plot : list[float] | None
             Accumulation levels to plot, by default None
-        cmap_accumulation : list[str] | None
-            Colors of the accumulation levels, by default None
+        colormaps : dict[str, Colormap] | None
+            Dictionary of colormaps, by default None
         per_sample : int, optional
             Number of plots per sample, by default 6
         every_n_epochs : int, optional
@@ -379,7 +381,7 @@ class LongRolloutPlots(BasePlotCallback):
 
         self.sample_idx = sample_idx
         self.accumulation_levels_plot = accumulation_levels_plot
-        self.cmap_accumulation = cmap_accumulation
+        self.colormaps = colormaps
         self.per_sample = per_sample
         self.parameters = parameters
         self.animation_interval = animation_interval
@@ -520,10 +522,10 @@ class LongRolloutPlots(BasePlotCallback):
             self.per_sample,
             self.latlons,
             self.accumulation_levels_plot,
-            self.cmap_accumulation,
             data_0.squeeze(),
             data_rollout_step.squeeze(),
             output_tensor[0, 0, :, :],  # rolloutstep, first member
+            colormaps=self.colormaps,
         )
         self._output_figure(
             logger,
@@ -879,10 +881,11 @@ class PlotSample(BasePerBatchPlotCallback):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
-        cmap_accumulation: list[str],
         precip_and_related_fields: list[str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
+        **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
 
@@ -896,23 +899,24 @@ class PlotSample(BasePerBatchPlotCallback):
             Parameters to plot
         accumulation_levels_plot : list[float]
             Accumulation levels to plot
-        cmap_accumulation : list[str]
-            Colors of the accumulation levels
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
+        colormaps : dict[str, Colormap] | None, optional
+            Dictionary of colormaps, by default None
         per_sample : int, optional
             Number of plots per sample, by default 6
         every_n_batches : int, optional
             Batch frequency to plot at, by default None
         """
+        del kwargs
         super().__init__(config, every_n_batches=every_n_batches)
         self.sample_idx = sample_idx
         self.parameters = parameters
 
         self.precip_and_related_fields = precip_and_related_fields
         self.accumulation_levels_plot = accumulation_levels_plot
-        self.cmap_accumulation = cmap_accumulation
         self.per_sample = per_sample
+        self.colormaps = colormaps
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -974,12 +978,12 @@ class PlotSample(BasePerBatchPlotCallback):
                 self.per_sample,
                 self.latlons,
                 self.accumulation_levels_plot,
-                self.cmap_accumulation,
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 datashader=self.datashader_plotting,
                 precip_and_related_fields=self.precip_and_related_fields,
+                colormaps=self.colormaps,
             )
 
             self._output_figure(
