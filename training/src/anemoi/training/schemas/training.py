@@ -194,7 +194,24 @@ class ReweightedGraphNodeAttributeSchema(BaseModel):
     "sum of weight of subset nodes as a fraction of sum of weight of all nodes after rescaling"
 
 
-NodeLossWeightsSchema = Union[GraphNodeAttributeSchema, ReweightedGraphNodeAttributeSchema]
+class ScaledGraphNodeAttributeSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.nodeweights.ScaledGraphNodeAttribute"] = Field(..., alias="_target_")
+    "Node loss weights object from anemoi.training.losses."
+    target_nodes: str = Field(examples=["data"])
+    "name of target nodes, key in HeteroData graph object."
+    node_attribute: str = Field(examples=["area_weight"])
+    "name of node weight attribute, key in the nodes object."
+    scaled_attribute: str = Field(examples=["dist_from_lam_center"])
+    "name of node attribute defining what will the nodes be scaled with, key in the nodes object."
+    inverse: bool = Field(examples=["True"])
+    "Scale the weight directly proportionally to attribute or inversely."
+
+
+NodeLossWeightsSchema = Union[
+    GraphNodeAttributeSchema,
+    ReweightedGraphNodeAttributeSchema,
+    ScaledGraphNodeAttributeSchema,
+]
 
 
 class ScaleValidationMetrics(BaseModel):
@@ -263,5 +280,5 @@ class TrainingSchema(BaseModel):
     "Configuration of the pressure level scaler apllied in the loss computation."
     metrics: list[str]
     "List of metrics"
-    node_loss_weights: NodeLossWeightsSchema
+    node_loss_weights: list[NodeLossWeightsSchema]
     "Node loss weights configuration."

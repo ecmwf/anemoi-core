@@ -1,0 +1,9 @@
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      # ...
+    attributes:
+      dist_from_lam_center:
+        _target_: anemoi.graphs.nodes.attributes.DistanceFromPointAttribute
+        dst_point: "lam_center"

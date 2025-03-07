@@ -29,3 +29,11 @@ support more complex use cases:
    :maxdepth: 1
 
    node_attributes/boolean_operations
+
+Additionally, different float operations have been implemented to
+support more complex use cases:
+
+.. toctree::
+   :maxdepth: 1
+
+   node_attributes/float_operations
