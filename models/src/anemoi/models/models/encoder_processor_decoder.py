@@ -13,8 +13,8 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from hydra.errors import InstantiationException
+from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -84,10 +84,11 @@ class AnemoiModelEncProcDec(nn.Module):
                 dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 layer_kernels=self.layer_kernels,
             )
-    
-        except InstantiationException:
-            LOGGER.info(f"Could not instantiate {model_config.model.encoder}, might cause errors later if this module is used.")
 
+        except InstantiationException:
+            LOGGER.info(
+                f"Could not instantiate {model_config.model.encoder}, might cause errors later if this module is used."
+            )
 
         # Processor hidden -> hidden
         try:
@@ -100,7 +101,9 @@ class AnemoiModelEncProcDec(nn.Module):
                 layer_kernels=self.layer_kernels,
             )
         except InstantiationException:
-            LOGGER.info(f"Could not instantiate {model_config.model.processor}, might cause errors later if this module is used.")
+            LOGGER.info(
+                f"Could not instantiate {model_config.model.processor}, might cause errors later if this module is used."
+            )
 
         # Decoder hidden -> data
         try:
@@ -116,8 +119,9 @@ class AnemoiModelEncProcDec(nn.Module):
                 layer_kernels=self.layer_kernels,
             )
         except InstantiationException:
-            LOGGER.info(f"Could not instantiate {model_config.model.decoder}, might cause errors later if this module is used.")
-
+            LOGGER.info(
+                f"Could not instantiate {model_config.model.decoder}, might cause errors later if this module is used."
+            )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(

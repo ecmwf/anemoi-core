@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+
 from .forecaster import GraphForecaster
 
 LOGGER = logging.getLogger(__name__)
@@ -54,15 +55,22 @@ class GraphAutoEncoder(GraphForecaster):
             Supporting NumPy arrays to store in the checkpoint
 
         """
-        super().__init__(config=config, graph_data=graph_data, statistics=statistics, data_indices=data_indices, metadata=metadata, supporting_arrays=supporting_arrays)
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
 
     def rollout_step(
         self,
         batch: torch.Tensor,
-        rollout: Optional[int] = None,  # noqa: FA100
+        rollout: Optional[int] = None,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:  # noqa: FA100
+    ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:
         """Rollout step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
@@ -110,16 +118,16 @@ class GraphAutoEncoder(GraphForecaster):
             f", {batch.shape[1]} !>= {rollout + self.multi_step}"
         )
         assert batch.shape[1] >= rollout + self.multi_step, msg
-        
+
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
             y = batch[:, 0, ..., self.data_indices.internal_data.output.full]
-       
+
             loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
- 
+
             metrics_next = {}
             if validation_mode:
                 metrics_next = self.calculate_val_metrics(

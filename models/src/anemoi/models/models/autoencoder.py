@@ -14,14 +14,13 @@ from typing import Optional
 import einops
 import torch
 from torch import Tensor
-from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
-from anemoi.utils.config import DotDict
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.models.models import AnemoiModelEncProcDecHierarchical
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +47,9 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         graph_data : HeteroData
             Graph definition
         """
-        super().__init__(model_config=model_config, data_indices=data_indices, statistics=statistics, graph_data=graph_data)
+        super().__init__(
+            model_config=model_config, data_indices=data_indices, statistics=statistics, graph_data=graph_data
+        )
 
     def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
         batch_size = x.shape[0]
@@ -111,25 +112,27 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 class AnemoiModelHierarchicalAutoEncoder(AnemoiModelEncProcDecHierarchical):
 
     def __init__(
-            self,
-            *,
-            model_config: DotDict,
-            data_indices: dict,
-            statistics: dict,
-            graph_data: HeteroData,
-        ) -> None:
-            """Initializes the graph neural network.
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+    ) -> None:
+        """Initializes the graph neural network.
 
-            Parameters
-            ----------
-            model_config : DotDict
-                Model configuration
-            data_indices : dict
-                Data indices
-            graph_data : HeteroData
-                Graph definition
-            """
-            super().__init__(model_config=model_config, data_indices=data_indices, statistics=statistics, graph_data=graph_data)
+        Parameters
+        ----------
+        model_config : DotDict
+            Model configuration
+        data_indices : dict
+            Data indices
+        graph_data : HeteroData
+            Graph definition
+        """
+        super().__init__(
+            model_config=model_config, data_indices=data_indices, statistics=statistics, graph_data=graph_data
+        )
 
     def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
         batch_size = x.shape[0]
@@ -189,7 +192,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelEncProcDecHierarchical):
             x_skip[src_hidden_name] = curr_latent
 
             # Encode to next hidden level
-            print(f"Downscale {i} shapes: ", (shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]))
+            print(
+                f"Downscale {i} shapes: ",
+                (shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
+            )
 
             x_encoded_latents[src_hidden_name], curr_latent = self._run_mapper(
                 self.downscale[src_hidden_name],
@@ -205,7 +211,9 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelEncProcDecHierarchical):
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
             # Decode to next level
-            print(f"Upscale {i} shapes: ", (shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]))
+            print(
+                f"Upscale {i} shapes: ", (shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name])
+            )
 
             curr_latent = self._run_mapper(
                 self.upscale[src_hidden_name],

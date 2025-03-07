@@ -117,7 +117,7 @@ class GraphForecaster(pl.LightningModule):
 
         self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(config.training, data_indices)
 
-        # Check if the model is a stretched grid 
+        # Check if the model is a stretched grid
         graph_hidden_names = config.graph.hidden
         if "hidden" in graph_hidden_names:
             if graph_data["hidden"].node_type == "StretchedTriNodes":
@@ -125,14 +125,13 @@ class GraphForecaster(pl.LightningModule):
                 limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
             else:
                 limited_area_mask = torch.ones((1,))
-        
+
         else:
             if graph_data[graph_hidden_names[0]].node_type == "StretchedTriNodes":
                 mask_name = config.graph.nodes.hidden_1.node_builder.mask_attr_name
                 limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
             else:
                 limited_area_mask = torch.ones((1,))
-    
 
         # Kwargs to pass to the loss function
         loss_kwargs = {"node_weights": self.node_weights}

@@ -12,8 +12,8 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from hydra.errors import InstantiationException
+from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -23,7 +23,6 @@ from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.models import AnemoiModelEncProcDec
-
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -94,11 +93,12 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
                 dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[0]],
                 layer_kernels=self.layer_kernels,
-
             )
         except InstantiationException or AssertionError as e:
             print(e)
-            LOGGER.info(f"Could not instantiate {model_config.model.encoder}, might cause errors later if this module is used.")
+            LOGGER.info(
+                f"Could not instantiate {model_config.model.encoder}, might cause errors later if this module is used."
+            )
 
         # Level processors
         if self.level_process:
@@ -116,7 +116,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     dst_grid_size=self.node_attributes.num_nodes[nodes_names],
                     num_layers=model_config.model.level_process_num_layers,
                     layer_kernels=self.layer_kernels,
-
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
@@ -144,7 +143,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             print("Done")
         except InstantiationException or AssertionError as e:
             print("Exception occurred: ", e)
-            LOGGER.info(f"Could not instantiate {model_config.model.processor}, might cause errors later if this module is used.")
+            LOGGER.info(
+                f"Could not instantiate {model_config.model.processor}, might cause errors later if this module is used."
+            )
 
         # Downscale
         self.downscale = nn.ModuleDict()
@@ -198,7 +199,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
         except InstantiationException or AssertionError as e:
             print(e)
-            LOGGER.info(f"Could not instantiate {model_config.model.decoder}, might cause errors later if this module is used.")
+            LOGGER.info(
+                f"Could not instantiate {model_config.model.decoder}, might cause errors later if this module is used."
+            )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(

@@ -7,9 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .encoder_processor_decoder import AnemoiModelEncProcDec
-from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .autoencoder import AnemoiModelAutoEncoder
 from .autoencoder import AnemoiModelHierarchicalAutoEncoder
+from .encoder_processor_decoder import AnemoiModelEncProcDec
+from .hierarchical import AnemoiModelEncProcDecHierarchical
 
-__all__ = ["AnemoiModelEncProcDec", "AnemoiModelEncProcDecHierarchical", "AnemoiModelAutoEncoder", "AnemoiModelHierarchicalAutoEncoder"]
+__all__ = [
+    "AnemoiModelEncProcDec",
+    "AnemoiModelEncProcDecHierarchical",
+    "AnemoiModelAutoEncoder",
+    "AnemoiModelHierarchicalAutoEncoder",
+]

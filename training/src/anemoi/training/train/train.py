@@ -11,14 +11,13 @@
 from __future__ import annotations
 
 import datetime
+import importlib
 import logging
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hydra
-from hydra.utils import instantiate
-import importlib
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -36,7 +35,6 @@ from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -158,7 +156,6 @@ class AnemoiTrainer:
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-
         # Extract module and class
         module_name, class_name = self.config.training.task.rsplit(".", 1)
         module = importlib.import_module(module_name)
