@@ -117,6 +117,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mae = "anemoi.training.losses.mae.WeightedMAELoss"
     logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
     huber = "anemoi.training.losses.huber.WeightedHuberLoss"
+    msle = "anemoi.training.losses.msle.WeightedMSLELoss"
 
 
 class BaseLossSchema(BaseModel):

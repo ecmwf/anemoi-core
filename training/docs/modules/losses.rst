@@ -30,6 +30,7 @@ The following loss functions are available by default:
 -  ``WeightedHuberLoss``: Latitude-weighted Huber loss.
 -  ``WeightedLogCoshLoss``: Latitude-weighted log-cosh loss.
 -  ``WeightedRMSELoss``: Latitude-weighted root-mean-squared-error.
+-  ``WeightedMSLELoss``: Latitude-weighted mean-squared-log-error.
 -  ``CombinedLoss``: Combined component weighted loss.
 
 These are available in the ``anemoi.training.losses`` module, at
