@@ -109,7 +109,8 @@ class PressureLevelScalerSchema(BaseModel):
 
 
 PossibleScalars = Annotated[
-    str, AfterValidator(partial(allowed_values, values=["limited_area_mask", "variable", "loss_weights_mask", "*"])),
+    str,
+    AfterValidator(partial(allowed_values, values=["limited_area_mask", "variable", "loss_weights_mask", "*"])),
 ]
 
 
