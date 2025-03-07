@@ -112,7 +112,7 @@ lr:
 # in order to keep a constant global_lr
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
 
-metrics:
+metrics: # Specific metrics to log in logger (apart from the grouped ones)
 - z_500
 - t_850
 - u_850
