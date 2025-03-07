@@ -41,8 +41,8 @@ entire globe
 where: - `center_coords` is a tuple containing the lat, lon coordinates
 of the central point. - `n_circles` is the total number of circles. -
 `base_dist` is the radius of the first circle. - `min_n_points` is the
-number of points on the first circle. - `max_n_points` is the number of
-points on the last circle.
+number of points in the further away circle. - `max_n_points` is the
+number of points in the innermost circle.
 
 *****************
  Stretched Graph
@@ -72,9 +72,9 @@ where: - `lam_resolution` is are the number of refinements to be applied
 to the icosahedron inside the area of interest. - `center_coords` is a
 tuple containing the lat, lon coordinates of the central point. -
 `n_circles` is the total number of circles. - `base_dist` is the radius
-of the first circle. - `min_n_points` is the number of points on the
-first circle. - `max_n_points` is the number of points on the last
-circle.
+of the first circle. - `min_n_points` is the number of points in the
+further away circle. - `max_n_points` is the number of points in the
+innermost circle.
 
 .. warning::
 

@@ -140,6 +140,45 @@ class StretchedIcosahdralNodeSchema(BaseModel):
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
+class ConcentricNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.ConcentricNodes"] = Field(..., alias="_target_")
+    "Class implementation for nodes based on concentric circles around a specific location."
+    center_coords: tuple[int, int]
+    "Latitude and Longitude of center point."
+    n_circles: int
+    "Number of circles to generate around the center."
+    base_dist: PositiveFloat = Field(default=0.1)
+    "Distance of the first circle fromn the center in km."
+    min_n_points: int = Field(default=64)
+    "Minimum number of points in the further away circle."
+    max_n_points: int = Field(default=1024)
+    "Maximum number of points in the innermost circle."
+
+
+class StretchedConcentricNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.StretchedConcentricNodes"] = Field(..., alias="_target_")
+    "Class implementation for Nodes based on iterative refinements of an icosahedron for the LAM area,"
+    "and concentric mesh for the global."
+    lam_resolution: PositiveInt
+    "Refinement level of the icosahedral mesh on the local area."
+    center_coords: tuple[int, int]
+    "Latitude and Longitude of center point."
+    n_circles: int
+    "Number of circles to generate around the center."
+    base_dist: PositiveFloat = Field(default=0.1)
+    "Distance of the first circle fromn the center in km."
+    min_n_points: int = Field(default=64)
+    "Minimum number of points in the further away circle."
+    max_n_points: int = Field(default=1024)
+    "Maximum number of points in the innermost circle."
+    reference_node_name: str
+    "Name of the reference nodes in the graph to consider for the Area Mask."
+    mask_attr_name: str
+    "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
+    margin_radius_km: PositiveFloat = Field(example=100.0)
+    "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
+
+
 NodeBuilderSchemas = Annotated[
     Union[
         ZarrNodeSchema,
@@ -152,6 +191,8 @@ NodeBuilderSchemas = Annotated[
         IcosahedralandHealPixNodeSchema,
         LimitedAreaIcosahedralandHealPixNodeSchema,
         StretchedIcosahdralNodeSchema,
+        ConcentricNodeSchema,
+        StretchedConcentricNodeSchema,
     ],
     Field(discriminator="target_"),
 ]
