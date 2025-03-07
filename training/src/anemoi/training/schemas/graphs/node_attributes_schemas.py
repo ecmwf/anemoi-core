@@ -68,8 +68,8 @@ class DistanceFromPointSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.DistanceFromPointAttribute",] = Field(..., alias="_target_")
     norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
     "Normalisation of the weights."
-    dst_point: str | tuple[float, float] = Field(default="lam_center", example=((25, 69)))
-    "Coordinates of the point to compute distance from."
+    dst_point: str | tuple[float, float] = Field(default="lam_center")
+    "Coordinates of the point to compute distance from. /"
     "If 'lam_center' is passed, distane from lam center point will be computed"
 
     "Implementation of distance from point from anemoi.graphs.nodes.attributes"
