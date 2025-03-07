@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -184,6 +185,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             // self.config.hardware.num_gpus_per_model
         )
 
+        # Construct the path to the custom statistics file
+        custom_statistics_path = (
+            f"{self.config.hardware.paths.custom_dataset_statistics}"
+            f"{self.config.hardware.files.custom_dataset_statistics}"
+        )
+
+        # Check if the custom statistics file exists
+        if os.path.exists(custom_statistics_path):
+            custom_statistics_file = custom_statistics_path
+        else:
+            custom_statistics_file = None
+
+        breakpoint()
+
         return NativeGridDataset(
             data_reader=data_reader,
             rollout=r,
@@ -193,6 +208,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             grid_indices=self.grid_indices,
             label=label,
             effective_bs=effective_bs,
+            custom_statistics_file=custom_statistics_file,
         )
 
     def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:
