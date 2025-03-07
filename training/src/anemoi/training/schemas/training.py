@@ -117,6 +117,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mae = "anemoi.training.losses.mae.WeightedMAELoss"
     logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
     huber = "anemoi.training.losses.huber.WeightedHuberLoss"
+    limited_mse = "anemoi.training.losses.limitedarea.WeightedMSELossLimitedArea"
 
 
 class BaseLossSchema(BaseModel):
@@ -133,7 +134,7 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
-class WeightedMSELossLimitedAreaSchema(BaseModel):
+class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
     target_: Literal["anemoi.training.losses.limitedarea.WeightedMSELossLimitedArea"] = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
     scalars: list[PossibleScalars] = Field(example=["variable"])
