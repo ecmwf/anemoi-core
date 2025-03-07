@@ -9,6 +9,7 @@
 
 from enum import Enum
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 
@@ -41,7 +42,16 @@ class ActivationFunctons(str, Enum):
     GLU = "GLU"
 
 
-class TransformerModelComponent(BaseModel):
+class TransformerModelComponent(PydanticBaseModel):
+    class Config:
+        """Pydantic BaseModel configuration."""
+
+        use_attribute_docstrings = True
+        use_enum_values = True
+        validate_assignment = True
+        validate_default = True
+        extra = "allow"  # Beware this allows extra fields in the config, typos are less likely to be spotted
+
     activation: ActivationFunctons = Field(example="GELU")
     "Activation function to use for the transformer model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
