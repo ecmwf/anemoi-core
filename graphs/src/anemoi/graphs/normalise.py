@@ -9,7 +9,7 @@
 
 import logging
 
-import numpy as np
+import torch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ LOGGER = logging.getLogger(__name__)
 class NormaliserMixin:
     """Mixin class for normalising attributes."""
 
-    def normalise(self, values: np.ndarray) -> np.ndarray:
+    def normalise(self, values: torch.Tensor) -> torch.Tensor:
         """Normalise the given values.
 
         It supports different normalisation methods: None, 'l1',
@@ -37,15 +37,15 @@ class NormaliserMixin:
             LOGGER.debug(f"{self.__class__.__name__} values are not normalised.")
             return values
         if self.norm == "l1":
-            return values / np.sum(values)
+            return values / torch.sum(values)
         if self.norm == "l2":
-            return values / np.linalg.norm(values)
+            return values / torch.norm(values)
         if self.norm == "unit-max":
-            return values / np.amax(values)
+            return values / torch.amax(values)
         if self.norm == "unit-range":
-            return (values - np.amin(values)) / (np.amax(values) - np.amin(values))
+            return (values - torch.amin(values)) / (torch.amax(values) - torch.amin(values))
         if self.norm == "unit-std":
-            std = np.std(values)
+            std = torch.std(values)
             if std == 0:
                 LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalisation is skipped.")
                 return values

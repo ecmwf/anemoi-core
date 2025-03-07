@@ -95,13 +95,13 @@ def plot_interactive_subgraph(
             "reversescale": True,
             "color": list(node_adjacencies),
             "size": 10,
-            "colorbar": {"thickness": 15, "title": "Node Connections", "xanchor": "left", "titleside": "right"},
+            "colorbar": {"thickness": 15, "title": "Node Connections", "xanchor": "left", "title_side": "right"},
             "line_width": 2,
         },
     )
     layout = go.Layout(
         title="<br>" + f"Graph {source_name} --> {target_name}",
-        titlefont_size=16,
+        title_font_size=16,
         showlegend=True,
         hovermode="closest",
         margin={"b": 20, "l": 5, "r": 5, "t": 40},
@@ -153,7 +153,7 @@ def plot_isolated_nodes(graph: HeteroData, out_file: Optional[Union[str, Path]] 
 
     layout = go.Layout(
         title="<br>Orphan nodes",
-        titlefont_size=16,
+        title_font_size=16,
         showlegend=True,
         hovermode="closest",
         margin={"b": 20, "l": 5, "r": 5, "t": 40},

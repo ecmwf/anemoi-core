@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from abc import ABC
 from abc import abstractmethod
 
@@ -17,7 +19,10 @@ import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.utils.config import DotDict
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseNodeBuilder(ABC):
@@ -52,8 +57,15 @@ class BaseNodeBuilder(ABC):
         HeteroData
             The graph with the registered nodes.
         """
-        graph[self.name].x = self.get_coordinates()
+        graph[self.name].x = self.get_coordinates().to(torch.float32)
         graph[self.name].node_type = type(self).__name__
+
+        if graph[self.name].num_nodes >= 2:
+            # At least 2 nodes are needed to compute the grid_reference_distance
+            graph[self.name]["_grid_reference_distance"] = get_grid_reference_distance(graph[self.name].x.cpu())
+        else:
+            LOGGER.warning(f"{self.__class__.__name__} registered {graph[self.name].num_nodes} nodes.")
+
         return graph
 
     def register_attributes(self, graph: HeteroData, config: DotDict | None = None) -> HeteroData:
@@ -82,7 +94,9 @@ class BaseNodeBuilder(ABC):
     @abstractmethod
     def get_coordinates(self) -> torch.Tensor: ...
 
-    def reshape_coords(self, latitudes: np.ndarray, longitudes: np.ndarray) -> torch.Tensor:
+    def reshape_coords(
+        self, latitudes: np.ndarray | torch.Tensor, longitudes: np.ndarray | torch.Tensor
+    ) -> torch.Tensor:
         """Reshape latitude and longitude coordinates.
 
         Parameters
@@ -97,9 +111,14 @@ class BaseNodeBuilder(ABC):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
-        coords = np.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
-        coords = np.deg2rad(coords)
-        return torch.tensor(coords, dtype=torch.float32)
+        if isinstance(latitudes, np.ndarray):
+            latitudes = torch.from_numpy(latitudes)
+
+        if isinstance(longitudes, np.ndarray):
+            longitudes = torch.from_numpy(longitudes)
+
+        coords = torch.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
+        return torch.deg2rad(coords)
 
     def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
         """Update the graph with new nodes.
@@ -116,11 +135,14 @@ class BaseNodeBuilder(ABC):
         HeteroData
             The graph with new nodes included.
         """
+        t0 = time.time()
         graph = self.register_nodes(graph)
+        t1 = time.time()
+        LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
-        if attrs_config is None:
-            return graph
-
-        graph = self.register_attributes(graph, attrs_config)
+        t0 = time.time()
+        graph = self.register_attributes(graph, attrs_config or {})
+        t1 = time.time()
+        LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         return graph
