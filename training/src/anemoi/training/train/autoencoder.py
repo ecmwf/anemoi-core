@@ -13,11 +13,11 @@ from typing import Optional
 from typing import Union
 
 import torch
-from omegaconf import DictConfig
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.schemas.base_schema import BaseSchema
 
 from .forecaster import GraphForecaster
 
@@ -30,7 +30,7 @@ class GraphAutoEncoder(GraphForecaster):
     def __init__(
         self,
         *,
-        config: DictConfig,
+        config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
         data_indices: IndexCollection,
@@ -41,7 +41,7 @@ class GraphAutoEncoder(GraphForecaster):
 
         Parameters
         ----------
-        config : DictConfig
+        config : BaseSchema
             Job configuration
         graph_data : HeteroData
             Graph object

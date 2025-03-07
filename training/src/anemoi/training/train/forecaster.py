@@ -67,7 +67,7 @@ class GraphForecaster(pl.LightningModule):
 
         Parameters
         ----------
-        config : DictConfig
+        config : BaseSchema
             Job configuration
         graph_data : HeteroData
             Graph object
