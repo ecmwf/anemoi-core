@@ -445,7 +445,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
             source_nodes = self.add_edges_from_tri_nodes(source_nodes)
         elif source_nodes.node_type in [HexNodes.__name__, LimitedAreaHexNodes.__name__]:
             source_nodes = self.add_edges_from_hex_nodes(source_nodes)
-        elif source_nodes.node_type == StretchedTriNodes.__name__:
+        elif source_nodes.node_type in [StretchedTriNodes.__name__]:
             source_nodes = self.add_edges_from_stretched_tri_nodes(source_nodes)
         else:
             raise ValueError(f"Invalid node type {source_nodes.node_type}")
