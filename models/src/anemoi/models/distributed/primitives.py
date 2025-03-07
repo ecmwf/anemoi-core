@@ -46,6 +46,8 @@ def _split(input_: Tensor, dim_: int, shapes_: tuple, group: Optional[ProcessGro
     # sanity checks
     assert dim_ < input_.dim(), f"Error, cannot split along {dim_} for tensor with {input_.dim()} dimensions."
 
+    print(input_.shape, [x[dim_] for x in shapes_], dim_)
+
     input_list = torch.split(input_, [x[dim_] for x in shapes_], dim=dim_)
 
     rank = dist.get_rank(group=group)
