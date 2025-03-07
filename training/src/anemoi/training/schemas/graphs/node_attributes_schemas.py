@@ -47,9 +47,12 @@ class CutOutMaskSchema(BaseModel):
 
 class NonmissingZarrVariableSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.NonmissingZarrVariable"] = Field(..., alias="_target_")
-    "Implementation of a mask from the nonmissing values of a Zarr variable from anemoi.graphs.nodes.attributes."
+    (
+        "Implementation of a mask from the nonmissing values of a anemoi-datasets variable "
+        "from anemoi.graphs.nodes.attributes."
+    )
     variable: str
-    "The Zarr variable to use."
+    "The anemoi-datasets variable to use."
 
 
 class BooleanOperationSchema(BaseModel):

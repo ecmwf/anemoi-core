@@ -12,6 +12,7 @@ from __future__ import annotations
 from enum import Enum
 from functools import partial
 from typing import Annotated
+from typing import Any
 from typing import Literal
 from typing import Union
 
@@ -20,6 +21,7 @@ from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import field_validator
 from pydantic import model_validator
 
 from anemoi.training.schemas.utils import allowed_values
@@ -106,7 +108,7 @@ class PressureLevelScalerSchema(BaseModel):
     "Slope of the scaling function."
 
 
-PossibleScalars = Annotated[str, AfterValidator(partial(allowed_values, values=["variable", "loss_weights_mask"]))]
+PossibleScalars = Annotated[str, AfterValidator(partial(allowed_values, values=["variable", "loss_weights_mask", "*"]))]
 
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
@@ -114,6 +116,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mse = "anemoi.training.losses.mse.WeightedMSELoss"
     mae = "anemoi.training.losses.mae.WeightedMAELoss"
     logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
+    huber = "anemoi.training.losses.huber.WeightedHuberLoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -137,35 +140,61 @@ class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
     "Whether to compute the contribution to the MSE or not."
 
 
-class CombinedLossSchema(BaseModel):
+class CombinedLossSchema(BaseLossSchema):
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     losses: list[BaseLossSchema] = Field(min_length=1)
-    loss_weights: list[Union[int, float]] = Field(min_length=1)
+    "Losses to combine, can be any of the normal losses."
+    loss_weights: Union[list[Union[int, float]], None] = None
+    "Weightings of losses, if not set, all losses are weighted equally."
+
+    @field_validator("losses", mode="before")
+    @classmethod
+    def add_empty_scalars(cls, losses: Any) -> Any:
+        """Add empty scalars to loss functions, as scalars can be set at top level."""
+        from omegaconf.omegaconf import open_dict
+
+        for loss in losses:
+            if "scalars" not in loss:
+                with open_dict(loss):
+                    loss["scalars"] = []
+        return losses
 
     @model_validator(mode="after")
-    def check_length_of_weights_and_losses(self, values: dict) -> CombinedLossSchema:
-        losses, loss_weights = values["losses"], values["loss_weights"]
-        if len(losses) != len(loss_weights):
+    def check_length_of_weights_and_losses(self) -> CombinedLossSchema:
+        """Check that the number of losses and weights match, or if not set, skip."""
+        losses, loss_weights = self.losses, self.loss_weights
+        if loss_weights is not None and len(losses) != len(loss_weights):
             error_msg = "Number of losses and weights must match"
             raise ValueError(error_msg)
-        return values
+        return self
 
 
 LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
 
 
-class NodeLossWeightsTargets(str, Enum):
-    graph_node_attribute = "anemoi.training.losses.nodeweights.GraphNodeAttribute"
-    reweighted_graph_node_attributes = "anemoi.training.losses.ReweightedGraphNodeAttribute"
-
-
-class NodeLossWeightsSchema(BaseModel):
-    target_: NodeLossWeightsTargets = Field(..., alias="_target_")
+class GraphNodeAttributeSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.nodeweights.GraphNodeAttribute"] = Field(..., alias="_target_")
     "Node loss weights object from anemoi.training.losses."
     target_nodes: str = Field(examples=["data"])
     "name of target nodes, key in HeteroData graph object."
     node_attribute: str = Field(examples=["area_weight"])
     "name of node weight attribute, key in HeteroData graph object."
+
+
+class ReweightedGraphNodeAttributeSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute"] = Field(..., alias="_target_")
+    "Node loss weights object from anemoi.training.losses."
+    target_nodes: str = Field(examples=["data"])
+    "name of target nodes, key in HeteroData graph object."
+    node_attribute: str = Field(examples=["area_weight"])
+    "name of node weight attribute, key in the nodes object."
+    scaled_attribute: str = Field(examples=["cutout_mask"])
+    "name of node attribute defining the subset of nodes to be scaled, key in the nodes object."
+    weight_frac_of_total: float = Field(examples=[0.3], ge=0, le=1)
+    "sum of weight of subset nodes as a fraction of sum of weight of all nodes after rescaling"
+
+
+NodeLossWeightsSchema = Union[GraphNodeAttributeSchema, ReweightedGraphNodeAttributeSchema]
 
 
 class ScaleValidationMetrics(BaseModel):

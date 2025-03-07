@@ -229,14 +229,14 @@ class BooleanBaseNodeAttribute(BaseNodeAttribute, ABC):
 
 
 class NonmissingZarrVariable(BooleanBaseNodeAttribute):
-    """Mask of valid (not missing) values of a Zarr dataset variable.
+    """Mask of valid (not missing) values of a Anemoi dataset variable.
 
-    It reads a variable from a Zarr dataset and returns a boolean mask of nonmissing values in the first timestep.
+    It reads a variable from a Anemoi dataset and returns a boolean mask of nonmissing values in the first timestep.
 
     Attributes
     ----------
     variable : str
-        Variable to read from the Zarr dataset.
+        Variable to read from the Anemoi dataset.
 
     Methods
     -------
