@@ -73,20 +73,14 @@ class MLP(nn.Module):
         Linear = layer_kernels["Linear"]
         LayerNorm = layer_kernels["LayerNorm"]
 
-        try:
-            act_func = getattr(nn, activation)
-        except AttributeError as ae:
-            LOGGER.error("Activation function %s not supported", activation)
-            raise RuntimeError from ae
-
-        mlp1 = nn.Sequential(Linear(in_features, hidden_dim), act_func())
+        mlp1 = nn.Sequential(Linear(in_features, hidden_dim), activation())
         for _ in range(n_extra_layers + 1):
             mlp1.append(Linear(hidden_dim, hidden_dim))
-            mlp1.append(act_func())
+            mlp1.append(activation())
         mlp1.append(Linear(hidden_dim, out_features))
 
         if final_activation:
-            mlp1.append(act_func())
+            mlp1.append(activation())
 
         if layer_norm:
             mlp1.append(LayerNorm(normalized_shape=out_features))
