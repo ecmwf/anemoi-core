@@ -41,8 +41,8 @@ recipe file, which can be used to build graphs for the input, hidden and
 output layers. For each layer, the package allows you to:
 
 -  :ref:`Define graph nodes <graphs-node_coordinates>` based on
-   coordinates defined in a dataset (Zarr and NPZ) or via algorithmic
-   approaches such as the triangular refined icosahedron.
+   coordinates defined in a dataset (anemoi dataset and NPZ) or via
+   algorithmic approaches such as the triangular refined icosahedron.
 
 -  :ref:`Define edges <graphs-edges>` (connections between nodes) based
    on methods such as the cut-off radius or K nearest-neighbours.

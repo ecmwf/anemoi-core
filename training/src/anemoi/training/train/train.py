@@ -33,12 +33,14 @@ from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
+from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.config import DotDict
 from anemoi.utils.provenance import gather_provenance_info
 
 if TYPE_CHECKING:
@@ -63,8 +65,17 @@ class AnemoiTrainer:
         # This can increase performance (and TensorCore usage, where available).
         torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
-        OmegaConf.resolve(config)
-        self.config = config
+
+        if config.no_validation:
+            config = OmegaConf.to_object(config)
+            self.config = UnvalidatedBaseSchema(**DictConfig(config))
+            LOGGER.info("Skipping config validation.")
+        else:
+
+            OmegaConf.resolve(config)
+            self.config = BaseSchema(**config)
+
+            LOGGER.info("Config validated.")
 
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
         self.load_weights_only = self.config.training.load_weights_only
@@ -131,14 +142,14 @@ class AnemoiTrainer:
 
             if graph_filename.exists() and not self.config.graph.overwrite:
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename)
+                return torch.load(graph_filename, weights_only=False)
 
         else:
             graph_filename = None
 
         from anemoi.graphs.create import GraphCreator
 
-        graph_config = DotDict(OmegaConf.to_container(self.config.graph, resolve=True))
+        graph_config = convert_to_omegaconf(self.config).graph
         return GraphCreator(config=graph_config).create(
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,
@@ -253,7 +264,7 @@ class AnemoiTrainer:
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config)
+        return get_callbacks(self.config.model_dump(by_alias=True))
 
     @cached_property
     def metadata(self) -> dict:
@@ -261,7 +272,7 @@ class AnemoiTrainer:
         return map_config_to_primitives(
             {
                 "version": "1.0",
-                "config": self.config,
+                "config": convert_to_omegaconf(self.config),
                 "seed": self.initial_seed,
                 "run_id": self.run_id,
                 "dataset": self.datamodule.metadata,
@@ -324,6 +335,7 @@ class AnemoiTrainer:
             "cuda",
             "tpu",
         }, f"Invalid accelerator ({self.config.hardware.accelerator}) in hardware config."
+
         if self.config.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
         return self.config.hardware.accelerator
@@ -394,7 +406,7 @@ class AnemoiTrainer:
         """Training strategy."""
         return DDPGroupStrategy(
             self.config.hardware.num_gpus_per_model,
-            self.config.dataloader.get("read_group_size", self.config.hardware.num_gpus_per_model),
+            self.config.dataloader.read_group_size,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 

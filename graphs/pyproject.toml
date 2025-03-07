@@ -41,7 +41,7 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "anemoi-datasets[data]>=0.3.3",
-  "anemoi-utils>=0.3.6",
+  "anemoi-utils>=0.4.11",
   "h3>=3.7.6,<4",
   "healpy>=1.17",
   "hydra-core>=1.3",
@@ -63,7 +63,7 @@ optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
   "requests",
-  "sphinx",
+  "sphinx<8.2",       # Fixed until nbsphinx updates
   "sphinx-argparse",
   "sphinx-rtd-theme",
   "termcolor",

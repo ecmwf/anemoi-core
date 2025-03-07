@@ -52,7 +52,7 @@ class AnemoiModelEncProcDec(nn.Module):
             Graph definition
         """
         super().__init__()
-
+        model_config = DotDict(model_config)
         self._graph_data = graph_data
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden

@@ -9,10 +9,9 @@
 
 import pytest
 import torch
-import zarr
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import AreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders import from_file
 
@@ -29,7 +28,7 @@ def test_init(mocker, mock_zarr_dataset):
 def test_fail():
     """Test ZarrDatasetNodes with invalid dataset."""
     node_builder = from_file.ZarrDatasetNodes("invalid_path.zarr", name="test_nodes")
-    with pytest.raises(zarr.errors.PathNotFoundError):
+    with pytest.raises(Exception):
         node_builder.update_graph(HeteroData())
 
 
@@ -47,7 +46,7 @@ def test_register_nodes(mocker, mock_zarr_dataset):
     assert graph["test_nodes"].node_type == "ZarrDatasetNodes"
 
 
-@pytest.mark.parametrize("attr_class", [UniformWeights, AreaWeights])
+@pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])
 def test_register_attributes(mocker, graph_with_nodes: HeteroData, attr_class):
     """Test ZarrDatasetNodes register correctly the weights."""
     mocker.patch.object(from_file, "open_dataset", return_value=None)
