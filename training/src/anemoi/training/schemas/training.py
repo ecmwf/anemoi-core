@@ -108,7 +108,9 @@ class PressureLevelScalerSchema(BaseModel):
     "Slope of the scaling function."
 
 
-PossibleScalars = Annotated[str, AfterValidator(partial(allowed_values, values=["limited_area_mask", "variable", "loss_weights_mask", "*"]))]
+PossibleScalars = Annotated[
+    str, AfterValidator(partial(allowed_values, values=["limited_area_mask", "variable", "loss_weights_mask", "*"])),
+]
 
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
