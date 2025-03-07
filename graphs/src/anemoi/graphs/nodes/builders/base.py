@@ -117,10 +117,5 @@ class BaseNodeBuilder(ABC):
             The graph with new nodes included.
         """
         graph = self.register_nodes(graph)
-
-        if attrs_config is None:
-            return graph
-
-        graph = self.register_attributes(graph, attrs_config)
-
+        graph = self.register_attributes(graph, attrs_config or {})
         return graph

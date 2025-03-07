@@ -108,7 +108,7 @@ class PressureLevelScalerSchema(BaseModel):
     "Slope of the scaling function."
 
 
-PossibleScalars = Annotated[str, AfterValidator(partial(allowed_values, values=["variable", "loss_weights_mask", "*"]))]
+PossibleScalars = Annotated[str, AfterValidator(partial(allowed_values, values=["limited_area_mask", "variable", "loss_weights_mask", "*"]))]
 
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
@@ -133,7 +133,13 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
-class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
+class WeightedMSELossLimitedAreaSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.limitedarea.WeightedMSELossLimitedArea"] = Field(..., alias="_target_")
+    "Loss function object from anemoi.training.losses."
+    scalars: list[PossibleScalars] = Field(example=["variable"])
+    "Scalars to include in loss calculation"
+    ignore_nans: bool = False
+    "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     inside_lam: bool = True
     "Whether to compute the MSE inside or outside the limited area."
     wmse_contribution: bool = False
