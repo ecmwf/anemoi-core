@@ -57,7 +57,7 @@ attributes:
       _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
       norm: unit-max
       fill_value: 0
-    cutout:
+    cutout_mask:
       _target_: anemoi.graphs.nodes.attributes.CutOutMask
   edges:
     edge_length:
