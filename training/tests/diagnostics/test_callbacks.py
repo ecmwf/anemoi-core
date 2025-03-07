@@ -14,7 +14,7 @@ import yaml
 
 from anemoi.training.diagnostics.callbacks import get_callbacks
 
-NUM_FIXED_CALLBACKS = 2  # ParentUUIDCallback, CheckVariableOrder
+NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RolloutUpdate
 
 default_config = """
 diagnostics:
