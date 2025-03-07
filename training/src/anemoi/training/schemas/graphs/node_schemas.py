@@ -64,6 +64,8 @@ class ReducedGaussianGridNodeSchema(BaseModel):
 class ICONNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.ICONNodes"] = Field(..., alias="_target_")
     "ICON grid object from anemoi.graphs.nodes."
+    name: str
+    "Name of ICON grid."
     grid_filename: str
     "Name of NetCDF ICON grid file."
     max_level_multimesh: int
