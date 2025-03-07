@@ -135,12 +135,6 @@ class HuberLossSchema(BaseLossSchema):
 
 
 class WeightedMSELossLimitedAreaSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.limitedarea.WeightedMSELossLimitedArea"] = Field(..., alias="_target_")
-    "Loss function object from anemoi.training.losses."
-    scalars: list[PossibleScalars] = Field(example=["variable"])
-    "Scalars to include in loss calculation"
-    ignore_nans: bool = False
-    "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     inside_lam: bool = True
     "Whether to compute the MSE inside or outside the limited area."
     wmse_contribution: bool = False
