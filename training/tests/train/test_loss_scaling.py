@@ -17,7 +17,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
-from anemoi.training.losses.scalers.base_scaler import ScalerDim
+from anemoi.training.utils.enums import TensorDim
 from anemoi.training.losses.scalers.scaling import create_scalers
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -236,7 +236,7 @@ def test_variable_loss_scaling_vals(
 
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
-    final_variable_scaling = loss.scaler.subset_by_dim(ScalerDim.VARIABLE.value)
+    final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value)
 
     assert torch.allclose(torch.tensor(final_variable_scaling), expected_scaling)
 

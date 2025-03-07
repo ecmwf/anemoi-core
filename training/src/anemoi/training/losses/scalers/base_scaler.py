@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
-from enum import Enum
 from typing import TYPE_CHECKING
+from anemoi.training.utils.enums import TensorDim
 
 import numpy as np
 
@@ -25,17 +25,10 @@ LOGGER = logging.getLogger(__name__)
 SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 
 
-class ScalerDim(Enum):
-    BATCH_SIZE = 0
-    ENSEMBLE_DIM = 1
-    GRID = 2
-    VARIABLE = 3
-
-
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
-    scale_dims: tuple[ScalerDim] = None
+    scale_dims: tuple[TensorDim] = None
 
     def __init__(self, data_indices: IndexCollection, norm: str | None = None) -> None:
         """Initialise BaseScaler.
@@ -56,7 +49,7 @@ class BaseScaler(ABC):
             "unit-mean",
         ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
         assert self.scale_dims is not None, f"Class {self.__class__.__name__} must define 'scale_dims'"
-        if isinstance(self.scale_dims, ScalerDim):
+        if isinstance(self.scale_dims, TensorDim):
             self.scale_dims = (self.scale_dims,)
 
     @abstractmethod

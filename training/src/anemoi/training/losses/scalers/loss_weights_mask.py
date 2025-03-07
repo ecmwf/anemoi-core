@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
-from anemoi.training.losses.scalers.base_scaler import ScalerDim
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
@@ -26,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 
 class NaNMaskScaler(BaseDelayedScaler):
 
-    scale_dims: tuple[ScalerDim] = (ScalerDim.GRID, ScalerDim.VARIABLE)
+    scale_dims: tuple[TensorDim] = (TensorDim.GRID, TensorDim.VARIABLE)
 
     def __init__(self, data_indices: IndexCollection, norm: str | None = None, **kwargs) -> None:
         """Initialise NanMaskScaler.
