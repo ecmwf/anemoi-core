@@ -13,9 +13,10 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
-from anemoi.training.utils.enums import TensorDim
 
 import numpy as np
+
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection

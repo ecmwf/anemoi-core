@@ -28,7 +28,7 @@ __all__ = [
     "NoVariableLevelScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
-    "TensorDim",
     "StdevTendencyScaler",
+    "TensorDim",
     "VarTendencyScaler",
 ]

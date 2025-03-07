@@ -9,6 +9,7 @@
 
 from enum import Enum
 
+
 class TensorDim(Enum):
     BATCH_SIZE = 0
     ENSEMBLE_DIM = 1
