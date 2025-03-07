@@ -77,6 +77,7 @@ class AnemoiTrainer:
 
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
         self.load_weights_only = self.config.training.load_weights_only
+        self.run_id_with_no_checkpoint = bool(self.config.training.run_id_with_no_checkpoint)
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id
@@ -201,15 +202,21 @@ class AnemoiTrainer:
     @cached_property
     def run_id(self) -> str:
         """Unique identifier for the current run."""
+        # When a run ID is provided
         if self.config.training.run_id and not self.config.training.fork_run_id:
             # Return the provided run ID - reuse run_id if resuming run
             return self.config.training.run_id
 
+        # When a run ID has been created externally and we want to fork a run
+        if self.config.training.run_id and self.config.training.fork_run_id:
+            return self.config.training.run_id
+
+        # When we rely on mlflow to create a new run ID
         if self.config.diagnostics.log.mlflow.enabled:
             # if using mlflow with a new run get the run_id from mlflow
             return self._get_mlflow_run_id()
 
-        # Generate a random UUID
+        # When no run ID is provided a random one is generated
         import uuid
 
         return str(uuid.uuid4())
@@ -432,11 +439,10 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
-
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
-            ckpt_path=None if self.load_weights_only else self.last_checkpoint,
+            ckpt_path=None if (self.load_weights_only or self.run_id_with_no_checkpoint) else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
