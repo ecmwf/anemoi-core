@@ -10,21 +10,21 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Tuple
 
 import networkx as nx
 import numpy as np
-import math
 
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian, cartesian_to_latlon_rad
+from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.tri_icosahedron import create_nx_graph_from_tri_coords
 from anemoi.graphs.generate.tri_icosahedron import get_latlon_coords_icosphere
 from anemoi.graphs.generate.utils import get_coordinates_ordering
 
 LOGGER = logging.getLogger(__name__)
 
-import numpy as np
 
 def central_point_on_sphere(latlons: np.ndarray) -> np.ndarray:
     """
@@ -42,15 +42,16 @@ def central_point_on_sphere(latlons: np.ndarray) -> np.ndarray:
     """
     # Convert lat-lon to Cartesian
     xyz = latlon_rad_to_cartesian((latlons[:, 0], latlons[:, 1]))
-    
+
     # Compute mean of Cartesian coordinates
     mean_xyz = xyz.mean(axis=0)
-    
+
     # Normalize to project back onto the sphere
     mean_xyz /= np.linalg.norm(mean_xyz)
-    
+
     # Convert back to lat-lon
     return cartesian_to_latlon_rad(mean_xyz[np.newaxis, :])[0]
+
 
 def get_latlon_coords_concentric(
     center_coords: Tuple[float, float],
@@ -58,7 +59,7 @@ def get_latlon_coords_concentric(
     base_dist: float,
     min_n_points: int,
     max_n_points: int,
-    sphere_radius: float = 6371.0  # default Earth's radius in km
+    sphere_radius: float = 6371.0,  # default Earth's radius in km
 ) -> np.ndarray:
     """
     Generate concentric geodesic circles (lat, lon in radians) around a given center on Earth.
@@ -67,7 +68,7 @@ def get_latlon_coords_concentric(
       lat2 = arcsin( sin(lat1)*cos(d/R) + cos(lat1)*sin(d/R)*cos(theta) )
       lon2 = lon1 + atan2( sin(theta)*sin(d/R)*cos(lat1),
                            cos(d/R) - sin(lat1)*sin(lat2) )
-    
+
     Parameters
     ----------
     center_coords : Tuple[float, float]
@@ -103,11 +104,12 @@ def get_latlon_coords_concentric(
         d_over_R = r / sphere_radius  # Angular distance in radians.
         for j in range(n_pts):
             theta = 2.0 * math.pi * j / n_pts  # Bearing in radians.
-            lat2 = math.asin(math.sin(lat_center) * math.cos(d_over_R) +
-                             math.cos(lat_center) * math.sin(d_over_R) * math.cos(theta))
+            lat2 = math.asin(
+                math.sin(lat_center) * math.cos(d_over_R) + math.cos(lat_center) * math.sin(d_over_R) * math.cos(theta)
+            )
             lon2 = lon_center + math.atan2(
                 math.sin(theta) * math.sin(d_over_R) * math.cos(lat_center),
-                math.cos(d_over_R) - math.sin(lat_center) * math.sin(lat2)
+                math.cos(d_over_R) - math.sin(lat_center) * math.sin(lat2),
             )
             # Normalize longitude to the range [-pi, pi]
             lon2 = (lon2 + math.pi) % (2 * math.pi) - math.pi

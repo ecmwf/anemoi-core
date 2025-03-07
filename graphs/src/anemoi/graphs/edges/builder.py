@@ -26,15 +26,12 @@ from torch_geometric.data.storage import NodeStorage
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate import hex_icosahedron
 from anemoi.graphs.generate import tri_icosahedron
-from anemoi.graphs.generate import concentric
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import HexNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaHexNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import LimitedAreaTriNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import StretchedTriNodes
 from anemoi.graphs.nodes.builders.from_refined_icosahedron import TriNodes
-from anemoi.graphs.nodes.builders.from_concentric import ConcentricNodes
-from anemoi.graphs.nodes.builders.from_concentric import StretchedConcentricNodes
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.utils.config import DotDict
