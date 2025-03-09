@@ -22,7 +22,7 @@ anemoi-models package:
  Interface
 ***********
 
-The `AnemoiModelInterface` is designed to provide an interface between
+The `AnemoiModelForecastInterface` is designed to provide an interface between
 the training and the model itself. This code is used for making
 predictions with an underlying machine learning model. It implements the
 the interface for pre-processing input data, performing inference using

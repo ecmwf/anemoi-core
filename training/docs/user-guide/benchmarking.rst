@@ -197,7 +197,7 @@ time report with verbose:False, so that it focuses on the callbacks and
 hooks coming from 3 main categories:
 
 -  ``LightningDataModule (AnemoiDatasetDataModule)``
--  ``LightningModule (GraphForecaster)``
+-  ``LightningModule (ForecastLightningModule)``
 -  ``ParallelisationStrategy (DDPGroupStrategy)``
 
 Aside from these 3 categories, the report also includes:

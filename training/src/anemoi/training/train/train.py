@@ -31,7 +31,7 @@ from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.distributed.strategy import DDPGroupStrategy
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.lightning_module.forecaster import ForecastLightningModule
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
@@ -142,7 +142,7 @@ class AnemoiTrainer:
         )
 
     @cached_property
-    def model(self) -> GraphForecaster:
+    def model(self) -> ForecastLightningModule:
         """Provide the model instance."""
         kwargs = {
             "config": self.config,
@@ -153,7 +153,7 @@ class AnemoiTrainer:
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model = GraphForecaster(**kwargs)
+        model = ForecastLightningModule(**kwargs)
 
         if self.load_weights_only:
             # Sanify the checkpoint for transfer learning
@@ -163,7 +163,7 @@ class AnemoiTrainer:
 
             LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
 
-            return GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+            return ForecastLightningModule.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
         LOGGER.info("Model initialised from scratch.")
         return model

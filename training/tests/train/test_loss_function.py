@@ -13,7 +13,7 @@ from omegaconf import DictConfig
 
 from anemoi.training.losses.mse import WeightedMSELoss
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.lightning_module.forecaster import ForecastLightningModule
 
 
 def test_manual_init() -> None:
@@ -22,7 +22,7 @@ def test_manual_init() -> None:
 
 
 def test_dynamic_init_include() -> None:
-    loss = GraphForecaster.get_loss_function(
+    loss = ForecastLightningModule.get_loss_function(
         DictConfig({"_target_": "anemoi.training.losses.mse.WeightedMSELoss"}),
         node_weights=torch.ones(1),
     )
@@ -31,7 +31,7 @@ def test_dynamic_init_include() -> None:
 
 
 def test_dynamic_init_scalar() -> None:
-    loss = GraphForecaster.get_loss_function(
+    loss = ForecastLightningModule.get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.mse.WeightedMSELoss",
@@ -49,7 +49,7 @@ def test_dynamic_init_scalar() -> None:
 
 
 def test_dynamic_init_scalar_not_add() -> None:
-    loss = GraphForecaster.get_loss_function(
+    loss = ForecastLightningModule.get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.mse.WeightedMSELoss",

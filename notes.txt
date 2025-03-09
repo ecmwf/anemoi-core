@@ -1,0 +1,9 @@
+Round 1 - Draft
+- [Done] Interfaces
+- [Done] LightningModules
+- [Done] Losses: VQ only
+- [Done] Model
+- Debug a run
+- [NOT DONE] Callbacks ?
+
+Round 2 - Debugging

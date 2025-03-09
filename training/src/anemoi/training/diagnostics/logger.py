@@ -133,7 +133,7 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
     ----------
     config : DictConfig
         Job configuration
-    model: GraphForecaster
+    model: ForecastLightningModule
         Model to watch
 
     Returns

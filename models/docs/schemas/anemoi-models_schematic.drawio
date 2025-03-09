@@ -7,7 +7,7 @@
         <mxCell id="eMePRidQOvQKZ3TtVd1W-39" value="AnimoI Models" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;container=0;" parent="1" vertex="1">
           <mxGeometry x="640" y="1828" width="790" height="510" as="geometry" />
         </mxCell>
-        <mxCell id="eMePRidQOvQKZ3TtVd1W-40" value="AnemoiModelInterface" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fontStyle=1;startSize=23;fillColor=#dae8fc;strokeColor=#6c8ebf;container=0;" parent="eMePRidQOvQKZ3TtVd1W-39" vertex="1">
+        <mxCell id="eMePRidQOvQKZ3TtVd1W-40" value="AnemoiModelForecastInterface" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fontStyle=1;startSize=23;fillColor=#dae8fc;strokeColor=#6c8ebf;container=0;" parent="eMePRidQOvQKZ3TtVd1W-39" vertex="1">
           <mxGeometry x="40" y="105" width="176" height="63" as="geometry" />
         </mxCell>
         <mxCell id="eMePRidQOvQKZ3TtVd1W-63" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="eMePRidQOvQKZ3TtVd1W-39" source="eMePRidQOvQKZ3TtVd1W-44" target="eMePRidQOvQKZ3TtVd1W-40" edge="1">

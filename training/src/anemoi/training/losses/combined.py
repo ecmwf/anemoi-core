@@ -15,7 +15,7 @@ from typing import Callable
 
 import torch
 
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.lightning_module.forecaster import ForecastLightningModule
 
 
 class CombinedLoss(torch.nn.Module):
@@ -40,7 +40,7 @@ class CombinedLoss(torch.nn.Module):
         Parameters
         ----------
         losses: tuple[dict[str, Any]| Callable]
-            Tuple of losses to initialise with `GraphForecaster.get_loss_function`.
+            Tuple of losses to initialise with `ForecastLightningModule.get_loss_function`.
             Allows for kwargs to be passed, and weighings controlled.
         *extra_losses: dict[str, Any] | Callable
             Additional arg form of losses to include in the combined loss.
@@ -82,7 +82,7 @@ class CombinedLoss(torch.nn.Module):
         assert len(losses) > 0, "At least one loss must be provided"
 
         self.losses = [
-            GraphForecaster.get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
+            ForecastLightningModule.get_loss_function(loss, **kwargs) if isinstance(loss, dict) else loss(**kwargs)
             for loss in losses
         ]
         self.loss_weights = loss_weights

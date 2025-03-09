@@ -7,39 +7,32 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
 from collections import defaultdict
 from collections.abc import Generator
-from collections.abc import Mapping
-from typing import Optional
-from typing import Union
+from typing import Optional, Union, Mapping
 
 import numpy as np
-import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from timm.scheduler import CosineLRScheduler
-from torch.distributed.distributed_c10d import ProcessGroup
-from torch.distributed.optim import ZeroRedundancyOptimizer
+from hydra.utils import instantiate
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.interface.forecast import AnemoiModelForecastInterface
+from anemoi.training.lightning_module.base import AnemoiLightningModule
 from anemoi.training.losses.utils import grad_scaler
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
-from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
+from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphForecaster(pl.LightningModule):
+class ForecastLightningModule(AnemoiLightningModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
     def __init__(
@@ -68,9 +61,15 @@ class GraphForecaster(pl.LightningModule):
             Provenance information
         supporting_arrays : dict
             Supporting NumPy arrays to store in the checkpoint
-
         """
-        super().__init__()
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
 
         graph_data = graph_data.to(self.device)
 
@@ -79,7 +78,7 @@ class GraphForecaster(pl.LightningModule):
         else:
             self.output_mask = NoOutputMask()
 
-        self.model = AnemoiModelInterface(
+        self.model = AnemoiModelForecastInterface(
             statistics=statistics,
             data_indices=data_indices,
             metadata=metadata,
@@ -87,16 +86,10 @@ class GraphForecaster(pl.LightningModule):
             graph_data=graph_data,
             config=DotDict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True))),
         )
-        self.config = config
-        self.data_indices = data_indices
-
-        self.save_hyperparameters()
 
         self.latlons_data = graph_data[config.graph.data].x
         self.node_weights = self.get_node_weights(config, graph_data)
         self.node_weights = self.output_mask.apply(self.node_weights, dim=0, fill_value=0.0)
-
-        self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         variable_scaling = self.get_variable_scaling(config, data_indices)
 
@@ -137,132 +130,31 @@ class GraphForecaster(pl.LightningModule):
             self.loss.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.multi_step = config.training.multistep_input
-        self.lr = (
-            config.hardware.num_nodes
-            * config.hardware.num_gpus_per_node
-            * config.training.lr.rate
-            / config.hardware.num_gpus_per_model
-        )
-        self.warmup_t = getattr(config.training.lr, "warmup_t", 1000)
-        self.lr_iterations = config.training.lr.iterations
-        self.lr_min = config.training.lr.min
         self.rollout = config.training.rollout.start
         self.rollout_epoch_increment = config.training.rollout.epoch_increment
         self.rollout_max = config.training.rollout.max
-
-        self.use_zero_optimizer = config.training.zero_optimizer
-
-        self.model_comm_group = None
-        self.reader_groups = None
 
         LOGGER.debug("Rollout window length: %d", self.rollout)
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
         LOGGER.debug("Multistep: %d", self.multi_step)
 
-        # lazy init model and reader group info, will be set by the DDPGroupStrategy:
-        self.model_comm_group_id = 0
-        self.model_comm_group_rank = 0
-        self.model_comm_num_groups = 1
-
-        self.reader_group_id = 0
-        self.reader_group_rank = 0
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x, self.model_comm_group)
-
-    # Future import breaks other type hints TODO Harrison Cook
     @staticmethod
-    def get_loss_function(
-        config: DictConfig,
-        scalars: Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None] = None,  # noqa: FA100
-        **kwargs,
-    ) -> Union[BaseWeightedLoss, torch.nn.ModuleList]:  # noqa: FA100
-        """Get loss functions from config.
-
-        Can be ModuleList if multiple losses are specified.
+    def get_val_metric_ranges(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, dict]:
+        """Get validation metric ranges.
 
         Parameters
         ----------
         config : DictConfig
-            Loss function configuration, should include `scalars` if scalars are to be added to the loss function.
-        scalars : Union[dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]], None], optional
-            Scalars which can be added to the loss function. Defaults to None., by default None
-            If a scalar is to be added to the loss, ensure it is in `scalars` in the loss config
-            E.g.
-                If `scalars: ['variable']` is set in the config, and `variable` in `scalars`
-                `variable` will be added to the scalar of the loss function.
-        kwargs : Any
-            Additional arguments to pass to the loss function
+            Configuration
+        data_indices : IndexCollection
+            Data indices
 
         Returns
         -------
-        Union[BaseWeightedLoss, torch.nn.ModuleList]
-            Loss function, or list of metrics
-
-        Raises
-        ------
-        TypeError
-            If not a subclass of `BaseWeightedLoss`
-        ValueError
-            If scalar is not found in valid scalars
+        tuple[dict, dict]
+            Internal metric ranges and validation metric ranges
         """
-        config_container = OmegaConf.to_container(config, resolve=False)
-        if isinstance(config_container, list):
-            return torch.nn.ModuleList(
-                [
-                    GraphForecaster.get_loss_function(
-                        OmegaConf.create(loss_config),
-                        scalars=scalars,
-                        **kwargs,
-                    )
-                    for loss_config in config
-                ],
-            )
-
-        loss_config = OmegaConf.to_container(config, resolve=True)
-        scalars_to_include = loss_config.pop("scalars", [])
-
-        # Instantiate the loss function with the loss_init_config
-        loss_function = instantiate(loss_config, **kwargs)
-
-        if not isinstance(loss_function, BaseWeightedLoss):
-            error_msg = f"Loss must be a subclass of 'BaseWeightedLoss', not {type(loss_function)}"
-            raise TypeError(error_msg)
-
-        for key in scalars_to_include:
-            if key not in scalars or []:
-                error_msg = f"Scalar {key!r} not found in valid scalars: {list(scalars.keys())}"
-                raise ValueError(error_msg)
-            loss_function.add_scalar(*scalars[key], name=key)
-
-        return loss_function
-
-    def training_weights_for_imputed_variables(
-        self,
-        batch: torch.Tensor,
-    ) -> None:
-        """Update the loss weights mask for imputed variables."""
-        if "loss_weights_mask" in self.loss.scalar:
-            loss_weights_mask = torch.ones((1, 1), device=batch.device)
-            found_loss_mask_training = False
-            # iterate over all pre-processors and check if they have a loss_mask_training attribute
-            for pre_processor in self.model.pre_processors.processors.values():
-                if hasattr(pre_processor, "loss_mask_training"):
-                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
-                    found_loss_mask_training = True
-                # if transform_loss_mask function exists for preprocessor apply it
-                if hasattr(pre_processor, "transform_loss_mask") and found_loss_mask_training:
-                    loss_weights_mask = pre_processor.transform_loss_mask(loss_weights_mask)
-            # update scaler with loss_weights_mask retrieved from preprocessors
-            self.loss.update_scalar(scalar=loss_weights_mask.cpu(), name="loss_weights_mask")
-            self.scalars["loss_weights_mask"] = ((-2, -1), loss_weights_mask.cpu())
-
-        self.updated_loss_mask = True
-
-    @staticmethod
-    def get_val_metric_ranges(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, dict]:
-
         metric_ranges = defaultdict(list)
         metric_ranges_validation = defaultdict(list)
 
@@ -304,6 +196,20 @@ class GraphForecaster(pl.LightningModule):
         config: DictConfig,
         data_indices: IndexCollection,
     ) -> torch.Tensor:
+        """Get variable scaling.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Configuration
+        data_indices : IndexCollection
+            Data indices
+
+        Returns
+        -------
+        torch.Tensor
+            Variable scaling tensor
+        """
         variable_loss_scaling = (
             np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
             * config.training.variable_loss_scaling.default
@@ -340,34 +246,50 @@ class GraphForecaster(pl.LightningModule):
 
     @staticmethod
     def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
+        """Get node weights.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Configuration
+        graph_data : HeteroData
+            Graph data
+
+        Returns
+        -------
+        torch.Tensor
+            Node weights tensor
+        """
         node_weighting = instantiate(config.training.node_loss_weights)
         return node_weighting.weights(graph_data)
 
-    def set_model_comm_group(
+    def training_weights_for_imputed_variables(
         self,
-        model_comm_group: ProcessGroup,
-        model_comm_group_id: int,
-        model_comm_group_rank: int,
-        model_comm_num_groups: int,
-        model_comm_group_size: int,
+        batch: torch.Tensor,
     ) -> None:
-        self.model_comm_group = model_comm_group
-        self.model_comm_group_id = model_comm_group_id
-        self.model_comm_group_rank = model_comm_group_rank
-        self.model_comm_num_groups = model_comm_num_groups
-        self.model_comm_group_size = model_comm_group_size
+        """Update the loss weights mask for imputed variables.
 
-    def set_reader_groups(
-        self,
-        reader_groups: list[ProcessGroup],
-        reader_group_id: int,
-        reader_group_rank: int,
-        reader_group_size: int,
-    ) -> None:
-        self.reader_groups = reader_groups
-        self.reader_group_id = reader_group_id
-        self.reader_group_rank = reader_group_rank
-        self.reader_group_size = reader_group_size
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch tensor
+        """
+        if "loss_weights_mask" in self.loss.scalar:
+            loss_weights_mask = torch.ones((1, 1), device=batch.device)
+            found_loss_mask_training = False
+            # iterate over all pre-processors and check if they have a loss_mask_training attribute
+            for pre_processor in self.model.pre_processors.processors.values():
+                if hasattr(pre_processor, "loss_mask_training"):
+                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
+                    found_loss_mask_training = True
+                # if transform_loss_mask function exists for preprocessor apply it
+                if hasattr(pre_processor, "transform_loss_mask") and found_loss_mask_training:
+                    loss_weights_mask = pre_processor.transform_loss_mask(loss_weights_mask)
+            # update scaler with loss_weights_mask retrieved from preprocessors
+            self.loss.update_scalar(scalar=loss_weights_mask.cpu(), name="loss_weights_mask")
+            self.scalars["loss_weights_mask"] = ((-2, -1), loss_weights_mask.cpu())
+
+        self.updated_loss_mask = True
 
     def advance_input(
         self,
@@ -376,6 +298,24 @@ class GraphForecaster(pl.LightningModule):
         batch: torch.Tensor,
         rollout_step: int,
     ) -> torch.Tensor:
+        """Advance input for rollout.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor
+        y_pred : torch.Tensor
+            Predicted output tensor
+        batch : torch.Tensor
+            Batch tensor
+        rollout_step : int
+            Rollout step
+
+        Returns
+        -------
+        torch.Tensor
+            Advanced input tensor
+        """
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
@@ -399,10 +339,10 @@ class GraphForecaster(pl.LightningModule):
     def rollout_step(
         self,
         batch: torch.Tensor,
-        rollout: Optional[int] = None,  # noqa: FA100
+        rollout: Optional[int] = None,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:  # noqa: FA100
+    ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:
         """Rollout step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
@@ -425,11 +365,6 @@ class GraphForecaster(pl.LightningModule):
         ------
         Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
             Loss value, metrics, and predictions (per step)
-
-        Returns
-        -------
-        None
-            None
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
@@ -476,6 +411,22 @@ class GraphForecaster(pl.LightningModule):
         batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        """Perform a step (training or validation).
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch tensor
+        batch_idx : int
+            Batch index
+        validation_mode : bool, optional
+            Whether in validation mode, by default False
+
+        Returns
+        -------
+        tuple[torch.Tensor, Mapping[str, torch.Tensor]]
+            Loss, metrics, and predictions
+        """
         del batch_idx
         batch = self.allgather_batch(batch)
 
@@ -496,44 +447,6 @@ class GraphForecaster(pl.LightningModule):
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds
 
-    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
-        """Allgather the batch-shards across the reader group.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch-shard of current reader rank
-
-        Returns
-        -------
-        torch.Tensor
-            Allgathered (full) batch
-        """
-        grid_size = len(self.latlons_data)  # number of points
-
-        if grid_size == batch.shape[-2]:
-            return batch  # already have the full grid
-
-        grid_shard_size = grid_size // self.reader_group_size
-        last_grid_shard_size = grid_size - (grid_shard_size * (self.reader_group_size - 1))
-
-        # prepare tensor list with correct shapes for all_gather
-        shard_shape = list(batch.shape)
-        shard_shape[-2] = grid_shard_size
-        last_shard_shape = list(batch.shape)
-        last_shard_shape[-2] = last_grid_shard_size
-
-        tensor_list = [torch.empty(tuple(shard_shape), device=self.device) for _ in range(self.reader_group_size - 1)]
-        tensor_list.append(torch.empty(last_shard_shape, device=self.device))
-
-        torch.distributed.all_gather(
-            tensor_list,
-            batch,
-            group=self.reader_groups[self.reader_group_id],
-        )
-
-        return torch.cat(tensor_list, dim=-2)
-
     def calculate_val_metrics(
         self,
         y_pred: torch.Tensor,
@@ -544,17 +457,17 @@ class GraphForecaster(pl.LightningModule):
 
         Parameters
         ----------
-            y_pred: torch.Tensor
-                Predicted ensemble
-            y: torch.Tensor
-                Ground truth (target).
-            rollout_step: int
-                Rollout step
+        y_pred: torch.Tensor
+            Predicted ensemble
+        y: torch.Tensor
+            Ground truth (target).
+        rollout_step: int
+            Rollout step
 
         Returns
         -------
-            val_metrics, preds:
-                validation metrics and predictions
+        dict
+            Validation metrics
         """
         metrics = {}
         y_postprocessed = self.model.post_processors(y, in_place=False)
@@ -606,6 +519,20 @@ class GraphForecaster(pl.LightningModule):
         return metrics
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        """Perform a training step.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch tensor
+        batch_idx : int
+            Batch index
+
+        Returns
+        -------
+        torch.Tensor
+            Loss tensor
+        """
         train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
             f"train_{getattr(self.loss, 'name', self.loss.__class__.__name__.lower())}",
@@ -627,40 +554,27 @@ class GraphForecaster(pl.LightningModule):
         )
         return train_loss
 
-    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
-        """Step the learning rate scheduler by Pytorch Lightning.
-
-        Parameters
-        ----------
-        scheduler : CosineLRScheduler
-            Learning rate scheduler object.
-        metric : Optional[Any]
-            Metric object for e.g. ReduceLRonPlateau. Default is None.
-
-        """
-        del metric
-        scheduler.step(epoch=self.trainer.global_step)
-
     def on_train_epoch_end(self) -> None:
+        """Handle end of training epoch, potentially increasing rollout length."""
         if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
             self.rollout += 1
             LOGGER.debug("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
-        """
-        Calculate the loss over a validation batch using the training loss function.
+        """Perform a validation step.
 
         Parameters
         ----------
         batch : torch.Tensor
-            Validation batch
+            Batch tensor
         batch_idx : int
-            Batch inces
+            Batch index
 
         Returns
         -------
-        None
+        tuple
+            Validation loss and predictions
         """
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
@@ -689,26 +603,3 @@ class GraphForecaster(pl.LightningModule):
             )
 
         return val_loss, y_preds
-
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
-        if self.use_zero_optimizer:
-            optimizer = ZeroRedundancyOptimizer(
-                self.trainer.model.parameters(),
-                optimizer_class=torch.optim.AdamW,
-                betas=(0.9, 0.95),
-                lr=self.lr,
-            )
-        else:
-            optimizer = torch.optim.AdamW(
-                self.trainer.model.parameters(),
-                betas=(0.9, 0.95),
-                lr=self.lr,
-            )  # , fused=True)
-
-        scheduler = CosineLRScheduler(
-            optimizer,
-            lr_min=self.lr_min,
-            t_initial=self.lr_iterations,
-            warmup_t=self.warmup_t,
-        )
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]

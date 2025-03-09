@@ -14,7 +14,7 @@ from _pytest.fixtures import SubRequest
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.lightning_module.forecaster import ForecastLightningModule
 
 
 @pytest.fixture
@@ -134,7 +134,7 @@ def test_variable_loss_scaling_vals(
 ) -> None:
     config, data_indices = fake_data
 
-    variable_loss_scaling = GraphForecaster.get_variable_scaling(config, data_indices)
+    variable_loss_scaling = ForecastLightningModule.get_variable_scaling(config, data_indices)
 
     assert torch.allclose(variable_loss_scaling, expected_scaling)
 
@@ -143,7 +143,7 @@ def test_variable_loss_scaling_vals(
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices = fake_data
 
-    metric_range, metric_ranges_validation = GraphForecaster.get_val_metric_ranges(config, data_indices)
+    metric_range, metric_ranges_validation = ForecastLightningModule.get_val_metric_ranges(config, data_indices)
 
     del metric_range["all"]
     del metric_ranges_validation["all"]
