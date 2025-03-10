@@ -77,7 +77,6 @@ class AnemoiTrainer:
 
         self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
         self.load_weights_only = self.config.training.load_weights_only
-        self.run_id_with_no_checkpoint = bool(self.config.training.run_id_with_no_checkpoint)
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id
@@ -89,6 +88,10 @@ class AnemoiTrainer:
         # Update paths to contain the run ID
         self._update_paths()
 
+        # Update dry_run_id attribute, check if checkpoint exists
+        self._get_dry_run_id()
+
+        # Check for dry run, i.e. run id without data
         self._log_information()
 
     @cached_property
@@ -399,6 +402,14 @@ class AnemoiTrainer:
         LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
         LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
 
+    def _get_dry_run_id(self) -> None:
+        """Check if the run ID is dry, e.g. without a checkpoint."""
+        if self.config.hardware.paths.checkpoints.is_dir():
+            self.dry_run_id = False
+        else:
+            LOGGER.info("Starting from a dry run ID.")
+            self.dry_run_id = True
+
     @cached_property
     def strategy(self) -> DDPGroupStrategy:
         """Training strategy."""
@@ -442,7 +453,7 @@ class AnemoiTrainer:
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only or self.run_id_with_no_checkpoint) else self.last_checkpoint,
+            ckpt_path=None if (self.load_weights_only or self.dry_run_id) else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
