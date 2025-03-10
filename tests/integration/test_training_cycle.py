@@ -11,7 +11,6 @@ import logging
 import shutil
 
 import pytest
-import torch
 
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -26,19 +25,20 @@ def test_training_cycle_architecture_configs(architecture_config) -> None:
     shutil.rmtree(architecture_config.hardware.paths.output)
 
 
-@longtests
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
-def test_training_cycle_grid_configs(stretched_config) -> None:
-    AnemoiTrainer(stretched_config).train()
-    shutil.rmtree(stretched_config.hardware.paths.output)
+if __name__ == "__main__":
+    from pathlib import Path
 
+    from hydra import compose
+    from hydra import initialize
+    from omegaconf import OmegaConf
 
-# if __name__ == "__main__":
-#     from hydra import compose
-#     from hydra import initialize
-#     from omegaconf import OmegaConf
+    with initialize(version_base=None, config_path="../../training/src/anemoi/training/config", job_name="test_basic"):
+        template = compose(
+            config_name="debug"
+        )  # apply architecture overrides to template since they override a default
+        global_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_training_cycle.yaml")
+        specific_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_basic.yaml")
+        cfg = OmegaConf.merge(template, global_modifications, specific_modifications)
+        OmegaConf.resolve(cfg)
 
-#     with initialize(version_base=None, config_path="", job_name="test_training"):
-#         cfg = compose(config_name="stretched_config", overrides=[])
-#         OmegaConf.resolve(cfg)
-#         test_training_cycle_architecture_configs(cfg)
+    test_training_cycle_architecture_configs(cfg)
