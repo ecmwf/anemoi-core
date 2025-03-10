@@ -10,9 +10,16 @@ from __future__ import annotations
 
 import functools
 import os
+from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 
 import requests
+
+if TYPE_CHECKING:
+    from argparse import Namespace
+
+    from mlflow import MlflowClient
 
 
 def health_check(tracking_uri: str) -> None:
@@ -114,3 +121,20 @@ def expand_iterables(
         else:
             expanded_params[key] = expand(value)
     return expanded_params
+
+
+def log_hyperparams_as_mlflow_artifact(client: MlflowClient, run_id: str, params: dict[str, Any] | Namespace) -> None:
+    """Log hyperparameters as an artifact."""
+    import json
+    import tempfile
+    from json import JSONEncoder
+
+    class StrEncoder(JSONEncoder):
+        def default(self, o: Any) -> str:
+            return str(o)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        path = Path(tmp_dir) / "config.json"
+        with Path.open(path, "w") as f:
+            json.dump(params, f, cls=StrEncoder)
+        client.log_artifact(run_id=run_id, local_path=path)

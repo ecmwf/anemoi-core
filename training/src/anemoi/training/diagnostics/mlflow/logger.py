@@ -32,6 +32,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.training.diagnostics.mlflow.utils import health_check
+from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_as_mlflow_artifact
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -532,19 +533,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
     @rank_zero_only
     def log_hyperparams_as_artifact(self, params: dict[str, Any] | Namespace) -> None:
         """Log hyperparameters as an artifact."""
-        import json
-        import tempfile
-        from json import JSONEncoder
-
-        class StrEncoder(JSONEncoder):
-            def default(self, o: Any) -> str:
-                return str(o)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            path = Path(tmp_dir) / "config.json"
-            with Path.open(path, "w") as f:
-                json.dump(params, f, cls=StrEncoder)
-            self.experiment.log_artifact(run_id=self.run_id, local_path=path)
+        log_hyperparams_as_mlflow_artifact(self.experiment, self.run_id, params)
 
     @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:

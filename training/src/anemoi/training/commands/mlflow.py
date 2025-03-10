@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import json
 import logging
-import tempfile
 from pathlib import Path
 
 from anemoi.training.commands import Command
@@ -173,9 +171,9 @@ class MlFlow(Command):
             import mlflow
             from hydra import compose
             from hydra import initialize
-            from omegaconf import OmegaConf
 
             from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
+            from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_as_mlflow_artifact
 
             # Load configuration
             with initialize(version_base=None, config_path="./"):
@@ -207,14 +205,11 @@ class MlFlow(Command):
 
             # Log the configuration file as an artifact
             mlflow.set_tracking_uri(cfg.diagnostics.log.mlflow.tracking_uri)
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                fp = Path(tmp_dir, "config.json")
-                json.dump(OmegaConf.to_container(cfg), Path.open(fp, "w"))
-                client.log_artifact(run.info.run_id, fp)
-                client.set_tag(run_id, "mlflow.user", args.owner)
-                client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
-                if cfg.diagnostics.log.mlflow.run_name:
-                    client.set_tag(run_id, "mlflow.runName", cfg.diagnostics.log.mlflow.run_name)
+            log_hyperparams_as_mlflow_artifact(client, run_id, cfg)
+            client.set_tag(run_id, "mlflow.user", args.owner)
+            client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
+            if cfg.diagnostics.log.mlflow.run_name:
+                client.set_tag(run_id, "mlflow.runName", cfg.diagnostics.log.mlflow.run_name)
 
             # Dump configuration in output file
             LOGGER.info("Saving run id in file in %s.", args.output)
