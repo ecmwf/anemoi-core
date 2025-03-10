@@ -183,7 +183,12 @@ class MlFlow(Command):
 
             # Create MLflow client and get experiment
             client = AnemoiMlflowClient(cfg.diagnostics.log.mlflow.tracking_uri, authentication=True)
-            experiment_id = client.get_experiment_by_name(cfg.diagnostics.log.mlflow.experiment_name).experiment_id
+            experiment = client.get_experiment_by_name(cfg.diagnostics.log.mlflow.experiment_name)
+            experiment_id = (
+                experiment.experiment_id
+                if experiment is not None
+                else client.create_experiment(cfg.diagnostics.log.mlflow.experiment_name)
+            )
 
             # Parse configuration
             if cfg.training.run_id is not None:  # Existing run_id
