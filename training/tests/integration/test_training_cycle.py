@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -11,6 +11,7 @@ import logging
 import shutil
 
 import pytest
+from omegaconf import DictConfig
 
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -20,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 @longtests
-def test_training_cycle_architecture_configs(architecture_config) -> None:
+def test_training_cycle_architecture_configs(architecture_config: DictConfig) -> None:
     AnemoiTrainer(architecture_config).train()
     shutil.rmtree(architecture_config.hardware.paths.output)
 
@@ -34,7 +35,7 @@ if __name__ == "__main__":
 
     with initialize(version_base=None, config_path="../../training/src/anemoi/training/config", job_name="test_basic"):
         template = compose(
-            config_name="debug"
+            config_name="debug",
         )  # apply architecture overrides to template since they override a default
         global_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_training_cycle.yaml")
         specific_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_basic.yaml")
