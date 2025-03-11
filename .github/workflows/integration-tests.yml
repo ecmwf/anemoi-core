@@ -15,4 +15,5 @@ jobs:
     with:
       python-version: '3.10'
       install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
-      test_directory: "training/tests/integration"
+      test-directory: "training/tests/integration"
+      pytest-options: "--longtests"
