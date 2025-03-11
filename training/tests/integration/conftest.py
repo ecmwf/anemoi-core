@@ -20,11 +20,6 @@ from omegaconf import OmegaConf
     params=[
         ["model=gnn"],
         ["model=graphtransformer"],
-        # [
-        #     "model=transformer",
-        #     "graph=encoder_decoder_only",
-        #     "model.processor.attention_implementation=scaled_dot_product_attention",
-        # ],
     ],
 )
 def architecture_config(request: pytest.FixtureRequest) -> None:
