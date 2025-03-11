@@ -23,16 +23,12 @@ from typing import Any
 from typing import Literal
 from weakref import WeakValueDictionary
 
-from packaging.version import Version
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
-from pytorch_lightning.loggers.mlflow import _convert_params
-from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
-from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.training.diagnostics.mlflow.utils import health_check
-from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_as_mlflow_artifact
+from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_in_mlflow
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -497,44 +493,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self.run_id_to_log_monitor[self.run_id] = log_monitor
         log_monitor.start()
 
-    @staticmethod
-    def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
-        """Clean up params to avoid issues with mlflow.
-
-        Too many logged params will make the server take longer to render the
-        experiment.
-
-        Parameters
-        ----------
-        params : dict[str, Any]
-            Parameters to clean up.
-
-        Returns
-        -------
-        dict[str, Any]
-            Cleaned up params ready for MlFlow.
-        """
-        prefixes_to_remove = [
-            "hardware",
-            "data",
-            "dataloader",
-            "model",
-            "training",
-            "diagnostics",
-            "metadata.config",
-            "metadata.dataset.variables_metadata",
-            "metadata.dataset.specific.forward.forward.attrs.variables_metadata",
-        ]
-        keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
-        for key in keys_to_remove:
-            del params[key]
-        return params
-
-    @rank_zero_only
-    def log_hyperparams_as_artifact(self, params: dict[str, Any] | Namespace) -> None:
-        """Log hyperparameters as an artifact."""
-        log_hyperparams_as_mlflow_artifact(self.experiment, self.run_id, params)
-
     @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:
         """Overwrite the log_hyperparams method.
@@ -552,44 +510,13 @@ class AnemoiMLflowLogger(MLFlowLogger):
             have lists converted according to `expand_iterables`,
             by default None.
         """
-        if self._flag_log_hparams:
-            params = _convert_params(params)
-
-            # this is needed to resolve optional missing config values to a string, instead of raising a missing error
-            if config := params.get("config"):
-                params["config"] = config.model_dump(by_alias=True)
-
-            import mlflow
-            from mlflow.entities import Param
-
-            truncation_length = 250
-
-            if Version(mlflow.VERSION) >= Version("1.28.0"):
-                truncation_length = 500
-
-            self.log_hyperparams_as_artifact(params)
-
-            expanded_params = {}
-            params = params.copy()
-
-            for key in expand_keys or []:
-                if key in params:
-                    expanded_params.update(
-                        expand_iterables(params.pop(key), size_threshold=None, delimiter="."),
-                    )
-            expanded_params.update(params)
-
-            expanded_params = _flatten_dict(
-                expanded_params,
-                delimiter=".",
-            )  # Flatten dict with '.' to not break API queries
-            expanded_params = self._clean_params(expanded_params)
-
-            # Truncate parameter values.
-            params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
-
-            for idx in range(0, len(params_list), 100):
-                self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])
+        log_hyperparams_in_mlflow(
+            self.experiment,
+            self.run_id,
+            params,
+            expand_keys=expand_keys,
+            log_hyperparams=self._flag_log_hparams,
+        )
 
     @rank_zero_only
     def finalize(self, status: str = "success") -> None:

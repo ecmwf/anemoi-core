@@ -171,47 +171,57 @@ class MlFlow(Command):
             import mlflow
             from hydra import compose
             from hydra import initialize
+            from omegaconf import OmegaConf
 
             from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
-            from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_as_mlflow_artifact
+            from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_in_mlflow
+            from anemoi.training.schemas.base_schema import BaseSchema
+            from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
-            # Load configuration
+            # Load configuration and resolve schema
             with initialize(version_base=None, config_path="./"):
-                cfg = compose(config_name=args.config_name)
+                config = compose(config_name=args.config_name)
+            OmegaConf.resolve(config)
+            config = BaseSchema(**config)
 
             # Create MLflow client and get experiment
-            client = AnemoiMlflowClient(cfg.diagnostics.log.mlflow.tracking_uri, authentication=True)
-            experiment = client.get_experiment_by_name(cfg.diagnostics.log.mlflow.experiment_name)
+            client = AnemoiMlflowClient(config.diagnostics.log.mlflow.tracking_uri, authentication=True)
+            experiment = client.get_experiment_by_name(config.diagnostics.log.mlflow.experiment_name)
             experiment_id = (
                 experiment.experiment_id
                 if experiment is not None
-                else client.create_experiment(cfg.diagnostics.log.mlflow.experiment_name)
+                else client.create_experiment(config.diagnostics.log.mlflow.experiment_name)
             )
 
             # Parse configuration
-            if cfg.training.run_id is not None:  # Existing run_id
-                LOGGER.info("Existing run_id: %s", cfg.training.run_id)
+            if config.training.run_id is not None:  # Existing run_id
+                LOGGER.info("Existing run_id: %s", config.training.run_id)
                 try:
-                    client.get_run(cfg.training.run_id)
+                    client.get_run(config.training.run_id)
                 except ValueError as e:
                     msg = "Invalid run_id provided."
                     raise ValueError(msg) from e
                 return
 
-            # Existing fork_id needs a new run_id attached to it
-            run = client.create_run(experiment_id, run_name=cfg.diagnostics.log.mlflow.run_name)
+            # Create a new run attached to the experiment
+            run = client.create_run(experiment_id, run_name=config.diagnostics.log.mlflow.run_name)
             run_id = run.info.run_id
             LOGGER.info("Creating new run_id: %s", run_id)
 
-            # Log the configuration file as an artifact
-            mlflow.set_tracking_uri(cfg.diagnostics.log.mlflow.tracking_uri)
-            log_hyperparams_as_mlflow_artifact(client, run_id, cfg)
+            # Log metadata to MLflow server
+            mlflow.set_tracking_uri(config.diagnostics.log.mlflow.tracking_uri)
             client.set_tag(run_id, "mlflow.user", args.owner)
             client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
-            if cfg.diagnostics.log.mlflow.run_name:
-                client.set_tag(run_id, "mlflow.runName", cfg.diagnostics.log.mlflow.run_name)
+            config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
+            log_hyperparams_in_mlflow(
+                client,
+                run_id,
+                config_params,
+                expand_keys=config.diagnostics.log.mlflow.expand_hyperparams,
+                log_hyperparams=True,
+            )
 
-            # Dump configuration in output file
+            # Dump run ID in output file
             LOGGER.info("Saving run id in file in %s.", args.output)
             with args.output.open("w") as f:
                 f.write(run_id)

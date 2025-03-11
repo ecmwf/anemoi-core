@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import requests
+from packaging.version import Version
+from pytorch_lightning.loggers.mlflow import _convert_params
+from pytorch_lightning.loggers.mlflow import _flatten_dict
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -138,3 +141,104 @@ def log_hyperparams_as_mlflow_artifact(client: MlflowClient, run_id: str, params
         with Path.open(path, "w") as f:
             json.dump(params, f, cls=StrEncoder)
         client.log_artifact(run_id=run_id, local_path=path)
+
+
+def clean_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Clean up params to avoid issues with mlflow.
+
+    Too many logged params will make the server take longer to render the
+    experiment.
+
+    Parameters
+    ----------
+    params : dict[str, Any]
+        Parameters to clean up.
+
+    Returns
+    -------
+    dict[str, Any]
+        Cleaned up params ready for MlFlow.
+    """
+    prefixes_to_remove = [
+        "hardware",
+        "data",
+        "dataloader",
+        "model",
+        "training",
+        "diagnostics",
+        "metadata.config",
+        "metadata.dataset.variables_metadata",
+        "metadata.dataset.specific.forward.forward.attrs.variables_metadata",
+    ]
+    keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
+    for key in keys_to_remove:
+        del params[key]
+    return params
+
+
+def log_hyperparams_in_mlflow(
+    client: MlflowClient,
+    run_id: str,
+    params: dict[str, Any] | Namespace,
+    *,
+    expand_keys: list[str] | None = None,
+    log_hyperparams: bool | None = True,
+) -> None:
+    """Log hyperparameters to MLflow server.
+
+    - flatten config params using '.'.
+    - expand keys within params to avoid truncation.
+    - log hyperparameters as an artifact.
+
+    Parameters
+    ----------
+    client : MlflowClient
+        MLflow client.
+    run_id : str
+        Run ID.
+    params : dict[str, Any] | Namespace
+        params to log.
+    expand_keys : list[str] | None, optional
+        keys to expand within params. Any key being expanded will
+        have lists converted according to `expand_iterables`,
+        by default None.
+    log_hyperparams : bool | None, optional
+        Whether to log hyperparameters, by default True.
+    """
+    if log_hyperparams:
+        params = _convert_params(params)
+
+        # this is needed to resolve optional missing config values to a string, instead of raising a missing error
+        if config := params.get("config"):
+            params["config"] = config.model_dump(by_alias=True)
+
+        import mlflow
+        from mlflow.entities import Param
+
+        truncation_length = 250
+
+        if Version(mlflow.VERSION) >= Version("1.28.0"):
+            truncation_length = 500
+
+        log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
+
+        expanded_params = {}
+        params = params.copy()
+
+        for key in expand_keys or []:
+            if key in params:
+                expanded_params.update(
+                    expand_iterables(params.pop(key), size_threshold=None, delimiter="."),
+                )
+        expanded_params.update(params)
+
+        expanded_params = _flatten_dict(
+            expanded_params,
+            delimiter=".",
+        )  # Flatten dict with '.' to not break API queries
+        expanded_params = clean_params(expanded_params)
+
+        # Truncate parameter values.
+        params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
+        for idx in range(0, len(params_list), 100):
+            client.log_batch(run_id=run_id, params=params_list[idx : idx + 100])
