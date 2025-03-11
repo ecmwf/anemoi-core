@@ -11,7 +11,7 @@ on:
 
 jobs:
   integration_tests:
-    uses: ecmwf-actions/reusable-workflows/.github/workflows/integration-tests.yml@add-integration-test-anemoi
+    uses: ecmwf/reusable-workflows/.github/workflows/integration-tests.yml@add-integration-test-anemoi
     with:
       python-version: '3.10'
       install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
