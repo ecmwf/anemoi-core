@@ -8,12 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import os
 import shutil
 
 import pytest
 from omegaconf import DictConfig
 
 from anemoi.training.train.train import AnemoiTrainer
+
+os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
 longtests = pytest.mark.skipif("not config.getoption('longtests')", reason="need --longtests option to run")
 
