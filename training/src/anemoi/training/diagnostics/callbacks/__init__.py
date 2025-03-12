@@ -24,7 +24,6 @@ from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
-from anemoi.training.diagnostics.callbacks.rollout import UpdateRollout
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 
 if TYPE_CHECKING:
@@ -197,12 +196,10 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     # Parent UUID callback
     # Check variable order callback
-    # UpdateRollout
     trainer_callbacks.extend(
         (
             ParentUUIDCallback(config),
             CheckVariableOrder(),
-            UpdateRollout(),
         ),
     )
 
