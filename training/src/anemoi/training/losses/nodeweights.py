@@ -63,7 +63,7 @@ class GraphNodeAttribute:
         """
         return AreaWeights(norm="unit-max", fill_value=0).compute(graph_data, self.target)
 
-    def weights(self, graph_data: HeteroData) -> torch.Tensor:
+    def weights(self, graph_data: HeteroData, attr_weight: torch.Tensor = None) -> torch.Tensor:
         """Returns weight of type self.node_attribute for nodes self.target.
 
         Attempts to load from graph_data and calculates area weights for the target
@@ -74,11 +74,17 @@ class GraphNodeAttribute:
         graph_data: HeteroData
             graph object
 
+        attr_weight: torch.Tensor
+            weight of target nodes
+
         Returns
         -------
         torch.Tensor
             weight of target nodes
         """
+        if attr_weight is not None:
+            return attr_weight
+
         if self.node_attribute in graph_data[self.target]:
             attr_weight = graph_data[self.target][self.node_attribute].squeeze()
 
@@ -120,8 +126,8 @@ class ReweightedGraphNodeAttribute(GraphNodeAttribute):
         self.scaled_attribute = scaled_attribute
         self.fraction = weight_frac_of_total
 
-    def weights(self, graph_data: HeteroData) -> torch.Tensor:
-        attr_weight = super().weights(graph_data)
+    def weights(self, graph_data: HeteroData, attr_weight: torch.Tensor = None) -> torch.Tensor:
+        attr_weight = super().weights(graph_data, attr_weight)
 
         if self.scaled_attribute in graph_data[self.target]:
             mask = graph_data[self.target][self.scaled_attribute].squeeze().bool()
@@ -137,6 +143,75 @@ class ReweightedGraphNodeAttribute(GraphNodeAttribute):
             "Weight of nodes in %s rescaled such that their sum equals %.3f of the sum over all nodes",
             self.scaled_attribute,
             self.fraction,
+        )
+
+        return attr_weight
+
+
+class ScaledGraphNodeAttribute(GraphNodeAttribute):
+    """Method to reweight a subset of the target nodes defined by scaled_attribute.
+
+    Subset nodes will be scaled based on the selected attribute.
+    Scaling can be directly or inversely proportional to attribute.
+    """
+
+    def __init__(self, target_nodes: str, node_attribute: str, scaled_attribute: str, inverse: bool):
+        """Initialize reweighted graph node attribute.
+
+        Parameters
+        ----------
+        target_nodes: str
+            name of nodes, key in HeteroData graph object
+        node_attribute: str
+            name of node weight attribute, key in HeteroData graph object
+        scaled_attribute: str
+            name of node attribute defining the subset of nodes to be scaled, key in HeteroData graph object
+        inverse: bool
+            inversely or directly proportional to attribute.
+
+        """
+        # hidden, area_weight, cutout
+        super().__init__(target_nodes=target_nodes, node_attribute=node_attribute)
+        self.scaled_attribute = scaled_attribute
+        self.inverse = inverse
+
+    def weights(
+        self,
+        graph_data: HeteroData,
+        attr_weight: torch.Tensor = None,
+        min_threshold: float = 0.5,
+    ) -> torch.Tensor:
+
+        attr_weight = super().weights(graph_data, attr_weight)
+
+        if self.scaled_attribute in graph_data[self.target]:
+            attr_values = graph_data[self.target][self.scaled_attribute].squeeze().flatten()
+        else:
+            error_msg = f"scaled_attribute {self.scaled_attribute} not found in graph_object"
+            raise KeyError(error_msg)
+
+        # Compute attr range:
+        max_val = torch.max(attr_values)
+        min_val = torch.min(attr_values)
+
+        norm_values = (attr_values - min_val) / (max_val - min_val + 1e-8)  # Avoid division by zero
+
+        # Normalize attribute values
+        scaled_values = (
+            min_threshold + (1 - min_threshold) * (1 - norm_values)
+            if self.inverse
+            else min_threshold + (1 - min_threshold) * norm_values
+        )
+
+        # Ensure shapes match and apply scaling
+        attr_weight = attr_weight * scaled_values.view(attr_weight.shape)
+
+        mode = "inversely proportionally to" if self.inverse else "proportionally to"
+        LOGGER.info(
+            "Weight of nodes in %s rescaled %s the selected attribute %s.",
+            self.target,
+            mode,
+            self.scaled_attribute,
         )
 
         return attr_weight
