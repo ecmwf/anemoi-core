@@ -13,6 +13,7 @@ import os
 from typing import Any
 
 import requests
+from multiurl.http import robust
 
 
 def health_check(tracking_uri: str) -> None:
@@ -29,7 +30,11 @@ def health_check(tracking_uri: str) -> None:
     token = os.getenv("MLFLOW_TRACKING_TOKEN")
 
     headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(f"{tracking_uri}/health", headers=headers, timeout=60)
+    response = robust(requests.get, retry_after=30, maximum_tries=10)(
+        f"{tracking_uri}/health",
+        headers=headers,
+        timeout=60,
+    )
 
     if response.text == "OK":
         return

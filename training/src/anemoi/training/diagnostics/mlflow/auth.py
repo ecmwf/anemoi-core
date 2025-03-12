@@ -20,6 +20,7 @@ from getpass import getpass
 from typing import TYPE_CHECKING
 
 import requests
+from multiurl.http import robust
 from requests.exceptions import HTTPError
 
 from anemoi.utils.config import load_config
@@ -38,7 +39,12 @@ class TokenAuth:
 
     config_file = "mlflow-token.json"
 
-    def __init__(self, url: str, enabled: bool = True, target_env_var: str = "MLFLOW_TRACKING_TOKEN") -> None:
+    def __init__(
+        self,
+        url: str,
+        enabled: bool = True,
+        target_env_var: str = "MLFLOW_TRACKING_TOKEN",
+    ) -> None:
         """Initialise the token authentication object.
 
         Parameters
@@ -192,7 +198,10 @@ class TokenAuth:
         save_config(self.config_file, config)
 
         expire_date = datetime.fromtimestamp(self.refresh_expires, tz=timezone.utc)
-        self.log.info("Your MLflow login token is valid until %s UTC", expire_date.strftime("%Y-%m-%d %H:%M:%S"))
+        self.log.info(
+            "Your MLflow login token is valid until %s UTC",
+            expire_date.strftime("%Y-%m-%d %H:%M:%S"),
+        )
 
     def _token_request(
         self,
@@ -217,7 +226,12 @@ class TokenAuth:
         }
 
         try:
-            response = requests.post(f"{self.url}/{path}", headers=headers, json=payload, timeout=30)
+            response = robust(requests.post, retry_after=60, maximum_tries=30)(
+                f"{self.url}/{path}",
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
             response.raise_for_status()
             response_json = response.json()
 
