@@ -117,6 +117,11 @@ class MlFlow(Command):
             help="Name of the training configuration.",
         )
         prepare.add_argument(
+            "--run-name",
+            default=None,
+            help="MLflow run name.",
+        )
+        prepare.add_argument(
             "--output",
             default="./mlflow_run_id.yaml",
             type=Path,
@@ -199,7 +204,8 @@ class MlFlow(Command):
                 return
 
             # Create a new run attached to the experiment
-            run = client.create_run(experiment_id, run_name=config.diagnostics.log.mlflow.run_name)
+            run_name = args.run_name if args.run_name is not None else config.diagnostics.log.mlflow.run_name
+            run = client.create_run(experiment_id, run_name=run_name)
             run_id = run.info.run_id
             LOGGER.info("Creating new run_id: %s", run_id)
 
