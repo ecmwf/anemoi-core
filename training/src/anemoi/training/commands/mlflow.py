@@ -171,18 +171,13 @@ class MlFlow(Command):
             import mlflow
             from hydra import compose
             from hydra import initialize
-            from omegaconf import OmegaConf
 
             from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
             from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_in_mlflow
-            from anemoi.training.schemas.base_schema import BaseSchema
-            from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
             # Load configuration and resolve schema
             with initialize(version_base=None, config_path="./"):
                 config = compose(config_name=args.config_name)
-            OmegaConf.resolve(config)
-            config = BaseSchema(**config)
 
             # Create MLflow client and get experiment
             client = AnemoiMlflowClient(config.diagnostics.log.mlflow.tracking_uri, authentication=True)
@@ -212,13 +207,13 @@ class MlFlow(Command):
             mlflow.set_tracking_uri(config.diagnostics.log.mlflow.tracking_uri)
             client.set_tag(run_id, "mlflow.user", args.owner)
             client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
-            config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
             log_hyperparams_in_mlflow(
                 client,
                 run_id,
-                config_params,
+                config,
                 expand_keys=config.diagnostics.log.mlflow.expand_hyperparams,
                 log_hyperparams=True,
+                clean_params=False,
             )
 
             # Dump run ID in output file

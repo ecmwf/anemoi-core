@@ -143,7 +143,7 @@ def log_hyperparams_as_mlflow_artifact(client: MlflowClient, run_id: str, params
         client.log_artifact(run_id=run_id, local_path=path)
 
 
-def clean_params(params: dict[str, Any]) -> dict[str, Any]:
+def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
     """Clean up params to avoid issues with mlflow.
 
     Too many logged params will make the server take longer to render the
@@ -166,6 +166,7 @@ def clean_params(params: dict[str, Any]) -> dict[str, Any]:
         "model",
         "training",
         "diagnostics",
+        "graph",
         "metadata.config",
         "metadata.dataset.variables_metadata",
         "metadata.dataset.specific.forward.forward.attrs.variables_metadata",
@@ -183,6 +184,7 @@ def log_hyperparams_in_mlflow(
     *,
     expand_keys: list[str] | None = None,
     log_hyperparams: bool | None = True,
+    clean_params: bool = True,
 ) -> None:
     """Log hyperparameters to MLflow server.
 
@@ -236,7 +238,8 @@ def log_hyperparams_in_mlflow(
             expanded_params,
             delimiter=".",
         )  # Flatten dict with '.' to not break API queries
-        expanded_params = clean_params(expanded_params)
+        if clean_params:
+            expanded_params = clean_config_params(expanded_params)
 
         # Truncate parameter values.
         params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
