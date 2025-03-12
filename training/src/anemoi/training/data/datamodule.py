@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from functools import cached_property
-from multiprocessing import Value
 from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.training.data.grid_indices import BaseGridIndices
-    from anemoi.training.schedulers.rollout import RolloutScheduler
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -54,9 +52,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self.config = config
         self.graph_data = graph_data
 
-        self._rollout: RolloutScheduler | None = None
-        self._rollout_shared_value = Value("i", 1)
-        self._rollout_shared_value_validation = Value("i", 1)
+        # Set the maximum rollout to be expected
+        self.rollout = (
+            self.config.training.rollout.max
+            if self.config.training.rollout.epoch_increment > 0
+            else self.config.training.rollout.start
+        )
 
         # Set the training end date if not specified
         if self.config.dataloader.training.end is None:
@@ -133,6 +134,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def ds_valid(self) -> NativeGridDataset:
+        r = self.rollout
+        r = max(r, self.config.dataloader.validation_rollout)
 
         if not self.config.dataloader.training.end < self.config.dataloader.validation.start:
             LOGGER.warning(
@@ -143,7 +146,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self._get_dataset(
             open_dataset(self.config.model_dump().dataloader.validation),
             shuffle=False,
-            rollout=self._rollout_shared_value_validation,
+            rollout=r,
             label="validation",
         )
 
@@ -163,59 +166,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             label="test",
         )
 
-    @property
-    def rollout(self) -> RolloutScheduler:
-        if self._rollout is None:
-            error_msg = "Rollout scheduler not set."
-            raise AttributeError(error_msg)
-        return self._rollout
-
-    @rollout.setter
-    def rollout(self, rollout: RolloutScheduler) -> None:
-        self._rollout = rollout
-
-        self._rollout_shared_value.value = self.rollout.current_maximum
-        self._rollout_shared_value_validation.value = max(
-            rollout.current_maximum,
-            self.config.dataloader.validation_rollout,
-        )
-
-    def update_rollout(self) -> None:
-        """Update the rollout values in the underlying datasets from the scheduler."""
-        self._rollout_shared_value.value = self.rollout.current_maximum
-        self._rollout_shared_value_validation.value = max(
-            self.rollout.current_maximum,
-            self.config.dataloader.validation_rollout,
-        )
-
     def _get_dataset(
         self,
         data_reader: Callable,
         shuffle: bool = True,
-        rollout: int | None = None,
+        rollout: int = 1,
         label: str = "generic",
     ) -> NativeGridDataset:
-        """
-        Get dataset from reader.
 
-        Parameters
-        ----------
-        data_reader : Callable
-            Data reader
-        shuffle : bool, optional
-            Whether to shuffle, by default True
-        rollout : int | None, optional
-            Override to rollout value, if not set
-            will be given by `rollout.current_maximum`, by default None
-        label : str, optional
-            Name of the dataset, by default "generic"
-
-        Returns
-        -------
-        NativeGridDataset
-            Configured Dataset
-        """
-        r = rollout if rollout is not None else self._rollout_shared_value
+        r = max(rollout, self.rollout)
 
         # Compute effective batch size
         effective_bs = (

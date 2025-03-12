@@ -101,8 +101,3 @@ files,
    :members:
    :no-undoc-members:
    :show-inheritance:
-
-.. automodule:: anemoi.training.schemas.schedulers
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
