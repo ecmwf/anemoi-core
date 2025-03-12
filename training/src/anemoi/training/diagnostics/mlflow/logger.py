@@ -192,12 +192,12 @@ class LogsMonitor:
                 log_capture_time_counter = 0
 
     def _store_buffered_logs(self) -> None:
-        _buffer_size = self._io_buffer.tell()
-        if not _buffer_size:
+        buffer_size = self._io_buffer.tell()
+        if not buffer_size:
             return
         self._io_buffer.seek(0)
         # read and reset the buffer
-        data = self._io_buffer.read(_buffer_size)
+        data = self._io_buffer.read(buffer_size)
         self._io_buffer.seek(0)
         # handle the buffered data and store
         # split lines and keep \n at the end of each line

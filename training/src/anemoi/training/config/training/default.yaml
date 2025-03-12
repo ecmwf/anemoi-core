@@ -84,12 +84,20 @@ scale_validation_metrics:
 
 
 # length of the "rollout" window (see Keisler's paper)
+# Changing rollout values during an epoch is dangerous and may lead to
+# index errors, if doing so, ensure `adjust_maximum` is set to the
+# maximum possible rollout change within an epoch.
 rollout:
-  start: 1
+  _target_: anemoi.training.schedulers.rollout.stepped.EpochStepped
+  minimum: 1
+  maximum: 12
   # increase rollout every n epochs
-  epoch_increment: 0
-  # maximum rollout to use
-  max: 1
+  every_n_epochs: 1
+  # Control the incrementing of the rollout window
+  increment:
+    step:
+      0: 0
+      260000: 1 # After 260k steps, increment by 1 every 1 epoch
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null

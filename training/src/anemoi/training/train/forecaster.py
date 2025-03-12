@@ -49,6 +49,9 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from anemoi.training.schedulers.rollout import RolloutScheduler
+
 
 class GraphForecaster(pl.LightningModule):
     """Graph neural network forecaster for PyTorch Lightning."""
@@ -171,18 +174,15 @@ class GraphForecaster(pl.LightningModule):
         self.warmup_t = config.training.lr.warmup_t
         self.lr_iterations = config.training.lr.iterations
         self.lr_min = config.training.lr.min
-        self.rollout = config.training.rollout.start
-        self.rollout_epoch_increment = config.training.rollout.epoch_increment
-        self.rollout_max = config.training.rollout.max
+
+        self.rollout: RolloutScheduler = instantiate(config.training.rollout)
 
         self.use_zero_optimizer = config.training.zero_optimizer
 
         self.model_comm_group = None
         self.reader_groups = None
 
-        LOGGER.debug("Rollout window length: %d", self.rollout)
-        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
-        LOGGER.debug("Rollout max : %d", self.rollout_max)
+        LOGGER.debug("Rollout config: %d", self.rollout.description())
         LOGGER.debug("Multistep: %d", self.multi_step)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
@@ -478,7 +478,10 @@ class GraphForecaster(pl.LightningModule):
         )
         assert batch.shape[1] >= rollout + self.multi_step, msg
 
-        for rollout_step in range(rollout or self.rollout):
+        rollout = rollout or int(self.rollout)
+        assert rollout >= 1, "Rollout must be at least 1"
+
+        for rollout_step in range(rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
@@ -510,9 +513,11 @@ class GraphForecaster(pl.LightningModule):
         metrics = {}
         y_preds = []
 
+        rollout_value = int(self.rollout)
+
         for loss_next, metrics_next, y_preds_next in self.rollout_step(
             batch,
-            rollout=self.rollout,
+            rollout=rollout_value,
             training_mode=True,
             validation_mode=validation_mode,
         ):
@@ -520,7 +525,7 @@ class GraphForecaster(pl.LightningModule):
             metrics.update(metrics_next)
             y_preds.extend(y_preds_next)
 
-        loss *= 1.0 / self.rollout
+        loss *= 1.0 / rollout_value
         return loss, metrics, y_preds
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
@@ -632,6 +637,31 @@ class GraphForecaster(pl.LightningModule):
 
         return metrics
 
+    def on_load_checkpoint(self, checkpoint: dict) -> None:
+        if "rollout" in checkpoint:
+            # Allow rollout scheduler to change but state be conserved.
+            self.rollout = instantiate(self.config.training.rollout).get_state_from(checkpoint["rollout"])
+
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        # Save rollout state in checkpoint
+        checkpoint["rollout"] = self.rollout
+
+    def on_train_batch_end(self, *_) -> None:
+        # Step rollout scheduler
+        self.rollout.step()
+
+    def on_train_epoch_end(self, *_) -> None:
+        # Step rollout epoch on training epoch end if no validation batches are to be run.
+        if self.trainer.limit_val_batches == 0:
+            self.rollout.step_epoch()
+            LOGGER.info("Stepping Rollout on training epoch end, rollout: %i.", int(self.rollout))
+
+    def on_validation_epoch_end(self, *_) -> None:
+        # Step rollout epoch on validation epoch end if not in sanity checking mode.
+        if not self.trainer.sanity_checking:
+            self.rollout.step_epoch()
+            LOGGER.info("Stepping Rollout on validation epoch end, rollout: %i.", int(self.rollout))
+
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
@@ -646,7 +676,7 @@ class GraphForecaster(pl.LightningModule):
         )
         self.log(
             "rollout",
-            float(self.rollout),
+            int(self.rollout),
             on_step=True,
             logger=self.logger_enabled,
             rank_zero_only=True,
@@ -667,12 +697,6 @@ class GraphForecaster(pl.LightningModule):
         """
         del metric
         scheduler.step(epoch=self.trainer.global_step)
-
-    def on_train_epoch_end(self) -> None:
-        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
-            self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
-        self.rollout = min(self.rollout, self.rollout_max)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
         """

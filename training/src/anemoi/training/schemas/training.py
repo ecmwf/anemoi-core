@@ -26,6 +26,7 @@ from pydantic import model_validator
 
 from anemoi.training.schemas.utils import allowed_values
 
+from .schedulers import RolloutSchemas  # noqa: TC001
 from .utils import BaseModel
 
 
@@ -50,17 +51,6 @@ class SWA(BaseModel):
     "Enable stochastic weight averaging."
     lr: NonNegativeFloat = Field(example=1.0e-4)
     "Learning rate for SWA."
-
-
-class Rollout(BaseModel):
-    """Rollout configuration."""
-
-    start: PositiveInt = Field(example=1)
-    "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(example=0)
-    "Number of epochs to increment the rollout."
-    max: PositiveInt = Field(example=1)
-    "Maximum number of rollouts."
 
 
 class LR(BaseModel):
@@ -172,18 +162,29 @@ class CombinedLossSchema(BaseLossSchema):
 LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
 
 
-class NodeLossWeightsTargets(str, Enum):
-    graph_node_attribute = "anemoi.training.losses.nodeweights.GraphNodeAttribute"
-    reweighted_graph_node_attributes = "anemoi.training.losses.ReweightedGraphNodeAttribute"
-
-
-class NodeLossWeightsSchema(BaseModel):
-    target_: NodeLossWeightsTargets = Field(..., alias="_target_")
+class GraphNodeAttributeSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.nodeweights.GraphNodeAttribute"] = Field(..., alias="_target_")
     "Node loss weights object from anemoi.training.losses."
     target_nodes: str = Field(examples=["data"])
     "name of target nodes, key in HeteroData graph object."
     node_attribute: str = Field(examples=["area_weight"])
     "name of node weight attribute, key in HeteroData graph object."
+
+
+class ReweightedGraphNodeAttributeSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute"] = Field(..., alias="_target_")
+    "Node loss weights object from anemoi.training.losses."
+    target_nodes: str = Field(examples=["data"])
+    "name of target nodes, key in HeteroData graph object."
+    node_attribute: str = Field(examples=["area_weight"])
+    "name of node weight attribute, key in the nodes object."
+    scaled_attribute: str = Field(examples=["cutout_mask"])
+    "name of node attribute defining the subset of nodes to be scaled, key in the nodes object."
+    weight_frac_of_total: float = Field(examples=[0.3], ge=0, le=1)
+    "sum of weight of subset nodes as a fraction of sum of weight of all nodes after rescaling"
+
+
+NodeLossWeightsSchema = Union[GraphNodeAttributeSchema, ReweightedGraphNodeAttributeSchema]
 
 
 class ScaleValidationMetrics(BaseModel):
@@ -238,7 +239,7 @@ class TrainingSchema(BaseModel):
     "List of validation metrics configurations. These metrics "
     scale_validation_metrics: ScaleValidationMetrics
     """Configuration for scaling validation metrics."""
-    rollout: Rollout = Field(default_factory=Rollout)
+    rollout: RolloutSchemas
     "Rollout configuration."
     max_epochs: Union[PositiveInt, None] = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
