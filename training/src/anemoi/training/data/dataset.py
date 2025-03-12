@@ -14,7 +14,6 @@ import os
 import random
 from functools import cached_property
 from typing import TYPE_CHECKING
-from typing import Any
 
 import numpy as np
 import torch
@@ -40,7 +39,7 @@ class NativeGridDataset(IterableDataset):
         self,
         data_reader: Callable,
         grid_indices: type[BaseGridIndices],
-        rollout: Any = 1,
+        rollout: int = 1,
         multistep: int = 1,
         timeincrement: int = 1,
         shuffle: bool = True,
@@ -56,7 +55,7 @@ class NativeGridDataset(IterableDataset):
         grid_indices : Type[BaseGridIndices]
             indices of the grid to keep. Defaults to None, which keeps all spatial indices.
         rollout : int, optional
-            length of rollout window, by default 1
+            length of rollout window, by default 12
         timeincrement : int, optional
             time increment between samples, by default 1
         multistep : int, optional
@@ -73,7 +72,7 @@ class NativeGridDataset(IterableDataset):
 
         self.data = data_reader
 
-        self._rollout = rollout
+        self.rollout = rollout
         self.timeincrement = timeincrement
         self.grid_indices = grid_indices
 
@@ -100,16 +99,6 @@ class NativeGridDataset(IterableDataset):
         assert self.multi_step > 0, "Multistep value must be greater than zero."
         self.ensemble_dim: int = 2
         self.ensemble_size = self.data.shape[self.ensemble_dim]
-
-    @property
-    def rollout(self) -> int:
-        """Get rollout value."""
-        if isinstance(self._rollout, int):
-            return self._rollout
-        if hasattr(self._rollout, "value"):
-            return self._rollout.value
-        error_msg = f"Cannot parse rollout of type: {type(self._rollout)}"
-        raise TypeError(error_msg)
 
     @cached_property
     def statistics(self) -> dict:
@@ -240,7 +229,10 @@ class NativeGridDataset(IterableDataset):
         sanity_rnd = self.rng.random(1)
 
         LOGGER.debug(
-            ("Worker %d (%s, pid %d, glob. rank %d, model comm group %d, group_rank %d, base_seed %d), sanity rnd %f"),
+            (
+                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
+                "group_rank %d, base_seed %d), sanity rnd %f"
+            ),
             worker_id,
             self.label,
             os.getpid(),

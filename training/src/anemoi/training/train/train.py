@@ -352,7 +352,7 @@ class AnemoiTrainer:
             "Effective learning rate: %.3e",
             int(total_number_of_model_instances) * self.config.training.lr.rate,
         )
-        LOGGER.debug("Rollout config: %d", self.config.training.rollout)
+        LOGGER.debug("Rollout window length: %d", self.config.training.rollout.start)
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
             LOGGER.info(
@@ -401,15 +401,9 @@ class AnemoiTrainer:
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
-    def _set_datamodule_rollout(self) -> None:
-        """Set datamodule rollout to model rollout."""
-        self.datamodule.rollout = self.model.rollout
-
     def train(self) -> None:
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
-
-        self._set_datamodule_rollout()
 
         trainer = pl.Trainer(
             accelerator=self.accelerator,

@@ -1168,6 +1168,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         data, output_tensor = self.process(pl_module, outputs, batch)
 
         for rollout_step in range(pl_module.rollout):
+
             # Build dictionary of inidicies and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
 
