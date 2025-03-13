@@ -15,6 +15,7 @@ from abc import abstractmethod
 
 import torch
 from torch_geometric.data import HeteroData
+
 from anemoi.graphs.utils import NodesAxis
 
 LOGGER = logging.getLogger(__name__)
@@ -152,8 +153,8 @@ class RemoveUnconnectedNodes(BaseMaskingProcessor):
 
 class BaseSortEdgeIndex(PostProcessor, ABC):
     """Base class for sort edge indices processor."""
-    
-    nodes_axis : NodesAxis | None = None
+
+    nodes_axis: NodesAxis | None = None
 
     def __init__(self, descending: bool = True) -> None:
         assert self.nodes_axis is not None, f"{self.__class__.__name__} must define the nodes_axis class attribute."
@@ -179,12 +180,13 @@ class BaseSortEdgeIndex(PostProcessor, ABC):
         for (src, to, dst), edges in graph.edge_items():
             sort_indices = self.get_sorting_mask(edges)
             edges["edge_index"] = edges["edge_index"][:, sort_indices]
-            graph[(src, to , dst)] = edges
+            graph[(src, to, dst)] = edges
         return graph
 
 
 class SortEdgeIndexBySourceNodes(BaseSortEdgeIndex):
     nodes_axis = NodesAxis.SOURCE
+
 
 class SortEdgeIndexByTargetNodes(BaseSortEdgeIndex):
     nodes_axis = NodesAxis.TARGET

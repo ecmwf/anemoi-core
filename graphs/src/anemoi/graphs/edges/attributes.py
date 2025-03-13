@@ -18,8 +18,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges.directional import directional_edge_features
 from anemoi.graphs.normalise import NormaliserMixin
-from anemoi.graphs.utils import haversine_distance
 from anemoi.graphs.utils import NodesAxis
+from anemoi.graphs.utils import haversine_distance
 
 
 class BaseEdgeAttribute(ABC, NormaliserMixin):
@@ -188,7 +188,8 @@ class BaseAttributeFromNode(BooleanBaseEdgeAttribute, ABC):
         Computes the edge attribute from the source or target node attribute.
 
     """
-    nodes_axis : NodesAxis | None = None
+
+    nodes_axis: NodesAxis | None = None
 
     def __init__(self, node_attr_name: str) -> None:
         super().__init__()
@@ -215,6 +216,7 @@ class AttributeFromSourceNode(BaseAttributeFromNode):
     """
     Copy an attribute of the source node to the edge.
     """
+
     nodes_axis = NodesAxis.SOURCE
 
 

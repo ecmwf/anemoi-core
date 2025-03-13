@@ -9,10 +9,11 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
-from enum import Enum
 
 
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
