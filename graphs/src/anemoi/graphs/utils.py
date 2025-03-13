@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
+from enum import Enum
 
 
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
@@ -101,3 +102,8 @@ def haversine_distance(source_coords: np.ndarray, target_coords: np.ndarray) -> 
     a = np.sin(dlat / 2) ** 2 + np.cos(source_coords[:, 0]) * np.cos(target_coords[:, 0]) * np.sin(dlon / 2) ** 2
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
     return c
+
+
+class NodesAxis(Enum):
+    SOURCE = 0
+    TARGET = 1
