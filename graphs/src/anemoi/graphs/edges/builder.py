@@ -404,7 +404,9 @@ class MultiScaleEdges(BaseEdgeBuilder):
         StretchedTriNodes,
     ]
 
-    def __init__(self, source_name: str, target_name: str, x_hops: int, scale_resolutions: int | list[int]| None, **kwargs):
+    def __init__(
+        self, source_name: str, target_name: str, x_hops: int, scale_resolutions: int | list[int] | None, **kwargs
+    ):
         super().__init__(source_name, target_name)
         assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
         assert isinstance(x_hops, int), "Number of x_hops must be an integer"
