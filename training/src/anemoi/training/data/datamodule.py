@@ -179,7 +179,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return self._get_dataset(
             open_dataset(self.config.model_dump().dataloader.validation),
             shuffle=False,
-            val_rollout=self.config.dataloader.get("validation_rollout", 1),
+            val_rollout=self.config.dataloader.validation_rollout,
             label="validation",
         )
 

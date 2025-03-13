@@ -20,13 +20,12 @@ data:
 
 model:
   model:
-    _target_: anemoi.models.models.AnemoiModelEncProcDecInterpolator
-    latent_skip: False # True/False for skip connection on latent mesh
-    grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
+    _target_: anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator
+    #latent_skip: False # True/False for skip connection on latent mesh
+    #grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
 
 training:
-  train_module: anemoi.training.train.interpolator
-  train_function: GraphInterpolator
+  task: anemoi.training.train.interpolator.GraphInterpolator
 
   explicit_times:
     input: [0,6]
@@ -35,6 +34,3 @@ training:
   target_forcing: #forcing parameters for the target time to include as input
     data: #of which come from the dataset
       - "insolation"
-    custom: #custom forcings calculated on the fly
-      - "time_frac" #fraction of time at target with respect to the initial and final truth times
-      #TODO: make this optional or remove option, currently hardcoded.

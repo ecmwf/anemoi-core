@@ -165,12 +165,10 @@ class AnemoiTrainer:
             "supporting_arrays": self.supporting_arrays,
         }
 
-        train_module = importlib.import_module(
-            getattr(self.config.training, "train_module", "anemoi.training.train.forecaster"),
-        )
-        train_func = getattr(train_module, getattr(self.config.training, "train_function", "GraphForecaster"))
-        model = train_func(**kwargs)
-        # NOTE: This should be replaced with instantiate
+        module_name, class_name = self.config.training.task.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        model_class = getattr(module, class_name)
+        model = model_class(**kwargs)
 
         # Load the model weights
         if self.load_weights_only:
@@ -181,11 +179,11 @@ class AnemoiTrainer:
                     model = transfer_learning_loading(model, self.last_checkpoint)
                 else:
                     LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                    model = train_func.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                    model = model_class.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                model = train_func.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_class.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights

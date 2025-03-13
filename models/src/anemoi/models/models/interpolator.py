@@ -47,6 +47,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         graph_data : HeteroData
             Graph definition
         """
+        model_config = DotDict(model_config)
         self.num_target_forcings = len(model_config.training.target_forcing.data) + 1
         self.input_times = len(model_config.training.explicit_times.input)
         super().__init__(
@@ -57,10 +58,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.grid_skip = grid_skip
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        self.num_input_channels = len(data_indices.internal_model.input)
-        self.num_output_channels = len(data_indices.internal_model.output)
-        self._internal_input_idx = data_indices.internal_model.input.prognostic
-        self._internal_output_idx = data_indices.internal_model.output.prognostic
+        super()._calculate_shapes_and_indices(data_indices)
         self.input_dim = (
             self.input_times * self.num_input_channels
             + self.node_attributes.attr_ndims[self._graph_name_data]

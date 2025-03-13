@@ -80,6 +80,25 @@ class LR(BaseModel):
     "Number of warm up iteration. Default to 1000."
 
 
+class ExplicitTimes(BaseModel):
+    """Time indices for input and output.
+
+    Starts at index 0. Input and output can overlap.
+    """
+
+    input: list[NonNegativeInt] = Field(default=[0, 1])
+    target: list[NonNegativeInt] = Field(default=[2])
+
+
+class TargetForcing(BaseModel):
+    """Forcing parameters for target output times.
+    
+    Extra forcing parameters to use as input to distinguish between different target times.
+    """
+
+    data: list[str] = Field(default="insolation")
+
+
 class LossScalingSchema(BaseModel):
     default: int = 1
     "Default scaling value applied to the variables loss. Default to 1."
@@ -265,3 +284,9 @@ class TrainingSchema(BaseModel):
     "List of metrics"
     node_loss_weights: NodeLossWeightsSchema
     "Node loss weights configuration."
+    task: str = Field(default="anemoi.training.train.forecaster.GraphForecaster")
+    "Training objective."
+    explicit_times: ExplicitTimes = Field(default_factory=ExplicitTimes)
+    "Time indices for input and output."
+    target_forcing: TargetForcing = Field(default_factory=TargetForcing)
+    "Forcing parameters for target output times."
