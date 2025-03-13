@@ -14,9 +14,12 @@ import datetime  # noqa: TC003
 from pathlib import Path  # noqa: TC003
 from typing import Any
 from typing import Literal
+from typing import Optional
 from typing import Union
 
+from omegaconf import DictConfig  # noqa: TC002
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import ConfigDict
 from pydantic import Field
 from pydantic import PositiveInt
 from pydantic import RootModel
@@ -57,10 +60,10 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
-class DatasetSchema(BaseModel):
+class DatasetSchema(PydanticBaseModel):
     """Dataset configuration schema."""
 
-    dataset: Union[str, dict, Path, list[dict]]
+    dataset: Optional[Union[str, dict, Path, list[dict]]] = None
     "Dataset, see anemoi-datasets"
     start: Union[str, int, None] = Field(default=None)
     "Starting datetime for sample of the dataset."
@@ -104,6 +107,9 @@ class MaskedGridIndicesSchema(BaseModel):
 
 
 class DataLoaderSchema(PydanticBaseModel):
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
     prefetch_factor: int = Field(example=2, ge=0)
     "Number of batches loaded in advance by each worker."
     pin_memory: bool = Field(example=True)
@@ -114,15 +120,15 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetSchema
+    training: Union[DatasetSchema, DictConfig]
     "Training DatasetSchema."
-    validation: DatasetSchema
+    validation: Union[DatasetSchema, DictConfig]
     "Validation DatasetSchema."
-    test: DatasetSchema
+    test: Union[DatasetSchema, DictConfig]
     "Test DatasetSchema."
     validation_rollout: PositiveInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
-    # TODO(Helen): Ccheck that this equal or greater than the number of rollouts expected by callbacks ???
+    # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
     grid_indices: Union[FullGridIndicesSchema, MaskedGridIndicesSchema]

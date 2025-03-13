@@ -49,7 +49,7 @@ class NativeGridDataset(IterableDataset):
         Parameters
         ----------
         data_reader : Callable
-            user function that opens and returns the zarr array data
+            user function that opens and returns the anemoi-datasets array data
         grid_indices : Type[BaseGridIndices]
             indices of the grid to keep. Defaults to None, which keeps all spatial indices.
         relative_date_indices: list
@@ -239,7 +239,7 @@ class NativeGridDataset(IterableDataset):
     def __iter__(self) -> torch.Tensor:
         """Return an iterator over the dataset.
 
-        The datasets are retrieved by Anemoi Datasets from zarr files. This iterator yields
+        The datasets are retrieved by anemoi.datasets from anemoi datasets. This iterator yields
         chunked batches for DDP and sharded training.
 
         Currently it receives data with an ensemble dimension, which is discarded for

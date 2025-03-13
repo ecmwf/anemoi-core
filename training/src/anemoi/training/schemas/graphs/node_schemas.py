@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 
 class ZarrNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.ZarrDatasetNodes"] = Field(..., alias="_target_")
-    "Nodes from Zarr dataset class implementation from anemoi.graphs.nodes."
+    "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
     dataset: Union[str, dict]  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
 
