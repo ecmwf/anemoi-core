@@ -15,8 +15,8 @@ jobs:
     steps:
       - uses: ecmwf/reusable-workflows/nightly-pytest@add-integration-test-anemoi-move-action
         with:
-          repository: anemoi-core
-          ref: anemoi-core
+          repository: ecmwf/anemoi-core
+          ref: ecmwf/anemoi-core
           python-version: '3.10'
           install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
           test-directory: "training/tests/integration"
