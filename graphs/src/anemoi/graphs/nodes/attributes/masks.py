@@ -21,7 +21,7 @@ from anemoi.graphs.nodes.attributes.base_attributes import BooleanBaseNodeAttrib
 LOGGER = logging.getLogger(__name__)
 
 
-class NonmissingZarrVariable(BooleanBaseNodeAttribute):
+class NonmissingAnemoiDatasetVariable(BooleanBaseNodeAttribute):
     """Mask of valid (not missing) values of a Anemoi dataset variable.
 
     It reads a variable from a Anemoi dataset and returns a boolean mask of nonmissing values in the first timestep.

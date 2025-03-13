@@ -106,7 +106,7 @@ class Azimuth(BasePositionalBuilder):
     """
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        # Forward bearing. x_i, x_j must bez radians.
+        # Forward bearing. x_i, x_j must be radians.
         a11 = torch.cos(x_i[:, self._idx_lat]) * torch.sin(x_j[:, self._idx_lat])
         a12 = (
             torch.sin(x_i[:, self._idx_lat])
@@ -131,8 +131,8 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
     """Base class for propagating an attribute from the nodes to the edges."""
 
     def __init__(self, node_attr_name: str) -> None:
-        self.node_attr_name = node_attr_name
         super().__init__()
+        self.node_attr_name = node_attr_name
         if not hasattr(self, "node_idx"):
             raise AttributeError(
                 "Classes inheriting from BaseEdgeAttributeFromNodeBuilder must set 'node_idx' attribute"
