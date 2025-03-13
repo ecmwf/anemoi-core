@@ -19,6 +19,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges.directional import directional_edge_features
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import haversine_distance
+from anemoi.graphs.utils import NodesAxis
 
 
 class BaseEdgeAttribute(ABC, NormaliserMixin):
@@ -187,22 +188,22 @@ class BaseAttributeFromNode(BooleanBaseEdgeAttribute, ABC):
         Computes the edge attribute from the source or target node attribute.
 
     """
+    nodes_axis : NodesAxis | None = None
 
     def __init__(self, node_attr_name: str) -> None:
         super().__init__()
         self.node_attr_name = node_attr_name
-        self.idx = None
+        assert self.nodes_axis is not None, f"{self.__class__.__name__} must define the nodes_axis class attribute."
 
-    @abstractmethod
-    def get_node_name(self, source_name: str, target_name: str): ...
+    def get_node_name(self, graph: HeteroData, nodes_names: tuple[str, str]) -> torch.Tensor:
+        nodes_name = nodes_names[self.nodes_axis.value]
+        return graph[nodes_name][self.node_attr_name].numpy()
 
     def get_raw_values(self, graph: HeteroData, source_name: str, target_name: str) -> np.ndarray:
-
-        node_name = self.get_node_name(source_name, target_name)
-
+        node_attributes = self.get_node_name(source_name, target_name)
         edge_index = graph[(source_name, "to", target_name)].edge_index
         try:
-            return graph[node_name][self.node_attr_name].numpy()[edge_index[self.idx]]
+            return node_attributes[edge_index[self.nodes_axis.value]]
 
         except KeyError:
             raise KeyError(
@@ -214,13 +215,7 @@ class AttributeFromSourceNode(BaseAttributeFromNode):
     """
     Copy an attribute of the source node to the edge.
     """
-
-    def __init__(self, node_attr_name: str) -> None:
-        super().__init__(node_attr_name)
-        self.idx = 0
-
-    def get_node_name(self, source_name: str, target_name: str):
-        return source_name
+    nodes_axis = NodesAxis.SOURCE
 
 
 class AttributeFromTargetNode(BaseAttributeFromNode):
@@ -228,9 +223,4 @@ class AttributeFromTargetNode(BaseAttributeFromNode):
     Copy an attribute of the target node to the edge.
     """
 
-    def __init__(self, node_attr_name: str) -> None:
-        super().__init__(node_attr_name)
-        self.idx = 1
-
-    def get_node_name(self, source_name: str, target_name: str):
-        return target_name
+    nodes_axis = NodesAxis.TARGET
