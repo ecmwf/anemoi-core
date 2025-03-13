@@ -25,6 +25,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
+import einops
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface.reconstruct import AnemoiModelReconstructInterface
@@ -35,16 +36,17 @@ from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.utils.config import DotDict
 from anemoi.training.losses.reconstruction import VAELoss, VQLoss
-
+from anemoi.training.utils.debug_hydra import instantiate_debug
+from torch import Tensor
 LOGGER = logging.getLogger(__name__)
 
 
+from anemoi.training.lightning_module.base import AnemoiLightningModule
 class ReconstructionLightningModule(AnemoiLightningModule):
     """VAE-based reconstruction model for PyTorch Lightning."""
 
     def __init__(
         self,
-        *,
         config: DictConfig,
         graph_data: HeteroData,
         statistics: dict,
@@ -80,10 +82,6 @@ class ReconstructionLightningModule(AnemoiLightningModule):
 
         graph_data = graph_data.to(self.device)
 
-        if config.model.get("output_mask", None) is not None:
-            self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
-        else:
-            self.output_mask = NoOutputMask()
 
         self.model = AnemoiModelReconstructInterface(
             statistics=statistics,
@@ -94,9 +92,11 @@ class ReconstructionLightningModule(AnemoiLightningModule):
             config=DotDict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True))),
         )
 
-        self.latlons_data = graph_data[config.graph.data].x
-        self.node_weights = self.get_node_weights(config, graph_data)
-        self.node_weights = self.output_mask.apply(self.node_weights, dim=0, fill_value=0.0)
+        self.latlons_hidden = self.get_latlons_hidden(graph_data, config)
+        self.latlons_input = self.get_latlons_input(graph_data, config)
+        self.latlons_output = self.get_latlons_output(graph_data, config)
+        self.latent_node_weights = self.get_latent_node_weights(graph_data, config)
+        self.node_weights = self.get_node_weights(graph_data, config)
 
         variable_scaling = self.get_variable_scaling(config, data_indices)
 
@@ -106,460 +106,41 @@ class ReconstructionLightningModule(AnemoiLightningModule):
             "loss_weights_mask": ((-2, -1), torch.ones((1, 1))),
         }
 
-        # Initialize loss based on model type
-        self.model_type = self.model.model.latent_representation_format
-        if self.model_type == "continuous":  # Beta-VAE
-            self.loss = VAELoss(
-                reconstruction_loss=self.get_loss_function(
-                    config.training.reconstruction_loss, 
-                    scalars=self.scalars, 
-                    node_weights=self.node_weights
-                ),
-                kl_weight=config.training.kl_weight,
-            )
-        elif self.model_type == "discrete":  # VQ-VAE
-            self.loss = VQLoss(
-                reconstruction_loss=self.get_loss_function(
-                    config.training.reconstruction_loss, 
-                    scalars=self.scalars, 
-                    node_weights=self.node_weights
-                ),
-                commitment_weight=config.training.commitment_weight,
-                codebook_weight=config.training.codebook_weight,
-            )
+
+        if hasattr(config, "model_discriminator"):
+            self.instantiate_discriminator(config, graph_data)
+        else:
+            self.discriminator = None
+            self.discriminator_loss = None
+
+        # Setting latent regularisation loss weight based on model type
+        if self.model.model.latent_representation_format == "continuous":
+            self.latent_regularisation_loss_weight = self.loss.divergence_loss_weight
+
+        elif self.model.model.latent_representation_format == "discrete":
+            self.latent_regularisation_loss_weight = self.loss.commitment_weight
+
+
         else:
             raise ValueError(f"Unknown model type: {self.model_type}")
+
+        self.loss = self.get_loss_function(config.training.training_loss,
+                                            node_weights=self.node_weights,
+                                            latent_node_weights=self.get_latent_node_weights(graph_data, config),
+                                            feature_weights=self.feature_weights,
+                                            data_indices_model_output=self.data_indices.model.output,
+                                            scalars=self.scalars)
+
 
         # Set up metrics for validation
         self.metrics = self.get_loss_function(config.training.validation_metrics, scalars=self.scalars, node_weights=self.node_weights)
         if not isinstance(self.metrics, torch.nn.ModuleList):
             self.metrics = torch.nn.ModuleList([self.metrics])
 
-        if config.training.loss_gradient_scaling:
-            self.loss.register_full_backward_hook(grad_scaler, prepend=False)
-
         self.multi_step = config.training.multistep_input
         
-    @staticmethod
-    def get_variable_scaling(
-        config: DictConfig,
-        data_indices: IndexCollection,
-    ) -> torch.Tensor:
-        """Get variable scaling for reconstruction loss.
 
-        Parameters
-        ----------
-        config : DictConfig
-            Configuration
-        data_indices : IndexCollection
-            Data indices
-
-        Returns
-        -------
-        torch.Tensor
-            Variable scaling tensor
-        """
-        # Simplified variable scaling for reconstruction
-        variable_loss_scaling = torch.ones(len(data_indices.internal_data.output.full)) * config.training.get("variable_loss_scaling", 1.0)
-        return variable_loss_scaling
-
-    @staticmethod
-    def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
-        """Get node weights for the reconstruction loss.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Configuration
-        graph_data : HeteroData
-            Graph data
-
-        Returns
-        -------
-        torch.Tensor
-            Node weights tensor
-        """
-        from anemoi.training.utils.node_weights import NodeWeights
-        node_weighting = NodeWeights()
-        return node_weighting.weights(graph_data)
-
-    def forward(self, x: torch.Tensor) -> Dict[str, Any]:
-        """Forward pass of the model.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor
-
-        Returns
-        -------
-        Dict[str, Any]
-            Model outputs
-        """
-        return self.model(x)
-
-    def _step(
-        self,
-        batch: torch.Tensor,
-        batch_idx: int,
-        validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], Dict[str, Any]]:
-        """Perform a step (training or validation).
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch tensor
-        batch_idx : int
-            Batch index
-        validation_mode : bool, optional
-            Whether in validation mode, by default False
-
-        Returns
-        -------
-        tuple
-            Loss, metrics, and predictions
-        """
-        del batch_idx
-        batch = self.allgather_batch(batch)
-        
-        # Apply pre-processing
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
-        
-        # Extract input and target
-        x = batch[:, :self.multi_step, ..., self.data_indices.internal_data.input.full]
-        y = batch[:, 0, ..., self.data_indices.internal_data.output.full]  # First timestep for reconstruction
-        
-        # Forward pass through model
-        outputs = self(x)
-        
-        # Calculate loss depending on model type
-        if self.model_type == "continuous":  # Beta-VAE
-            loss = self.loss(
-                outputs["x_rec"], 
-                y, 
-                outputs["x_latent"], 
-                outputs["x_latent_logvar"]
-            )
-        else:  # VQ-VAE
-            loss = self.loss(
-                outputs["x_rec"], 
-                y, 
-                outputs["map_loss_breakdown"]
-            )
-        
-        metrics = {}
-        if validation_mode:
-            metrics = self.calculate_validation_metrics(outputs, y)
-            
-        return loss, metrics, outputs
-
-    def calculate_validation_metrics(
-        self, 
-        outputs: Dict[str, torch.Tensor], 
-        y: torch.Tensor
-    ) -> Dict[str, torch.Tensor]:
-        """Calculate validation metrics.
-
-        Parameters
-        ----------
-        outputs : Dict[str, torch.Tensor]
-            Model outputs
-        y : torch.Tensor
-            Target tensor
-
-        Returns
-        -------
-        Dict[str, torch.Tensor]
-            Metrics dictionary
-        """
-        metrics = {}
-        
-        # Apply post-processing for metrics
-        y_postprocessed = self.model.post_processors(y, in_place=False)
-        outputs_postprocessed = self.model.post_processors(outputs["x_rec"], in_place=False)
-        
-        # Calculate reconstruction metrics
-        for metric in self.metrics:
-            metric_name = getattr(metric, "name", metric.__class__.__name__.lower())
-            metrics[f"{metric_name}"] = metric(outputs_postprocessed, y_postprocessed)
-        
-        # Add latent space metrics
-        if self.model_type == "continuous":  # Beta-VAE
-            metrics["kl_divergence"] = self.loss.kl_divergence(outputs["x_latent"], outputs["x_latent_logvar"])
-        elif self.model_type == "discrete":  # VQ-VAE
-            metrics["commitment_loss"] = outputs["map_loss_breakdown"].get("commitment_loss", torch.tensor(0.0))
-            metrics["codebook_loss"] = outputs["map_loss_breakdown"].get("codebook_loss", torch.tensor(0.0))
-            
-        return metrics
-
-    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        """Perform a training step.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch tensor
-        batch_idx : int
-            Batch index
-
-        Returns
-        -------
-        torch.Tensor
-            Loss tensor
-        """
-        train_loss, _, _ = self._step(batch, batch_idx)
-        self.log(
-            f"train_loss",
-            train_loss,
-            on_epoch=True,
-            on_step=True,
-            prog_bar=True,
-            logger=self.logger_enabled,
-            batch_size=batch.shape[0],
-            sync_dist=True,
-        )
-        return train_loss
-
-    def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
-        """Perform a validation step.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch tensor
-        batch_idx : int
-            Batch index
-
-        Returns
-        -------
-        tuple
-            Validation loss and outputs
-        """
-        with torch.no_grad():
-            val_loss, metrics, outputs = self._step(batch, batch_idx, validation_mode=True)
-
-        self.log(
-            "val_loss",
-            val_loss,
-            on_epoch=True,
-            on_step=False,
-            prog_bar=True,
-            logger=self.logger_enabled,
-            batch_size=batch.shape[0],
-            sync_dist=True,
-        )
-
-        for mname, mvalue in metrics.items():
-            self.log(
-                f"val_{mname}",
-                mvalue,
-                on_epoch=True,
-                on_step=False,
-                prog_bar=False,
-                logger=self.logger_enabled,
-                batch_size=batch.shape[0],
-                sync_dist=True,
-            )
-
-        return val_loss, outputs
-
-    def configure_optimizers(self) -> tuple:
-        """Configure optimizers and learning rate schedulers.
-        
-        Returns
-        -------
-        tuple
-            Optimizers and schedulers
-        """
-        if self.discriminator is None:
-            return super().configure_optimizers()
-        
-        if self.config.training.scale_lr_by_gpus:
-            lr_vae = (
-                (self.config.hardware.num_nodes
-                    * self.config.hardware.num_gpus_per_node
-                    * self.config.training.optimizer.lr)
-                    / self.config.hardware.num_gpus_per_model
-                )
-        else:
-            lr_vae = self.config.training.optimizer.lr
-
-        lr_discriminator = self.config.training.optimizer_discriminator.lr_ratio_to_vae * lr_vae
-        
-        LOGGER.debug("Effective VAE learning rate: %.3e", lr_vae)
-
-        # VAE Encoder/Decoder optimizer
-        vae_named_params = self.model.named_parameters()
-        if self.config.training.optimizer.weight_decay > 0:
-            vae_param_groups = self.split_params_by_weight_decay(vae_named_params, self.config.training.optimizer.weight_decay, lr_vae)
-        else:
-            vae_param_groups = vae_named_params
-
-        optimizer_vae = torch.optim.AdamW(
-            vae_param_groups,
-            betas=(0.9, 0.95),
-            lr=lr_vae,
-            weight_decay=self.config.training.optimizer.weight_decay,
-        )
-        scheduler_vae = CosineLRScheduler(
-            optimizer_vae,
-            lr_min=self.config.training.scheduler.lr_min,
-            t_initial=self.config.training.scheduler.t_initial or self.training_steps(),
-            warmup_t= self.config.training.scheduler.warmup_t if self.config.training.scheduler.warmup_t.is_integer() else int(self.config.training.scheduler.warmup_t * self.training_steps()),
-        )
-
-        # Discriminator optimizer
-        discriminator_named_params = self.discriminator.named_parameters()
-        if self.config.training.optimizer_discriminator.weight_decay > 0:
-            discriminator_param_groups = self.split_params_by_weight_decay(discriminator_named_params, self.config.training.optimizer_discriminator.weight_decay, lr_discriminator)
-        else:
-            discriminator_param_groups = discriminator_named_params
-
-        optimizer_discriminator = torch.optim.AdamW(
-            discriminator_param_groups,
-            betas=(0.9, 0.95),
-            lr=lr_discriminator,
-            weight_decay=self.config.training.optimizer_discriminator.weight_decay,
-        )
-        
-        scheduler_discriminator = CosineLRScheduler(
-            optimizer_discriminator,
-            lr_min=self.config.training.scheduler.lr_min,
-            t_initial=self.config.training.scheduler.t_initial or (self.training_steps() - self.discriminator_training_start_step),
-            warmup_t= self.config.training.scheduler.warmup_t if self.config.training.scheduler.warmup_t.is_integer() else int(self.config.training.scheduler.warmup_t * (self.training_steps() - self.discriminator_training_start_step) ),
-        )
-        
-        return [optimizer_vae, optimizer_discriminator], [{"scheduler": scheduler_vae, "interval": "step"}, {"scheduler": scheduler_discriminator, "interval": "step"}]
-
-    def split_params_by_weight_decay(self, named_params, weight_decay=0.01, lr=0.001) -> list[dict]:
-        """Split parameters by weight decay.
-        
-        Parameters
-        ----------
-        named_params : iterator
-            Named parameters
-        weight_decay : float, optional
-            Weight decay value, by default 0.01
-        lr : float, optional
-            Learning rate, by default 0.001
-            
-        Returns
-        -------
-        list[dict]
-            Parameter groups
-        """
-        decay_params = []
-        no_decay_params = []
-        for name, param in named_params:
-            if not param.requires_grad:
-                continue  # skip frozen parameters
-            # Do not apply weight decay to bias terms or LayerNorm parameters.
-            if "bias" in name or "norm" in name or "ln" in name or 'qk_scale' in name:
-                no_decay_params.append(param)
-            else:
-                decay_params.append(param)
-        return [
-            {"params": decay_params, "weight_decay": weight_decay, "lr": lr},
-            {"params": no_decay_params, "weight_decay": 0.0, "lr": lr}
-        ]
-
-    def training_steps(self) -> int:
-        """Get the total number of training steps.
-        
-        Returns
-        -------
-        int
-            Total number of training steps
-        """
-        return self.trainer.max_steps
-    
-
-class ReconstructionLightningModule_fromOriginalBranch(AnemoiLightningModule):
-    def __init__(self, config, graph_data, statistics, statistics_tendencies, data_indices, metadata):
-        super().__init__(config, graph_data, statistics, statistics_tendencies, data_indices, metadata, model_cls=ReconstructionModelInterface)
-
-        self.latlons_hidden = self.get_latlons_hidden(graph_data, config)
-        self.latlons_input = self.get_latlons_input(graph_data, config)
-        self.latlons_output = self.get_latlons_output(graph_data, config)
-        self.latent_node_weights = self.get_latent_node_weights(graph_data, config)
-        self.node_weights = self.get_node_weights(graph_data, config)
-
-        self.modelling_strategy = 0
-
-        if config.training.masked_weather_modelling:
-            self.modelling_strategy = 1
-            
-            # feature_mapping = { v:self.data_indices.model.output.name_to_index[k] for k,v in self.data_indices.model.input.name_to_index.items() if k in self.data_indices.model.output.name_to_index }
-
-            feature_mapping = { k:{'model_output_idx':v_model_ouput_idx, 'model_input_idx': self.data_indices.model.input.name_to_index[k]} for k, v_model_ouput_idx in self.data_indices.model.output.name_to_index.items() }
-            
-            self.masked_weather_modeller = instantiate_debug(
-                                                                config.training.masked_weather_modelling,
-                                                                  feature_in_size=len(self.data_indices.data.input.full),
-                                                                  feature_out_size=len(self.data_indices.data.output.full),
-                                                                  feature_mapping=feature_mapping,
-                                                                  graph = graph_data,
-                                                                  target_grid_name=config.graph.decoder[-1],
-                                                                  latent_grid_name=config.graph.encoder[-1],
-                                                                  model_output_name_to_index=self.data_indices.model.output.name_to_index,
-                                                                  
-                                                                  )
-            assert config.data.normalizers.state.default == "min-max-floor", "Masked weather modelling requires min-max-floor normalization - since we set masked values to 0 e.g. no input"
-
-        # Instantiate the discriminator
-        if hasattr(config, "model_discriminator"):
-            self.discriminator = instantiate_debug(
-                config.model_discriminator.model,
-                config,
-                data_indices=self.data_indices,
-                graph_data=graph_data    
-            )
-
-            self.discriminator_loss = instantiate_debug(
-                config.training.discriminator_loss,
-                node_weights=self.node_weights,
-                feature_weights=torch.ones(self.discriminator.num_output_channels)
-            )
-
-            self.discriminator_loss_weight = self.config.training.discriminator_loss_weight
-
-            self.automatic_optimization = False
-            self.modelling_strategy = 2
-            self.accum_grad_batches = config.training.accum_grad_batches
-
-            # NOTE : when doing automatic_optimization=False, the trainer.accum_grad_batches will be set to 1 for PytorchLightning compatibility
-            # We set self.accum_grad_batches to the value specified in the config
-
-            # Setting up parameters for delayed discriminator training
-            self.discriminator_training_start_step = config.training.get("discriminator_training_start_step", 0)
-            self.discriminator_training_start_step = self.discriminator_training_start_step if (self.discriminator_training_start_step % 1 == 0) else int(self.discriminator_training_start_step * self.training_steps())
-            self.discriminator_backprop_to_vae_dec_start_step = config.training.get("discriminator_backprop_to_vae_dec_start_step", 0)
-            self.discriminator_backprop_to_vae_dec_start_step = self.discriminator_backprop_to_vae_dec_start_step if (self.discriminator_backprop_to_vae_dec_start_step % 1 == 0) else int(self.discriminator_backprop_to_vae_dec_start_step * self.training_steps())
-            assert self.discriminator_training_start_step < self.discriminator_backprop_to_vae_dec_start_step, "Discriminator training start step must be before the discriminator backprop to vae start step"
-            LOGGER.info(f"Discriminator training start step: {self.discriminator_training_start_step}, Discriminator backprop to vae start step: {self.discriminator_backprop_to_vae_dec_start_step}")
-            LOGGER.info(f"Note: This is the number of gradient update steps not the number of training batches seen - it aligns with max_steps")
-
-
-        else:
-            self.discriminator = None
-            self.discriminator_loss = None
-            
-
-        self.multi_step = config.training.multistep_input
-        assert self.multi_step == 1, "Logic for multistep not implemented yet: Callbacks, Training, What would be reconstructing 2 or 1 states>?"
-
-        self.loss = self.instantiate_loss(config, graph_data)
-        self.val_metrics = self.instantiate_val_metrics(config, graph_data)
-
-        self.step_functions = {
-                0: self._step_normal,
-                1: self._step_masked,
-                2: self._step_masked_w_discriminator,
-            }
-
-
-    def configure_optimizers(self):
+    def configure_optimizers(self,):
         if self.discriminator is None:
             return super().configure_optimizers()
         
@@ -621,38 +202,93 @@ class ReconstructionLightningModule_fromOriginalBranch(AnemoiLightningModule):
         
         return [optimizer_vae, optimizer_discriminator], [{"scheduler": scheduler_vae, "interval": "step"}, {"scheduler": scheduler_discriminator, "interval": "step"}]
 
-    def split_params_by_weight_decay(self, named_params, weight_decay=0.01, lr=0.001) -> list[dict]:
+    def configure_modelling_strategy(self, config, graph_data):
+        self.modelling_strategy = 0
 
-        decay_params = []
-        no_decay_params = []
-        for name, param in named_params:
-            if not param.requires_grad:
-                continue  # skip frozen parameters
-            # Do not apply weight decay to bias terms or LayerNorm parameters.
-            if "bias" in name or "norm" in name or "ln" in name or 'qk_scale' in name:
-                no_decay_params.append(param)
-            else:
-                decay_params.append(param)
-        return [
-            {"params": decay_params, "weight_decay": weight_decay, "lr": lr},
-            {"params": no_decay_params, "weight_decay": 0.0, "lr": lr}
-        ]
+        # Masked Weather Modelling
+        if config.training.masked_weather_modelling:
+            self.modelling_strategy = 1
+            
+            # feature_mapping = { v:self.data_indices.model.output.name_to_index[k] for k,v in self.data_indices.model.input.name_to_index.items() if k in self.data_indices.model.output.name_to_index }
 
-    def get_latlons_input(self, graph_data, config):
-        return graph_data[config.graph.encoder[0]].x
+            feature_mapping = { k:{'model_output_idx':v_model_ouput_idx, 'model_input_idx': self.data_indices.model.input.name_to_index[k]} for k, v_model_ouput_idx in self.data_indices.model.output.name_to_index.items() }
+            
+            self.masked_weather_modeller = instantiate_debug(
+                                                                config.training.masked_weather_modelling,
+                                                                  feature_in_size=len(self.data_indices.data.input.full),
+                                                                  feature_out_size=len(self.data_indices.data.output.full),
+                                                                  feature_mapping=feature_mapping,
+                                                                  graph = graph_data,
+                                                                  target_grid_name=config.graph.decoder[-1],
+                                                                  latent_grid_name=config.graph.encoder[-1],
+                                                                  model_output_name_to_index=self.data_indices.model.output.name_to_index, #NOTE: HELEN : does this need to be updated to the new data_indices style of referencing?
+                                                                  
+                                                                  )
+            LOGGER.info(f"NOTE: Currently in this branch our masking just sets masked values to 0 - which is bad because 0 is often in the range of the normalization.
+                         This will be updated to a more appropriate masking methodology. \n If you have any ideas please let us know!
+                        ")
 
-    def get_latlons_output(self, graph_data, config):
-        return graph_data[config.graph.decoder[-1]].x
-    
-    def get_latlons_hidden(self, graph_data, config):
-        return [graph_data[h_name].x for h_name in config.graph.encoder]
-    
-    def get_latent_node_weights(self, graph_data, config):
-        return graph_data[config.graph.encoder[-1]][config.model.node_loss_weight].squeeze()
+    def instantiate_discriminator(self, config, graph_data):
+        self.discriminator = instantiate_debug(
+            config.model_discriminator.model,
+            config,
+            data_indices=self.data_indices,
+            graph_data=graph_data    
+        )
+        self.discriminator_loss = instantiate_debug(
+            config.training.discriminator_loss,
+            node_weights=self.node_weights,
+            feature_weights=torch.ones(self.discriminator.num_output_channels)
+        )
+        self.adversarial_loss_weight = self.config.training.adversarial_loss_weight
 
-    def get_node_weights(self, graph_data, config):
-        output_grid = config.graph.decoder[-1]
-        return graph_data[output_grid][config.model.node_loss_weight].squeeze()
+        self.automatic_optimization = False
+        self.modelling_strategy = 2
+        self.accum_grad_batches = config.training.accum_grad_batches
+
+        # NOTE : when doing automatic_optimization=False, the trainer.accum_grad_batches will be set to 1 for PytorchLightning compatibility
+        # We set self.accum_grad_batches to the value specified in the config
+
+        # Setting up parameters for delayed discriminator training
+        discriminator_training_start_step = config.training.get("discriminator_training_start_step", 0)
+        self.discriminator_training_start_step = discriminator_training_start_step if (discriminator_training_start_step % 1 == 0) else int(discriminator_training_start_step * self.training_steps())
+        discriminator_backprop_to_vae_dec_start_step = config.training.get("discriminator_backprop_to_vae_dec_start_step", 0)
+        self.discriminator_backprop_to_vae_dec_start_step = discriminator_backprop_to_vae_dec_start_step if (discriminator_backprop_to_vae_dec_start_step % 1 == 0) else int(discriminator_backprop_to_vae_dec_start_step * self.training_steps())
+        
+        assert self.discriminator_training_start_step <= self.discriminator_backprop_to_vae_dec_start_step, "Discriminator training start step must be before the discriminator backprop to vae start step"
+        LOGGER.info(f"Discriminator training start step: {self.discriminator_training_start_step}, Discriminator backprop to vae start step: {self.discriminator_backprop_to_vae_dec_start_step}")
+        LOGGER.info(f"Note: This is the number of gradient update steps not the number of training batches seen - it aligns with max_steps")
+
+
+
+        if hasattr(config.training, "feature_matching_loss"):
+            self.add_feature_matching_loss = True
+            self.feature_matching_loss = instantiate_debug(
+                config.training.feature_matching_loss,
+                node_weights=self.node_weights,
+                feature_weights=torch.ones(config.model_discriminator.num_channels),
+                discriminator_layers_count=config.model_discriminator.processor.num_layers,
+            )
+            self.feature_matching_loss_weight = config.training.feature_matching_loss_weight
+        else:
+            self.feature_matching_loss = None
+            self.add_feature_matching_loss = False
+
+
+    def forward(self, x: torch.Tensor) -> Dict[str, Any]:
+        """Forward pass of the model.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor
+
+        Returns
+        -------
+        Dict[str, Any]
+            Model outputs
+        """
+        return self.model(x)
 
     def _step( 
         self,
@@ -674,7 +310,8 @@ class ReconstructionLightningModule_fromOriginalBranch(AnemoiLightningModule):
         batch_target: Optional[torch.Tensor|dict[str, torch.Tensor]] = None,
         validation_kwargs: dict|None = None,
         ) -> tuple[Tensor, Mapping, Tensor]:
-        raise NotImplementedError("Not implemented")
+        raise NotImplementedError("Not implemented on this branch")
+    
         batch_inp = self.model.pre_processors_state(batch, in_place=False)  # shape = (bs, nens_input, multistep, 
 
         x_inp = batch_inp[..., self.data_indices.data.input.full]
@@ -752,7 +389,6 @@ class ReconstructionLightningModule_fromOriginalBranch(AnemoiLightningModule):
             metrics = {}
 
         return loss, metrics, {**dict_tensors, **dict_model_outputs}
-
 
     def _step_masked_w_discriminator(self, batch: Tensor, batch_idx: int, validation_mode: bool = False, batch_target: Optional[torch.Tensor] = None, validation_kwargs: dict|None = None):
         # Optimization strategy:
@@ -877,6 +513,7 @@ class ReconstructionLightningModule_fromOriginalBranch(AnemoiLightningModule):
             # NOTE: validation metrics are calculated based on the full reconstruction
             dict_tensors = self.get_proc_and_unproc_data(x_rec, x_target, x_inp)
             metrics = self.calculate_val_metrics(**dict_tensors, x_quantized=dict_model_outputs.get("x_quantized"), x_latent=dict_model_outputs.get("x_latent"), validation_kwargs=validation_kwargs)
+            
         else:
             dict_tensors = {}
             metrics = {}
@@ -918,7 +555,95 @@ class ReconstructionLightningModule_fromOriginalBranch(AnemoiLightningModule):
 
         return discriminator_loss, {}
         
+
+    def training_step(self, batch: torch.Tensor|list[torch.Tensor], batch_idx: int) -> torch.Tensor:
+    
+        train_loss, _, _ = self._step(batch, batch_idx, validation_mode=False)   
+
+        if isinstance(batch, list):
+            batch_size = batch[0].shape[0]
+        else:
+            batch_size = batch.shape[0]
         
+        if isinstance(train_loss, dict):
+            for k, v in train_loss.items():
+                self.log(
+                    f"train/loss/{k}",
+                    v,
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=True,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                    rank_zero_only=True,
+                )
+            loss = train_loss[self.loss.name]
+            
+        else:
+            self.log(
+                f"train/loss/{self.loss.name}",
+                train_loss,
+                on_epoch=True,
+                on_step=True,
+                prog_bar=True,
+                logger=self.logger_enabled,
+                batch_size=batch_size,
+                sync_dist=True,
+                rank_zero_only=True,
+            )
+            loss = train_loss
+
+        return loss
+
+    def validation_step(self, batch: torch.Tensor, batch_idx: int) -> tuple[torch.Tensor|dict, dict]:
+        # TODO: change this to use the name from the loss function to avoid hardcoding
+        
+        with torch.no_grad():
+        # with torch.no_grad():
+            val_loss, metrics, outputs = self._step(batch, batch_idx, validation_mode=True)
+
+        if isinstance(batch, list):
+            batch_size = batch[0].shape[0]
+        else:
+            batch_size = batch.shape[0]
+            
+        if isinstance(val_loss, dict):
+            for k, v in val_loss.items():
+                self.log(
+                    f"val/loss/{k}",
+                    v,
+                    on_epoch=True,
+                    on_step=False,
+                    prog_bar=True,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                )
+        else:
+            self.log(
+                f"val/loss/{self.loss.name}",
+                val_loss,
+                on_epoch=True,
+                on_step=False,
+                prog_bar=True,
+                logger=self.logger_enabled,
+                batch_size=batch_size,
+                sync_dist=True,
+            )
+
+        for mname, mvalue in metrics.items():
+            self.log(
+                "val/" + mname,
+                mvalue,
+                on_epoch=True,
+                on_step=False,
+                prog_bar=False,
+                logger=self.logger_enabled,
+                batch_size=batch_size,
+                sync_dist=True,
+            )
+        return outputs
 
     def get_proc_and_unproc_data(self, x_rec: Tensor, x_target: Tensor, x_inp: Tensor):
 
@@ -935,71 +660,207 @@ class ReconstructionLightningModule_fromOriginalBranch(AnemoiLightningModule):
             "x_inp_postprocessed": x_inp_postprocessed,
             
         }
+     
+    def calculate_val_metrics(
+        self,
+        x_rec, x_target, x_inp, x_rec_postprocessed, x_target_postprocessed, x_inp_postprocessed, time_index:list[int]|None=None, val_metrics:None=None,
+        **kwargs
+    ) -> tuple[dict, list[torch.Tensor]]:
+        """Calculate metrics on the validation output.
 
-    def calculate_val_metrics(self, x_rec, x_target, x_inp, x_rec_postprocessed, x_target_postprocessed, time_index:list[int]|None=None, val_metrics:ModuleList|None=None, val_metric_ranges:dict|None=None, **kwargs):
-        metric_vals = {}
+        Parameters
+        ----------
+        y_pred: torch.Tensor
+            Predicted ensemble
+        y: torch.Tensor
+            Ground truth (target).
+        rollout_step: int
+            Rollout step
+
+        Returns
+        -------
+        dict
+            Validation metrics
+        """
+        metrics = {}
         timesteps = x_rec.shape[1]
 
-        if val_metrics is None:
-            val_metrics = self.val_metrics
 
-        if val_metric_ranges is None:
-            val_metric_ranges = self.val_metric_ranges
+        for metric in self.metrics:
+            metric_name = getattr(metric, "name", metric.__class__.__name__.lower())
 
-        for metric in val_metrics:
-            for mkey, indices in val_metric_ranges.items():
-                # NOTE: feature_scale is turned off here
+            if not isinstance(metric, BaseWeightedLoss):
+                # If not a weighted loss, we cannot feature scale, so call normally
 
-                # for single metrics do no variable scaling and non processed data
-                # TOOD (rilwan-ade): Update logging to use get_time_step and report lead time in hours
-                if len(indices) == 1:
-                    _args = (x_rec_postprocessed[..., indices], x_target_postprocessed[..., indices])
+                # metrics[f"{metric_name}/{rollout_step + 1}"] = metric(
+                #     y_pred_postprocessed,
+                #     y_postprocessed,
+                # )
+                continue
+
+            for mkey, indices in self.val_metric_ranges.items():
+                if "scale_validation_metrics" in self.config.training and (
+                    mkey in self.config.training.scale_validation_metrics.metrics
+                    or "*" in self.config.training.scale_validation_metrics.metrics
+                ):
+                    with metric.scalar.freeze_state():
+                        for key in self.config.training.scale_validation_metrics.scalars_to_apply:
+                            metric.add_scalar(*self.scalars[key], name=key)
+
+                        # Use internal model space indices
+                        internal_model_indices = self.internal_metric_ranges[mkey]
+                        
+                        timesteps = x_rec.shape[1]
+
+                        for ts in range(timesteps):
+
+                            if len(internal_model_indices) == 1:
+                                _args = (x_rec_postprocessed[:, ts, ..., internal_model_indices], x_target_postprocessed[:, ts, ..., internal_model_indices])
+                            else:
+                                _args = (x_rec[:, ts, ..., indices], x_target[:, ts, ..., indices])
+
+                            metrics[f"{metric_name}/{mkey}/{ts + 1}"] = metric(
+                                *_args,
+                                scalar_indices=[..., internal_model_indices],
+                            )
                 else:
-                    _args = (x_rec[..., indices], x_target[..., indices])
-                
-                m_value = metric(*_args, feature_scale=False, squash=(-5, -3, -2, -1), feature_indices=indices,  **kwargs)
+                    if -1 in metric.scalar:
+                        exception_msg = (
+                            "Validation metrics cannot be scaled over the variable dimension"
+                            " in the post processed space. Please specify them in the config"
+                            " at `scale_validation_metrics`."
+                        )
+                        raise ValueError(exception_msg)
 
-                if m_value.numel() == 0:
-                    continue
+                    for ts in range(timesteps):
 
-                # Check if it is a time-dependent metric. 
-                metric_reduced_time_dimension = m_value.shape[0] != timesteps
-                if not metric_reduced_time_dimension: 
+                        metrics[f"{metric_name}/{mkey}/{ts + 1}"] = metric(
+                            x_rec_postprocessed[:, ts, ..., indices],
+                            x_target_postprocessed[:, ts, ..., indices],
+                            scalar_indices=[..., indices],
+                        )
 
-                    for i in range(timesteps):
-                        if time_index is None or i in time_index:
-                            metric_vals[f"{metric.name}_{mkey}_{i + 1}"] = m_value[i]
-                else:
-                    metric_vals[f"{metric.name}_{mkey}"] = m_value
+        return metrics
 
-        return metric_vals
 
-    def instantiate_loss(self, config, graph_data):
-
-        loss = instantiate_debug(
-            config.training.loss,
-            node_weights=self.node_weights,
-            latent_node_weights=self.get_latent_node_weights(graph_data, config),
-            feature_weights=self.feature_weights,
-            data_indices_model_output=self.data_indices.model.output,
-        )
-
-        return loss
-    
-    def instantiate_val_metrics(self, config, graph_data):
+    def configure_optimizers(self) -> tuple:
+        """Configure optimizers and learning rate schedulers.
         
-        val_metrics = ModuleList(
-            [
-                instantiate_debug(
-                    vm_cfg,
-                    node_weights=self.node_weights,
-                    feature_weights=self.feature_weights,
-                    latent_node_weights=self.get_latent_node_weights(graph_data, config),
-                    data_indices_model_output=self.data_indices.model.output,
+        Returns
+        -------
+        tuple
+            Optimizers and schedulers
+        """
+        if self.discriminator is None:
+            return super().configure_optimizers()
+        
+        if self.config.training.scale_lr_by_gpus:
+            lr_vae = (
+                (self.config.hardware.num_nodes
+                    * self.config.hardware.num_gpus_per_node
+                    * self.config.training.optimizer.lr)
+                    / self.config.hardware.num_gpus_per_model
                 )
-                for vm_cfg in config.training.validation_metrics
-            ],
+        else:
+            lr_vae = self.config.training.optimizer.lr
+
+        lr_discriminator = self.config.training.optimizer_discriminator.lr_ratio_to_vae * lr_vae
+        
+        LOGGER.debug("Effective VAE learning rate: %.3e", lr_vae)
+
+        # VAE Encoder/Decoder optimizer
+        vae_named_params = self.model.named_parameters()
+        if self.config.training.optimizer.weight_decay > 0:
+            vae_param_groups = self.split_params_by_weight_decay(vae_named_params, self.config.training.optimizer.weight_decay, lr_vae)
+        else:
+            vae_param_groups = vae_named_params
+
+        optimizer_vae = torch.optim.AdamW(
+            vae_param_groups,
+            betas=(0.9, 0.95),
+            lr=lr_vae,
+            weight_decay=self.config.training.optimizer.weight_decay,
+        )
+        scheduler_vae = CosineLRScheduler(
+            optimizer_vae,
+            lr_min=self.config.training.scheduler.lr_min,
+            t_initial=self.config.training.scheduler.t_initial or self.training_steps(),
+            warmup_t= self.config.training.scheduler.warmup_t if self.config.training.scheduler.warmup_t.is_integer() else int(self.config.training.scheduler.warmup_t * self.training_steps()),
         )
 
-        return val_metrics
- 
+        # Discriminator optimizer
+        discriminator_named_params = self.discriminator.named_parameters()
+        if self.config.training.optimizer_discriminator.weight_decay > 0:
+            discriminator_param_groups = self.split_params_by_weight_decay(discriminator_named_params, self.config.training.optimizer_discriminator.weight_decay, lr_discriminator)
+        else:
+            discriminator_param_groups = discriminator_named_params
+
+        optimizer_discriminator = torch.optim.AdamW(
+            discriminator_param_groups,
+            betas=(0.9, 0.95),
+            lr=lr_discriminator,
+            weight_decay=self.config.training.optimizer_discriminator.weight_decay,
+        )
+        
+        scheduler_discriminator = CosineLRScheduler(
+            optimizer_discriminator,
+            lr_min=self.config.training.scheduler.lr_min,
+            t_initial=self.config.training.scheduler.t_initial or (self.training_steps() - self.discriminator_training_start_step),
+            warmup_t= self.config.training.scheduler.warmup_t if self.config.training.scheduler.warmup_t.is_integer() else int(self.config.training.scheduler.warmup_t * (self.training_steps() - self.discriminator_training_start_step) ),
+        )
+        
+        return [optimizer_vae, optimizer_discriminator], [{"scheduler": scheduler_vae, "interval": "step"}, {"scheduler": scheduler_discriminator, "interval": "step"}]
+
+    def split_params_by_weight_decay(self, named_params, weight_decay=0.01, lr=0.001) -> list[dict]:
+        """Split parameters by weight decay.
+        
+        Parameters
+        ----------
+        named_params : iterator
+            Named parameters
+        weight_decay : float, optional
+            Weight decay value, by default 0.01
+        lr : float, optional
+            Learning rate, by default 0.001
+            
+        Returns
+        -------
+        list[dict]
+            Parameter groups
+        """
+        decay_params = []
+        no_decay_params = []
+        for name, param in named_params:
+            if not param.requires_grad:
+                continue  # skip frozen parameters
+            # Do not apply weight decay to bias terms or LayerNorm parameters.
+            if "bias" in name or "norm" in name or "ln" in name or 'qk_scale' in name:
+                no_decay_params.append(param)
+            else:
+                decay_params.append(param)
+        return [
+            {"params": decay_params, "weight_decay": weight_decay, "lr": lr},
+            {"params": no_decay_params, "weight_decay": 0.0, "lr": lr}
+        ]
+
+    def training_steps(self) -> int:
+        """Get the total number of training steps.
+        
+        Returns
+        -------
+        int
+            Total number of training steps
+        """
+        return self.trainer.max_steps
+
+    def get_latlons_input(self, graph_data, config):
+        return graph_data[config.graph.encoder[0]].x
+
+    def get_latlons_output(self, graph_data, config):
+        return graph_data[config.graph.decoder[-1]].x
+    
+    def get_latlons_hidden(self, graph_data, config):
+        return [graph_data[h_name].x for h_name in config.graph.encoder]
+
+    def get_latent_node_weights(self, graph_data, config):
+        return graph_data[config.graph.encoder[-1]][config.model.node_loss_weight].squeeze()

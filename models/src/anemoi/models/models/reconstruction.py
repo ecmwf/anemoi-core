@@ -104,13 +104,7 @@ class AnemoiVQVAE(nn.Module, AnemoiReconstructionModelMixin):
             src_grid_name = self.list_graph_name_encoder[i]
 
             sub_graph_processor = graph_data[(dst_grid_name, "to", dst_grid_name)]
-            attention_span = calculate_scaled_attention_attention_spans(
-                config.model.encoder.base_processor_attention_span,
-                self._input_grid_name,
-                src_grid_name,
-                scaling_method="scale_span_relative_to_grid_size",
-                _graph_data=self._graph_data,
-            )  # This is usually nodes so scaling method should be down
+
 
             encoder_modules.append(
                 # NOTE: Below method used for debugging purposes
@@ -130,7 +124,7 @@ class AnemoiVQVAE(nn.Module, AnemoiReconstructionModelMixin):
                     dst_grid_size=self._list_hidden_grid_size_encoder[i + 1],
                     sub_graph_processor=sub_graph_processor,
                     ln_autocast=config.model.ln_autocast,
-                    attention_span=attention_span,
+                    # attention_span=attention_span, # THIS should just be in the config if using graph Transforer
                     emb_nodes_src_bias=False if i == 0 else True,
                     # cln_noise_dim=self.noise_injector.outp_channels,
                 )
@@ -174,6 +168,13 @@ class AnemoiVQVAE(nn.Module, AnemoiReconstructionModelMixin):
         proj_x_dst_weather.append(torch.nn.Linear(self.num_channels_decoder[-1], self.num_output_channels, bias=True))
 
         self.proj_x_dst_weather = torch.nn.Sequential(*proj_x_dst_weather)
+
+        self.boundings = nn.ModuleList(
+            [
+                instantiate_debug(cfg, name_to_index=self.data_indices.internal_model.output.name_to_index)
+                for cfg in getattr(config.model, "bounding", [])
+            ]
+        )
 
         if freeze_parameters:
             self.freeze_params()
@@ -229,6 +230,10 @@ class AnemoiVQVAE(nn.Module, AnemoiReconstructionModelMixin):
             e=e,
             grid=self._list_hidden_grid_size_encoder[-1],
         )
+
+        for bounding in self.boundings:
+            # bounding performed in the order specified in the config file
+            x_rec = bounding(x_rec)
 
         return {
             "x_rec": x_rec,
@@ -496,6 +501,13 @@ class AnemoiBetaVAE(nn.Module, AnemoiReconstructionModelMixin):
 
         self.proj_x_dst_weather = torch.nn.Sequential(*proj_x_dst_weather)
 
+        self.boundings = nn.ModuleList(
+            [
+                instantiate_debug(cfg, name_to_index=self.data_indices.internal_model.output.name_to_index)
+                for cfg in getattr(config.model, "bounding", [])
+            ]
+        )
+
         if freeze_parameters:
             self.freeze_params()
 
@@ -664,6 +676,10 @@ class AnemoiBetaVAE(nn.Module, AnemoiReconstructionModelMixin):
             e=e,
             grid=self._list_hidden_grid_size_encoder[-1],
         )
+
+        for bounding in self.boundings:
+            # bounding performed in the order specified in the config file
+            x_rec = bounding(x_rec)
 
         return {
             "x_rec": x_rec,

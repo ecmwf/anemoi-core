@@ -16,9 +16,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
+
 LOGGER = logging.getLogger(__name__)
 
-class HingeLoss(nn.Module):
+class HingeLoss(BaseWeightedLoss):
     """Latitude- and feature-weighted hinge loss.
     
     This loss computes the hinge loss between predictions and targets,
@@ -47,26 +49,29 @@ class HingeLoss(nn.Module):
         ignore_nans : bool, optional
             If True, the loss functions will use nanmean/nansum to ignore NaNs,
             by default False.
+        patch_proportion : float, optional
+            Proportion of patches to use in loss calculation, by default 0.15
         """
-        super().__init__()
+        super().__init__(
+            node_weights=node_weights,
+            ignore_nans=ignore_nans,
+            **kwargs,
+        )
 
-        self.avg_function = torch.nanmean if ignore_nans else torch.mean
-        self.sum_function = torch.nansum if ignore_nans else torch.sum
         self.margin = margin
-
         self.patch_proportion = patch_proportion
 
         # We add an extra dimension to node_weights for broadcasting
         self.register_buffer("node_weights", node_weights[..., None], persistent=True)
         self.register_buffer("feature_weights", feature_weights, persistent=True)
 
-
-
     def forward(
         self,
-        fake_outp: torch.Tensor,
-        real_outp: torch.Tensor | None = None,
+        pred: torch.Tensor,
+        target: torch.Tensor,
         squash: Union[bool, tuple] = True,
+        scalar_indices: tuple[int, ...] | None = None,
+        without_scalars: list[str] | list[int] | None = None,
         feature_scale: bool = True,
         feature_indices: torch.Tensor | None = None,
         **kwargs,
@@ -76,14 +81,18 @@ class HingeLoss(nn.Module):
         
         Parameters
         ----------
-        fake_outp : torch.Tensor
+        pred : torch.Tensor
             Fake/generated output tensor, shape (bs, timesteps, ens, lat*lon, n_features)
-        real_outp : torch.Tensor | None
-            Real output tensor, shape (bs, timesteps, ens, lat*lon, n_features)
+        target : torch.Tensor
+            Real output tensor, shape (bs, timesteps, ens, lat*lon, n_features).
             Should contain values of -1 or 1. If None, only fake loss is computed.
         squash : bool or tuple, optional
             Whether to reduce (sum) over the spatial and feature dimensions,
             by default True.
+        scalar_indices : tuple[int, ...] | None, optional
+            Indices to use for scaling, by default None
+        without_scalars : list[str] | list[int] | None, optional
+            List of scalars to exclude, by default None
         feature_scale : bool, optional
             Whether to scale the loss by the feature weights,
             by default True.
@@ -96,34 +105,21 @@ class HingeLoss(nn.Module):
             The computed hinge loss.
         """
         # Compute hinge loss for real and fake outputs
-        if real_outp is not None:
-            losses_real = F.relu(self.margin - real_outp)  # real samples should be classified as positive (close to 1)
-            losses_fake = F.relu(self.margin + fake_outp)  # fake samples should be classified as negative (close to -1)
+        if target is not None:
+            losses_real = F.relu(self.margin - target)  # real samples should be classified as positive (close to 1)
+            losses_fake = F.relu(self.margin + pred)  # fake samples should be classified as negative (close to -1)
             
             # Combine the losses
             losses = (losses_real + losses_fake) / 2
         else:
-            losses = F.relu(self.margin + fake_outp)
+            losses = F.relu(self.margin + pred)
         
-        # Apply feature weighting if enabled
-        if feature_scale:
-            if feature_indices is not None:
-                # If we're only interested in specific features, select them for weighting
-                feature_weights = self.feature_weights[feature_indices]
-                losses = losses * feature_weights
-                losses = losses / feature_weights.sum()
-            else:
-                losses = losses * self.feature_weights
-                losses = losses / self.feature_weights.sum()
+
         
-        # Apply node weighting over spatial dimensions
-        losses = losses * (self.node_weights / self.sum_function(self.node_weights))
+        # Apply scaling from BaseWeightedLoss if needed
+        losses = self.scale(losses, scalar_indices, without_scalars=without_scalars)
         
-        # Normalize by ensemble dimension (assumed to be axis -3)
-        losses = losses / losses.shape[-3]
-        
-        # Normalize by batch dimension (assumed to be axis -5)
-        losses = losses / losses.shape[-5]
+
 
         # Taking a random patch of the loss (patching applied in the spatial & feature dimensions)
         # Set (1 - patch proportion) of the values to 0 
@@ -138,7 +134,7 @@ class HingeLoss(nn.Module):
         if squash:
             # If squash is a tuple, use it directly; otherwise, assume these axes: batch, ensemble, time, spatial, feature
             axes = squash if isinstance(squash, tuple) else (-5, -3, -2, -1)
-            losses = self.sum_function(losses, axis=axes)
+            losses = self.sum_function(losses, dim=axes)
         
         return losses
 

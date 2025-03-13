@@ -18,13 +18,14 @@ from typing import Callable
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-
+import pytorch_lightning as pl
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-
+import torch
+import numpy as np
 if TYPE_CHECKING:
     from pytorch_lightning.callbacks import Callback
 
@@ -206,6 +207,30 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     )
 
     return trainer_callbacks
+
+def safe_cast_to_numpy(tensor: torch.Tensor) -> np.ndarray:
+    """Converts a PyTorch tensor to a NumPy array, ensuring that the array is of the
+    appropriate type.
+    """
+    if isinstance(tensor, np.ndarray):
+        return tensor
+    
+    tensor = tensor.to("cpu")
+
+    if tensor.dtype == torch.bfloat16 or tensor.dtype == torch.float32:
+        tensor = tensor.to(torch.float32)
+    elif tensor.dtype == torch.float16:
+        pass
+
+    return tensor.numpy()
+
+class MemCleanUpCallback(Callback):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        # This will be called after the ValidationCallback
+        self.cleanup()
+
+    def cleanup(self) -> None:
+        torch.cuda.empty_cache()
 
 
 __all__ = ["get_callbacks"]

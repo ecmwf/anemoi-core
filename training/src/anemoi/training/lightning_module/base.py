@@ -169,6 +169,130 @@ class AnemoiLightningModule(pl.LightningModule):
 
         return loss_function
 
+    @staticmethod
+    def get_variable_scaling(
+        config: DictConfig,
+        data_indices: IndexCollection,
+    ) -> torch.Tensor:
+        """Get variable scaling.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Configuration
+        data_indices : IndexCollection
+            Data indices
+
+        Returns
+        -------
+        torch.Tensor
+            Variable scaling tensor
+        """
+        variable_loss_scaling = (
+            np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
+            * config.training.variable_loss_scaling.default
+        )
+        pressure_level = instantiate(config.training.pressure_level_scaler)
+
+        LOGGER.info(
+            "Pressure level scaling: use scaler %s with slope %.4f and minimum %.2f",
+            type(pressure_level).__name__,
+            pressure_level.slope,
+            pressure_level.minimum,
+        )
+
+        for key, idx in data_indices.internal_model.output.name_to_index.items():
+            split = key.split("_")
+            if len(split) > 1 and split[-1].isdigit():
+                # Apply pressure level scaling
+                if split[0] in config.training.variable_loss_scaling.pl:
+                    variable_loss_scaling[idx] = config.training.variable_loss_scaling.pl[
+                        split[0]
+                    ] * pressure_level.scaler(
+                        int(split[-1]),
+                    )
+                else:
+                    LOGGER.debug("Parameter %s was not scaled.", key)
+            else:
+                # Apply surface variable scaling
+                if key in config.training.variable_loss_scaling.sfc:
+                    variable_loss_scaling[idx] = config.training.variable_loss_scaling.sfc[key]
+                else:
+                    LOGGER.debug("Parameter %s was not scaled.", key)
+
+        return torch.from_numpy(variable_loss_scaling)
+
+    @staticmethod
+    def get_val_metric_ranges(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, dict]:
+        """Get validation metric ranges.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Configuration
+        data_indices : IndexCollection
+            Data indices
+
+        Returns
+        -------
+        tuple[dict, dict]
+            Internal metric ranges and validation metric ranges
+        """
+        metric_ranges = defaultdict(list)
+        metric_ranges_validation = defaultdict(list)
+
+        for key, idx in data_indices.internal_model.output.name_to_index.items():
+            split = key.split("_")
+            if len(split) > 1 and split[-1].isdigit():
+                # Group metrics for pressure levels (e.g., Q, T, U, V, etc.)
+                metric_ranges[f"pl_{split[0]}"].append(idx)
+            else:
+                metric_ranges[f"sfc_{key}"].append(idx)
+
+            # Specific metrics from hydra to log in logger
+            if key in config.training.metrics:
+                metric_ranges[key] = [idx]
+
+        # Add the full list of output indices
+        metric_ranges["all"] = data_indices.internal_model.output.full.tolist()
+
+        # metric for validation, after postprocessing
+        for key, idx in data_indices.model.output.name_to_index.items():
+            # Split pressure levels on "_" separator
+            split = key.split("_")
+            if len(split) > 1 and split[1].isdigit():
+                # Create grouped metrics for pressure levels (e.g. Q, T, U, V, etc.) for logger
+                metric_ranges_validation[f"pl_{split[0]}"].append(idx)
+            else:
+                metric_ranges_validation[f"sfc_{key}"].append(idx)
+            # Create specific metrics from hydra to log in logger
+            if key in config.training.metrics:
+                metric_ranges_validation[key] = [idx]
+
+        # Add the full list of output indices
+        metric_ranges_validation["all"] = data_indices.model.output.full.tolist()
+
+        return metric_ranges, metric_ranges_validation
+
+    @staticmethod
+    def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
+        """Get node weights.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Configuration
+        graph_data : HeteroData
+            Graph data
+
+        Returns
+        -------
+        torch.Tensor
+            Node weights tensor
+        """
+        node_weighting = instantiate(config.training.node_loss_weights)
+        return node_weighting.weights(graph_data)
+    
     def set_model_comm_group(
         self,
         model_comm_group: ProcessGroup,
@@ -301,7 +425,6 @@ class AnemoiLightningModule(pl.LightningModule):
         metric : Optional[Any]
             Metric object for e.g. ReduceLRonPlateau. Default is None.
         """
-        del metric
         scheduler.step(epoch=self.trainer.global_step)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -15,7 +15,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
-
+from anemoi.training.utils.debug_hydra import instantiate_debug
 
 class AnemoiModelForecastInterface(torch.nn.Module):
     """An interface for Anemoi models.
@@ -121,3 +121,117 @@ class AnemoiModelForecastInterface(torch.nn.Module):
             y_hat = self(x)
 
         return self.post_processors(y_hat, in_place=False)
+
+
+class AnemoiModelInterfaceVAEForecasting(torch.nn.Module):
+    """An interface for Anemoi Forecasting models.
+
+    This class is a wrapper around the Anemoi model that includes pre-processing and post-processing steps.
+    It inherits from the PyTorch Module class.
+
+    Attributes
+    ----------
+    config : DotDict
+        Configuration settings for the model.
+    id : str
+        A unique identifier for the model instance.
+    multi_step : bool
+        Whether the model uses multi-step input.
+    graph_data : HeteroData
+        Graph data for the model.
+    statistics : dict
+        Statistics for the data.
+    metadata : dict
+        Metadata for the model.
+    data_indices : dict
+        Indices for the data.
+    model : AnemoiModelEncProcDec
+        The underlying Anemoi model.
+    """
+
+    latent_representation_format = ["discrete", "continuous"]
+
+    # discrete is if we are using a VQVAE model for the compression
+    # We perform cross-entropy loss in the latent space
+    # continuous is if we are using Beta-VAE for the compression
+    # We perform l1/l2 loss in the latent space
+
+    def __init__(
+        self,
+        *,
+        config: DotDict,
+        graph_data: HeteroData,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: dict,
+        metadata: dict,
+    ) -> None:
+        super().__init__()
+
+        self.config = config
+        self.id = str(uuid.uuid4())
+        self.multi_step = self.config.training.multistep_input
+
+        self.graph_data = graph_data
+        self.statistics = statistics
+        self.statistics_tendencies = statistics_tendencies
+        self.metadata = metadata
+        self.data_indices = data_indices
+        self._build_model()
+
+        self.latent_representation_format = self.model.latent_representation_format
+
+    def _build_model(self) -> None:
+        """Builds the model and pre- and post-processors."""
+        # Instantiate processors for state
+        self.model = instantiate_debug(
+            self.config.model.model,
+            self.config,
+            data_indices=self.data_indices,
+            graph_data=self.graph_data,
+            _recursive_=False,
+        )
+
+        # Get the pre and post processors from the pre-trained vae
+        self.pre_processors_state = self.model.vae_interface.pre_processors_state
+        self.post_processors_state = self.model.vae_interface.post_processors_state
+        self.boundings = self.model.vae_interface.boundings
+
+    def forward(self, x: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None) -> torch.Tensor:
+
+        x_latent_state = self.model.forward(x, model_comm_group)
+
+        return x_latent_state
+
+    def predict_step(self, batch: torch.Tensor) -> torch.Tensor:
+        """Prediction step for the model.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Input batched data.
+
+        Returns
+        -------
+        torch.Tensor
+            Predicted data.
+        """
+
+        with torch.no_grad():
+
+            assert (
+                len(batch.shape) == 5
+            ), f"The input tensor has an incorrect shape: expected a 5-dimensional tensor, got {batch.shape}!"  # batch, timesteps, (ensemble), latlon, variables
+
+            x = self.pre_processors_state(
+                batch[:, 0 : self.multi_step, ...], in_place=False, data_index=self.data_indices.data.input.full
+            )
+
+            x_encoded = self.model.encode(x)
+
+            x_latent_step = self.forward(x_encoded)
+
+            x_state_pred = self.decode_latent_state(x_latent_step)
+
+        return x_state_pred
+

@@ -92,30 +92,6 @@ class TransformerDiscriminator(nn.Module, AnemoiDiscriminatorModelMixin):
     def initialise_processor(self, config):
         pass
 
-    def initialise_rope_matrices(self, config):
-        # Initialize a rope matric for every grid level featured in the encoder and decoder
-        from anemoi.models.layers.rope import SphericalRotaryEmbedding
-
-        rope_matrices = {}
-
-        grid_name = self.graph_name
-        dim = config.model_discriminator.processor.num_channels // config.model_discriminator.processor.num_heads
-
-        rope_matrices[f"{grid_name}_{dim}"] = SphericalRotaryEmbedding(
-            dim=dim,
-            theta=10000,
-            custom_theta_freqs=None,
-            custom_phi_freqs=None,
-            cache_max_seq_len=self._graph_data[grid_name].num_nodes,
-            default_lat=self._graph_data[grid_name].x[:, 0],
-            default_long=self._graph_data[grid_name].x[:, 1],
-            pad_rotation_block=1,
-        )
-        # self.add_module()
-        # self.rope_matrices = nn.ModuleDict(rope_matrices)
-        self.add_module("rope_matrices", nn.ModuleDict(rope_matrices))
-        # self.rope_matrices = rope_matrices
-
     def forward(
         self,
         x: Tensor,
@@ -204,41 +180,13 @@ class TransformerDiscriminator(nn.Module, AnemoiDiscriminatorModelMixin):
 
         return x, features
 
-
-class TransformerDiscriminator_FlexAttn(TransformerDiscriminator):
-
-    def initialise_block_masks(self, config: DotDict):
-
-        # Setup block masks
-        self.map_spanSrcTgtBasegrid_blockmask_manager = {}
-
-        # Encoder Processor
-        bmm = BlockMaskManager(
-            self._graph_data,
-            **config.model_discriminator.processor_block_mask,
-            query_grid_name=self.graph_name,
-            keyvalue_grid_name=self.graph_name,
-        )
-
-        self.map_spanSrcTgtBasegrid_blockmask_manager[bmm.signature()] = bmm
+class TransformerDiscriminator_GraphTransformer(TransformerDiscriminator):
 
     def initialise_processor(self, config: DotDict):
 
-        self.initialise_block_masks(config)
-
-        self.initialise_rope_matrices(config)
-
         self.processor = instantiate_debug(
             config.model_discriminator.processor,
-            block_mask=self.map_spanSrcTgtBasegrid_blockmask_manager[
-                (
-                    config.model_discriminator.processor_block_mask.attention_span,
-                    self.graph_name,
-                    self.graph_name,
-                    config.model_discriminator.processor_block_mask.base_grid,
-                )
-            ],
-            rope_embedding=self.rope_matrices[
-                f"{self.graph_name}_{config.model_discriminator.processor.num_channels // config.model_discriminator.processor.num_heads}"
-            ],
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_data)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )

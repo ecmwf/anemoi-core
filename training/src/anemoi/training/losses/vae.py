@@ -9,11 +9,12 @@ from torch import Tensor
 from omegaconf import DictConfig
 from typing import Optional, Union, Dict
 
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.utils.debug_hydra import instantiate_debug
 
 LOGGER = logging.getLogger(__name__)
 
-class VAELoss(nn.Module):
+class VAELoss(BaseWeightedLoss):
     """Variational Autoencoder loss, combining reconstruction loss and KL divergence loss.
     
     This class computes the combined VAE loss with configurable weighting between
@@ -53,7 +54,11 @@ class VAELoss(nn.Module):
         ignore_nans : bool | None, optional
             If True, use nanmean/nansum to ignore NaNs in loss computation, by default False
         """
-        super().__init__()
+        super().__init__(
+            node_weights=node_weights,
+            ignore_nans=ignore_nans,
+            **kwargs,
+        )
 
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
@@ -91,9 +96,11 @@ class VAELoss(nn.Module):
 
     def forward(
         self, 
-        preds: Tensor, 
+        pred: Tensor, 
         target: Tensor, 
-        squash: bool | tuple = True, 
+        squash: bool | tuple = True,
+        scalar_indices: tuple[int, ...] | None = None,
+        without_scalars: list[str] | list[int] | None = None,
         mwm_mask: Optional[Tensor] = None, 
         **kwargs
     ) -> Dict[str, Tensor]:
@@ -101,13 +108,17 @@ class VAELoss(nn.Module):
 
         Parameters
         ----------
-        preds : Tensor
+        pred : Tensor
             Predictions tensor, shape (bs, (timesteps), lat*lon, n_outputs)
         target : Tensor
             Target tensor, shape (bs, (timesteps), lat*lon, n_outputs)
         squash : bool | tuple, optional
             Whether to reduce/sum the loss over dimensions, by default True.
             If tuple, specifies dimensions to reduce over.
+        scalar_indices : tuple[int, ...] | None, optional
+            Indices to use for scaling, by default None
+        without_scalars : list[str] | list[int] | None, optional
+            List of scalars to exclude, by default None
         mwm_mask : Optional[Tensor], optional
             Mask tensor for masked weather modeling, by default None.
             Shape (bs, timesteps, ens, 1, lat*lon, n_outputs), where 1 indicates 
@@ -118,7 +129,7 @@ class VAELoss(nn.Module):
         Dict[str, Tensor]
             Dictionary containing the total VAE loss and its components
         """
-        x_rec = preds
+        x_rec = pred
         x_target = target
 
         # Get latent space parameters
@@ -147,7 +158,9 @@ class VAELoss(nn.Module):
                 x_target, 
                 squash=squash, 
                 feature_scale=kwargs.get("feature_scale", True), 
-                feature_indices=kwargs.get("feature_indices", None)
+                feature_indices=kwargs.get("feature_indices", None),
+                scalar_indices=scalar_indices,
+                without_scalars=without_scalars
             )
         else:
             # Without squashing or feature scaling initially
@@ -156,7 +169,9 @@ class VAELoss(nn.Module):
                 x_target, 
                 squash=False, 
                 feature_scale=False, 
-                feature_indices=kwargs.get("feature_indices", None)
+                feature_indices=kwargs.get("feature_indices", None),
+                scalar_indices=scalar_indices,
+                without_scalars=without_scalars
             )
 
             # Apply mask-aware scaling
@@ -207,11 +222,12 @@ class VAELoss(nn.Module):
             f"{self.name_latent}": div_loss,
         }
 
-        # if self.discriminator_loss is not None:
-        #     # NOTE: For this line to make sense, need to make sure the pre/post-processing of x_rec and x_target are aligned
-        #     x_rec_adversarial = kwargs["x_rec_adversarial"]
-        #     adv_loss = self.forward_discriminator_loss(x_rec_adversarial, x_target)
-        #     output[self.discriminator_loss.name] = adv_loss
+        # Calculate adversarial loss if discriminator is provided
+        if hasattr(self, 'discriminator_loss') and self.discriminator_loss is not None and "x_rec_adversarial" in kwargs:
+            # Get adversarial output (features or classifications from a discriminator)
+            x_rec_adversarial = kwargs["x_rec_adversarial"]
+            adv_loss = self.forward_discriminator_loss(x_rec_adversarial, x_target)
+            output[f"discriminator_{self.discriminator_loss.name}"] = adv_loss
 
         #     vae_loss = vae_loss + self.adversarial_loss_weight * adv_loss
 
@@ -224,7 +240,14 @@ class VAELoss(nn.Module):
 
     @cached_property
     def name(self) -> str:
-        """Return the name of the loss for logging."""
+        """Return the name of the loss for logging.
+        
+        Returns
+        -------
+        str
+            The combined name string for the VAE loss, including both
+            reconstruction and latent components.
+        """
         str_ = "bvae"
         str_ += f"_{self.name_reconstruction}"
         str_ += f"_{self.name_latent}"
@@ -232,16 +255,28 @@ class VAELoss(nn.Module):
 
     @cached_property
     def name_reconstruction(self) -> str:
-        """Return the name of the reconstruction loss component."""
+        """Return the name of the reconstruction loss component.
+        
+        Returns
+        -------
+        str
+            The name of the reconstruction loss component.
+        """
         return f"recon_{self.reconstruction_loss.name}"
 
     @cached_property
     def name_latent(self) -> str:
-        """Return the name of the latent/divergence loss component."""
+        """Return the name of the latent/divergence loss component.
+        
+        Returns
+        -------
+        str
+            The name of the latent/divergence loss component.
+        """
         return f"latent_{self.divergence_loss.name}"
 
 
-class VQVAELossLucidRain(nn.Module):
+class VQVAELossLucidRain(BaseWeightedLoss):
     """Vector Quantized VAE loss implementation based on the LucidRains VQ approach.
     
     Combines reconstruction loss with the commitment loss from the VQ codebook.
@@ -273,11 +308,13 @@ class VQVAELossLucidRain(nn.Module):
         ignore_nans : bool | None, optional
             If True, use nanmean/nansum to ignore NaNs in loss computation, by default False
         """
-        super().__init__()
+        super().__init__(
+            node_weights=node_weights,
+            ignore_nans=ignore_nans,
+            **kwargs,
+        )
         
         self.commitment_weight = commitment_weight
-        self.avg_function = torch.nanmean if ignore_nans else torch.mean
-        self.sum_function = torch.nansum if ignore_nans else torch.sum
         self.register_buffer("latent_node_weights", latent_node_weights[..., None], persistent=True)
 
         # Initialize reconstruction loss
@@ -296,9 +333,11 @@ class VQVAELossLucidRain(nn.Module):
         
     def forward(
         self, 
-        preds: Tensor, 
+        pred: Tensor, 
         target: Tensor, 
-        squash: Union[bool, tuple] = True, 
+        squash: Union[bool, tuple] = True,
+        scalar_indices: tuple[int, ...] | None = None,
+        without_scalars: list[str] | list[int] | None = None,
         mwm_mask: Optional[Tensor] = None,
         map_loss_breakdown: dict | None = None,
         **kwargs
@@ -307,14 +346,19 @@ class VQVAELossLucidRain(nn.Module):
 
         Parameters
         ----------
-        preds : Tensor
+        pred : Tensor
             Predictions tensor, shape (bs, (timesteps), lat*lon, n_outputs)
         target : Tensor
             Target tensor, shape (bs, (timesteps), lat*lon, n_outputs)
         squash : bool | tuple, optional
             Whether to reduce/sum the loss over dimensions, by default True
+        scalar_indices : tuple[int, ...] | None, optional
+            Indices to use for scaling, by default None
+        without_scalars : list[str] | list[int] | None, optional
+            List of scalars to exclude, by default None
         mwm_mask : Optional[Tensor], optional
             Mask tensor, shape (bs, timesteps, ens, 1, lat*lon, n_outputs), by default None
+            Used for masked weather modeling, where 1 indicates positions to predict
         map_loss_breakdown : dict | None, optional
             Dictionary containing VQ-specific loss components from the VQ layer, 
             including 'loss', by default None
@@ -324,7 +368,7 @@ class VQVAELossLucidRain(nn.Module):
         dict
             Dictionary containing the total VQVAE loss and its components
         """
-        x_rec = preds
+        x_rec = pred
         x_target = target 
 
         # Compute reconstruction loss with or without mask
@@ -334,7 +378,9 @@ class VQVAELossLucidRain(nn.Module):
                 x_target, 
                 squash=squash, 
                 feature_scale=kwargs.get("feature_scale", True), 
-                feature_indices=kwargs.get("feature_indices", None)
+                feature_indices=kwargs.get("feature_indices", None),
+                scalar_indices=scalar_indices,
+                without_scalars=without_scalars
             )
         else:
             # Without squashing or feature scaling initially
@@ -343,46 +389,12 @@ class VQVAELossLucidRain(nn.Module):
                 x_target, 
                 squash=False, 
                 feature_scale=False, 
-                feature_indices=kwargs.get("feature_indices", None)
+                feature_indices=kwargs.get("feature_indices", None),
+                scalar_indices=scalar_indices,
+                without_scalars=without_scalars
             )
 
-            # Apply mask-aware scaling
-            if kwargs.get("feature_scale", True):
-                # 1) Undo the area weighting that happens in the reconstruction losses
-                rec_loss = rec_loss * (self.reconstruction_loss.node_weights.sum(dim=-2) / self.reconstruction_loss.node_weights)
-
-                # 2) Calculate grid x feature scaling factor (set to 0 where mask is 0)
-                scale_factor_grid_feature_numerator = self.reconstruction_loss.node_weights * self.reconstruction_loss.feature_weights
-                scale_factor_grid_feature_numerator = torch.where(
-                    mwm_mask == 1, 
-                    scale_factor_grid_feature_numerator, 
-                    torch.zeros_like(scale_factor_grid_feature_numerator)
-                )
-
-                # 3) Calculate the denominator as the sum where the mask is 1
-                scale_factor_grid_feature_denominator = self.sum_function(scale_factor_grid_feature_numerator)
-
-                # 4) Apply scaling factor
-                rec_loss = rec_loss * (scale_factor_grid_feature_numerator / scale_factor_grid_feature_denominator)
-            else:
-                # Grid dimension reweighting only
-                rec_loss = rec_loss * (self.reconstruction_loss.node_weights.sum(dim=-2) / self.reconstruction_loss.node_weights)
-
-                # Calculate scaling factors based on mask
-                scale_factor_grid_numerator = torch.where(
-                    mwm_mask == 1,
-                    self.reconstruction_loss.node_weights.expand_as(rec_loss), 
-                    torch.zeros_like(rec_loss)
-                )
-
-                scale_factor_grid_denominator = self.sum_function(scale_factor_grid_numerator)
-
-                # Apply scaling
-                rec_loss = rec_loss * (scale_factor_grid_numerator / scale_factor_grid_denominator)
-
-            # Apply squashing if requested
-            if squash:
-                rec_loss = rec_loss.sum(dim=squash if isinstance(squash, tuple) else (-5, -3, -2, -1))
+            rec_loss = rec_loss * mwm_mask.numel() /  mwm_mask.sum()
 
         # Get VQ-specific loss components from map_loss_breakdown
         if map_loss_breakdown is None:
@@ -394,7 +406,7 @@ class VQVAELossLucidRain(nn.Module):
         if rec_loss.numel() == vq_loss.numel() or squash is True:
             total_loss = rec_loss + vq_loss
         else:
-            total_loss = None
+            total_loss = rec_loss.sum() + vq_loss.sum()
 
         # Return loss components in a dictionary
         output = {
@@ -408,15 +420,33 @@ class VQVAELossLucidRain(nn.Module):
         
     @cached_property
     def name(self) -> str:
-        """Return the name of the loss for logging."""
+        """Return the name of the loss for logging.
+        
+        Returns
+        -------
+        str
+            The combined name string for the VQVAE loss.
+        """
         return f"vqvae_latentloss_{self.reconstruction_loss.name}"
 
     @cached_property
     def name_reconstruction(self) -> str:
-        """Return the name of the reconstruction loss component."""
+        """Return the name of the reconstruction loss component.
+        
+        Returns
+        -------
+        str
+            The name of the reconstruction loss component.
+        """
         return f"recon_{self.reconstruction_loss.name}"
 
     @cached_property
     def name_latent(self) -> str:
-        """Return the name of the latent loss component."""
+        """Return the name of the latent loss component.
+        
+        Returns
+        -------
+        str
+            The name of the Vector Quantization latent loss component.
+        """
         return f"latent_loss"

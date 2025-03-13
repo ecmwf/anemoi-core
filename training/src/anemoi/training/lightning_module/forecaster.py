@@ -19,20 +19,44 @@ from omegaconf import OmegaConf
 from hydra.utils import instantiate
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
+from torch.nn import ModuleList
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface.forecast import AnemoiModelForecastInterface
+from anemoi.models.interface.latent_forecast import AnemoiModelInterfaceVAEForecasting
 from anemoi.training.lightning_module.base import AnemoiLightningModule
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.config import DotDict
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.utils.debug_hydra import instantiate_debug
 
 LOGGER = logging.getLogger(__name__)
 
+def get_time_step(timestep_hours: int, rollout_steps: int) -> str:
+    """Format a time step string based on hours and rollout steps.
+    
+    Parameters
+    ----------
+    timestep_hours : int
+        Hours per time step
+    rollout_steps : int
+        Number of rollout steps
+        
+    Returns
+    -------
+    str
+        Formatted time step string (e.g., "24h" for 24 hours)
+    """
+    hours = timestep_hours * rollout_steps
+    if hours % 24 == 0 and hours >= 24:
+        return f"{hours//24}d"
+    return f"{hours}h"
 
 class ForecastLightningModule(AnemoiLightningModule):
+
     """Graph neural network forecaster for PyTorch Lightning."""
 
     def __init__(
@@ -138,130 +162,6 @@ class ForecastLightningModule(AnemoiLightningModule):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
         LOGGER.debug("Multistep: %d", self.multi_step)
-
-    @staticmethod
-    def get_val_metric_ranges(config: DictConfig, data_indices: IndexCollection) -> tuple[dict, dict]:
-        """Get validation metric ranges.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Configuration
-        data_indices : IndexCollection
-            Data indices
-
-        Returns
-        -------
-        tuple[dict, dict]
-            Internal metric ranges and validation metric ranges
-        """
-        metric_ranges = defaultdict(list)
-        metric_ranges_validation = defaultdict(list)
-
-        for key, idx in data_indices.internal_model.output.name_to_index.items():
-            split = key.split("_")
-            if len(split) > 1 and split[-1].isdigit():
-                # Group metrics for pressure levels (e.g., Q, T, U, V, etc.)
-                metric_ranges[f"pl_{split[0]}"].append(idx)
-            else:
-                metric_ranges[f"sfc_{key}"].append(idx)
-
-            # Specific metrics from hydra to log in logger
-            if key in config.training.metrics:
-                metric_ranges[key] = [idx]
-
-        # Add the full list of output indices
-        metric_ranges["all"] = data_indices.internal_model.output.full.tolist()
-
-        # metric for validation, after postprocessing
-        for key, idx in data_indices.model.output.name_to_index.items():
-            # Split pressure levels on "_" separator
-            split = key.split("_")
-            if len(split) > 1 and split[1].isdigit():
-                # Create grouped metrics for pressure levels (e.g. Q, T, U, V, etc.) for logger
-                metric_ranges_validation[f"pl_{split[0]}"].append(idx)
-            else:
-                metric_ranges_validation[f"sfc_{key}"].append(idx)
-            # Create specific metrics from hydra to log in logger
-            if key in config.training.metrics:
-                metric_ranges_validation[key] = [idx]
-
-        # Add the full list of output indices
-        metric_ranges_validation["all"] = data_indices.model.output.full.tolist()
-
-        return metric_ranges, metric_ranges_validation
-
-    @staticmethod
-    def get_variable_scaling(
-        config: DictConfig,
-        data_indices: IndexCollection,
-    ) -> torch.Tensor:
-        """Get variable scaling.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Configuration
-        data_indices : IndexCollection
-            Data indices
-
-        Returns
-        -------
-        torch.Tensor
-            Variable scaling tensor
-        """
-        variable_loss_scaling = (
-            np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
-            * config.training.variable_loss_scaling.default
-        )
-        pressure_level = instantiate(config.training.pressure_level_scaler)
-
-        LOGGER.info(
-            "Pressure level scaling: use scaler %s with slope %.4f and minimum %.2f",
-            type(pressure_level).__name__,
-            pressure_level.slope,
-            pressure_level.minimum,
-        )
-
-        for key, idx in data_indices.internal_model.output.name_to_index.items():
-            split = key.split("_")
-            if len(split) > 1 and split[-1].isdigit():
-                # Apply pressure level scaling
-                if split[0] in config.training.variable_loss_scaling.pl:
-                    variable_loss_scaling[idx] = config.training.variable_loss_scaling.pl[
-                        split[0]
-                    ] * pressure_level.scaler(
-                        int(split[-1]),
-                    )
-                else:
-                    LOGGER.debug("Parameter %s was not scaled.", key)
-            else:
-                # Apply surface variable scaling
-                if key in config.training.variable_loss_scaling.sfc:
-                    variable_loss_scaling[idx] = config.training.variable_loss_scaling.sfc[key]
-                else:
-                    LOGGER.debug("Parameter %s was not scaled.", key)
-
-        return torch.from_numpy(variable_loss_scaling)
-
-    @staticmethod
-    def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
-        """Get node weights.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Configuration
-        graph_data : HeteroData
-            Graph data
-
-        Returns
-        -------
-        torch.Tensor
-            Node weights tensor
-        """
-        node_weighting = instantiate(config.training.node_loss_weights)
-        return node_weighting.weights(graph_data)
 
     def training_weights_for_imputed_variables(
         self,
@@ -603,3 +503,393 @@ class ForecastLightningModule(AnemoiLightningModule):
             )
 
         return val_loss, y_preds
+    
+
+
+class LightningModuleLatentForecasting(AnemoiLightningModule):
+    """Graph neural network latent forecaster for PyTorch Lightning.
+    
+    This class specializes in training a forecasting model that operates in the latent
+    space of a pre-trained VAE model. It loads a VAE from a checkpoint and uses it
+    to encode inputs to latent space, forecast in latent space, and decode predictions.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: DictConfig,
+        graph_data: HeteroData,
+        statistics: dict,
+        data_indices: IndexCollection,
+        metadata: dict,
+        supporting_arrays: dict,
+    ) -> None:
+        """Initialize latent space forecasting model.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Job configuration
+        graph_data : HeteroData
+            Graph object
+        statistics : dict
+            Statistics of the training data
+        data_indices : IndexCollection
+            Indices of the training data
+        metadata : dict
+            Provenance information
+        supporting_arrays : dict
+            Supporting NumPy arrays to store in the checkpoint
+        """
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+
+        # Move graph data to device
+        graph_data = graph_data.to(self.device)
+
+        # Initialize output mask
+        if config.model.get("output_mask", None) is not None:
+            self.output_mask = Boolean1DMask(graph_data[config.graph.data][config.model.output_mask])
+        else:
+            self.output_mask = NoOutputMask()
+
+        # Initialize the model with VAE forecasting interface
+        self.model = AnemoiModelInterfaceVAEForecasting(
+            statistics=statistics,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
+            graph_data=graph_data,
+            config=DotDict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True))),
+        )
+
+        # Store latent representation type from the model
+        self.latent_representation = self.model.model.latent_representation_format  # "continuous" or "discrete"
+        
+        # Configure VAE freezing if needed
+        # NOTE: This needs to be extended to allow params to be unfrozen sometime into training
+        LOGGER.info("Currently we only have functionality for VAE params to be frozen/non frozen from start of training. Will extend this to allow staggered unfreezing w/ custom scheduler")
+        if getattr(config.model.vae, "freeze_parameters", False):
+            self.model.model.freeze_parameters()
+            
+        
+        # Get necessary attributes for training
+        self.latlons_data = self.model.model.vae_interface.graph_data[self.model.model._graph_name_inp].x
+        self.node_weights = self.model.model.vae_interface.graph_data[self.model.model._graph_name_inp][config.model.node_loss_weight].squeeze(-1)
+
+        self.latent_node_weights = self.model.model.vae_interface.graph_data[self.model.model._graph_name_hidden][config.model.node_loss_weight].squeeze(-1)
+
+        # Rollout configuration
+        self.rollout = config.training.rollout.start
+        self.rollout_epoch_increment = config.training.rollout.epoch_increment
+        self.rollout_max = config.training.rollout.max
+        self.multi_step = config.training.multistep_input
+
+        # Loss and metrics initialization
+        variable_scaling = self.get_variable_scaling(config, data_indices)
+        self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(config, data_indices)
+
+        # Set up loss function
+        loss_kwargs = {
+            "node_weights": self.latent_node_weights,
+            "feature_weights": self.latent_node_weights.new_ones([self.model.model.vae_interface.model.latent_space_dim]),
+        }
+        
+        # Scalars to include in the loss function
+        self.scalars = {
+            "variable": (-1, variable_scaling),
+            "loss_weights_mask": ((-2, -1), torch.ones((1, 1))),
+        }
+        
+        # Initialize loss function
+        self.loss = self.get_loss_function(config.training.loss, scalars=self.scalars, **loss_kwargs)
+        
+        # Initialize validation metrics
+        self.metrics = self.get_loss_function(config.training.validation_metrics, scalars=self.scalars, **loss_kwargs)
+        if not isinstance(self.metrics, torch.nn.ModuleList):
+            self.metrics = torch.nn.ModuleList([self.metrics])
+    
+    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        """Execute a training step.
+        
+        This follows the same pattern as ForecastLightningModule but adds logging
+        for the current rollout length.
+        
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Input batch
+        batch_idx : int
+            Batch index
+            
+        Returns
+        -------
+        torch.Tensor
+            Training loss
+        """
+        # Use the standard training step from the base class
+        train_loss = super().training_step(batch, batch_idx)
+
+        # Log the current rollout value
+        self.log(
+            "rollout",
+            float(self.rollout),
+            on_step=True,
+            logger=self.logger_enabled,
+            rank_zero_only=True,
+            sync_dist=False,
+        )
+        return train_loss
+
+    def on_train_epoch_end(self) -> None:
+        """Adjust rollout length at the end of each training epoch."""
+        super().on_train_epoch_end()
+        
+        # Increment rollout if configured
+        if self.rollout_epoch_increment > 0 and (self.current_epoch + 1) % self.rollout_epoch_increment == 0:
+            self.rollout = min(self.rollout + 1, self.rollout_max)
+            LOGGER.info(f"Increased rollout to {self.rollout}")
+
+    def _step(
+        self,
+        batch: torch.Tensor,
+        batch_idx: int,
+        validation_mode: bool = False,
+        batch_target: Optional[torch.Tensor] = None,
+        use_checkpoint: bool = True,
+        validation_kwargs: dict | None = None,
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], dict]:
+        """Execute a single step (training or validation).
+        
+        This method:
+        1. Encodes the input to latent space using the VAE encoder
+        2. Performs a multi-step rollout in latent space
+        3. Decodes predictions back to observation space (for validation only)
+        
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Input batch
+        batch_idx : int
+            Batch index
+        validation_mode : bool, optional
+            Whether running in validation mode, by default False
+        batch_target : Optional[torch.Tensor], optional
+            Optional target batch, by default None
+        use_checkpoint : bool, optional
+            Whether to use gradient checkpointing, by default True
+        validation_kwargs : dict | None, optional
+            Additional validation arguments, by default None
+            
+        Returns
+        -------
+        tuple[torch.Tensor, Mapping[str, torch.Tensor], dict]
+            Loss, metrics, and output tensors
+        """
+        validation_kwargs = validation_kwargs or {}
+        
+        # Preprocess the input batch
+        batch_preprocessed = self.model.pre_processors_state(batch, in_place=False) 
+        
+        with torch.no_grad():
+            if batch_target is not None:
+                # Target is provided for validation
+                batch_inverse = self.model.post_processors_state(batch_target, in_place=False, inverse=True)
+                batch_latent_target = self.model.model.encode(
+                    batch_inverse[:, self.multi_step:self.multi_step + self.rollout, ..., self.data_indices.internal_data.input.full]
+                )
+                batch_recon_target = batch_inverse[:, self.multi_step:self.multi_step + self.rollout, ..., self.data_indices.internal_data.output.full]
+            else:
+                # For training, use the batch itself as the target
+                batch_inverse = self.model.post_processors_state(batch, in_place=False, inverse=True)
+                batch_latent_target = self.model.model.encode(
+                    batch_inverse[:, self.multi_step:self.multi_step + self.rollout, ..., self.data_indices.internal_data.input.full]
+                )
+                batch_recon_target = batch_inverse[:, self.multi_step:self.multi_step + self.rollout, ..., self.data_indices.internal_data.output.full]
+
+            # Encode input sequence to latent representation
+            x = batch_preprocessed[:, 0:self.multi_step, ..., self.data_indices.internal_data.input.full]
+            x_encoded = self.model.model.encode(x)
+        
+        # Get latent state from encoding (different for discrete and continuous latent spaces)
+        x_latent_state = self.model.model.get_latent_representation(x_encoded, sample_from_latent_space=False)
+        
+        # Initialize tensor to store predictions
+        y_preds_latent = torch.zeros_like(batch_latent_target)
+        
+        # Rollout forecasting in latent space
+        for rollout_step in range(self.rollout):
+            y_pred_latent = self.model.model.forward_latent_state(x_latent_state, qauntize_next_latent=False) # NOTE: this needs to be updated. w/ beta vae we don't need to quantize, but w/ vq vae it should be optional to project back to a restrained state space
+            y_preds_latent[:, rollout_step:rollout_step + 1, ...] = y_pred_latent
+            x_latent_state = self.advance_latent_input(x_latent_state, y_pred_latent)
+        
+        # Compute loss (with checkpointing if requested)
+        if use_checkpoint:  
+            loss = checkpoint(self.loss, y_preds_latent, batch_latent_target, squash=True, use_reentrant=False)
+        else:
+            loss = self.loss(y_preds_latent, batch_latent_target, squash=True)
+        
+        # Scale loss by rollout length (losses don't do any temporal scaling)
+        loss *= 1.0 / self.rollout
+        
+        outputs = {}
+        metrics = {}
+        
+        # For validation, decode predictions and compute metrics
+        if validation_mode:
+            # Decode predictions differently based on latent representation type
+            if self.latent_representation == "discrete":
+                y_quantized = self.model.model.get_latent_representation(y_preds_latent)
+                y_preds = self.model.model.decode_latent_state(y_quantized, model_comm_group=self.model_comm_group)
+            else: 
+                y_preds = self.model.model.decode_latent_state(y_preds_latent) 
+
+            y = batch_recon_target
+
+            outputs_ = self.get_proc_and_unproc_data(y_pred=y_preds, y=y)
+            metrics = self.calculate_val_metrics(**outputs_, **validation_kwargs)
+
+        return loss, metrics, outputs_
+        
+
+    def get_proc_and_unproc_data(self, y_pred=None, y=None, y_pred_postprocessed=None, y_postprocessed=None):        
+        assert y_pred is not None or y_pred_postprocessed is not None, "Either y_pred or y_pred_postprocessed must be provided"
+        assert y is not None or y_postprocessed is not None, "Either y or y_postprocessed must be provided"
+
+        if y_postprocessed is None:
+            y_postprocessed = self.model.post_processors_state(y, in_place=False)
+        if y_pred_postprocessed is None:
+            y_pred_postprocessed = self.model.post_processors_state(y_pred, in_place=False)
+
+        if y_pred is None:
+            y_pred = self.model.pre_processors_state(y_pred_postprocessed, in_place=False, data_index=self.data_indices.data.output.full)
+        if y is None:
+            y = self.model.pre_processors_state(y_postprocessed, in_place=False, data_index=self.data_indices.data.output.full)
+
+        return {
+            "y": y,
+            "y_pred": y_pred,
+            "y_postprocessed": y_postprocessed,
+            "y_pred_postprocessed": y_pred_postprocessed,
+        }
+
+    def calculate_val_metrics(self, y_pred, y, y_pred_postprocessed, y_postprocessed, time_index:list[int]|None=None, val_metrics:Optional[ModuleList]=None, val_metric_ranges:Optional[dict]=None, **kwargs):
+        """
+        Calculate validation metrics.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor (bs, ens_pred, timesteps, latlon, nvar)
+            Predicted output tensor.
+        y : torch.Tensor (bs, timesteps, ens_target latlon, nvar)
+            Target output tensor.
+        y_pred_postprocessed : torch.Tensor (bs, end_pred, timesteps, latlon, nvar)
+            Postprocessed predicted output tensor.
+        y_postprocessed : torch.Tensor (bs, end_target, timesteps, latlon, nvar)
+            Postprocessed target output tensor.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+        
+        """
+        metric_vals = {}
+        timesteps = y_pred.shape[1]
+
+        if val_metrics is None:
+            val_metrics = self.val_metrics
+        if val_metric_ranges is None:
+            val_metric_ranges = self.val_metric_ranges
+
+        for metric in self.metrics:
+            metric_name = getattr(metric, "name", metric.__class__.__name__.lower())
+
+            if not isinstance(metric, BaseWeightedLoss):
+                # If not a weighted loss, we cannot feature scale, so call normally
+
+                # metrics[f"{metric_name}/{rollout_step + 1}"] = metric(
+                #     y_pred_postprocessed,
+                #     y_postprocessed,
+                # )
+                continue
+
+            for mkey, indices in self.val_metric_ranges.items():
+                if "scale_validation_metrics" in self.config.training and (
+                    mkey in self.config.training.scale_validation_metrics.metrics
+                    or "*" in self.config.training.scale_validation_metrics.metrics
+                ):
+                    with metric.scalar.freeze_state():
+                        for key in self.config.training.scale_validation_metrics.scalars_to_apply:
+                            metric.add_scalar(*self.scalars[key], name=key)
+
+                        # Use internal model space indices
+                        internal_model_indices = self.internal_metric_ranges[mkey]
+                        
+                        timesteps = x_rec.shape[1]
+
+                        for ts in range(timesteps):
+
+                            if len(internal_model_indices) == 1:                                
+                                _args = (y_pred_postprocessed[:, ts, ..., internal_model_indices], y_postprocessed[:, ts, ..., internal_model_indices])
+                                feature_scale = False
+                            else:
+                                _args = (y_pred[:, ts, ..., indices], y[:, ts, ..., indices])
+                                feature_scale = True
+
+                            metrics[f"{metric_name}/{mkey}/{ts + 1}"] = metric(
+                                *_args,
+                                scalar_indices=[..., internal_model_indices],
+                            )
+                else:
+                    if -1 in metric.scalar:
+                        exception_msg = (
+                            "Validation metrics cannot be scaled over the variable dimension"
+                            " in the post processed space. Please specify them in the config"
+                            " at `scale_validation_metrics`."
+                        )
+                        raise ValueError(exception_msg)
+
+                    for ts in range(timesteps):
+
+                        metrics[f"{metric_name}/{mkey}/{ts + 1}"] = metric(
+                            y_pred_postprocessed[:, ts, ..., indices],
+                            y_postprocessed[:, ts, ..., indices],
+                            scalar_indices=[..., indices],
+                        )
+
+        return metrics
+
+    def advance_latent_input(
+        self,
+        x_latent_state: torch.Tensor,
+        y_pred_latent: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+
+        This operates on non-processed data or processed data. The user must ensure both x and y_pred are either non-processed or processed.
+
+        x: (bs, multi_step, ens, latlon, nvars_full)
+        y_pred: (bs, timesteps, ens_pred, latlon, nvars_full)
+        batch: (bs, timesteps, ens_target latlon, nvars_full)
+        
+        """
+        x_latent_state = x_latent_state.roll(-1, dims=-4)
+
+        # Get prognostic variables
+        x_latent_state[:, -1:, ...] = y_pred_latent
+
+        return x_latent_state
+    
+    def validation_output_and_metrics(self, y_pred, y, validation_kwargs={} ):
+        
+    
+        outputs_ = self.get_proc_and_unproc_data(y_pred=y_pred, y=y)
+        metrics = self.calculate_val_metrics(**outputs_, **validation_kwargs)
+
+        return metrics, outputs_

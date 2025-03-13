@@ -112,3 +112,6 @@ class WeatherMaskGeneratorRandom(nn.Module):
 
         return input_mask, target_mask
     
+class WeatherMaskGeneratorTube(nn.Module):
+    
+    pass

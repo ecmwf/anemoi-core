@@ -4,6 +4,28 @@ Round 1 - Draft
 - [Done] Losses: VQ only
 - [Done] Model
 - Debug a run
-- [NOT DONE] Callbacks ?
+- [Done] Callbacks 
+
+Round 2 - 2nd round Draft
+- [DONE] [LightningModules]
+- [Model / Layers ] reconstruction.py, encoderblock.py discriminator.py
+- [Losses] (convert to that WeightedLoss format)
+
+Round 3 - ChatBot Review Changes for Errors
+- Lightning modules
+- Interfaces
+- Losses
+- Model
+
+Round 4 - Fix the LatentForecasting LightningModule (added late)
+
+Round 4 - Write Configs to Run 
+- BetaVAE
+- VQVAE
+- BetaVAE w/ Discriminator
+- VQVAE w/ Discriminator
+
+
+Round 5 - Test Normal GraphTransformer Runs Well
 
 Round 2 - Debugging

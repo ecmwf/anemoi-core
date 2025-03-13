@@ -19,7 +19,7 @@ from typing import Union
 from torch.nn import Module
 from omegaconf import DictConfig, ListConfig
 from anemoi.training.utils.debug_hydra import instantiate_debug
-# TODO(rilwan-ade): make parent loss calss that holds the common methods avg_function and sum_function
+from anemoi.training.losses.weightedloss import BaseWeightedLoss
 import einops
 
 class FeatureMatchingLoss(nn.Module):
@@ -61,13 +61,25 @@ class FeatureMatchingLoss(nn.Module):
         """
         super().__init__()
 
-        self.avg_function = torch.nanmean if ignore_nans else torch.mean
-        self.sum_function = torch.nansum if ignore_nans else torch.sum
-
+        # Initialize the underlying loss function
         if isinstance(loss_func, DictConfig):
-            self.loss_func = instantiate_debug(loss_func, node_weights=node_weights, feature_weights=feature_weights)
+            self.loss_func = instantiate_debug(
+                loss_func, 
+                node_weights=node_weights, 
+                feature_weights=feature_weights,
+                ignore_nans=ignore_nans,
+                **kwargs
+            )
         else:
             self.loss_func = loss_func
+            
+        # Verify the loss function has the expected interface
+        if not isinstance(self.loss_func, BaseWeightedLoss):
+            raise TypeError(f"loss_func must be a BaseWeightedLoss, got {type(self.loss_func)}")
+
+        # Set up helper functions from the contained loss
+        self.avg_function = self.loss_func.avg_function
+        self.sum_function = self.loss_func.sum_function
 
         # Process layer weights
         if isinstance(layer_weights, (list, ListConfig)):
@@ -77,34 +89,14 @@ class FeatureMatchingLoss(nn.Module):
             )
             weights_tensor = torch.as_tensor(layer_weights)
             normalized_layer_weights = weights_tensor / torch.sum(weights_tensor)
-            normalized_layer_weights = normalized_layer_weights[:, None, None, None, None, None]
+            # Reshape for broadcasting: [layers, 1, 1, 1, 1, 1]
+            normalized_layer_weights = normalized_layer_weights.view(-1, 1, 1, 1, 1, 1)
         else:
-            normalized_layer_weights = self.get_layer_weights(layer_weights, discriminator_layers_count)
+            normalized_layer_weights = torch.ones(discriminator_layers_count) / discriminator_layers_count
+            normalized_layer_weights = normalized_layer_weights.view(-1, 1, 1, 1, 1, 1)
 
         self.register_buffer("layer_weights", normalized_layer_weights, persistent=True)
         self.patch_proportion = patch_proportion
-
-    def get_layer_weights(self, weighting_scheme: str, discriminator_layers_count: int) -> torch.Tensor:
-        """Generate layer weights based on a named weighting scheme.
-
-        Parameters
-        ----------
-        weighting_scheme : str
-            Name of the weighting scheme to use
-        discriminator_layers_count : int
-            Number of discriminator layers
-
-        Returns
-        -------
-        torch.Tensor
-            Tensor of layer weights
-
-        Raises
-        ------
-        NotImplementedError
-            If the weighting scheme is not implemented
-        """
-        raise NotImplementedError(f"Layer weighting scheme '{weighting_scheme}' not implemented")
 
     def forward(
         self,
@@ -113,6 +105,8 @@ class FeatureMatchingLoss(nn.Module):
         squash: Union[bool, tuple] = True,
         feature_scale: bool = True,
         feature_indices: torch.Tensor | None = None,
+        scalar_indices: tuple[int, ...] | None = None,
+        without_scalars: list[str] | list[int] | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """Calculates the feature matching loss between real and fake feature maps.
@@ -126,50 +120,58 @@ class FeatureMatchingLoss(nn.Module):
         squash : bool | tuple, optional
             Whether to reduce (sum) over dimensions, by default True
         feature_scale : bool, optional
-            Whether to scale the loss by the feature weights, by default True
+            Whether to scale the loss by feature weights, by default True
         feature_indices : torch.Tensor | None, optional
             Indices of the features to scale the loss by, by default None
+        scalar_indices : tuple[int, ...] | None, optional
+            Indices to use for scaling, by default None
+        without_scalars : list[str] | list[int] | None, optional
+            List of scalars to exclude from scaling, by default None
 
         Returns
         -------
         torch.Tensor
             Feature matching loss
         """
+        # Verify inputs
+        assert len(features_real) == len(features_fake), "Real and fake feature lists must have same length"
+        assert len(features_real) > 0, "Feature lists cannot be empty"
+        
+        # Make sure features are on the same device as layer weights
+        device = self.layer_weights.device
+        
         # Initialize tensor to store losses for each layer with the same shape as features
-        layer_losses = torch.zeros(
-            (len(features_real), *features_real[0].shape), 
-            device=features_real[0].device, 
-            dtype=features_real[0].dtype
-        )
-
-        # Calculate loss for each layer
+        layer_losses = []
+        
+        # Calculate loss for each layer using the underlying loss function
         for i, (real_feat, fake_feat) in enumerate(zip(features_real, features_fake)):
-            # Calculate loss without reducing dimensions or applying feature scaling yet
-            layer_loss = self.loss_func(fake_feat, real_feat, squash=False, feature_scale=False)
-            layer_losses[i] = layer_loss
-
-        # Apply feature weighting if enabled
-        if feature_scale:
-            if feature_indices is not None:
-                # Apply weighting only to selected features
-                feature_weights = self.loss_func.feature_weights[feature_indices]
-                layer_losses = layer_losses * feature_weights
-                layer_losses = layer_losses / feature_weights.sum()
-            else:
-                layer_losses = layer_losses * self.loss_func.feature_weights
-                layer_losses = layer_losses / self.loss_func.feature_weights.sum()
-        
-        # Apply node weighting over spatial dimensions
-        layer_losses = layer_losses * (self.loss_func.node_weights / self.loss_func.sum_function(self.loss_func.node_weights))
-        
-        # Normalize by ensemble dimension (assumed to be axis -3)
-        layer_losses = layer_losses / layer_losses.shape[-3]
-        
-        # Normalize by batch dimension (assumed to be axis -5)
-        layer_losses = layer_losses / layer_losses.shape[-5]
-
-        # Apply layer weighting
-        layer_losses = layer_losses * self.layer_weights
+            # Ensure features are on the correct device
+            real_feat = real_feat.to(device)
+            fake_feat = fake_feat.to(device)
+            
+            # Use the contained loss function, deferring squashing/scaling to later
+            layer_loss = self.loss_func(
+                fake_feat, 
+                real_feat, 
+                squash=False,  # Don't squash yet, we need to apply layer weights first
+                feature_scale=feature_scale,
+                feature_indices=feature_indices,
+                scalar_indices=scalar_indices,
+                without_scalars=without_scalars
+            )
+            
+            # Apply layer weighting - ensure correct broadcasting
+            weighted_loss = layer_loss * self.layer_weights[i]
+            layer_losses.append(weighted_loss)
+            
+        # Stack losses from different layers
+        if all(loss.dim() == layer_losses[0].dim() for loss in layer_losses):
+            layer_losses = torch.stack(layer_losses, dim=0)
+        else:
+            # Handle case where losses have different dimensions
+            LOGGER.warning("Layer losses have different dimensions, summing individually")
+            total_loss = sum(loss.sum() for loss in layer_losses)
+            return total_loss
 
         # Taking a random patch of the loss if patch_proportion > 0
         if self.patch_proportion > 0:
@@ -181,18 +183,12 @@ class FeatureMatchingLoss(nn.Module):
                 torch.tensor(1e-6, device=layer_losses.device)
             )
 
-        # Sum across layers
-        layer_losses = self.sum_function(layer_losses, axis=0)
-
-        # Optionally reduce across other dimensions
-        if squash:
-            # If squash is a tuple, use it directly; otherwise, use default dimensions
-            axes = squash if isinstance(squash, tuple) else (-5, -3, -2, -1)
-            layer_losses = self.sum_function(layer_losses, axis=axes)
+        
+        layer_losses = self.sum_function(layer_losses)
         
         return layer_losses
 
     @cached_property
     def name(self) -> str:
         """Returns the name of the loss for logging."""
-        return "feature_matching"
+        return f"feature_matching_{self.loss_func.name}"
