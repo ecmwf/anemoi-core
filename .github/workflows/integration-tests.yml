@@ -11,7 +11,7 @@ on:
 
 jobs:
   integration_tests:
-    uses: ecmwf/reusable-workflows/nightly-pytest/action.yml@add-integration-test-anemoi-move-action
+    uses: ecmwf/reusable-workflows/nightly-pytest@add-integration-test-anemoi-move-action
     with:
       python-version: '3.10'
       install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
