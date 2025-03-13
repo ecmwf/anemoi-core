@@ -92,7 +92,7 @@ class ExplicitTimes(BaseModel):
 
 class TargetForcing(BaseModel):
     """Forcing parameters for target output times.
-    
+
     Extra forcing parameters to use as input to distinguish between different target times.
     """
 
