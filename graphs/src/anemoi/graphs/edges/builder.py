@@ -383,6 +383,8 @@ class MultiScaleEdges(BaseEdgeBuilder):
     x_hops : int
         Number of hops (in the refined icosahedron) between two nodes to connect
         them with an edge.
+    scale_resolutions : Union[int, List[int], None]
+        Specifies the resolution scales for computing the hop neighbourhood.
 
     Methods
     -------
@@ -402,17 +404,21 @@ class MultiScaleEdges(BaseEdgeBuilder):
         StretchedTriNodes,
     ]
 
-    def __init__(self, source_name: str, target_name: str, x_hops: int, **kwargs):
+    def __init__(self, source_name: str, target_name: str, x_hops: int, scale_resolutions: int | list[int]| None, **kwargs):
         super().__init__(source_name, target_name)
         assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
         assert isinstance(x_hops, int), "Number of x_hops must be an integer"
         assert x_hops > 0, "Number of x_hops must be positive"
         self.x_hops = x_hops
+        if isinstance(scale_resolutions, int):
+            scale_resolutions = [scale_resolutions]
+        assert min(scale_resolutions) > 0, "The scale_resolutions argument only supports positive integers."
+        self.scale_resolutions = scale_resolutions
 
     def add_edges_from_tri_nodes(self, nodes: NodeStorage) -> NodeStorage:
         nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
             nodes["_nx_graph"],
-            resolutions=nodes["_resolutions"],
+            resolutions=self.scale_resolutions or nodes["_resolutions"],
             x_hops=self.x_hops,
             area_mask_builder=nodes.get("_area_mask_builder", None),
         )
@@ -425,7 +431,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
 
         nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
             nodes["_nx_graph"],
-            resolutions=nodes["_resolutions"],
+            resolutions=self.scale_resolutions or nodes["_resolutions"],
             x_hops=self.x_hops,
             area_mask_builder=all_points_mask_builder,
         )
@@ -434,7 +440,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
     def add_edges_from_hex_nodes(self, nodes: NodeStorage) -> NodeStorage:
         nodes["_nx_graph"] = hex_icosahedron.add_edges_to_nx_graph(
             nodes["_nx_graph"],
-            resolutions=nodes["_resolutions"],
+            resolutions=self.scale_resolutions or nodes["_resolutions"],
             x_hops=self.x_hops,
         )
 
