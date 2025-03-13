@@ -11,9 +11,10 @@ on:
 
 jobs:
   integration_tests:
-    uses: ecmwf/reusable-workflows/.github/workflows/integration-tests.yml@add-integration-test-anemoi
+    uses: ecmwf/reusable-workflows/nightly-pytest/action.yml@add-integration-test-anemoi-move-action
     with:
       python-version: '3.10'
       install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
       test-directory: "training/tests/integration"
       pytest-options: "--longtests"
+      manual: ${{github.event_name == 'workflow_dispatch' && 'true' || 'false'}}

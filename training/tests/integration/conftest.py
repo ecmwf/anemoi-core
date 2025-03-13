@@ -23,7 +23,6 @@ from omegaconf import OmegaConf
     ],
 )
 def architecture_config(request: pytest.FixtureRequest) -> None:
-    # TODO(Helen,Vera): docs need clarification on where to run tests (from top-level directory)
     overrides = request.param
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_basic"):
         template = compose(
