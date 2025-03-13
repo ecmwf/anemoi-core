@@ -131,8 +131,8 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
     """Base class for propagating an attribute from the nodes to the edges."""
 
     def __init__(self, node_attr_name: str) -> None:
-        super().__init__()
         self.node_attr_name = node_attr_name
+        super().__init__()
         if not hasattr(self, "node_idx"):
             raise AttributeError(
                 "Classes inheriting from BaseEdgeAttributeFromNodeBuilder must set 'node_idx' attribute"
