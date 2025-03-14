@@ -40,9 +40,9 @@ if __name__ == "__main__":
         template = compose(
             config_name="debug",
         )  # apply architecture overrides to template since they override a default
-        global_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_training_cycle.yaml")
-        specific_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_basic.yaml")
-        cfg = OmegaConf.merge(template, global_modifications, specific_modifications)
+        testing_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_training_cycle.yaml")
+        use_case_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_basic.yaml")
+        cfg = OmegaConf.merge(template, testing_modifications, use_case_modifications)
         OmegaConf.resolve(cfg)
 
     test_training_cycle_architecture_configs(cfg)
