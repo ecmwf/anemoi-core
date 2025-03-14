@@ -12,7 +12,7 @@ jobs:
   integration_tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: ecmwf/reusable-workflows/nightly-pytest@add-integration-test-anemoi-move-action
+      - uses: ecmwf/reusable-workflows/nightly-pytest@add-integration-test-anemoi
         with:
           repository: ${{github.repository}}
           ref: ${{github.ref}}
