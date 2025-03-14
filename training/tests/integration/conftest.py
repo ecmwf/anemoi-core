@@ -29,7 +29,7 @@ def architecture_config(request: pytest.FixtureRequest, testing_modifications_wi
             config_name="debug",
             overrides=overrides,
         )  # apply architecture overrides to template since they override a default
-        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_basic.yaml")
+        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_basic.yaml")
         cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
         OmegaConf.resolve(cfg)
         return cfg
@@ -37,7 +37,7 @@ def architecture_config(request: pytest.FixtureRequest, testing_modifications_wi
 
 @pytest.fixture
 def testing_modifications_with_temp_dir(tmp_path) -> OmegaConf:
-    testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_training_cycle.yaml")
+    testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/testing_modifications.yaml")
     temp_dir = str(tmp_path)
     testing_modifications.hardware.paths.output = temp_dir
     return testing_modifications
