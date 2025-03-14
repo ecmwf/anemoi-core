@@ -198,9 +198,9 @@ and managing configurations via configuration files.
 3. Prepare the Data: Ensure the required dataset is uploaded to the EWC
 S3 before adding the test. Please get in touch about access.
 
-4. Subfolder Organization: Place your test and config files in a new 
-subfolder within `training/tests/integration/` for clarity
-and ease of maintenance.
+4. Subfolder Organization: Place your test and config files in a new
+subfolder within `training/tests/integration/` for clarity and ease of
+maintenance.
 
 5. Handling Test Failures: Complex use cases will likely require more
 test-time modifications. Check if these have overwritten expected
