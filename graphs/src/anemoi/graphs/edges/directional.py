@@ -9,86 +9,92 @@
 
 from __future__ import annotations
 
-import numpy as np
-from scipy.spatial.transform import Rotation
+import torch
 
-from anemoi.graphs.generate.transforms import direction_vec
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
-
-def get_rotation_from_unit_vecs(points: np.ndarray, reference: np.ndarray) -> Rotation:
-    """Compute rotation matrix of a set of points with respect to a reference vector.
-
-    Parameters
-    ----------
-    points : np.ndarray of shape (num_points, 3)
-        The points to compute the direction vector.
-    reference : np.ndarray of shape (3, )
-        The reference vector.
-
-    Returns
-    -------
-    Rotation
-        The rotation matrix that aligns the points with the reference vector.
-    """
-    assert points.shape[1] == 3, "Points must be in 3D"
-    v_unit = direction_vec(points, reference)
-    theta = np.arccos(np.dot(points, reference))
-    return Rotation.from_rotvec(np.transpose(v_unit * theta))
+NORTH_POLE = [0, 0, 1]  # North pole in 3D coordinates
 
 
-def compute_directions(loc1: np.ndarray, loc2: np.ndarray, pole_vec: np.ndarray | None = None) -> np.ndarray:
-    """Compute the direction of the edge joining the nodes considered.
+def direction_vec(points: torch.Tensor, reference: torch.Tensor, epsilon: float = 10e-11) -> torch.Tensor:
+    """Compute the unit direction vector from b to a in torch."""
+    v = torch.cross(points, reference, dim=-1)
+    vnorm1 = torch.pow(v, 2).sum(dim=-1)
+    redo_idx = torch.nonzero(vnorm1 < epsilon, as_tuple=False).squeeze()
+
+    if len(redo_idx) > 0:
+        points[redo_idx] += epsilon
+        v = torch.cross(points, reference, dim=-1)
+        vnorm1 = torch.pow(v, 2).sum(dim=-1)
+
+    return v / torch.sqrt(vnorm1).unsqueeze(-1)  # normalize across last dimension
+
+
+def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
+    """Rotate points v around axis by the angle using Rodrigues' rotation formula in torch.
 
     Parameters
     ----------
-    loc1 : np.ndarray of shape (2, num_points)
-        Location of the head nodes.
-    loc2 : np.ndarray of shape (2, num_points)
-        Location of the tail nodes.
-    pole_vec : np.ndarray, optional
-        The pole vector to rotate the points to. Defaults to the north pole.
+    v : torch.Tensor
+        A tensor of shape (N, 3) representing N vectors to be rotated.
+    axis : torch.Tensor
+        A tensor of shape (N, 3) representing the rotation axis.
+    angle : torch.Tensor
+        A tensor of shape (N,) representing the rotation angles.
 
     Returns
     -------
-    np.ndarray of shape (3, num_points)
-        The direction of the edge after rotating the north pole.
+    torch.Tensor
+        A tensor of shape (N, 3) representing the rotated locations.
+
+    Notes
+    -----
+    - https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
     """
-    if pole_vec is None:
-        pole_vec = np.array([0, 0, 1])
+    axis = axis / torch.norm(axis, dim=-1, keepdim=True)  # Ensure the axis is a unit vector
+    cos_theta = torch.cos(angle).unsqueeze(-1)
+    sin_theta = torch.sin(angle).unsqueeze(-1)
 
-    # all will be rotated relative to destination node
-    loc1_xyz = latlon_rad_to_cartesian(loc1, 1.0)
-    loc2_xyz = latlon_rad_to_cartesian(loc2, 1.0)
-    r = get_rotation_from_unit_vecs(loc2_xyz, pole_vec)
-    direction = direction_vec(r.apply(loc1_xyz), pole_vec)
-    return direction / np.sqrt(np.power(direction, 2).sum(axis=0))
+    s1 = v * cos_theta
+    s2 = torch.cross(axis, v, dim=-1) * sin_theta
+    s3 = axis * torch.sum(v * axis, dim=-1, keepdim=True) * (1 - cos_theta)
+    v_rot = s1 + s2 + s3
+
+    return v_rot
 
 
-def directional_edge_features(
-    loc1: np.ndarray, loc2: np.ndarray, relative_to_rotated_target: bool = True
-) -> np.ndarray:
-    """Compute features of the edge joining the nodes considered.
-
-    It computes the direction of the edge after rotating the north pole.
+def compute_directions(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+    """Compute the direction of the edge.
 
     Parameters
     ----------
-    loc1 : np.ndarray of shpae (2, num_points)
-        Location of the head node.
-    loc2 : np.ndarray of shape (2, num_points)
-        Location of the tail node.
-    relative_to_rotated_target : bool, optional
-        Whether to rotate the north pole to the target node. Defaults to True.
+    source_coords : torch.Tensor of shape (N, 2)
+        A tensor of shape (N, 2) representing the lat-lon location of the N head nodes.
+    target_coords : torch.Tensor of shape (N, 2)
+        A tensor of shape (N, 2) representing the lat-lon location of the N tail nodes.
 
     Returns
     -------
-    np.ndarray of shape of (2, num_points)
-        Direction of the edge after rotation the north pole.
+    torch.Tensor of shape (N, 2)
+        The direction of the edge.
     """
-    if relative_to_rotated_target:
-        rotation = compute_directions(loc1, loc2)
-        assert np.allclose(rotation[2], 0), "Rotation should be aligned with the north pole"
-        return rotation[:2]
+    north_pole = torch.tensor([NORTH_POLE], dtype=source_coords.dtype).to(device=source_coords.device)
+    source_coords_xyz = latlon_rad_to_cartesian(source_coords, 1.0)
+    target_coords_xyz = latlon_rad_to_cartesian(target_coords, 1.0)
 
-    return loc2 - loc1
+    # Compute the unit direction vector & the angle theta between target coords and the north pole.
+    v_unit = direction_vec(target_coords_xyz, north_pole)
+    theta = torch.acos(
+        torch.clamp(torch.sum(target_coords_xyz * north_pole, dim=1), -1.0, 1.0)
+    )  # Clamp for numerical stability
+
+    # Rotate source coords by angle theta around v_unit axis.
+    rotated_source_coords_xyz = rotate_vectors(source_coords_xyz, v_unit, theta)
+
+    # Compute the direction from the rotated vector to the north pole.
+    direction = direction_vec(rotated_source_coords_xyz, north_pole)
+    normed_direction = direction / torch.norm(direction, dim=1).unsqueeze(-1)
+
+    # All 3rd components should be 0s
+    assert torch.max(torch.abs(normed_direction[:, 2])) < 1e-9, "Rotation should be aligned with the north pole"
+    return normed_direction[:, :2]
