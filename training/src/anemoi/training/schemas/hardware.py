@@ -53,7 +53,7 @@ class Logs(PydanticBaseModel):
 
 
 class PathsSchema(BaseModel):
-    data: Union[Path, None] = None
+    data: Union[Path, dict[str, Path], None] = None
     "Path to the data directory."
     graph: Union[Path, None] = None
     "Path to the graph directory."
