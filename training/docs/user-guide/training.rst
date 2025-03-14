@@ -242,19 +242,52 @@ performed on 12 forecast steps (equivalent to 72 hours) incrementally.
 In other words, at each epoch another forecast step is added to the
 error term.
 
-Rollout requires the model training to be restarted so the user should
-make sure to set ``config.training.run_id`` equal to the run-id of the
-first stage of training.
+Rollout finetuning can be configured to start at a certain threshold or
+the value of the rollout chosen from a provided list or dictionary.
 
-Note, in the standard set-up, rollout is performed at the minimum
-learning rate and the number of batches used is reduced (using
-``config.dataloader.training.limit_batches``) to prevent any overfit to
-specific timesteps.
+Note, if you wish to modify any of the standard configs during rollout
+exclusively, like the learning rate or number of batches used (using
+``config.dataloader.training.limit_batches``), you must restart the
+training run, and reconfigure.
 
-To start rollout set ``config.training.rollout.epoch_increment`` equal
-to 1 (thus increasing the rollout step by 1 at every epoch) and set a
-maximum rollout by setting ``config.training.rollout.max`` (usually set
-to 12).
+Otherwise, with the ``RolloutSchedulers`` you can fully configure how
+many rollout steps are completed by the model.
+
+The various schedulers which are available are detailed in `schedulers
+<modules/schedulers>`_. It is possible to configure static, index based,
+or step/epoch incrementing classes, and implement your own.
+
+.. note::
+
+   As ``pytorch lightning`` only allows refreshing of the dataset once
+   per epoch, increments to the rollout within an epoch can cause
+   ``IndexError``'s when attempting to rollout for longer then the data
+   allows. To mitigate this, for step based schedulers you can set
+   ``adjust_maximum`` to an int to always provide more timesteps to the
+   training loop.
+
+**Default Rollout Scheduler**
+
+Shown below is the default rollout scheduler in ``config.training``.
+
+.. code:: yaml
+
+   # Dataloader rollout counter can only be updated at the end of each epoch
+   # So updates during an epoch will only be reflected at the end of said epoch.
+   rollout:
+      _target_: anemoi.training.schedulers.rollout.stepped.EpochStepped
+      minimum: 1
+      maximum: 12
+      # increase rollout every n epochs
+      every_n_epochs: 1
+      # Control the incrementing of the rollout window
+      increment:
+         step:
+            0: 0
+            200000: 1 # After 200k steps, increment by 1 every 1 epoch
+
+This will trigger the scheduler every epoch, but only begin incrementing
+the rollout value by 1 after the 200,000th step.
 
 ***************************
  Restarting a training run

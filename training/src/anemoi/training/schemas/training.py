@@ -26,6 +26,7 @@ from pydantic import model_validator
 
 from anemoi.training.schemas.utils import allowed_values
 
+from .schedulers import RolloutSchemas  # noqa: TC001
 from .utils import BaseModel
 
 
@@ -50,17 +51,6 @@ class SWA(BaseModel):
     "Enable stochastic weight averaging."
     lr: NonNegativeFloat = Field(example=1.0e-4)
     "Learning rate for SWA."
-
-
-class Rollout(BaseModel):
-    """Rollout configuration."""
-
-    start: PositiveInt = Field(example=1)
-    "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(example=0)
-    "Number of epochs to increment the rollout."
-    max: PositiveInt = Field(example=1)
-    "Maximum number of rollouts."
 
 
 class LR(BaseModel):
@@ -249,7 +239,7 @@ class TrainingSchema(BaseModel):
     "List of validation metrics configurations. These metrics "
     scale_validation_metrics: ScaleValidationMetrics
     """Configuration for scaling validation metrics."""
-    rollout: Rollout = Field(default_factory=Rollout)
+    rollout: RolloutSchemas
     "Rollout configuration."
     max_epochs: Union[PositiveInt, None] = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
