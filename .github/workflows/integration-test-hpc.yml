@@ -1,0 +1,36 @@
+name: ci-hpc
+
+# Controls when the workflow will run
+on:
+  schedule:
+    - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - test/hpc-integration-tests
+
+jobs:
+  pytest:
+    runs-on: hpc
+    steps:
+      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+        with:
+          template: |
+            set -eux
+            module load python3
+
+            REPO_NAME=anemoi-core
+            REPO_BRANCH=${{ github.head_ref || github.ref_name }}
+
+            git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
+            cd $REPO_NAME
+            pip install -e ./training
+            pip install -e ./models
+            pip install -e ./graphs
+            pytest --longtests
+          sbatch_options: |
+            #SBATCH --job-name=anemoi_core_pytest
+            #SBATCH --time=00:10:00
+            #SBATCH --qos=nf
+          troika_user: ${{ secrets.HPC_CI_SSH_USER }}
