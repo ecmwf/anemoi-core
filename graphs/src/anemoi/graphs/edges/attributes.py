@@ -130,13 +130,13 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
     """Base class for propagating an attribute from the nodes to the edges."""
 
+    node_idx: int = None
+
     def __init__(self, node_attr_name: str) -> None:
         self.node_attr_name = node_attr_name
         super().__init__()
-        if not hasattr(self, "node_idx"):
-            raise AttributeError(
-                "Classes inheriting from BaseEdgeAttributeFromNodeBuilder must set 'node_idx' attribute"
-            )
+        if self.node_idx is None:
+            raise AttributeError(f"{self.__class__.__name__} class must set 'node_idx' attribute.")
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         return (x_j, x_i)[self.node_idx][self.node_attr_name]
