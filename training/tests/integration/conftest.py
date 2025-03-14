@@ -29,9 +29,9 @@ def architecture_config(request: pytest.FixtureRequest) -> None:
             config_name="debug",
             overrides=overrides,
         )  # apply architecture overrides to template since they override a default
-        global_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_training_cycle.yaml")
-        specific_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_basic.yaml")
-        cfg = OmegaConf.merge(template, global_modifications, specific_modifications)
+        testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_training_cycle.yaml")
+        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_basic.yaml")
+        cfg = OmegaConf.merge(template, testing_modifications, use_case_modifications)
         OmegaConf.resolve(cfg)
         return cfg
 
