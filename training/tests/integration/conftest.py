@@ -22,18 +22,25 @@ from omegaconf import OmegaConf
         ["model=graphtransformer"],
     ],
 )
-def architecture_config(request: pytest.FixtureRequest) -> None:
+def architecture_config(request: pytest.FixtureRequest, testing_modifications_with_temp_dir: OmegaConf) -> None:
     overrides = request.param
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_basic"):
         template = compose(
             config_name="debug",
             overrides=overrides,
         )  # apply architecture overrides to template since they override a default
-        testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_training_cycle.yaml")
         use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_basic.yaml")
-        cfg = OmegaConf.merge(template, testing_modifications, use_case_modifications)
+        cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
         OmegaConf.resolve(cfg)
         return cfg
+
+
+@pytest.fixture
+def testing_modifications_with_temp_dir(tmp_path) -> OmegaConf:
+    testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_training_cycle.yaml")
+    temp_dir = str(tmp_path)
+    testing_modifications.hardware.paths.output = temp_dir
+    return testing_modifications
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
