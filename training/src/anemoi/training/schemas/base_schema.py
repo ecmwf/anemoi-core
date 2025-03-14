@@ -26,6 +26,7 @@ from pydantic_core import ValidationError
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
 from .data import DataSchema  # noqa: TC001
 from .dataloader import DataLoaderSchema  # noqa: TC001
+from .datamodule import DataModuleSchema  # noqa: TC001
 from .diagnostics import DiagnosticsSchema  # noqa: TC001
 from .graphs.base_graph import BaseGraphSchema  # noqa: TC001
 from .hardware import HardwareSchema  # noqa: TC001
@@ -47,7 +48,7 @@ class BaseSchema(BaseModel):
     """Data configuration."""
     dataloader: DataLoaderSchema
     """Dataloader configuration."""
-    datamodule: Any
+    datamodule: DataModuleSchema
     """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
