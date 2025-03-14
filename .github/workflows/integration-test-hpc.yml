@@ -19,6 +19,9 @@ jobs:
           template: |
             set -eux
             module load python3
+            python -m venv .venv
+            source .venv/bin/activate
+            pip install --upgrade pip
 
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
