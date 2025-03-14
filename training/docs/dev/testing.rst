@@ -136,7 +136,7 @@ top-level directory of anemoi-core run:
 
 .. code:: bash
 
-   pytest training/tests/integration --slowtest
+   pytest training/tests/integration --longtests
 
 **********************************************
  Integration tests and member state use cases
