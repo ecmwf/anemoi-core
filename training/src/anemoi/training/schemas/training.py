@@ -213,6 +213,11 @@ class ScaleValidationMetrics(BaseModel):
 class TrainingSchema(BaseModel):
     """Training configuration."""
 
+    task: Literal[
+        "anemoi.training.train.forecaster.GraphForecaster",
+        "anemoi.training.train.autoencoder.GraphAutoEncoder",
+    ] = Field(default="anemoi.training.train.forecaster.GraphForecaster")
+    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
     run_id: Union[str, None] = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
     fork_run_id: Union[str, None] = Field(example=None)
