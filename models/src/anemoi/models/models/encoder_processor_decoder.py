@@ -12,6 +12,7 @@ import logging
 from typing import Optional
 
 import einops
+import numpy as np
 import torch
 from hydra.utils import instantiate
 from torch import Tensor
@@ -38,6 +39,7 @@ class AnemoiModelEncProcDec(nn.Module):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -66,10 +68,19 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        self._truncation_data = truncation_data
 
-        # read config.model.layer_kernels to get the implementation for certain layers
-        self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", {}))
+        input_dim = self._calculate_input_dim(model_config)
+
+        # we can't register these as buffers because DDP does not support sparse tensors
+        # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
+        self.A_down, self.A_up = None, None
+        if "down" in self._truncation_data:
+            self.A_down = self._make_truncation_matrix(self._truncation_data["down"])
+            LOGGER.info("Truncation: A_down %s", self.A_down.shape)
+        if "up" in self._truncation_data:
+            self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
+            LOGGER.info("Truncation: A_up %s", self.A_up.shape)
 
         # Encoder data -> hidden
         self.encoder = instantiate(
@@ -80,7 +91,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            layer_kernels=self.layer_kernels,
+            layer_kernels=load_layer_kernels(model_config.model.layer_kernels.get("encoder", {})),
         )
 
         # Processor hidden -> hidden
@@ -90,7 +101,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            layer_kernels=self.layer_kernels,
+            layer_kernels=load_layer_kernels(model_config.model.layer_kernels.get("processor", {})),
         )
 
         # Decoder hidden -> data
@@ -103,7 +114,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            layer_kernels=self.layer_kernels,
+            layer_kernels=load_layer_kernels(model_config.model.layer_kernels.get("decoder", {})),
         )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -119,9 +130,83 @@ class AnemoiModelEncProcDec(nn.Module):
             ]
         )
 
+    def _make_truncation_matrix(self, A, data_type=torch.float32):
+        A_ = torch.sparse_coo_tensor(
+            torch.tensor(np.vstack(A.nonzero()), dtype=torch.long),
+            torch.tensor(A.data, dtype=data_type),
+            size=A.shape,
+        ).coalesce()
+        return A_
+
+    def _multiply_sparse(self, x, A):
+        return torch.sparse.mm(A, x)
+
+    def _truncate_fields(self, x, A, batch_size=None, grad_checkpoint=False):
+        if not batch_size:
+            batch_size = x.shape[0]
+        out = []
+        with torch.amp.autocast(device_type="cuda", enabled=False):
+            for i in range(batch_size):
+                if grad_checkpoint:
+                    out.append(torch.utils.checkpoint(self.multiply_sparse, x[i, ...], A, use_reentrant=False))
+                else:
+                    out.append(self._multiply_sparse(x[i, ...], A))
+        return torch.stack(out)
+
+    def _assemble_input(self, x, batch_size):
+        # normalize and add data positional info (lat/lon)
+        x_data_latent = torch.cat(
+            (
+                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                self.node_attributes(self._graph_name_data, batch_size=batch_size),
+            ),
+            dim=-1,  # feature dimension
+        )
+
+        x_skip = x[:, -1, ...]
+        if self.A_down is not None or self.A_up is not None:
+            x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
+            # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
+            # hence we check that they are on the correct device ; copy should only happen in the first forward run
+            if self.A_down is not None:
+                self.A_down = self.A_down.to(x_skip.device)
+                x_skip = self._truncate_fields(x_skip, self.A_down)  # to coarse resolution
+            if self.A_up is not None:
+                self.A_up = self.A_up.to(x_skip.device)
+                x_skip = self._truncate_fields(x_skip, self.A_up)  # back to high resolution
+            x_skip = einops.rearrange(
+                x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size
+            )
+
+        return x_data_latent, x_skip
+
+    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
+        x_out = (
+            einops.rearrange(
+                x_out,
+                "(batch ensemble grid) vars -> batch ensemble grid vars",
+                batch=batch_size,
+                ensemble=ensemble_size,
+            )
+            .to(dtype=dtype)
+            .clone()
+        )
+
+        # residual connection (just for the prognostic variables)
+        x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
+
+        for bounding in self.boundings:
+            # bounding performed in the order specified in the config file
+            x_out = bounding(x_out)
+        return x_out
+
+    def _calculate_input_dim(self, model_config):
+        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.internal_model.input)
         self.num_output_channels = len(data_indices.internal_model.output)
+        self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
         self._internal_input_idx = data_indices.internal_model.input.prognostic
         self._internal_output_idx = data_indices.internal_model.output.prognostic
 
@@ -183,22 +268,12 @@ class AnemoiModelEncProcDec(nn.Module):
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
 
-        # add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                self.node_attributes(self._graph_name_data, batch_size=batch_size),
-            ),
-            dim=-1,  # feature dimension
-        )
-
+        x_data_latent, x_skip = self._assemble_input(x, batch_size)
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
 
-        # get shard shapes
         shard_shapes_data = get_shape_shards(x_data_latent, 0, model_comm_group)
         shard_shapes_hidden = get_shape_shards(x_hidden_latent, 0, model_comm_group)
 
-        # Run encoder
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
             (x_data_latent, x_hidden_latent),
@@ -214,10 +289,8 @@ class AnemoiModelEncProcDec(nn.Module):
             model_comm_group=model_comm_group,
         )
 
-        # add skip connection (hidden -> hidden)
         x_latent_proc = x_latent_proc + x_latent
 
-        # Run decoder
         x_out = self._run_mapper(
             self.decoder,
             (x_latent_proc, x_data_latent),
@@ -226,22 +299,149 @@ class AnemoiModelEncProcDec(nn.Module):
             model_comm_group=model_comm_group,
         )
 
-        x_out = (
-            einops.rearrange(
-                x_out,
-                "(batch ensemble grid) vars -> batch ensemble grid vars",
-                batch=batch_size,
-                ensemble=ensemble_size,
-            )
-            .to(dtype=x.dtype)
-            .clone()
+        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
+
+        return x_out
+
+
+class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
+    """Message passing graph neural network with ensemble functionality."""
+
+    def __init__(
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+        truncation_data: dict,
+    ) -> None:
+
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+            truncation_data=truncation_data,
         )
 
+        self.noise_injector = instantiate(
+            model_config.model.noise_injector,
+            num_channels=self.num_channels,
+            layer_kernels=load_layer_kernels(model_config.get("model.layer_kernels.noise_injector", {})),
+        )
+
+    def _calculate_input_dim(self, model_config):
+        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        input_dim += self.num_input_channels_prognostic
+        input_dim += 1
+        return input_dim
+
+    def _assemble_input(self, x, fcstep, bse):
+        x_skip = x[:, -1, :, :, self._internal_input_idx]
+        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
+
+        # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
+        # hence we check that they are on the correct device ; copy should only happen in the first forward run
+        # todo -> parallelize this
+        if self.A_down is not None:
+            self.A_down = self.A_down.to(x.device)
+            x_skip = self._truncate_fields(x_skip, self.A_down)  # to coarse resolution
+        if self.A_up is not None:
+            self.A_up = self.A_up.to(x.device)
+            x_skip = self._truncate_fields(x_skip, self.A_up)  # back to high resolution
+
+        # add data positional info (lat/lon)
+        x_data_latent = torch.cat(
+            (
+                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
+                self.node_attributes(self._graph_name_data, batch_size=bse),
+            ),
+            dim=-1,  # feature dimension
+        )
+        x_data_latent = torch.cat(
+            (x_data_latent, torch.ones(x_data_latent.shape[:-1], device=x_data_latent.device).unsqueeze(-1) * fcstep),
+            dim=-1,
+        )
+
+        return x_data_latent, x_skip
+
+    def _assemble_output(self, x_out, x_skip, batch_size, bse, dtype):
+        x_out = einops.rearrange(x_out, "(bse n) f -> bse n f", bse=bse)
+        x_out = einops.rearrange(x_out, "(bs e) n f -> bs e n f", bs=batch_size).to(dtype=dtype).clone()
+
         # residual connection (just for the prognostic variables)
-        x_out[..., self._internal_output_idx] += x[:, -1, :, :, self._internal_input_idx]
+        x_out[..., self._internal_output_idx] += einops.rearrange(
+            x_skip,
+            "(batch ensemble) grid var -> batch ensemble grid var",
+            batch=batch_size,
+        ).to(dtype=dtype)
 
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
+        return x_out
+
+    def forward(self, x: torch.Tensor, fcstep: int, model_comm_group: Optional[ProcessGroup] = None) -> torch.Tensor:
+        """Forward operator.
+
+        Args:
+            x: torch.Tensor
+                Input tensor, shape (bs, m, e, n, f)
+            fcstep: int
+                Forecast step
+            model_comm_group: Optional[ProcessGroup], optional
+                Model communication group
+        Returns:
+            Output tensor
+        """
+        batch_size, ensemble_size = x.shape[0], x.shape[2]
+        bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
+
+        fcstep = min(1, fcstep)
+
+        x_data_latent, x_skip = self._assemble_input(x, fcstep, bse)
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=bse)
+
+        shard_shapes_data = get_shape_shards(x_data_latent, 0, model_comm_group)
+        shard_shapes_hidden = get_shape_shards(x_hidden_latent, 0, model_comm_group)
+
+        x_data_latent, x_latent = self._run_mapper(
+            self.encoder,
+            (x_data_latent, x_hidden_latent),
+            batch_size=bse,
+            shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+            model_comm_group=model_comm_group,
+        )
+
+        x_latent_proc, latent_noise = self.noise_injector(
+            x=x_latent,
+            noise_ref=x_hidden_latent,
+            shard_shapes=shard_shapes_hidden,
+            model_comm_group=model_comm_group,
+        )
+
+        processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
+
+        x_latent_proc = self.processor(
+            x=x_latent_proc,
+            batch_size=bse,
+            shard_shapes=shard_shapes_hidden,
+            model_comm_group=model_comm_group,
+            **processor_kwargs,
+        )
+
+        x_latent_proc = x_latent_proc + x_latent
+
+        x_out = self._run_mapper(
+            self.decoder,
+            (x_latent_proc, x_data_latent),
+            batch_size=bse,
+            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            model_comm_group=model_comm_group,
+        )
+
+        x_out = self._assemble_output(x_out, x_skip, batch_size, bse, x.dtype)
 
         return x_out

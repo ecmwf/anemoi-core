@@ -20,9 +20,9 @@ from torch.utils.data import DataLoader
 from anemoi.datasets.data import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset import NativeGridDataset
-from anemoi.training.data.dataset import worker_init_func
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -176,14 +176,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         r = max(rollout, self.rollout)
 
-        # Compute effective batch size
-        effective_bs = (
-            self.config.dataloader.batch_size.training
-            * self.config.hardware.num_gpus_per_node
-            * self.config.hardware.num_nodes
-            // self.config.hardware.num_gpus_per_model
-        )
-
         return NativeGridDataset(
             data_reader=data_reader,
             rollout=r,
@@ -192,7 +184,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             grid_indices=self.grid_indices,
             label=label,
-            effective_bs=effective_bs,
         )
 
     def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:

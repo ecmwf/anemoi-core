@@ -1,33 +1,57 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
+- datamodule: single
 - diagnostics: evaluation
 - hardware: example
-- graph: multi_scale
-- model: gnn
+- graph: multi_scale #encoder_decoder_only #multi_scale
+- model: graphtransformer
 - training: default
 - _self_
 
 no_validation: False
 
-### This file is for local experimentation.
-##  When you commit your changes, assign the new features and keywords
-##  to the correct defaults.
-# For example to change from default GPU count:
-# hardware:
-#   num_gpus_per_node: 1
+data:
+  resolution: o96
+
+hardware:
+  paths:
+    truncation: /ec/res4/hpcperm/nesl/inter_mat
+    data: /home/mlx/ai-ml/datasets/
+    grids: /home/mlx/ai-ml/grids/
+    output: ${oc.env:SCRATCH}/aifs/${data.resolution}/
+  files:
+    truncation: O96-O32-linear.mat.npz
+    truncation_inv: O32-O96-linear.mat.npz
+    graph: graph_anemoi_new_${data.resolution}.pt
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6.zarr
+  accelerator: auto
+  num_gpus_per_node: 1
+  num_nodes: 1
+  num_gpus_per_model: 1
+
+model:
+  num_channels: 128
+
+dataloader:
+  limit_batches:
+    training: 8
+    validation: 8
+
+training:
+  max_epochs: 1
 
 diagnostics:
   plot:
     callbacks: []
-hardware:
-  files:
-    graph: ???
-model:
-  num_channels: 128
-dataloader:
-  limit_batches:
-    training: 100
-    validation: 100
-training:
-  max_epochs: 5
+  log:
+    interval: 4
+    mlflow:
+      enabled: True
+      offline: True
+      experiment_name: 'zdebug112'
+      authentication: True
+      tracking_uri: 'https://mlflow.ecmwf.int'
+      run_name: 'debug12343'
+  profiler: False
+  enable_progress_bar: True

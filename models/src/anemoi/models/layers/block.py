@@ -56,6 +56,7 @@ class BaseBlock(nn.Module, ABC):
         batch_size: int,
         size: Optional[Size] = None,
         model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
 
@@ -71,6 +72,7 @@ class TransformerProcessorBlock(BaseBlock):
         window_size: int,
         layer_kernels: DotDict,
         dropout_p: float = 0.0,
+        qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = None,
@@ -90,8 +92,9 @@ class TransformerProcessorBlock(BaseBlock):
             num_heads=num_heads,
             embed_dim=num_channels,
             window_size=window_size,
-            bias=False,
+            qkv_bias=False,
             is_causal=False,
+            qk_norm=qk_norm,
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
@@ -106,11 +109,22 @@ class TransformerProcessorBlock(BaseBlock):
         )
 
     def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
     ) -> Tensor:
-        # Need to be out of place for gradient propagation
-        x = x + self.attention(self.layer_norm_attention(x), shapes, batch_size, model_comm_group=model_comm_group)
-        x = x + self.mlp(self.layer_norm_mlp(x))
+        x = x + self.attention(
+            self.layer_norm_attention(x, **layer_kwargs), shapes, batch_size, model_comm_group=model_comm_group
+        )
+        x = x + self.mlp(
+            self.layer_norm_mlp(
+                x,
+                **layer_kwargs,
+            )
+        )
         return x
 
 
@@ -179,6 +193,7 @@ class GraphConvBaseBlock(BaseBlock):
         shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **layer_kwargs,
     ) -> tuple[Tensor, Tensor]: ...
 
 
@@ -191,7 +206,7 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
         activation: str = "SiLU",
-        update_src_nodes: bool = True,
+        update_src_nodes: bool = False,
         num_chunks: int = 1,
         **kwargs,
     ):
@@ -215,6 +230,7 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
         x_in = sync_tensor(x, 0, shapes[1], model_comm_group)
@@ -273,6 +289,7 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
         x_src = sync_tensor(x[0], 0, shapes[0], model_comm_group)
@@ -317,6 +334,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         layer_kernels: DotDict,
         num_heads: int = 16,
         bias: bool = True,
+        qk_norm: bool = False,
         activation: str = "GELU",
         num_chunks: int = 1,
         update_src_nodes: bool = False,
@@ -339,6 +357,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Number of heads
         bias : bool, by default True,
             Add bias or not
+        qk_norm : bool, by default False
+            Normalize query and key
         activation : str, optional
             Activation function, by default "GELU"
         update_src_nodes: bool, by default False
@@ -350,7 +370,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.out_channels_conv = out_channels // num_heads
         self.num_heads = num_heads
-
+        self.qk_norm = qk_norm
         self.num_chunks = num_chunks
 
         linear = layer_kernels["Linear"]
@@ -365,29 +385,26 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.projection = linear(out_channels, out_channels)
 
+        if self.qk_norm:
+            self.q_norm = layer_kernels["QueryNorm"](self.out_channels_conv)
+            self.k_norm = layer_kernels["KeyNorm"](self.out_channels_conv)
+
         try:
-            act_func = getattr(nn, activation)
+            self.act_func = getattr(nn, activation)
         except AttributeError as ae:
             LOGGER.error("Activation function %s not supported", activation)
             raise RuntimeError from ae
 
         self.layer_norm_attention = layerNorm(normalized_shape=in_channels)
-        self.layer_norm_mlp = layerNorm(normalized_shape=out_channels)
-
+        self.layer_norm_mlp_dst = layerNorm(normalized_shape=out_channels)
         self.node_dst_mlp = nn.Sequential(
-            self.layer_norm_mlp,
             linear(out_channels, hidden_dim),
-            act_func(),
+            self.act_func(),
             linear(hidden_dim, out_channels),
         )
 
-        if self.update_src_nodes:
-            self.node_src_mlp = nn.Sequential(
-                self.layer_norm_mlp,
-                linear(out_channels, hidden_dim),
-                act_func(),
-                linear(hidden_dim, out_channels),
-            )
+    def run_node_dst_mlp(self, x, **layer_kwargs):
+        return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
 
     def shard_qkve_heads(
         self,
@@ -449,6 +466,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **kwargs,
     ): ...
 
 
@@ -465,6 +483,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         num_heads: int = 16,
         bias: bool = True,
         activation: str = "GELU",
+        qk_norm: bool = False,
         num_chunks: int = 1,
         update_src_nodes: bool = False,
         **kwargs,
@@ -488,6 +507,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Add bias or not
         activation : str, optional
             Activation function, by default "GELU"
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         """
@@ -501,12 +522,30 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             bias=bias,
             activation=activation,
             num_chunks=num_chunks,
+            qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             **kwargs,
         )
 
-        self.layer_norm_attention_src = self.layer_norm_attention
-        self.layer_norm_attention_dest = layer_kernels["LayerNorm"](normalized_shape=in_channels)
+        linear = layer_kernels["Linear"]
+        layerNorm = layer_kernels["LayerNorm"]
+
+        self.layer_norm_attention_src = layerNorm(normalized_shape=in_channels)
+        self.layer_norm_attention_dest = self.layer_norm_attention
+
+        if self.update_src_nodes:
+            self.layer_norm_mlp_src = layerNorm(normalized_shape=out_channels)
+            self.node_src_mlp = nn.Sequential(
+                linear(out_channels, hidden_dim),
+                self.act_func(),
+                linear(hidden_dim, out_channels),
+            )
+        else:
+            self.layer_norm_mlp_src = nn.Identity()
+            self.node_src_mlp = nn.Identity()
+
+    def run_node_src_mlp(self, x, **layer_kwargs):
+        return self.node_src_mlp(self.layer_norm_mlp_src(x, **layer_kwargs))
 
     def forward(
         self,
@@ -517,12 +556,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **layer_kwargs,
     ):
         x_skip = x
 
         x = (
-            self.layer_norm_attention_src(x[0]),
-            self.layer_norm_attention_dest(x[1]),
+            self.layer_norm_attention_src(x[0], **layer_kwargs),
+            self.layer_norm_attention_dest(x[1], **layer_kwargs),
         )
 
         x_r = self.lin_self(x[1])
@@ -537,6 +577,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             ), "Only batch size of 1 is supported when model is sharded across GPUs"
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
 
         num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE
 
@@ -565,15 +609,20 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         out = out + x_skip[1]
 
-        # compute nodes_new_dst = self.node_dst_mlp(out) + out in chunks:
+        # compute nodes_new_dst = self.run_node_dst_mlp(out) + out in chunks:
         nodes_new_dst = torch.cat(
-            [self.node_dst_mlp(chunk) + chunk for chunk in out.tensor_split(num_chunks, dim=0)], dim=0
+            [self.run_node_dst_mlp(chunk, **layer_kwargs) + chunk for chunk in out.tensor_split(num_chunks, dim=0)],
+            dim=0,
         )
 
         if self.update_src_nodes:
-            # compute nodes_new_src = self.node_src_mlp(out) + out in chunks:
+            # compute nodes_new_src = self.run_node_src_mlp(out) + out in chunks:
             nodes_new_src = torch.cat(
-                [self.node_src_mlp(chunk) + chunk for chunk in x_skip[0].tensor_split(num_chunks, dim=0)], dim=0
+                [
+                    self.run_node_src_mlp(chunk, **layer_kwargs) + chunk
+                    for chunk in x_skip[0].tensor_split(num_chunks, dim=0)
+                ],
+                dim=0,
             )
         else:
             nodes_new_src = x_skip[0]
@@ -596,6 +645,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         num_heads: int = 16,
         bias: bool = True,
         activation: str = "GELU",
+        qk_norm: bool = False,
         num_chunks: int = 1,
         update_src_nodes: bool = False,
         **kwargs,
@@ -619,6 +669,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             Add bias or not
         activation : str, optional
             Activation function, by default "GELU"
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         """
@@ -632,6 +684,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             num_heads=num_heads,
             bias=bias,
             activation=activation,
+            qk_norm=qk_norm,
             num_chunks=num_chunks,
             update_src_nodes=update_src_nodes,
             **kwargs,
@@ -646,10 +699,11 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **layer_kwargs,
     ):
         x_skip = x
 
-        x = self.layer_norm_attention(x)
+        x = self.layer_norm_attention(x, **layer_kwargs)
         x_r = self.lin_self(x)
         query = self.lin_query(x)
         key = self.lin_key(x)
@@ -663,11 +717,16 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             ), "Only batch size of 1 is supported when model is sharded across GPUs"
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
         out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
         out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
         out = self.projection(out + x_r)
 
         out = out + x_skip
-        nodes_new = self.node_dst_mlp(out) + out
+        nodes_new = self.run_node_dst_mlp(out, **layer_kwargs) + out
 
         return nodes_new, edge_attr

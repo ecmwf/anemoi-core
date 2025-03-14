@@ -1,0 +1,169 @@
+# defaults:
+# - data: zarr
+# - dataloader: native_grid
+# - diagnostics: evaluation
+# - hardware: example
+# - graph: multi_scale #encoder_decoder_only
+# - model: transformer_ens
+# - training: default
+# - _self_
+
+defaults:
+  - hardware: slurm #example #slurm
+  - data: zarr_aifs-crps
+  - dataloader: ensemble_noeda_aifs-crps
+  - datamodule: single
+  - graph: encoder_decoder_only
+  - model: transformer_ens
+  - training: default
+  - diagnostics: evaluation
+  - _self_
+
+# - graph: encoder_decoder_only
+# - model: transformer
+
+data:
+  resolution: o96
+
+datamodule:
+  _target_: anemoi.training.data.datamodule.AnemoiEnsDatasetsDataModule
+
+hardware:
+  paths:
+    truncation: /ec/res4/hpcperm/nesl/inter_mat
+    data: /home/mlx/ai-ml/datasets/
+    output: ${oc.env:SCRATCH}/aifs/${data.resolution}/
+  files:
+    truncation: O96-O32-linear.mat.npz
+    truncation_inv: O32-O96-linear.mat.npz
+    graph: graph_anemoi_new_${data.resolution}.pt
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6.zarr
+  # checkpoint:
+  #   every_n_epochs: aifs-by_epoch-epoch_{epoch:03d}-rollout_{rollout:.0f}-train_kcrps_{train_kcrps_epoch:.3e}
+  #   every_n_train_steps: aifs-by_step-epoch_{epoch:03d}-step_{step:06d}-rollout_{rollout:.0f}
+  #   every_n_minutes: aifs-by_time-epoch_{epoch:03d}-step_{step:06d}-rollout_{rollout:.0f}
+  accelerator: auto
+  num_gpus_per_ensemble: 1
+  num_gpus_per_model: 1
+  # num_gpus_per_node: 1
+  # num_nodes: 1
+
+
+model:
+  activation: GELU
+  num_channels: 512
+  processor:
+    num_layers: 8
+    num_heads: 8
+    window_size: 608
+  encoder:
+    num_heads: 8
+  decoder:
+    num_heads: 8
+    initialise_data_extractor_zero: True
+
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+
+  bounding: []
+
+dataloader:
+  batch_size:
+    training: 2
+    validation: 2
+  limit_batches:
+    training: null
+    validation: 400
+
+training:
+  model_class: anemoi.training.train.forecaster.GraphEnsForecaster
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
+    num_gpus_per_ensemble: ${hardware.num_gpus_per_ensemble}
+    num_gpus_per_model: ${hardware.num_gpus_per_model}
+  ensemble_size_per_device: 2
+  precision: bf16-mixed
+  optimizer:
+    zero: False
+    kwargs:
+      weight_decay: 0.1
+      betas: [0.9, 0.95]
+      eps: 1e-7
+  max_epochs: 1000
+  multistep_input: 2
+  num_sanity_val_steps: 0  # start training directly
+
+  lr:
+    warmup: 1000
+    rate: 0.00025
+    iterations: 150000
+    min: 0.
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
+
+  pressure_level_scaler:
+    _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
+    minimum: 0.2
+    slope: 0.001
+
+  training_loss:
+    # loss class to initialise, can be anything subclassing torch.nn.Module
+    _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+    # other kwargs
+    alpha: 0.95
+    scalars: ['variable']
+    ignore_nans: False
+
+  validation_metrics:
+    # loss class to initialise, can be anything subclassing torch.nn.Module
+    - _target_: anemoi.training.losses.kcrps.KernelCRPS
+      # other kwargs
+      scalars: []
+      ignore_nans: False
+      fair: True
+    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+      scalars: []
+      ignore_nans: False
+      alpha: 0.95
+    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+      scalars: []
+      ignore_nans: False
+      alpha: 1.0
+
+  variable_loss_scaling:
+    default: 1
+    pl:
+      q: 0.6
+      t: 6 # 3?
+      u: 0.8
+      v: 0.5
+      w: 0.001
+      z: 12
+    sfc:
+      sp: 10
+      10u: 0.1
+      10v: 0.1
+      2d: 0.5
+      tp: 0.05
+      cp: 0.
+      sd: 0 #1
+
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    interval: 20
+    mlflow:
+      enabled: True
+      offline: True
+      experiment_name: 'zdebug112'
+      authentication: True
+      tracking_uri: 'https://mlflow.ecmwf.int'
+      run_name: 'small_test99'
+  profiler: False
+  enable_progress_bar: True

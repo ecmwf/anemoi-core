@@ -47,6 +47,8 @@ class BaseSchema(BaseModel):
     """Data configuration."""
     dataloader: DataLoaderSchema
     """Dataloader configuration."""
+    datamodule: Any
+    """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: HardwareSchema
@@ -95,6 +97,8 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Data configuration."""
     dataloader: Any
     """Dataloader configuration."""
+    datamodule: Any
+    """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: Any

@@ -4,16 +4,17 @@ cpu_offload: False
 output_mask: null
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiEnsModelEncProcDec
 
-
-# LayerKernels are optionally. If not specified, the default are pytorch.nn.LayerNorm and torch.nn.Linear.
-# TODO: Add to documentation: The query and key norms need to be autocast layer norms if flash attention is used.
 layer_kernels:
   processor:
     LayerNorm:
-      _target_: torch.nn.LayerNorm
+      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
       _partial_: True
+      normalized_shape: ${model.num_channels}
+      condition_shape: ${model.noise_injector.noise_channels_dim}
+      w_one_bias_zero_init: True
+      autocast: false
       #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear
@@ -42,42 +43,61 @@ layer_kernels:
     LayerNorm:
       _target_: torch.nn.LayerNorm
       _partial_: True
-      #Any arguments to your chosen function go here e.g.
+      #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear
       _partial_: True
-      #Any arguments to your chosen function go here e.g.
+      #Any arguments to your chosen function go here
+
+noise_injector:
+  _target_: anemoi.models.layers.ensemble.NoiseConditioning
+  _convert_: all
+  noise_std: 1
+  noise_channels_dim: 4
+  noise_mlp_hidden_dim: 32
+  inject_noise: True
 
 processor:
-  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  _target_: anemoi.models.layers.processor.TransformerProcessor
+  _convert_: all
   activation: ${model.activation}
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  window_size: 512
+  dropout_p: 0.0
+  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  qk_norm: True # Transformer and GraphTransformer only
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
-  qk_norm: False
+
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  _convert_: all
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: False
   cpu_offload: ${model.cpu_offload}
+
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  _convert_: all
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
   activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  initialise_data_extractor_zero: True
+  qk_norm: False # Transformer and GraphTransformer only
   cpu_offload: ${model.cpu_offload}
 
 trainable_parameters:
@@ -85,7 +105,6 @@ trainable_parameters:
   hidden: 8
   data2hidden: 8
   hidden2data: 8
-  hidden2hidden: 8 # GNN and GraphTransformer Processor only
 
 
 attributes:

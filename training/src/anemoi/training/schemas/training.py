@@ -76,8 +76,17 @@ class LR(BaseModel):
     "Number of iterations."
     min: NonNegativeFloat = Field(example=3e-7)
     "Minimum learning rate."
-    warmup_t: NonNegativeInt = Field(example=1000)
+    warmup: NonNegativeInt = Field(example=1000)
     "Number of warm up iteration. Default to 1000."
+
+
+class OptimizerSchema(BaseModel):
+    """Optimizer configuration."""
+
+    zero: bool = Field(example=False)
+    "Use Zero optimiser."
+    kwargs: dict[str, Any] = Field(default_factory=dict)
+    "Additional arguments to pass to the optimizer."
 
 
 class LossScalingSchema(BaseModel):
@@ -117,6 +126,8 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mae = "anemoi.training.losses.mae.WeightedMAELoss"
     logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
     huber = "anemoi.training.losses.huber.WeightedHuberLoss"
+    kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
+    afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
 
 
 class BaseLossSchema(BaseModel):
@@ -126,6 +137,19 @@ class BaseLossSchema(BaseModel):
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
+
+
+class KernelCRPSSchema(BaseLossSchema):
+    fair: bool = True
+    "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
+
+
+class AlmostFairKernelCRPSSchema(BaseLossSchema):
+    alpha: float = 1.0
+    """Factor for linear combination of fair (unbiased, ensemble variance component
+    weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
+    no_autocast: bool = True
+    "Deactivate autocast for the kernel CRPS calculation"
 
 
 class HuberLossSchema(BaseLossSchema):
@@ -169,7 +193,14 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = Union[BaseLossSchema, HuberLossSchema, WeightedMSELossLimitedAreaSchema, CombinedLossSchema]
+LossSchemas = Union[
+    BaseLossSchema,
+    HuberLossSchema,
+    WeightedMSELossLimitedAreaSchema,
+    CombinedLossSchema,
+    KernelCRPSSchema,
+    AlmostFairKernelCRPSSchema,
+]
 
 
 class GraphNodeAttributeSchema(BaseModel):
@@ -237,10 +268,14 @@ class TrainingSchema(BaseModel):
     "Sanity check runs n batches of val before starting the training routine."
     gradient_clip: GradientClip
     "Config for gradient clipping."
+    model_class: Any  # TODO: Fix this
+    "Forecaster to use."
+    strategy: Any  # TODO: Fix this
+    "Strategy to use."
+    ensemble_size_per_device: PositiveInt = Field(example=1)
+    "Number of ensemble member per device"
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
-    zero_optimizer: bool = Field(example=False)
-    "use ZeroRedundancyOptimizer, saves memory for larger models."
     training_loss: LossSchemas
     "Training loss configuration."
     loss_gradient_scaling: bool = False
@@ -257,6 +292,8 @@ class TrainingSchema(BaseModel):
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     lr: LR = Field(default_factory=LR)
     "Learning rate configuration."
+    optimizer: OptimizerSchema = Field(default_factory=OptimizerSchema)
+    "Optimizer configuration."
     variable_loss_scaling: LossScalingSchema
     "Configuration of the variable scaling used in the loss computation."
     pressure_level_scaler: PressureLevelScalerSchema

@@ -7,8 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .encoder_processor_decoder import AnemoiEnsModelEncProcDec
-from .encoder_processor_decoder import AnemoiModelEncProcDec
-from .hierarchical import AnemoiModelEncProcDecHierarchical
+from .ensforecaster import GraphEnsForecaster
+from .forecaster import GraphForecaster
 
-__all__ = ["AnemoiModelEncProcDec", "AnemoiEnsModelEncProcDec", "AnemoiModelEncProcDecHierarchical"]
+__all__ = ["GraphEnsForecaster", "GraphForecaster"]
