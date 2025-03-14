@@ -19,19 +19,25 @@ jobs:
           template: |
             set -eux
             module load python3
-            python -m venv .venv
-            source .venv/bin/activate
-            pip install --upgrade pip
 
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
 
             git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
             cd $REPO_NAME
+
+            python -m venv .venv
+            source .venv/bin/activate
+
+            pip install --upgrade pip
             pip install -e ./training
             pip install -e ./models
             pip install -e ./graphs
             pytest --longtests
+
+            deactivate
+
+            rm -rf $REPO_NAME
           sbatch_options: |
             #SBATCH --job-name=anemoi_core_pytest
             #SBATCH --time=00:10:00
