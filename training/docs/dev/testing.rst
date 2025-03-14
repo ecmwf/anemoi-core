@@ -161,11 +161,7 @@ overrides for parametrization of a small number of config values.
 3. Reducing Compute Load: Where possible, reduce the number of batches,
 epochs, and batch sizes.
 
-4. Subfolder Organization: Place test configuration modification files
-in a relevant subfolder within `training/tests/integration/` for clarity
-and ease of maintenance.
-
-5. Debugging and Failures: When integration tests fail, check the config
+4. Debugging and Failures: When integration tests fail, check the config
 files in `training/src/anemoi/training/config` for inconsistencies with
 the code and update the config files if necessary. Also check if
 test-time modifications have introduced unintended changes.
@@ -202,8 +198,9 @@ and managing configurations via configuration files.
 3. Prepare the Data: Ensure the required dataset is uploaded to the EWC
 S3 before adding the test. Please get in touch about access.
 
-4. Maintain Test Structure: Follow the repository structure by adding a
-separate subfolder in training/tests/integration.
+4. Subfolder Organization: Place your test and config files in a new 
+subfolder within `training/tests/integration/` for clarity
+and ease of maintenance.
 
 5. Handling Test Failures: Complex use cases will likely require more
 test-time modifications. Check if these have overwritten expected
