@@ -244,7 +244,7 @@ class WandbSchema(BaseModel):
     "Whether to log the gradients."
     parameters: bool
     "Whether to log the hyper parameters."
-    entity: Union[str, None] = None
+    entity: Union[str, None] = Field(default=None)
     "Username or team name where to send runs. This entity must exist before you can send runs there."
 
 
@@ -258,7 +258,7 @@ class MlflowSchema(BaseModel):
     log_model: Union[bool, Literal["all"]]
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
-    tracking_uri: Union[str, None]
+    tracking_uri: Union[str, None] = Field(default=None)
     "Address of local or remote tracking server."
     experiment_name: str
     "Name of experiment."
@@ -268,7 +268,7 @@ class MlflowSchema(BaseModel):
     "Activate system metrics."
     terminal: bool
     "Log terminal logs to MLflow."
-    run_name: Union[str, None]
+    run_name: Union[str, None] = Field(default=None)
     "Name of run."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
