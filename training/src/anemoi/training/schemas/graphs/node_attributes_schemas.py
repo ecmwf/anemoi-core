@@ -55,6 +55,14 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     "The anemoi-datasets variable to use."
 
 
+SingleAttributeSchema = Union[
+    PlanarAreaWeightSchema,
+    SphericalAreaWeightSchema,
+    CutOutMaskSchema,
+    NonmissingAnemoiDatasetVariableSchema,
+]
+
+
 class BooleanOperationSchema(BaseModel):
     target_: Literal[
         "anemoi.graphs.nodes.attributes.BooleanNot",
@@ -62,13 +70,6 @@ class BooleanOperationSchema(BaseModel):
         "anemoi.graphs.nodes.attributes.BooleanOrMask",
     ] = Field(..., alias="_target_")
     "Implementation of boolean masks from anemoi.graphs.nodes.attributes"
-    masks: Union[str, list[str]]
+    masks: Union[str, list[str], SingleAttributeSchema, list[SingleAttributeSchema]]
 
-
-NodeAttributeSchemas = Union[
-    PlanarAreaWeightSchema,
-    SphericalAreaWeightSchema,
-    CutOutMaskSchema,
-    NonmissingAnemoiDatasetVariableSchema,
-    BooleanOperationSchema,
-]
+NodeAttributeSchemas = Union[SingleAttributeSchema, BooleanOperationSchema,]
