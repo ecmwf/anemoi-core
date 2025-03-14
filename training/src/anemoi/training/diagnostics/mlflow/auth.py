@@ -20,11 +20,11 @@ from getpass import getpass
 from typing import TYPE_CHECKING
 
 import requests
-from multiurl.http import robust
 from requests.exceptions import HTTPError
 
 from anemoi.utils.config import load_config
 from anemoi.utils.config import save_config
+from anemoi.utils.remote import robust
 from anemoi.utils.timer import Timer
 
 REFRESH_EXPIRE_DAYS = 29
@@ -226,7 +226,7 @@ class TokenAuth:
         }
 
         try:
-            response = robust(requests.post, retry_after=60, maximum_tries=30)(
+            response = robust(requests.post)(
                 f"{self.url}/{path}",
                 headers=headers,
                 json=payload,

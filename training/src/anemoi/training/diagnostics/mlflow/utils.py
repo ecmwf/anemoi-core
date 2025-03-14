@@ -13,7 +13,8 @@ import os
 from typing import Any
 
 import requests
-from multiurl.http import robust
+
+from anemoi.utils.remote import robust
 
 
 def health_check(tracking_uri: str) -> None:
