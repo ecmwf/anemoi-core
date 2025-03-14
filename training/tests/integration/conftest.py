@@ -22,19 +22,25 @@ from omegaconf import OmegaConf
         ["model=graphtransformer"],
     ],
 )
-def architecture_config(request: pytest.FixtureRequest) -> None:
-    # TODO(Helen,Vera): docs need clarification on where to run tests (from top-level directory)
+def architecture_config(request: pytest.FixtureRequest, testing_modifications_with_temp_dir: OmegaConf) -> None:
     overrides = request.param
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_basic"):
         template = compose(
             config_name="debug",
             overrides=overrides,
         )  # apply architecture overrides to template since they override a default
-        global_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_training_cycle.yaml")
-        specific_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/test_basic.yaml")
-        cfg = OmegaConf.merge(template, global_modifications, specific_modifications)
+        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_basic.yaml")
+        cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
         OmegaConf.resolve(cfg)
         return cfg
+
+
+@pytest.fixture
+def testing_modifications_with_temp_dir(tmp_path: Path) -> OmegaConf:
+    testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/testing_modifications.yaml")
+    temp_dir = str(tmp_path)
+    testing_modifications.hardware.paths.output = temp_dir
+    return testing_modifications
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

@@ -1,5 +1,4 @@
 name: nightly-ci-integration-tests
-
 on:
   schedule:
     - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
@@ -11,9 +10,14 @@ on:
 
 jobs:
   integration_tests:
-    uses: ecmwf/reusable-workflows/.github/workflows/integration-tests.yml@add-integration-test-anemoi
-    with:
-      python-version: '3.10'
-      install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
-      test-directory: "training/tests/integration"
-      pytest-options: "--longtests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ecmwf/reusable-workflows/nightly-pytest
+        with:
+          repository: ${{github.repository}}
+          ref: ${{github.ref}}
+          python-version: '3.10'
+          install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
+          test-directory: "training/tests/integration"
+          pytest-options: "--longtests"
+          manual: ${{github.event_name == 'workflow_dispatch' && 'true' || 'false'}}

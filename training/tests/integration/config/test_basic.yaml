@@ -2,7 +2,6 @@
 hardware:
   files:
     dataset: aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
-    graph: test_graph.pt
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
 
