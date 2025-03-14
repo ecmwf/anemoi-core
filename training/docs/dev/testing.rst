@@ -154,8 +154,8 @@ consistency. We expect the templates to be consistent with the code base
 and have integration tests that check for this consistency.
 
 2. Test-specific Modifications: Apply only the necessary
-use-case-specific (e.g. dataset) and testing-specific (e.g. batch_size) 
-modifications to the template. Use a config modification yaml, or hydra 
+use-case-specific (e.g. dataset) and testing-specific (e.g. batch_size)
+modifications to the template. Use a config modification yaml, or hydra
 overrides for parametrization of a small number of config values.
 
 3. Reducing Compute Load: Where possible, reduce the number of batches,
@@ -176,14 +176,16 @@ Example of configuration handling
 For an example, see `training/tests/integration/test_training_cycle.py`.
 The test uses a configuration based on the template
 `training/src/anemoi/training/config/basic.py`, i.e. the basic global
-model. It applies testing-specific modifications to reduce batch_size etc.
-as detailed in `training/tests/integration/test_training_cycle.yaml`. It
-furthermore applies use-case-specific modifications as detailed in
+model. It applies testing-specific modifications to reduce batch_size
+etc. as detailed in
+`training/tests/integration/test_training_cycle.yaml`. It furthermore
+applies use-case-specific modifications as detailed in
 `training/tests/integration/test_basic.yaml` to provide the location of
 our testing dataset compatible with the global model.
 
-Note that we also parametrize the fixture `architecture_config` to override
-the default model configuration in order to test different model architectures.
+Note that we also parametrize the fixture `architecture_config` to
+override the default model configuration in order to test different
+model architectures.
 
 Adding a member state use case test
 ===================================
