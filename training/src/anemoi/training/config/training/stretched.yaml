@@ -1,12 +1,12 @@
 ---
 defaults:
-  - scalers: global
+  - scalers: regional
 
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
-transfer_learning: False # activate to perform transfer learning
-load_weights_only: False # only load model weights, do not restore optimiser states etc.
+load_weights_only: null # only load model weights, do not restore optimiser states etc.
+transfer_learning: null # activate to perform transfer learning
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -45,18 +45,19 @@ zero_optimizer: False
 # dynamic rescaling of the loss gradient
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
-loss_gradient_scaling: False
 
 # loss function for the model
 training_loss:
   # loss class to initialise
-  _target_: anemoi.training.losses.MSELoss
+  _target_: anemoi.training.losses.mse.MSELoss
   # Scalers to include in loss calculation
   # A selection of available scalers are listed in training/scalers/scalers.yaml
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
   scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
   ignore_nans: False
+
+loss_gradient_scaling: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
@@ -66,14 +67,26 @@ training_loss:
 validation_metrics:
   # loss class to initialise
   mse:
-    _target_: anemoi.training.losses.MSELoss
+    _target_: anemoi.training.losses.mse.MSELoss
     # Scalers to include in loss calculation
     # Cannot scale over the variable dimension due to possible remappings.
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: []
+    scalers: ['node_weights']
     # other kwargs
+    ignore_nans: True
+  mse_inside_lam_contribution:
+    _target_: anemoi.training.losses.mse.MSELoss
+    scalers: ['limited_area_mask', 'node_weights']
+    ignore_nans: True
+  mse_outside_lam_contribution:
+    _target_: anemoi.training.losses.mse.MSELoss
+    scalars: ['outside_lam_mask', 'node_weights']
+    ignore_nans: True
+  mse_inside_lam:
+    _target_: anemoi.training.losses.mse.MSELoss
+    scalars: ['limited_area_mask', 'lam_node_weights']
     ignore_nans: True
 
 # List of validation metrics to keep in normalised space, and scalers to be applied
@@ -81,7 +94,7 @@ validation_metrics:
 # Unlike above, variable scaling is possible due to these metrics being
 # calculated in the same way as the training loss, within the internal model space.
 scale_validation_metrics:
-  scalers_to_apply: ['general_variable', 'pressure_level', 'node_weights']
+  scalers_to_apply: ['general_variable', 'pressure_level', 'node_weights', 'limited_area_mask']
   metrics:
     - 'all'
     # - "*"
@@ -95,6 +108,7 @@ metrics:
 - t_850
 - u_850
 - v_850
+
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
@@ -117,5 +131,3 @@ lr:
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
 # in order to keep a constant global_lr
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
-
-submodules_to_freeze: []
