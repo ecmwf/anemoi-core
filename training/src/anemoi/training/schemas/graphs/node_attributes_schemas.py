@@ -72,4 +72,8 @@ class BooleanOperationSchema(BaseModel):
     "Implementation of boolean masks from anemoi.graphs.nodes.attributes"
     masks: Union[str, list[str], SingleAttributeSchema, list[SingleAttributeSchema]]
 
-NodeAttributeSchemas = Union[SingleAttributeSchema, BooleanOperationSchema,]
+
+NodeAttributeSchemas = Union[
+    SingleAttributeSchema,
+    BooleanOperationSchema,
+]

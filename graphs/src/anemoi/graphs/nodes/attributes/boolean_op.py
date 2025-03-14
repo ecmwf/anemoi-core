@@ -16,7 +16,6 @@ from typing import Type
 from typing import Union
 
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.nodes.attributes.base_attributes import BooleanBaseNodeAttribute
@@ -42,7 +41,7 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
                 attributes.dtype == torch.bool
             ), f"The mask attribute '{mask}' must be a boolean but is {attributes.dtype}."
             return attributes
-        
+
         return mask.get_raw_values(nodes, **kwargs)
 
     @abstractmethod
