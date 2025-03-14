@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import datetime
-import importlib
 import logging
 from functools import cached_property
 from pathlib import Path
@@ -21,6 +20,7 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from hydra.utils import get_class
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
@@ -165,9 +165,7 @@ class AnemoiTrainer:
             "supporting_arrays": self.supporting_arrays,
         }
 
-        module_name, class_name = self.config.training.task.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        model_class = getattr(module, class_name)
+        model_class = get_class(self.config.training.task)
         model = model_class(**kwargs)
 
         # Load the model weights

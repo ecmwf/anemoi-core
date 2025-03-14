@@ -65,7 +65,7 @@ class GraphInterpolator(GraphForecaster):
         self.target_forcing_indices = itemgetter(*config.training.target_forcing.data)(
             data_indices.data.input.name_to_index,
         )
-        if type(self.target_forcing_indices) is int:
+        if isinstance(self.target_forcing_indices, int):
             self.target_forcing_indices = [self.target_forcing_indices]
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
