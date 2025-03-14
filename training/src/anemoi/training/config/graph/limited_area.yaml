@@ -69,7 +69,8 @@ attributes:
       _target_: anemoi.graphs.nodes.attributes.CutOutMask
     boundary_mask:
       _target_: anemoi.graphs.nodes.attributes.BooleanNot
-      masks: cutout_mask
+      masks: 
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
   edges:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength

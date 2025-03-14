@@ -42,8 +42,8 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
                 attributes.dtype == torch.bool
             ), f"The mask attribute '{mask}' must be a boolean but is {attributes.dtype}."
             return attributes
-
-        return instantiate(mask).get_raw_values(nodes, **kwargs)
+        
+        return mask.get_raw_values(nodes, **kwargs)
 
     @abstractmethod
     def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor: ...
