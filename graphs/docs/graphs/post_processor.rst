@@ -69,21 +69,21 @@ preserved. For example:
 In this configuration, any node with the attribute `important_nodes` set
 will not be pruned, regardless of its connectivity status.
 
-
-*********************************
+************************************
  Edge Index Sorting Post-processors
-*********************************
+************************************
 
-The anemoi-graphs package provides two post-processors for sorting edge indices:
-``SortEdgeIndexBySourceNodes`` and ``SortEdgeIndexByTargetNodes``. These processors
-help organize the edge indices in a consistent order, which can be useful for
-deterministic behavior and improved performance in certain operations.
+The anemoi-graphs package provides two post-processors for sorting edge
+indices: ``SortEdgeIndexBySourceNodes`` and
+``SortEdgeIndexByTargetNodes``. These processors help organize the edge
+indices in a consistent order, which can be useful for deterministic
+behavior and improved performance in certain operations.
 
 SortEdgeIndexBySourceNodes
-=========================
+==========================
 
-This post-processor sorts all edge indices based on the source nodes. It can be
-configured to sort in either ascending or descending order:
+This post-processor sorts all edge indices based on the source nodes. It
+can be configured to sort in either ascending or descending order:
 
 .. code:: yaml
 
@@ -92,10 +92,10 @@ configured to sort in either ascending or descending order:
       descending: True  # optional, defaults to true
 
 SortEdgeIndexByTargetNodes
-=========================
+==========================
 
-Similar to the source node sorter, this post-processor sorts edge indices based
-on the target nodes:
+Similar to the source node sorter, this post-processor sorts edge
+indices based on the target nodes:
 
 .. code:: yaml
 
@@ -103,6 +103,6 @@ on the target nodes:
    - _target_: anemoi.graphs.processors.SortEdgeIndexByTargetNodes
       descending: True  # optional, defaults to true
 
-Both processors maintain the consistency of all edge attributes while sorting,
-ensuring that the relationship between edge indices and their corresponding
-attributes remains intact. 
+Both processors maintain the consistency of all edge attributes while
+sorting, ensuring that the relationship between edge indices and their
+corresponding attributes remains intact.
