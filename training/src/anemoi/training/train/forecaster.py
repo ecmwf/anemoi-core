@@ -119,8 +119,9 @@ class GraphForecaster(pl.LightningModule):
 
         # Check if the model is a stretched grid
         if graph_data["hidden"].node_type == "StretchedTriNodes":
-            mask_name = config.graph.nodes.hidden.node_builder.mask_attr_name
-            limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
+            graph_config = convert_to_omegaconf(self.config).graph
+            mask_name = graph_config.nodes.hidden.node_builder.mask_attr_name
+            limited_area_mask = graph_data[graph_config.data][mask_name].squeeze().bool()
         else:
             limited_area_mask = torch.ones((1,))
 
