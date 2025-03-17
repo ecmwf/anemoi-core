@@ -33,7 +33,8 @@ class RemoveUnconnectedNodesSchema(BaseModel):
 
 class SortEdgeIndexSchema(BaseModel):
     target_: Literal[
-        "anemoi.graphs.processors.SortEdgeIndexBySourceNodes", "anemoi.graphs.processors.SortEdgeIndexByTargetNodes",
+        "anemoi.graphs.processors.SortEdgeIndexBySourceNodes",
+        "anemoi.graphs.processors.SortEdgeIndexByTargetNodes",
     ] = Field(..., alias="_target_")
     "Post processor to sort edge indices based on either source or target nodes."
     descending: bool = Field(default=True, example=True)

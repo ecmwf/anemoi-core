@@ -164,6 +164,15 @@ class BaseSortEdgeIndex(PostProcessor, ABC):
         sort_indices = torch.sort(edges["edge_index"], descending=self.descending, dim=1)
         return sort_indices.indices[self.nodes_axis.value]
 
+    @staticmethod
+    def get_edge_dim(edge_attr: str) -> int:
+        # edge_index has shape (2, n_edges) and other edge attributes have (n_edges, attr_dim)
+        return int(edge_attr == "edge_index")
+
+    @staticmethod
+    def sort_by_indices(x: torch.Tensor, indices: torch.Tensor, dim: int = 1) -> torch.Tensor:
+        return x.index_select(dim=dim, index=indices)
+
     def update_graph(self, graph: HeteroData) -> HeteroData:
         """Sort all edge indices in the graph.
 
@@ -179,7 +188,9 @@ class BaseSortEdgeIndex(PostProcessor, ABC):
         """
         for (src, to, dst), edges in graph.edge_items():
             sort_indices = self.get_sorting_mask(edges)
-            edges["edge_index"] = edges["edge_index"][:, sort_indices]
+            for edge_attr in edges.edge_attr():
+                dim = BaseSortEdgeIndex.get_edge_dim(edge_attr)
+                edges[edge_attr] = BaseSortEdgeIndex.sort_by_indices(edges[edge_attr], sort_indices, dim=dim)
             graph[(src, to, dst)] = edges
         return graph
 

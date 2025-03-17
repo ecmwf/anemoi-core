@@ -131,7 +131,7 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
     """Base class for propagating an attribute from the nodes to the edges."""
 
-    node_idx: int = None
+    node_idx: NodesAxis | None = None
 
     def __init__(self, node_attr_name: str) -> None:
         self.node_attr_name = node_attr_name
@@ -149,55 +149,12 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
     """
     Copy an attribute of the source node to the edge.
-    Used for example to identify if an encoder edge originates from a LAM or global node.
-
-    Attributes
-    ----------
-    node_attr_name : str
-        Name of the node attribute to propagate.
-
-    Methods
-    -------
-    get_node_name(source_name, target_name)
-        Return the name of the node to copy.
-
-    get_raw_values(graph, source_name, target_name)
-        Computes the edge attribute from the source or target node attribute.
-
-    """
-
-    nodes_axis: NodesAxis | None = None
-
-    def __init__(self, node_attr_name: str) -> None:
-        super().__init__()
-        self.node_attr_name = node_attr_name
-        assert self.nodes_axis is not None, f"{self.__class__.__name__} must define the nodes_axis class attribute."
-
-    def get_node_name(self, graph: HeteroData, nodes_names: tuple[str, str]) -> torch.Tensor:
-        nodes_name = nodes_names[self.nodes_axis.value]
-        return graph[nodes_name][self.node_attr_name].numpy()
-
-    def get_raw_values(self, graph: HeteroData, source_name: str, target_name: str) -> np.ndarray:
-        node_attributes = self.get_node_name(source_name, target_name)
-        edge_index = graph[(source_name, "to", target_name)].edge_index
-        try:
-            return node_attributes[edge_index[self.nodes_axis.value]]
-
-        except KeyError:
-            raise KeyError(
-                f"{self.__class__.__name__} failed because the attribute '{self.node_attr_name}' is not defined for the nodes."
-            )
-
-
-class AttributeFromSourceNode(BaseAttributeFromNode):
-    """
-    Copy an attribute of the source node to the edge.
     """
 
     nodes_axis = NodesAxis.SOURCE
 
 
-class AttributeFromTargetNode(BaseAttributeFromNode):
+class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     """
     Copy an attribute of the target node to the edge.
     """
