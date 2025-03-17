@@ -35,9 +35,9 @@ jobs:
             source .venv/bin/activate
 
             pip install --upgrade pip
-            pip install -e ./training
-            pip install -e ./models
-            pip install -e ./graphs
+            pip install -e ./training[all,tests]
+            pip install -e ./models[all,tests]
+            pip install -e ./graphs[all,tests]
             python3 -m pytest training/tests/integration --longtests
 
             deactivate
