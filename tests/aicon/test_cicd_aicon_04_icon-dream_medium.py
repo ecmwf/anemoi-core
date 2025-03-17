@@ -10,7 +10,6 @@
 #
 # This script is not part of a productive ML workflow, but is
 # used for CI/CD!
-import datetime
 import os
 import pathlib
 import platform
@@ -31,7 +30,7 @@ os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).pa
 mpl.use("agg")
 
 
-def trainer(output_dir: Optional[str]=None) -> AnemoiTrainer:
+def trainer(output_dir: Optional[str] = None) -> AnemoiTrainer:
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
