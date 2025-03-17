@@ -40,7 +40,9 @@ The `scale_resolutions` parameter controls which refinement levels are included 
 
 - If an integer is provided (e.g., ``scale_resolutions: 4``), edges are computed for all levels from 1 up to and
 including that level (in this case, levels 1-4).
+
 - If a list is provided (e.g., ``scale_resolutions: [4]``), only edges at those specific levels are included.
+
 - If omitted, all possible refinement levels for the given nodes are used.
 
 .. note::
