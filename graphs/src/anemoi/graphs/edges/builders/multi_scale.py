@@ -68,8 +68,12 @@ class MultiScaleEdges(BaseEdgeBuilder):
         assert x_hops > 0, "Number of x_hops must be positive"
         self.x_hops = x_hops
         if isinstance(scale_resolutions, int):
-            scale_resolutions = list(range(scale_resolutions + 1))
-        assert min(scale_resolutions) > 0, "The scale_resolutions argument only supports positive integers."
+            assert scale_resolutions > 0, "The scale_resolutions argument only supports positive integers."
+            scale_resolutions = list(range(1, scale_resolutions + 1))
+        assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
+        assert (
+            scale_resolutions is None or min(scale_resolutions) > 0
+        ), "The scale_resolutions argument only supports positive integers."
         self.scale_resolutions = scale_resolutions
 
     @staticmethod
@@ -90,7 +94,15 @@ class MultiScaleEdges(BaseEdgeBuilder):
 
     def compute_edge_index(self, source_nodes: NodeStorage, _target_nodes: NodeStorage) -> torch.Tensor:
         edge_builder_cls = MultiScaleEdges.get_edge_builder_class(source_nodes.node_type)
+
+        # Get the refinement levels (or scales) at which to compute the neighbourhoods.
         scale_resolutions = self.scale_resolutions or source_nodes["_resolutions"]
+        if self.scale_resolutions is not None and max(self.scale_resolutions) > max(source_nodes["_resolutions"]):
+            LOGGER.warning(
+                f"Some scale resolutions may be ignored because they are greater than the resolution of the nodes ({max(source_nodes['_resolutions'])})."
+            )
+
+        # Add edges
         source_nodes = edge_builder_cls().add_edges(source_nodes, self.x_hops, scale_resolutions=scale_resolutions)
         adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
 
