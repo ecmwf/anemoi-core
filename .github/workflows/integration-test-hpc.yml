@@ -38,7 +38,7 @@ jobs:
             pip install -e ./training
             pip install -e ./models
             pip install -e ./graphs
-            pytest --longtests
+            python3 -m pytest training/tests/integration --longtests
 
             deactivate
 
