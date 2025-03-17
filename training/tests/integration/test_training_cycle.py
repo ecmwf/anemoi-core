@@ -14,6 +14,7 @@ import shutil
 import pytest
 from omegaconf import DictConfig
 
+from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
@@ -27,3 +28,7 @@ LOGGER = logging.getLogger(__name__)
 def test_training_cycle_architecture_configs(architecture_config: DictConfig) -> None:
     AnemoiTrainer(architecture_config).train()
     shutil.rmtree(architecture_config.hardware.paths.output)
+
+
+def test_config_validation_architecture_configs(architecture_config: DictConfig) -> None:
+    BaseSchema(**architecture_config)
