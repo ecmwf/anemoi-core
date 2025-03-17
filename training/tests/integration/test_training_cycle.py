@@ -28,8 +28,8 @@ def test_training_cycle_architecture_configs(architecture_config: DictConfig) ->
     AnemoiTrainer(architecture_config).train()
     shutil.rmtree(architecture_config.hardware.paths.output)
 
+
 @longtests
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
-def test_training_cycle_grid_configs(stretched_config) -> None:
+def test_training_cycle_grid_configs(stretched_config: DictConfig) -> None:
     AnemoiTrainer(stretched_config).train()
     shutil.rmtree(stretched_config.hardware.paths.output)
