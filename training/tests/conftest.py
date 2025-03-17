@@ -1,0 +1,35 @@
+# (C) Copyright 2025 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+
+import pytest
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--longtest",
+        action="store_true",
+        dest="longtest",
+        default=False,
+        help="enable longrundecorated tests",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the 'longtest' marker to avoid warnings."""
+    config.addinivalue_line("markers", "longtest: mark tests as long-running")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Automatically skip @pytest.mark.longrun tests unless --longtests is used."""
+    if not config.getoption("--longtest"):
+        skip_marker = pytest.mark.skip(reason="Skipping long test, use --longtests to enable")
+        for item in items:
+            if "longtest" in item.keywords:
+                item.add_marker(skip_marker)
