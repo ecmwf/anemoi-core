@@ -77,3 +77,4 @@ repos:
         - --disable=E113     # Disable empty docstrings
 ci:
   autoupdate_schedule: monthly
+  autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"

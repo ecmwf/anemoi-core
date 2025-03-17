@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.4.4...graphs-0.5.0) (2025-03-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** Improved configuration and data structures ([#79](https://github.com/ecmwf/anemoi-core/issues/79))
+
+### Features
+
+* **config:** Improved configuration and data structures ([#79](https://github.com/ecmwf/anemoi-core/issues/79)) ([1f7812b](https://github.com/ecmwf/anemoi-core/commit/1f7812b559b51d842852df29ace7dda6d0f66ef2))
+* **graphs:** migrate edge builders to torch-cluster ([#56](https://github.com/ecmwf/anemoi-core/issues/56)) ([f67da66](https://github.com/ecmwf/anemoi-core/commit/f67da664c18762e4c8a8cf0af9d4e97ec7315454))
+
+
+### Bug Fixes
+
+* **graphs:** make exception agnostic of zarr version ([#152](https://github.com/ecmwf/anemoi-core/issues/152)) ([f26adc9](https://github.com/ecmwf/anemoi-core/commit/f26adc969a0683711bc6a92a37e04e72d62ab57a))
+* **graphs:** support torch v2.6 ([#122](https://github.com/ecmwf/anemoi-core/issues/122)) ([dfef377](https://github.com/ecmwf/anemoi-core/commit/dfef377a48ff093ec193ce77c2f3333b87131920))
+
+
+### Documentation
+
+* Add subheadings to schema doc page ([#149](https://github.com/ecmwf/anemoi-core/issues/149)) ([d3c7de9](https://github.com/ecmwf/anemoi-core/commit/d3c7de905bced2dc9e75a92de4e9abf848936e62))
+* fix documentation to refer to anemoi datasets instead of zarr datasets ([#154](https://github.com/ecmwf/anemoi-core/issues/154)) ([ad062b2](https://github.com/ecmwf/anemoi-core/commit/ad062b22cdd05354bc010eabbf8ffa806def081c))
+* use new logo ([#140](https://github.com/ecmwf/anemoi-core/issues/140)) ([c269cea](https://github.com/ecmwf/anemoi-core/commit/c269cea3c84f2e35ef0a318e0cd1b769d285177c))
+
 ## 0.4.4 (2025-02-04)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
