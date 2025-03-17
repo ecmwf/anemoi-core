@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from enum import Enum
 
-import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
+
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
@@ -36,7 +37,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
         1,
     ), "Mask must have the same shape as the number of nodes."
 
-    nearest_neighbour = NearestNeighbors(metric="haversine", n_jobs=4)
+    nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
 
     nearest_neighbour.fit(coords_rad)
 
@@ -60,8 +61,9 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
     float
         The reference distance of the grid.
     """
-    nearest_neighbours = get_nearest_neighbour(coords_rad, mask)
-    dists, _ = nearest_neighbours.kneighbors(coords_rad, n_neighbors=2, return_distance=True)
+    xyz = latlon_rad_to_cartesian(coords_rad)
+    nearest_neighbours = get_nearest_neighbour(xyz, mask)
+    dists, _ = nearest_neighbours.kneighbors(xyz, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()
 
 
@@ -83,25 +85,28 @@ def concat_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> to
     return torch.unique(torch.cat([edge_indices1, edge_indices2], axis=1), dim=1)
 
 
-def haversine_distance(source_coords: np.ndarray, target_coords: np.ndarray) -> np.ndarray:
+def haversine_distance(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
     """Haversine distance.
 
     Parameters
     ----------
-    source_coords : np.ndarray of shape (N, 2)
+    source_coords : torch.Tensor of shape (N, 2)
         Source coordinates in radians.
-    target_coords : np.ndarray of shape (N, 2)
+    target_coords : torch.Tensor of shape (N, 2)
         Destination coordinates in radians.
 
     Returns
     -------
-    np.ndarray of shape (N,)
+    torch.Tensor of shape (N,)
         Haversine distance between source and destination coordinates.
     """
     dlat = target_coords[:, 0] - source_coords[:, 0]
     dlon = target_coords[:, 1] - source_coords[:, 1]
-    a = np.sin(dlat / 2) ** 2 + np.cos(source_coords[:, 0]) * np.cos(target_coords[:, 0]) * np.sin(dlon / 2) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    a = (
+        torch.sin(dlat / 2) ** 2
+        + torch.cos(source_coords[:, 0]) * torch.cos(target_coords[:, 0]) * torch.sin(dlon / 2) ** 2
+    )
+    c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
     return c
 
 
