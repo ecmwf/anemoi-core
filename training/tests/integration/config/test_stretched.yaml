@@ -43,9 +43,8 @@ data:
     - "lsm"
 
 training:
-  loss_scaling:
-    spatial:
-      cutout_weight_frac_of_global: 2 # ??? value in stretched config
+  node_loss_weights:
+    weight_frac_of_global: 2 # ??? value in stretched config
 
 
 hardware:
