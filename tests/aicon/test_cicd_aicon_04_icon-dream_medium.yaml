@@ -358,7 +358,7 @@ dataloader:
       #- ../dataset_20220101_20230101_6H.zarr
       #- ../forcings_20220101_20230101_6H.zarr
     start: "2022-01-01T00:00:00"
-    end: "2022-06-01T18:00:00"
+    end: "2022-01-04T00:00:00"
     frequency: ${data.frequency}
     drop: []
   validation:
@@ -368,8 +368,8 @@ dataloader:
       - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/forcings_20220101_20230101_6H.zarr
       #- ../dataset_20220101_20230101_6H.zarr
       #- ../forcings_20220101_20230101_6H.zarr
-    start: "2022-12-01T00:00:00"
-    end: "2022-12-03T18:00:00"
+    start: "2022-01-04T06:00:00"
+    end: "2022-01-06T06:00:00"
     frequency: ${data.frequency}
     drop: []
   test:

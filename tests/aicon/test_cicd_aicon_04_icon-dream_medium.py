@@ -15,6 +15,7 @@ import os
 import pathlib
 import platform
 import tempfile
+from typing import Optional
 
 import matplotlib as mpl
 import pytest
@@ -30,18 +31,13 @@ os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).pa
 mpl.use("agg")
 
 
-def trainer(shorten: bool = True) -> AnemoiTrainer:
+def trainer(output_dir: Optional[str]=None) -> AnemoiTrainer:
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
-    if shorten:
-        date = datetime.datetime.fromisoformat(config.dataloader.training.start)
-        date = date + datetime.timedelta(days=3)
-        config.dataloader.training.end = date.isoformat()
-        date = date + datetime.timedelta(hours=6)
-        config.dataloader.validation.start = date.isoformat()
-        date = date + datetime.timedelta(days=2)
-        config.dataloader.validation.end = date.isoformat()
+    if output_dir is not None:
+        config.hardware.paths.output = output_dir
+        config.hardware.paths.graph = output_dir
 
     grid_filename = config.graph.nodes.icon_mesh.node_builder.grid_filename
     with tempfile.NamedTemporaryFile(suffix=".nc") as grid_fp:
@@ -60,7 +56,8 @@ def trainer(shorten: bool = True) -> AnemoiTrainer:
 
 @pytest.fixture
 def get_trainer() -> tuple:
-    return trainer()
+    with tempfile.TemporaryDirectory() as output_dir:
+        return trainer(output_dir=output_dir)
 
 
 @pytest.mark.skipif(
@@ -75,4 +72,4 @@ def test_main(get_trainer: tuple) -> None:
 
 
 if __name__ == "__main__":
-    test_main(trainer(shorten=True))
+    test_main(trainer())
