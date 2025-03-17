@@ -39,7 +39,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
         The name of the target nodes.
     x_hops : int
         Number of hops (in the refined icosahedron) between two nodes to connect
-        them with an edge.    
+        them with an edge.
     scale_resolutions : Union[int, List[int], None]
         Defines the refinement levels at which edges are computed. If an integer is provided, edges are computed for all
         levels up to and including that level. For instance, `scale_resolutions=4` includes edges at levels 1 through 4,
@@ -59,14 +59,16 @@ class MultiScaleEdges(BaseEdgeBuilder):
     `MultiScaleEdges` only supports computing the edges within a set of nodes built by an `Type[IcosahedronNodes]`.
     """
 
-    def __init__(self, source_name: str, target_name: str, x_hops: int, scale_resolutions: int | list[int] | None, **kwargs):
+    def __init__(
+        self, source_name: str, target_name: str, x_hops: int, scale_resolutions: int | list[int] | None, **kwargs
+    ):
         super().__init__(source_name, target_name)
         assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
         assert isinstance(x_hops, int), "Number of x_hops must be an integer"
         assert x_hops > 0, "Number of x_hops must be positive"
         self.x_hops = x_hops
         if isinstance(scale_resolutions, int):
-            scale_resolutions = list(range(scale_resolutions+1))
+            scale_resolutions = list(range(scale_resolutions + 1))
         assert min(scale_resolutions) > 0, "The scale_resolutions argument only supports positive integers."
         self.scale_resolutions = scale_resolutions
 
