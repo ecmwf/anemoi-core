@@ -41,10 +41,15 @@ class LatLonNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, latitudes: list[float] | np.ndarray, longitudes: list[float] | np.ndarray, name: str) -> None:
+    def __init__(
+        self,
+        latitudes: list[float] | np.ndarray | torch.Tensor,
+        longitudes: list[float] | np.ndarray | torch.Tensor,
+        name: str,
+    ) -> None:
         super().__init__(name)
-        self.latitudes = latitudes if isinstance(latitudes, np.ndarray) else np.array(latitudes)
-        self.longitudes = longitudes if isinstance(longitudes, np.ndarray) else np.array(longitudes)
+        self.latitudes = latitudes if isinstance(latitudes, torch.Tensor) else torch.tensor(latitudes)
+        self.longitudes = longitudes if isinstance(longitudes, torch.Tensor) else torch.tensor(longitudes)
 
         assert len(self.latitudes) == len(
             self.longitudes
