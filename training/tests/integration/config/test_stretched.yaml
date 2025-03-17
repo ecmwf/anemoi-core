@@ -44,7 +44,7 @@ data:
 
 training:
   node_loss_weights:
-    weight_frac_of_global: .5 # ??? value in stretched config
+    weight_frac_of_total: .5 # ??? value in stretched config
 
 
 hardware:
