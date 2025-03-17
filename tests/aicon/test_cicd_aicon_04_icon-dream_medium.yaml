@@ -378,8 +378,8 @@ dataloader:
     end: null
     frequency: ${data.frequency}
   num_workers:
-    training: 8
-    validation: 8
+    training: 2
+    validation: 2
     test: 1
   grid_indices:
     _target_: anemoi.training.data.grid_indices.FullGrid
