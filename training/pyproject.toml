@@ -114,12 +114,7 @@ src = [ "src" ]
 exclude = [ "docs/" ]
 
 preview = true
-lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
-lint.pydocstyle.convention = "numpy"
-# Preserve types, even if a file imports `from __future__ import annotations`.
-# Necessary for supporting PEP 604 and pydantic with python 3.9
-lint.pyupgrade.keep-runtime-typing = true
-select = [
+lint.select = [
   "A", # flake8 builtins
   # "ANN", # flake8-annotations
   "ANN001", # Type annotation
@@ -178,8 +173,7 @@ select = [
   "YTT", # flake8-2020
 ]
 
-ignore = [
-  "UP007",
+lint.ignore = [
   "B018",
   "B028",
   "D100",
@@ -193,4 +187,10 @@ ignore = [
   "PT018",
   "S101",
   "TD003",
+  "UP007",
 ]
+lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
+lint.pydocstyle.convention = "numpy"
+# Preserve types, even if a file imports `from __future__ import annotations`.
+# Necessary for supporting PEP 604 and pydantic with python 3.9
+lint.pyupgrade.keep-runtime-typing = true
