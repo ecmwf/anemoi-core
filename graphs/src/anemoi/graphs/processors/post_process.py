@@ -188,10 +188,10 @@ class BaseSortEdgeIndex(PostProcessor, ABC):
         """
         for (src, to, dst), edges in graph.edge_items():
             sort_indices = self.get_sorting_mask(edges)
-            for edge_attr in edges.edge_attr():
-                dim = BaseSortEdgeIndex.get_edge_dim(edge_attr)
-                edges[edge_attr] = BaseSortEdgeIndex.sort_by_indices(edges[edge_attr], sort_indices, dim=dim)
-            graph[(src, to, dst)] = edges
+            for edge_attr_name in edges.edge_attrs():
+                dim = BaseSortEdgeIndex.get_edge_dim(edge_attr_name)
+                edge_attr = BaseSortEdgeIndex.sort_by_indices(edges[edge_attr_name], sort_indices, dim=dim)
+                graph[(src, to, dst)][edge_attr_name] = edge_attr
         return graph
 
 
