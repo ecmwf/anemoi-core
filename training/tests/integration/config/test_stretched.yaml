@@ -44,10 +44,12 @@ data:
 
 training:
   node_loss_weights:
-    weight_frac_of_global: 2 # ??? value in stretched config
+    weight_frac_of_global: .5 # ??? value in stretched config
 
 
 hardware:
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
   files:
     dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
     forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
