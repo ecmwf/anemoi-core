@@ -31,7 +31,7 @@ jobs:
             git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
             cd $REPO_NAME
 
-            python -m venv .venv
+            python3 -m venv .venv
             source .venv/bin/activate
 
             pip install --upgrade pip
