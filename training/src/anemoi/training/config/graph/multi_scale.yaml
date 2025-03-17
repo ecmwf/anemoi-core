@@ -34,7 +34,7 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
-    scale_resolutions: [1, 2, 3, 4, 5]
+    scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
