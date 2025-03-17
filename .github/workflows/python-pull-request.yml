@@ -3,6 +3,9 @@ name: Test PR
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - develop
   schedule:
     - cron: "9 2 * * 0" # at 9:02 on sunday
   workflow_dispatch:
