@@ -36,7 +36,7 @@ def architecture_config(request: pytest.FixtureRequest, testing_modifications_wi
 
 
 @pytest.fixture
-def stretched_config() -> None:
+def stretched_config(testing_modifications_with_temp_dir: OmegaConf) -> None:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
         template = compose(config_name="stretched")
         use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
