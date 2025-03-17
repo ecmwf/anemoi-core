@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
 import pytest
+import torch
 
 from anemoi.graphs.normalise import NormaliserMixin
 
@@ -25,9 +25,9 @@ def test_normaliser(norm: str):
             return self.normalise(data)
 
     normaliser = Normaliser(norm=norm)
-    data = np.random.rand(10, 5)
+    data = torch.rand(10, 5)
     normalised_data = normaliser(data)
-    assert isinstance(normalised_data, np.ndarray)
+    assert isinstance(normalised_data, torch.Tensor)
     assert normalised_data.shape == data.shape
 
 
@@ -44,7 +44,7 @@ def test_normaliser_wrong_norm(norm: str):
 
     with pytest.raises(ValueError):
         normaliser = Normaliser(norm=norm)
-        data = np.random.rand(10, 5)
+        data = torch.rand(10, 5)
         normaliser(data)
 
 
@@ -60,5 +60,5 @@ def test_normaliser_wrong_inheritance():
 
     with pytest.raises(AttributeError):
         normaliser = Normaliser(attr="attr_name")
-        data = np.random.rand(10, 5)
+        data = torch.rand(10, 5)
         normaliser(data)

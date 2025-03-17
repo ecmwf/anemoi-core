@@ -7,8 +7,8 @@ nodes:
       mask:
         _target_: anemoi.graphs.nodes.attributes.BooleanAndMask
         masks:
-        - _target_: anemoi.graphs.nodes.attributes.NonmissingZarrVariable
+        - _target_: anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable
           variable: var1
-        - _target_: anemoi.graphs.nodes.attributes.NonmissingZarrVariable
+        - _target_: anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable
           variable: var2
   hidden: ...
