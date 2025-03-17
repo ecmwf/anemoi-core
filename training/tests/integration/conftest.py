@@ -34,6 +34,15 @@ def architecture_config(request: pytest.FixtureRequest, testing_modifications_wi
         OmegaConf.resolve(cfg)
         return cfg
 
+@pytest.fixture()
+def stretched_config() -> None:
+    with initialize(version_base=None, config_path="", job_name="test_stretched"):
+        template = compose(config_name="stretched")
+        global_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_training_cycle.yaml")
+        specific_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_stretched.yaml")
+        cfg = OmegaConf.merge(template, global_modifications, specific_modifications)
+        OmegaConf.resolve(cfg)
+        return cfg
 
 @pytest.fixture
 def testing_modifications_with_temp_dir(tmp_path: Path) -> OmegaConf:
