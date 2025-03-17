@@ -39,7 +39,7 @@ def architecture_config(request: pytest.FixtureRequest, testing_modifications_wi
 def stretched_config() -> None:
     with initialize(version_base=None, config_path="", job_name="test_stretched"):
         template = compose(config_name="stretched")
-        use_case_modifications = OmegaConf.load(Path.cwd() / "tests/integration/test_stretched.yaml")
+        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
         cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
         OmegaConf.resolve(cfg)
         return cfg
