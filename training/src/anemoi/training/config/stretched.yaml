@@ -31,7 +31,7 @@ training:
     target_nodes: ${graph.data}
     node_attribute: area_weight
     scaled_attribute: cutout_mask
-    weight_frac_of_global: ???
+    weight_frac_of_total: ???
 hardware:
   files:
     dataset: ???
