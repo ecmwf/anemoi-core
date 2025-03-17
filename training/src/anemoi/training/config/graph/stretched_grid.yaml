@@ -1,7 +1,7 @@
 # Stretched grid graph config intended to be used with a cutout dataset.
 # The stretched mesh resolution used here is intended for o96 global resolution with 10km
 # limited area resolution.
-overwrite: False
+overwrite: True
 
 data: "data"
 hidden: "hidden"
@@ -18,7 +18,7 @@ nodes:
       lam_resolution: 8
       global_resolution: 5
       reference_node_name: ${graph.data}
-      mask_attr_name: cutout
+      mask_attr_name: cutout_mask
       margin_radius_km: 11
 
 edges:

@@ -12,7 +12,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import AreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.training.losses.nodeweights import GraphNodeAttribute
 from anemoi.training.losses.nodeweights import ReweightedGraphNodeAttribute
 
@@ -31,7 +31,7 @@ def fake_graph() -> HeteroData:
 
 
 def fake_sv_area_weights() -> torch.Tensor:
-    return AreaWeights(norm="unit-max", fill_value=0).compute(fake_graph(), "data").squeeze()
+    return SphericalAreaWeights(norm="unit-max", fill_value=0).compute(fake_graph(), "data").squeeze()
 
 
 def fake_reweighted_sv_area_weights(frac: float) -> torch.Tensor:
