@@ -49,10 +49,10 @@ training:
 
 hardware:
   paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
+    data: /home/mlx/ai-ml/datasets
   files:
-    dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
-    forcing_dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+    dataset: experimental/cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi.zarr
+    forcing_dataset: stable/aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6.zarr
     graph: test_stretched_graph.pt
 
 
