@@ -18,9 +18,9 @@ is to let us know by raising an issue on GitHub using the following steps:
 #. If you are interested in solving the issue yourself, assign
    the issue to yourself and follow the steps below.
 
-If you are interested in contributing to the development of 
+If you are interested in contributing to the development of
 the Anemoi packages, please follow the steps below:
-#. Fork the anemoi repository on GitHub to your personal/organisation 
+#. Fork the anemoi repository on GitHub to your personal/organisation
    account.
 #TODO: add link to Github tutorial
 #. Set up the development environment following the instructions below.
@@ -33,7 +33,7 @@ the Anemoi packages, please follow the steps below:
 #. Push your branch to your fork on GitHub.
 #. Open a Pull Request against the `main` branch of the original
    repository and fill in the Pull Request template.
-#. Request a review from maintainers or other contributors, which 
+#. Request a review from maintainers or other contributors, which
    will follow the code review process. # TODO add link to section below
 
 ****************************************
@@ -151,7 +151,7 @@ The generated documentation will be in `docs/_build/html/index.html`.
 *********************
  Code Review Process
 *********************
-The anemoi packages have a set of automated checks to enforce 
+The anemoi packages have a set of automated checks to enforce
 the coding guidelines.
 This is done through GitHub Actions, which will run the checks
 on every Pull Request.
@@ -169,4 +169,3 @@ The code review process contains the following steps:
 #. Once approved, a maintainer will merge your Pull Request into
    the appropriate branch.
 #TODO: rephrase
-
