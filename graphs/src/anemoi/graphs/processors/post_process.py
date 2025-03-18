@@ -17,6 +17,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
+
 # from anemoi.graphs.edges.attributes import EdgeBaseAttribute
 from anemoi.graphs.edges.attributes import EdgeLength
 
@@ -199,8 +200,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         for attr_name, edge_attr_builder in self.update_attrs.items():
             LOGGER.info(f"Updating edge attribute {attr_name}.")
             graph[self.edges_name][attr_name] = edge_attr_builder(
-                x = (graph[self.source_name], graph[self.target_name]), 
-                edge_index = graph[self.edges_name].edge_index
+                x=(graph[self.source_name], graph[self.target_name]), edge_index=graph[self.edges_name].edge_index
             )
         return graph
 
@@ -263,14 +263,12 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         source_nodes = graph[self.source_name]
         target_nodes = graph[self.target_name]
         edge_index = graph[self.edges_name].edge_index
-        lengths = EARTH_RADIUS*EdgeLength()(
-                  x=(source_nodes, target_nodes), edge_index=edge_index
-                  )
+        lengths = EARTH_RADIUS * EdgeLength()(x=(source_nodes, target_nodes), edge_index=edge_index)
         mask = torch.where(lengths < self.treshold, True, False).squeeze()
         cases = [
-                (self.source_mask_attr_name, source_nodes, 0),
-                (self.target_mask_attr_name, target_nodes, 1),
-                ]
+            (self.source_mask_attr_name, source_nodes, 0),
+            (self.target_mask_attr_name, target_nodes, 1),
+        ]
         for mask_attr_name, nodes, i in cases:
             if mask_attr_name:
                 attr_mask = nodes[mask_attr_name].squeeze()
