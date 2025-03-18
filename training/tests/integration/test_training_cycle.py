@@ -22,7 +22,7 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 LOGGER = logging.getLogger(__name__)
 
 
-@pytest.mark.longtest
+@pytest.mark.longtests
 def test_training_cycle_architecture_configs(architecture_config: DictConfig) -> None:
     AnemoiTrainer(architecture_config).train()
     shutil.rmtree(architecture_config.hardware.paths.output)

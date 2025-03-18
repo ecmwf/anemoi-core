@@ -13,23 +13,23 @@ import pytest
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
-        "--longtest",
+        "--longtests",
         action="store_true",
-        dest="longtest",
+        dest="longtests",
         default=False,
-        help="enable longrundecorated tests",
+        help="enable longtests decorated tests",
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the 'longtest' marker to avoid warnings."""
-    config.addinivalue_line("markers", "longtest: mark tests as long-running")
+    """Register the 'longtests' marker to avoid warnings."""
+    config.addinivalue_line("markers", "longtests: mark tests as long-running")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Automatically skip @pytest.mark.longrun tests unless --longtests is used."""
-    if not config.getoption("--longtest"):
+    if not config.getoption("--longtests"):
         skip_marker = pytest.mark.skip(reason="Skipping long test, use --longtests to enable")
         for item in items:
-            if "longtest" in item.keywords:
+            if item.get_closest_marker("longtests"):
                 item.add_marker(skip_marker)
