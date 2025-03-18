@@ -96,7 +96,7 @@ class TargetForcing(BaseModel):
     Extra forcing parameters to use as input to distinguish between different target times.
     """
 
-    data: list[str] = Field(default="insolation")
+    data: list[str] = Field(default=["insolation"])
 
 
 class LossScalingSchema(BaseModel):
