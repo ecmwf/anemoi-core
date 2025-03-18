@@ -5,6 +5,10 @@
 Thank you for your interest in Anemoi! This guide will show you how to
 contribute to the Anemoi packages.
 
+**************
+ Raise an issue
+**************
+
 If you encounter a bug or have a feature request, the first step is to
 let us know by raising an issue on GitHub using the following steps:
 
@@ -18,6 +22,10 @@ let us know by raising an issue on GitHub using the following steps:
    behaviour.
 #. If you are interested in solving the issue yourself, assign the issue
    to yourself and follow the steps below.
+
+***********************
+ Developing in Anemoi
+***********************
 
 For contributing to the development of the Anemoi packages, please
 follow these steps:
@@ -45,146 +53,6 @@ follow these steps:
 #. Request a review from maintainers or other contributors, which will
    follow the :ref:`code-review-process`.
 
-.. _setting-up-the-development-environment:
-
-****************************************
- Setting Up the Development Environment
-****************************************
-
-#. Clone the repository:
-
-   .. code:: bash
-
-      git clone https://github.com/ecmwf/anemoi-core/
-      cd anemoi-${package}
-
-#. Install dependencies:
-
-   .. code:: bash
-
-      # For all dependencies
-      pip install -e .
-
-      # For development dependencies
-      pip install -e '.[dev]'
-
-#. (macOS only) Install pandoc for documentation building:
-
-   .. code:: bash
-
-      brew install pandoc
-
-.. _pre-commit-hooks:
-
-******************
- Pre-Commit Hooks
-******************
-
-We use pre-commit hooks to ensure code quality and consistency. To set
-them up:
-
-#. Install pre-commit hooks:
-
-   .. code:: bash
-
-      pre-commit install
-
-#. Run hooks on all files to verify installation:
-
-   .. code:: bash
-
-      pre-commit run --all-files
-
-.. _development-guidelines:
-
-************************
- Development Guidelines
-************************
-
-Please follow these development guidelines:
-
-#. Ensure high-quality code with appropriate tests, documentation,
-   linting, and style checks.
-
-#. Follow the :ref:`branching-guidelines`.
-
-#. Open an issue before starting a feature or bug fix to discuss the
-   approach with maintainers.
-
-#. Make small, focused commits with clear and concise messages.
-
-#. Follow the `Conventional Commits guidelines
-   <https://www.conventionalcommits.org/>`_, e.g., "feat:", "fix:",
-   "docs:", etc.
-
-#. Use present tense and imperative mood in commit messages (e.g., "Add
-   feature" not "Added feature").
-
-#. Reference relevant issue numbers in commit messages when applicable.
-
-.. _branching-guidelines:
-
-**********************
- Branching Guidelines
-**********************
-
--  Use feature branches for new features (e.g., `feature/your-feature`)
--  Use fix branches for bug fixes (e.g., `fix/your-bug`)
--  Use a descriptive name that indicates the purpose of the branch
--  Keep branches up to date with `main` before opening a Pull Request
-
-.. _running-tests:
-
-***************
- Running Tests
-***************
-
-We use pytest for our test suite. To run tests:
-
-.. code:: bash
-
-   # Run all tests
-   pytest
-
-   # Run tests in a specific file
-   pytest tests/test_<file>.py
-
-Note: Some tests, like `test_gnn.py`, may run slower on CPU and are
-better suited for GPU execution.
-
-To run integration tests:
-
-.. code:: bash
-
-   pytest --slowtest
-
-.. _building-documentation:
-
-************************
- Building Documentation
-************************
-
-You can build the documentation locally to preview changes before
-submitting a Pull Request. We use Sphinx for documentation.
-
-You can install the dependencies for building the documentation with:
-
-.. code:: bash
-
-   pip install '.[docs]'
-
-To build the documentation locally:
-
-.. code:: bash
-
-   cd docs
-   make html
-
-The generated documentation will be in `docs/_build/html/index.html`.
-
-Documentation is also automatically generated for Pull Requests on
-ReadTheDocs.
-
 .. _code-review-process:
 
 *********************
@@ -195,10 +63,6 @@ The Anemoi packages have a set of automated checks to enforce coding
 guidelines. These checks are run via GitHub Actions on every Pull
 Request. For security reasons, maintainers must review code changes
 before enabling automated checks.
-
-**************
- Review Steps
-**************
 
 #. Ensure that all the :ref:`development-guidelines` criteria are met
    before submitting a Pull Request.
