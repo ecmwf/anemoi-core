@@ -45,7 +45,7 @@ class GLUActivationFunctions(str, Enum):
     GLU = "anemoi.models.layers.activations.GLU"
     SwiGLU = "anemoi.models.layers.activations.SwiGLU"
     ReGLU = "anemoi.models.layers.activations.ReGLU"
-    GEGLU = "anemoi.models.layers.activations.GEGLU"
+    GeGLU = "anemoi.models.layers.activations.GeGLU"
 
 
 class ActivationFunctionSchema(BaseModel):
@@ -58,8 +58,8 @@ class ActivationFunctionSchema(BaseModel):
 class GLUActivationFunctionSchema(ActivationFunctionSchema):
     target_: GLUActivationFunctions = Field(..., alias="_target_")
     "Activation function class implementation."
-    dim: NonNegativeInt
-    "Dimension of the layer on which the function is applied."
+    partial_: bool = Field(..., alias="_partial_")
+    "Should always be True to avoid using the same activation function object in the different layers."
 
 
 class TransformerModelComponent(BaseModel):
