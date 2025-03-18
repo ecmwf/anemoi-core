@@ -13,16 +13,13 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 
-from hydra.utils import instantiate
-
+import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
-import numpy as np
-
-from anemoi.graphs.edges.attributes import EdgeLength, BaseEdgeAttribute
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.utils.config import DotDict
+from anemoi.graphs.edges.attributes import BaseEdgeAttribute
+from anemoi.graphs.edges.attributes import EdgeLength
 
 LOGGER = logging.getLogger(__name__)
 
@@ -156,6 +153,7 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
 
         return connected_mask
 
+
 class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     """Base class for mask based edge processor.
 
@@ -181,7 +179,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     ) -> None:
         self.source_name = source_name
         self.target_name = target_name
-        self.edges_name = (self.source_name, 'to', self.target_name)
+        self.edges_name = (self.source_name, "to", self.target_name)
         self.update_attrs = update_attributes
         self.mask: torch.Tensor = None
 
@@ -189,7 +187,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         """Remove edges based on the mask passed."""
         for attr_name in graph[self.edges_name].edge_attrs():
             if attr_name == "edge_index":
-                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask] 
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask]
             else:
                 graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask, :]
 
@@ -223,7 +221,8 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         graph = self.removing_edges(graph)
         graph = self.update_attributes(graph)
         return graph
-    
+
+
 class RestrictEdgeLength(BaseEdgeMaskingProcessor):
     """Remove edges longer than a given treshold from the graph.
 
@@ -260,16 +259,16 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         self.target_mask_attr_name = target_mask_attr_name
 
     def compute_mask(self, graph: HeteroData) -> torch.Tensor:
-        lengths = EdgeLength().get_raw_values(graph, self.source_name, self.target_name)*EARTH_RADIUS
+        lengths = EdgeLength().get_raw_values(graph, self.source_name, self.target_name) * EARTH_RADIUS
         mask = np.where(lengths < self.treshold, True, False)
         if self.source_mask_attr_name:
-            source_attr_mask = graph[self.source_name][self.source_mask_attr_name][:,0]
-            source_indices = graph[self.edges_name]['edge_index'][0] 
+            source_attr_mask = graph[self.source_name][self.source_mask_attr_name][:, 0]
+            source_indices = graph[self.edges_name]["edge_index"][0]
             source_mask = np.vectorize(lambda i: source_attr_mask[i])(source_indices)
             mask = np.logical_or(mask, ~source_mask)
         if self.target_mask_attr_name:
-            target_attr_mask = graph[self.target_name][self.target_mask_attr_name][:,0]
-            target_indices = graph[self.edges_name]['edge_index'][1] 
+            target_attr_mask = graph[self.target_name][self.target_mask_attr_name][:, 0]
+            target_indices = graph[self.edges_name]["edge_index"][1]
             target_mask = np.vectorize(lambda i: target_attr_mask[i])(target_indices)
-            mask = np.logical_or(mask, ~target_mask)    
+            mask = np.logical_or(mask, ~target_mask)
         return mask
