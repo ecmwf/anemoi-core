@@ -12,7 +12,6 @@
 # used for CI/CD!
 import os
 import pathlib
-import platform
 import tempfile
 from typing import Optional
 
@@ -57,6 +56,7 @@ def trainer(output_dir: Optional[str] = None) -> AnemoiTrainer:
 def get_trainer() -> tuple:
     with tempfile.TemporaryDirectory() as output_dir:
         return trainer(output_dir=output_dir)
+
 
 @pytest.mark.longtests
 def test_main(get_trainer: tuple) -> None:
