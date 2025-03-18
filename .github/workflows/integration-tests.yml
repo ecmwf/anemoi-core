@@ -3,6 +3,10 @@ on:
   schedule:
     - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
   workflow_dispatch:
+  push:
+    branches:
+      # - main
+      - ci/fix-longrun-marker
 
 jobs:
   integration_tests:
