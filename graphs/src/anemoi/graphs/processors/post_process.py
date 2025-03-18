@@ -13,12 +13,11 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 
-import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.graphs.edges.attributes import BaseEdgeAttribute
+# from anemoi.graphs.edges.attributes import EdgeBaseAttribute
 from anemoi.graphs.edges.attributes import EdgeLength
 
 LOGGER = logging.getLogger(__name__)
@@ -197,10 +196,12 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
 
     def update_attributes(self, graph: HeteroData) -> HeteroData:
-        for attr_name, EdgeAttr in self.update_attrs.items():
-            assert isinstance(EdgeAttr, BaseEdgeAttribute), "{attr_name} should point to a known edge builder."
+        for attr_name, edge_attr_builder in self.update_attrs.items():
             LOGGER.info(f"Updating edge attribute {attr_name}.")
-            graph[self.edges_name][attr_name] = EdgeAttr.compute(graph, self.edges_name)
+            graph[self.edges_name][attr_name] = edge_attr_builder(
+                x = (graph[self.source_name], graph[self.target_name]), 
+                edge_index = graph[self.edges_name].edge_index
+            )
         return graph
 
     def update_graph(self, graph: HeteroData) -> HeteroData:
@@ -259,16 +260,20 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         self.target_mask_attr_name = target_mask_attr_name
 
     def compute_mask(self, graph: HeteroData) -> torch.Tensor:
-        lengths = EdgeLength().get_raw_values(graph, self.source_name, self.target_name) * EARTH_RADIUS
-        mask = np.where(lengths < self.treshold, True, False)
-        if self.source_mask_attr_name:
-            source_attr_mask = graph[self.source_name][self.source_mask_attr_name][:, 0]
-            source_indices = graph[self.edges_name]["edge_index"][0]
-            source_mask = np.vectorize(lambda i: source_attr_mask[i])(source_indices)
-            mask = np.logical_or(mask, ~source_mask)
-        if self.target_mask_attr_name:
-            target_attr_mask = graph[self.target_name][self.target_mask_attr_name][:, 0]
-            target_indices = graph[self.edges_name]["edge_index"][1]
-            target_mask = np.vectorize(lambda i: target_attr_mask[i])(target_indices)
-            mask = np.logical_or(mask, ~target_mask)
+        source_nodes = graph[self.source_name]
+        target_nodes = graph[self.target_name]
+        edge_index = graph[self.edges_name].edge_index
+        lengths = EARTH_RADIUS*EdgeLength()(
+                  x=(source_nodes, target_nodes), edge_index=edge_index
+                  )
+        mask = torch.where(lengths < self.treshold, True, False).squeeze()
+        cases = [
+                (self.source_mask_attr_name, source_nodes, 0),
+                (self.target_mask_attr_name, target_nodes, 1),
+                ]
+        for mask_attr_name, nodes, i in cases:
+            if mask_attr_name:
+                attr_mask = nodes[mask_attr_name].squeeze()
+                edge_mask = attr_mask[edge_index[i]]
+                mask = torch.logical_or(mask, ~edge_mask)
         return mask
