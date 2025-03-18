@@ -41,13 +41,3 @@ def testing_modifications_with_temp_dir(tmp_path: Path) -> OmegaConf:
     temp_dir = str(tmp_path)
     testing_modifications.hardware.paths.output = temp_dir
     return testing_modifications
-
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption(
-        "--longtests",
-        action="store_true",
-        dest="longtests",
-        default=False,
-        help="enable longrundecorated tests",
-    )
