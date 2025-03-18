@@ -17,7 +17,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         dest="longtests",
         default=False,
-        help="enable longtests decorated tests",
+        help="enable tests marked as longtests",
     )
 
 
@@ -27,7 +27,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Automatically skip @pytest.mark.longrun tests unless --longtests is used."""
+    """Automatically skip @pytest.mark.longtests tests unless --longtests is used."""
     if not config.getoption("--longtests"):
         skip_marker = pytest.mark.skip(reason="Skipping long test, use --longtests to enable")
         for item in items:
