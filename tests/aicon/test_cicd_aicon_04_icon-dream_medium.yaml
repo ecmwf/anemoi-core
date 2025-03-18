@@ -19,14 +19,6 @@
 # set to true to switch off config validation
 no_validation: False
 
-defaults:
-  - model: gnn
-  - training: default
-  - diagnostics: evaluation
-  #- override hydra/job_logging: none
-  #- override hydra/hydra_logging: none
-  - _self_
-
 hardware:
   paths:
     graph: none
@@ -168,6 +160,12 @@ data:
     default: "none"
 
 model:
+  output_mask: null
+  cpu_offload: False
+
+  model:
+    _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+
   num_channels: 5 # reduced for CI/CD test. original value 512
   activation: GELU
   processor:
@@ -178,6 +176,7 @@ model:
     num_layers: 2
     num_chunks: 2
     mlp_extra_layers: 0
+    cpu_offload: ${model.cpu_offload}
   encoder:
     _target_: anemoi.models.layers.mapper.GNNForwardMapper
     trainable_size: ${model.trainable_parameters.data2hidden}
@@ -185,6 +184,7 @@ model:
     activation: ${model.activation}
     num_chunks: 1
     mlp_extra_layers: 0
+    cpu_offload: ${model.cpu_offload}
   decoder:
     _target_: anemoi.models.layers.mapper.GNNBackwardMapper
     trainable_size: ${model.trainable_parameters.hidden2data}
@@ -192,6 +192,7 @@ model:
     activation: ${model.activation}
     num_chunks: 1
     mlp_extra_layers: 0
+    cpu_offload: ${model.cpu_offload}
   attributes:
     edges:
     - edge_length
@@ -208,6 +209,11 @@ model:
       variables: []
 
 training:
+  run_id: null
+  fork_run_id: null
+  transfer_learning: False # activate to perform transfer learning
+  submodules_to_freeze: []
+  num_sanity_val_steps: 2
   load_weights_only: false
   deterministic: false
   precision: 16-mixed
@@ -225,27 +231,40 @@ training:
     start: 1
     epoch_increment: 1
     max: 1
-  max_epochs: 2
+  max_epochs: 1
   lr:
     rate: 6.25e-05
     iterations: 300000
     min: 3.0e-07
+    warmup_t: 1000
   variable_loss_scaling:
     default: 1
     pl:
       P: 1
-    #  T: 6
-    #  U: 0.8
-    #  V: 0.5
-    #  QV: 0.001
-    #  PS: 10
     sfc: {}
+  metrics: []
+  training_loss:
+    _target_: anemoi.training.losses.mse.WeightedMSELoss
+    scalars: ['variable', 'loss_weights_mask']
+  node_loss_weights:
+    _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
+    target_nodes: ${graph.data}
+    node_attribute: area_weight
+  validation_metrics:
+    - _target_: anemoi.training.losses.mse.WeightedMSELoss
+      scalars: []
+      ignore_nans: False
+
+  scale_validation_metrics:
+    scalars_to_apply: ['variable']
+    metrics:
+      - 'all'
+  pressure_level_scaler:
+    _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
+    minimum: 0.2
+    slope: 0.001
 
 diagnostics:
-#  eval:
-#    enabled: false
-#    rollout: 12
-#    frequency: 20
   plot:
     asynchronous: True # Whether to plot asynchronously
     datashader: True # Choose which technique to use for plotting
@@ -269,41 +288,7 @@ diagnostics:
     # Precipitation and related fields
     precip_and_related_fields: [tp, cp]
 
-    callbacks:
-      # Add plot callbacks here
-      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
-        every_n_epochs: 5
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
-        # group parameters by categories when visualizing contributions to the loss
-        # one-parameter groups are possible to highlight individual parameters
-        parameter_groups:
-          moisture: [tp, cp, tcw]
-          sfc_wind: [10u, 10v]
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
-        sample_idx: ${diagnostics.plot.sample_idx}
-        per_sample : 6
-        parameters: ${diagnostics.plot.parameters}
-        #Defining the accumulation levels for precipitation related fields and the colormap
-        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
-        cmap_accumulation: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
-        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
-
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
-        # every_n_batches: 100 # Override for batch frequency
-        # min_delta: 0.01 # Minimum distance between two consecutive points
-        sample_idx: ${diagnostics.plot.sample_idx}
-        parameters:
-        - z_500
-        - tp
-        - 2t
-        - 10u
-        - 10v
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
-        sample_idx: ${diagnostics.plot.sample_idx}
-        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
-        parameters:
-        - U_119
-        - V_119
+    callbacks: []
 
   debug:
     anomaly_detection: false
@@ -320,23 +305,57 @@ diagnostics:
       num_models_saved: 0
   log:
     wandb:
-      enabled: false
-      entity: "{}" # @Helen. can be `???` with pydantic, must be `{}` otherwise
+      enabled: False
+      offline: False
+      log_model: False
+      project: 'Anemoi'
+      entity: null
+      # logger options (these probably come with some overhead)
+      gradients: False
+      parameters: False
     tensorboard:
       enabled: false
     mlflow:
-      enabled: true
+      enabled: False
       offline: True
-      log_model: false
+      authentication: False
+      log_model: False
+      tracking_uri: null
       experiment_name: 'cicd_test'
-      project_name: AICON
-      system: false
-      terminal: false
-      run_name: "R3B5 6hr loss_scaling=1"
-      tracking_uri: "none" # @Helen: must be string without pydantic
+      project_name: 'AICON'
+      system: False
+      terminal: False
+      run_name: null # If set to null, the run name will be the a random UUID
+      on_resume_create_child: True
+      expand_hyperparams: # Which keys in hyperparams to expand
+        - config
+      http_max_retries: 35
     interval: 100
+  enable_checkpointing: False
   enable_progress_bar: true
   print_memory_summary: false
+  benchmark_profiler:
+    # Use anemoi-profile to profile the training process
+    memory:
+      enabled: True
+      steps: 5 # wait warmup steps and then do steps (too many steps would lead to a big file)
+      warmup: 2
+      extra_plots: False
+      trace_rank0_only: False #set to true and it will profile rank 0 only. Reads SLURM_PROC_ID so won't work when not running via Slurm
+    time:
+      enabled: True
+      verbose: False #If true, output every action the profiler caputres, otherwise output a subset defined in PROFILER_ACTIONS at the top of aifs/diagnostics/profiler.py
+    speed:
+      enabled: True
+    system:
+      enabled: True
+    model_summary:
+      enabled: True
+    snapshot:
+      enabled: True
+      steps: 4 # wait warmup steps and then do steps
+      warmup: 0
+
 
 dataloader:
   prefetch_factor: 1
