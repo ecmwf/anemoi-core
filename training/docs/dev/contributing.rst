@@ -9,23 +9,18 @@ If you encounter a bug or have a feature request, the first step is to
 let us know by raising an issue on GitHub using the following steps:
 
 #. Check the existing issues to avoid duplicates.
-
 #. If it's a new issue, create a detailed bug report or feature request
    by filling in the issue template.
-
 #. Use clear, descriptive titles and provide as much relevant
    information as possible.
-
 #. If you have a bug, include the steps to reproduce it.
-
 #. If you have a feature request, describe the use case and expected
    behaviour.
-
 #. If you are interested in solving the issue yourself, assign the issue
    to yourself and follow the steps below.
 
-For contributing to the development of the Anemoi packages, please follow
-these steps:
+For contributing to the development of the Anemoi packages, please
+follow these steps:
 
 #. Fork the anemoi repository on GitHub to your personal/organisation
    account. See the `GitHub tutorial
