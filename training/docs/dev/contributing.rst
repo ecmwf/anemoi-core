@@ -2,8 +2,23 @@
  Contributing
 ##############
 
-Thank you for your interest in contributing to Anemoi Training! This
+Thank you for your interest in contributing to Anemoi ${package}! This
 guide will help you get started with the development process.
+
+#. Fork the anemoi repository on GitHub to your personal/organisation 
+   account. 
+#TODO: add link to Github tutorial
+#. Set up the development environment following the instructions below.
+#TODO: add reference
+#. Create a new branch for your developments.
+#TODO: Add branch guideline. Add reference
+#. Make your changes and ensure that your changes adheres to the
+   coding guidelines.
+#. Commit the changes using the `Commit Guidelines`_ above.
+#. Push your branch to your fork on GitHub.
+#. Open a Pull Request against the `main` branch of the original
+   repository and fill in the Pull Request template.
+#. Request a review from maintainers or other contributors.
 
 ****************************************
  Setting Up the Development Environment
@@ -13,8 +28,8 @@ guide will help you get started with the development process.
 
    .. code:: bash
 
-      git clone https://github.com/ecmwf/anemoi-training/
-      cd anemoi-training
+      git clone https://github.com/ecmwf/anemoi-core/
+      cd anemoi-${package}
 
 #. Install dependencies:
 
@@ -70,22 +85,6 @@ When committing code changes:
    feature" not "Added feature").
 
 #. Reference relevant issue numbers in commit messages when applicable.
-
-#. Update the ``CHANGELOG.md`` file with a human-friendly summary of
-   your changes.
-
-**********************
- Pull Request Process
-**********************
-
-#. Create a new branch for your feature or bug fix.
-#. Make your changes and commit them using the guidelines above.
-#. Push your branch to your fork on GitHub.
-#. Open a Pull Request against the `develop` branch of the main
-   repository.
-#. Ensure all tests pass and the code adheres to the project's style
-   guidelines.
-#. Request a review from maintainers or other contributors.
 
 ***************
  Running Tests
