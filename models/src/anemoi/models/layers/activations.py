@@ -66,3 +66,19 @@ class GeGLU(GLU):
 
     def __init__(self):
         super().__init__(nn.GELU())
+
+
+class Sine(nn.Module):
+    """Sine activation function.
+
+    Periodic activation function defined as:
+
+    Equation: Sine(x, w, phi) = sin(w x + phi)
+    """
+    def __init__(self, w = 1, phi = 0):
+        super().__init__()
+        self.w = w
+        self.phi = phi
+
+    def forward(self, x):
+        return torch.sin(self.w * x + self.phi)
