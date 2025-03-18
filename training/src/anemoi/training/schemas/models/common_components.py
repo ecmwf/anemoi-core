@@ -8,7 +8,6 @@
 #
 
 from enum import Enum
-from typing import Union
 
 from pydantic import Field
 from pydantic import NonNegativeInt

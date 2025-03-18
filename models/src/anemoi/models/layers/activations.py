@@ -75,7 +75,8 @@ class Sine(nn.Module):
 
     Equation: Sine(x, w, phi) = sin(w x + phi)
     """
-    def __init__(self, w = 1, phi = 0):
+
+    def __init__(self, w=1, phi=0):
         super().__init__()
         self.w = w
         self.phi = phi
