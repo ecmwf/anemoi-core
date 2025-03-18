@@ -13,6 +13,7 @@ import os
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
+from typing import Union
 
 import einops
 import torch
@@ -36,8 +37,10 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
-# Number of Mapper chunks used during inference (https://github.com/ecmwf/anemoi-models/pull/46)
+# Number of chunks used in inference (https://github.com/ecmwf/anemoi-models/pull/46)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
+NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
+NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
 
 
 class BaseBlock(nn.Module, ABC):
@@ -389,6 +392,20 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
                 linear(hidden_dim, out_channels),
             )
 
+    def get_qkve(
+        self,
+        x: OptPairTensor,
+        edge_attr: Tensor,
+    ):
+        x_src, x_dst = x if isinstance(x, tuple) else (x, x)
+
+        query = self.lin_query(x_dst)
+        key = self.lin_key(x_src)
+        value = self.lin_value(x_src)
+        edges = self.lin_edge(edge_attr)
+
+        return query, key, value, edges
+
     def shard_qkve_heads(
         self,
         query: Tensor,
@@ -400,6 +417,11 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Shards qkv and edges along head dimension."""
+        if model_comm_group is not None:
+            assert (
+                model_comm_group.size() == 1 or batch_size == 1
+            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+
         shape_src_nodes, shape_dst_nodes, shape_edges = shapes
 
         query, key, value, edges = (
@@ -422,6 +444,39 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         )
 
         return query, key, value, edges
+
+    def attention_block(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        size: Union[int, tuple[int, int]],
+        num_chunks: int,
+    ) -> Tensor:
+        conv_size = size if isinstance(size, tuple) else None
+
+        if num_chunks > 1:
+            # split 1-hop edges into chunks, compute self.conv chunk-wise and aggregate
+            edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
+                num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
+            )
+            # shape: (num_nodes, num_heads, out_channels_conv)
+            out = torch.zeros((*query.shape[:2], self.out_channels_conv), device=query.device)
+            for i in range(num_chunks):
+                out += self.conv(
+                    query=query,
+                    key=key,
+                    value=value,
+                    edge_attr=edge_attr_list[i],
+                    edge_index=edge_index_list[i],
+                    size=conv_size,
+                )
+        else:
+            out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=conv_size)
+
+        return out
 
     def shard_output_seq(
         self,
@@ -447,8 +502,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
+        size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
     ): ...
 
 
@@ -515,8 +570,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
+        size: tuple[int, int],
         model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
     ):
         x_skip = x
 
@@ -526,52 +581,29 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         )
 
         x_r = self.lin_self(x[1])
-        query = self.lin_query(x[1])
-        key = self.lin_key(x[0])
-        value = self.lin_value(x[0])
-        edges = self.lin_edge(edge_attr)
 
-        if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+        query, key, value, edges = self.get_qkve(x, edge_attr)
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
-        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE
+        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
 
-        if num_chunks > 1:
-            # split 1-hop edges into chunks, compute self.conv chunk-wise and aggregate
-            edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
-                num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
-            )
-            out = torch.zeros((x[1].shape[0], self.num_heads, self.out_channels_conv), device=x[1].device)
-            for i in range(num_chunks):
-                out += self.conv(
-                    query=query,
-                    key=key,
-                    value=value,
-                    edge_attr=edge_attr_list[i],
-                    edge_index=edge_index_list[i],
-                    size=size,
-                )
-        else:
-            out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
+        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
 
         out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
 
-        # compute out = self.projection(out + x_r) in chunks:
+        # out = self.projection(out + x_r) in chunks:
         out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)
 
         out = out + x_skip[1]
 
-        # compute nodes_new_dst = self.node_dst_mlp(out) + out in chunks:
+        # nodes_new_dst = self.node_dst_mlp(out) + out in chunks:
         nodes_new_dst = torch.cat(
             [self.node_dst_mlp(chunk) + chunk for chunk in out.tensor_split(num_chunks, dim=0)], dim=0
         )
 
         if self.update_src_nodes:
-            # compute nodes_new_src = self.node_src_mlp(out) + out in chunks:
+            # nodes_new_src = self.node_src_mlp(out) + out in chunks:
             nodes_new_src = torch.cat(
                 [self.node_src_mlp(chunk) + chunk for chunk in x_skip[0].tensor_split(num_chunks, dim=0)], dim=0
             )
@@ -644,30 +676,31 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
+        size: int,
         model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
     ):
         x_skip = x
 
         x = self.layer_norm_attention(x)
         x_r = self.lin_self(x)
-        query = self.lin_query(x)
-        key = self.lin_key(x)
-        value = self.lin_value(x)
 
-        edges = self.lin_edge(edge_attr)
-
-        if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+        query, key, value, edges = self.get_qkve(x, edge_attr)
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
-        out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
+
+        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
+
+        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
+
         out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
-        out = self.projection(out + x_r)
+
+        # out = self.projection(out + x_r) in chunks:
+        out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)
 
         out = out + x_skip
-        nodes_new = self.node_dst_mlp(out) + out
+        # nodes_new = self.node_dst_mlp(out) + out in chunks:
+        nodes_new = torch.cat(
+            [self.node_dst_mlp(chunk) + chunk for chunk in out.tensor_split(num_chunks, dim=0)], dim=0
+        )
 
         return nodes_new, edge_attr
