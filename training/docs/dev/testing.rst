@@ -138,6 +138,16 @@ top-level directory of anemoi-core run:
 
    pytest training/tests/integration --longtests
 
+For long-running integration tests, we use the `--longtests` flag to
+ensure that they are run only when necessary. This means that you should
+add the correspondong marker to these tests:
+
+.. code:: python
+
+   @pytest.mark.longtests
+   def test_long():
+         pass
+
 **********************************************
  Integration tests and member state use cases
 **********************************************
