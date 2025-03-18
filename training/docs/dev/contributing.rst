@@ -5,18 +5,17 @@
 Thank you for your interest in contributing to Anemoi ${package}! This
 guide will help you get started with the development process.
 
-#. Fork the anemoi repository on GitHub to your personal/organisation 
+#. Fork the anemoi repository on GitHub to your personal/organisation
    account.
 #. Set up the development environment following the instructions below.
 #. Create a new branch for your developments.
-#. Make your changes and ensure that your changes adheres to the
-   coding guidelines.
+#. Make your changes and ensure that your changes adheres to the coding
+   guidelines.
 #. Commit the changes using the `Commit Guidelines`_ above.
 #. Push your branch to your fork on GitHub.
 #. Open a Pull Request against the `main` branch of the original
    repository and fill in the Pull Request template.
 #. Request a review from maintainers or other contributors.
-
 
 ****************************************
  Setting Up the Development Environment
