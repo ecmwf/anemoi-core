@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------
 
 # set to true to switch off config validation
-no_validation: True
+no_validation: False
 
 defaults:
   - model: gnn
@@ -103,8 +103,9 @@ graph:
   attributes:
     nodes:
       area_weight:
-        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
         norm: unit-max  # options: l1, l2, unit-max, unit-sum, unit-std
+        fill_value: 0
     edges:
       edge_length:
         _target_: anemoi.graphs.edges.attributes.EdgeLength
