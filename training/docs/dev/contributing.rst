@@ -22,15 +22,10 @@ let us know by raising an issue on GitHub using the following steps:
    behaviour.
 
 #. If you are interested in solving the issue yourself, assign the issue
-   to yourself and follow the steps in the
-   :ref:`contributing-to-development` section.
+   to yourself and follow the steps below.
 
-.. _contributing-to-development:
-
-### Contributing to Development
-
-If you are interested in contributing to the development of the Anemoi
-packages, please follow the steps below:
+For contributing to the development of the Anemoi packages, please follow
+these steps:
 
 #. Fork the anemoi repository on GitHub to your personal/organisation
    account. See the `GitHub tutorial
@@ -134,7 +129,9 @@ Please follow these development guidelines:
 
 .. _branching-guidelines:
 
-### Branching Guidelines
+**********************
+ Branching Guidelines
+**********************
 
 -  Use feature branches for new features (e.g., `feature/your-feature`)
 -  Use fix branches for bug fixes (e.g., `fix/your-bug`)
@@ -204,7 +201,9 @@ guidelines. These checks are run via GitHub Actions on every Pull
 Request. For security reasons, maintainers must review code changes
 before enabling automated checks.
 
-### Review Steps
+**************
+ Review Steps
+**************
 
 #. Ensure that all the :ref:`development-guidelines` criteria are met
    before submitting a Pull Request.
