@@ -5,9 +5,9 @@
 Thank you for your interest in Anemoi! This guide will show you how to
 contribute to the Anemoi packages.
 
-**************
+****************
  Raise an issue
-**************
+****************
 
 If you encounter a bug or have a feature request, the first step is to
 let us know by raising an issue on GitHub using the following steps:
@@ -23,9 +23,9 @@ let us know by raising an issue on GitHub using the following steps:
 #. If you are interested in solving the issue yourself, assign the issue
    to yourself and follow the steps below.
 
-***********************
+**********************
  Developing in Anemoi
-***********************
+**********************
 
 For contributing to the development of the Anemoi packages, please
 follow these steps:

@@ -1,8 +1,8 @@
 .. _setting-up-the-development-environment:
 
-##########################################
+########################################
  Setting Up the Development Environment
-##########################################
+########################################
 
 To create a development environment follow the steps below,
 
@@ -35,8 +35,8 @@ To create a development environment follow the steps below,
  Pre-Commit Hooks
 ******************
 
-We use `pre-commit<https://pre-commit.com>`_ hooks to ensure code quality and consistency. To set
-them up:
+We use `pre-commit<https://pre-commit.com>`_ hooks to ensure code
+quality and consistency. To set them up:
 
 #. Install pre-commit hooks:
 

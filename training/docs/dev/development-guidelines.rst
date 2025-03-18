@@ -8,19 +8,16 @@ Please follow these development guidelines:
 
 #. Open an issue before starting a feature or bug fix to discuss the
    approach with maintainers adn other users.
-
 #. Ensure high-quality code with appropriate tests, documentation,
    linting, and style checks. TODO: Add reference to tests
-
 #. Follow the :ref:`branching-guidelines`.
-
 #. Follow the :ref:`commit-guidelines`.
 
 .. _branching-guidelines:
 
-************************************
+**********************
  Branching Guidelines
-************************************
+**********************
 
 -  Use feature branches for new features (e.g., `feature/your-feature`)
 -  Use fix branches for bug fixes (e.g., `fix/your-bug`)
@@ -29,9 +26,9 @@ Please follow these development guidelines:
 
 .. _commit-guidelines:
 
-******************
+*******************
  Commit Guidelines
-******************
+*******************
 
 When making commits to the repository, please follow these guidelines:
 
@@ -49,6 +46,6 @@ When making commits to the repository, please follow these guidelines:
 
 .. _pullrequest-guidelines:
 
-**************************
+*************************
  Pull Request Guidelines
-**************************
+*************************

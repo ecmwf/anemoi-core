@@ -1,6 +1,6 @@
-************************
+########################
  Building Documentation
-************************
+########################
 
 You can build the documentation locally to preview changes before
 submitting a Pull Request. We use Sphinx for documentation.
