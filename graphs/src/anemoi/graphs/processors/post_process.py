@@ -163,10 +163,6 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         Name of the source nodes of edges to remove.
     target_name: str
         Name of the target nodes of edges to remove.
-    source_mask_attr_name: str , optional
-         the postprocessing will be restricted to edges with source node having True in this mask_attr
-    target_mask_attr_name: str, optional
-        the postprocessing will be restricted to edges with target node having True in this mask_attr
     update_attributes: dict , optional
         edge attributes to be updated after removal of edges
     """
@@ -197,6 +193,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
 
     def update_attributes(self, graph: HeteroData) -> HeteroData:
+        """Recompute attributes"""
         for attr_name, edge_attr_builder in self.update_attrs.items():
             LOGGER.info(f"Updating edge attribute {attr_name}.")
             graph[self.edges_name][attr_name] = edge_attr_builder(
