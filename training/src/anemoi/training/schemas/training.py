@@ -87,7 +87,9 @@ class ExplicitTimes(BaseModel):
     """
 
     input: list[NonNegativeInt] = Field(default=[0, 1])
+    "Input time indices."
     target: list[NonNegativeInt] = Field(default=[2])
+    "Target time indices."
 
 
 class TargetForcing(BaseModel):
@@ -96,7 +98,8 @@ class TargetForcing(BaseModel):
     Extra forcing parameters to use as input to distinguish between different target times.
     """
 
-    data: list[str] = Field(default=["insolation"])
+    data: list[str] = Field(examples=["insolation"])
+    "List of forcing parameters to use as input to the model at the interpolated step."
 
 
 class LossScalingSchema(BaseModel):
@@ -233,7 +236,7 @@ class ScaleValidationMetrics(BaseModel):
     """List of metrics to keep in normalised space.."""
 
 
-class TrainingSchema(BaseModel):
+class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
     run_id: Union[str, None] = Field(example=None)
@@ -288,9 +291,22 @@ class TrainingSchema(BaseModel):
     "List of metrics"
     node_loss_weights: NodeLossWeightsSchema
     "Node loss weights configuration."
+    task: str
+    "Training objective."
+
+
+class ForecasterSchema(BaseTrainingSchema):
     task: str = Field(default="anemoi.training.train.forecaster.GraphForecaster")
     "Training objective."
-    explicit_times: ExplicitTimes = Field(default_factory=ExplicitTimes)
+
+
+class InterpolationSchema(BaseTrainingSchema):
+    task: str = Field(default="anemoi.training.train.forecaster.GraphForecaster")
+    "Training objective."
+    explicit_times: ExplicitTimes
     "Time indices for input and output."
-    target_forcing: TargetForcing = Field(default_factory=TargetForcing)
+    target_forcing: TargetForcing
     "Forcing parameters for target output times."
+
+
+TrainingSchema = Union[ForecasterSchema, InterpolationSchema]
