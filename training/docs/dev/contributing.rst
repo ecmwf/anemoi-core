@@ -16,25 +16,27 @@ is to let us know by raising an issue on GitHub using the following steps:
 #. If you have a feature request, describe the use case and expected
    behaviour.
 #. If you are interested in solving the issue yourself, assign
-   the issue to yourself and follow the steps below.
+   the issue to yourself and follow the steps in the
+   [Contributing to Development](#contributing-to-development) section.
 
-If you are interested in contributing to the development of 
+### Contributing to Development
+
+If you are interested in contributing to the development of
 the Anemoi packages, please follow the steps below:
-#. Fork the anemoi repository on GitHub to your personal/organisation 
-   account.
-#TODO: add link to Github tutorial
-#. Set up the development environment following the instructions below.
-#TODO: add reference
-#. Create a new branch for your developments.
-#TODO: Add branch guideline. Add reference
-#. Make your changes and ensure that your changes adheres to the
-   coding guidelines.
-#. Commit the changes using the `Commit Guidelines`_ above.
+#. Fork the anemoi repository on GitHub to your personal/organisation
+   account. [See GitHub tutorial](https://docs.github.com/en/get-started/quickstart/fork-a-repo)
+#. Set up the development environment following the instructions in the
+   [Setting Up the Development Environment](#setting-up-the-development-environment) section.
+#. Create a new branch for your developments, following the
+   [Branching Guidelines](#branching-guidelines).
+#. Make your changes and ensure that your changes adhere to the
+   [Development Guidelines](#development-guidelines).
+#. Commit the changes using the [Commit Guidelines](#commit-guidelines).
 #. Push your branch to your fork on GitHub.
 #. Open a Pull Request against the `main` branch of the original
    repository and fill in the Pull Request template.
-#. Request a review from maintainers or other contributors, which 
-   will follow the code review process. # TODO add link to section below
+#. Request a review from maintainers or other contributors, which
+   will follow the [Code Review Process](#code-review-process).
 
 ****************************************
  Setting Up the Development Environment
@@ -86,24 +88,22 @@ them up:
  Development Guidelines
 ***********************
 
-#TODO add coding guidelines in terms quality: tests, documentation, linting, style, etc.
-#TODO add branching guidelines
+Please follow these development guidelines:
 
-Ideally, open an issue for the feature or bug fix you're working on
-before starting development, to discuss the approach with maintainers.
-
-When committing code changes:
-
+#. Ensure high-quality code with appropriate tests, documentation, linting, and style checks.
+#. Follow the [Branching Guidelines](#branching-guidelines).
+#. Open an issue before starting a feature or bug fix to discuss the approach with maintainers.
 #. Make small, focused commits with clear and concise messages.
-
-#. Follow the `Conventional Commits guidelines
-   <https://www.conventionalcommits.org/>`_, e.g., "feat:", "fix:",
-   "docs:", etc.
-
-#. Use present tense and imperative mood in commit messages (e.g., "Add
-   feature" not "Added feature").
-
+#. Follow the [Conventional Commits guidelines](https://www.conventionalcommits.org/), e.g., "feat:", "fix:", "docs:", etc.
+#. Use present tense and imperative mood in commit messages (e.g., "Add feature" not "Added feature").
 #. Reference relevant issue numbers in commit messages when applicable.
+
+### Branching Guidelines
+
+- Use feature branches for new features (e.g., `feature/your-feature`)
+- Use fix branches for bug fixes (e.g., `fix/your-bug`)
+- Use a descriptive name that indicates the purpose of the branch
+- Keep branches up to date with `main` before opening a Pull Request
 
 ***************
  Running Tests
@@ -122,7 +122,11 @@ We use pytest for our test suite. To run tests:
 Note: Some tests, like `test_gnn.py`, may run slower on CPU and are
 better suited for GPU execution.
 
-# TODO: add here how to run integration tests --slowtest, etc.
+To run integration tests:
+
+.. code:: bash
+
+   pytest --slowtest
 
 ************************
  Building Documentation
@@ -146,27 +150,22 @@ To build the documentation locally:
 
 The generated documentation will be in `docs/_build/html/index.html`.
 
-# TODO: mention documentation is automatically generated in PRs on readthedocs
+Documentation is also automatically generated for Pull Requests on ReadTheDocs.
 
 *********************
  Code Review Process
 *********************
-The anemoi packages have a set of automated checks to enforce 
-the coding guidelines.
-This is done through GitHub Actions, which will run the checks
-on every Pull Request.
-For security reasons, the maintainers of the Anemoi packages
-first need to review the code changes before running the automated checks.
 
-The code review process contains the following steps:
-#. Ensure that all the coding guidelines criteria are met before
+The Anemoi packages have a set of automated checks to enforce
+coding guidelines. These checks are run via GitHub Actions on every Pull Request.
+For security reasons, maintainers must review code changes before enabling automated checks.
+
+### Review Steps
+
+1. Ensure that all the [Development Guidelines](#development-guidelines) criteria are met before
    submitting a Pull Request.
-#. Request a review from maintainers or other contributors,
-   keeping in mind these packages are supported on a best endeavours basis.
-#. After a first review, the maintainer will enable the automated
+2. Request a review from maintainers or other contributors, noting that support is on a best-efforts basis.
+3. After an initial review, a maintainer will enable automated
    checks to run on the Pull Request.
-#. Reviewers may have feedback or comments on your contributions.
-#. Once approved, a maintainer will merge your Pull Request into
-   the appropriate branch.
-#TODO: rephrase
-
+4. Reviewers may provide feedback or request changes to your contribution.
+5. Once approved, a maintainer will merge your Pull Request into the appropriate branch.
