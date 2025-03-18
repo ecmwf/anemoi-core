@@ -20,7 +20,6 @@ guide will help you get started with the development process.
    repository and fill in the Pull Request template.
 #. Request a review from maintainers or other contributors.
 
-
 ****************************************
  Setting Up the Development Environment
 ****************************************
