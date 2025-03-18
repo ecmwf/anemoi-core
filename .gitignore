@@ -78,6 +78,8 @@ dmypy.json
 
 # Data files
 *.grib
+*.grib1
+*.grib2
 *.onnx
 *.ckpt
 *.npy
