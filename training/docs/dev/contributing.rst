@@ -22,8 +22,10 @@ let us know by raising an issue on GitHub using the following steps:
    behaviour.
 
 #. If you are interested in solving the issue yourself, assign the issue
-   to yourself and follow the steps in the [Contributing to
-   Development](#contributing-to-development) section.
+   to yourself and follow the steps in the
+   :ref:`contributing-to-development` section.
+
+.. _contributing-to-development:
 
 ### Contributing to Development
 
@@ -31,20 +33,19 @@ If you are interested in contributing to the development of the Anemoi
 packages, please follow the steps below:
 
 #. Fork the anemoi repository on GitHub to your personal/organisation
-   account. [See GitHub
-   tutorial](https://docs.github.com/en/get-started/quickstart/fork-a-repo)
+   account. See the `GitHub tutorial
+   <https://docs.github.com/en/get-started/quickstart/fork-a-repo>`_.
 
 #. Set up the development environment following the instructions in the
-   [Setting Up the Development
-   Environment](#setting-up-the-development-environment) section.
+   :ref:`setting-up-the-development-environment` section.
 
-#. Create a new branch for your developments, following the [Branching
-   Guidelines](#branching-guidelines).
+#. Create a new branch for your developments, following the
+   :ref:`branching-guidelines`.
 
 #. Make your changes and ensure that your changes adhere to the
-   [Development Guidelines](#development-guidelines).
+   :ref:`development-guidelines`.
 
-#. Commit the changes using the [Commit Guidelines](#commit-guidelines).
+#. Commit the changes using the :ref:`commit-guidelines`.
 
 #. Push your branch to your fork on GitHub.
 
@@ -52,7 +53,9 @@ packages, please follow the steps below:
    repository and fill in the Pull Request template.
 
 #. Request a review from maintainers or other contributors, which will
-   follow the [Code Review Process](#code-review-process).
+   follow the :ref:`code-review-process`.
+
+.. _setting-up-the-development-environment:
 
 ****************************************
  Setting Up the Development Environment
@@ -81,6 +84,8 @@ packages, please follow the steps below:
 
       brew install pandoc
 
+.. _pre-commit-hooks:
+
 ******************
  Pre-Commit Hooks
 ******************
@@ -100,6 +105,8 @@ them up:
 
       pre-commit run --all-files
 
+.. _development-guidelines:
+
 ************************
  Development Guidelines
 ************************
@@ -109,21 +116,23 @@ Please follow these development guidelines:
 #. Ensure high-quality code with appropriate tests, documentation,
    linting, and style checks.
 
-#. Follow the [Branching Guidelines](#branching-guidelines).
+#. Follow the :ref:`branching-guidelines`.
 
 #. Open an issue before starting a feature or bug fix to discuss the
    approach with maintainers.
 
 #. Make small, focused commits with clear and concise messages.
 
-#. Follow the [Conventional Commits
-   guidelines](https://www.conventionalcommits.org/), e.g., "feat:",
-   "fix:", "docs:", etc.
+#. Follow the `Conventional Commits guidelines
+   <https://www.conventionalcommits.org/>`_, e.g., "feat:", "fix:",
+   "docs:", etc.
 
 #. Use present tense and imperative mood in commit messages (e.g., "Add
    feature" not "Added feature").
 
 #. Reference relevant issue numbers in commit messages when applicable.
+
+.. _branching-guidelines:
 
 ### Branching Guidelines
 
@@ -131,6 +140,8 @@ Please follow these development guidelines:
 -  Use fix branches for bug fixes (e.g., `fix/your-bug`)
 -  Use a descriptive name that indicates the purpose of the branch
 -  Keep branches up to date with `main` before opening a Pull Request
+
+.. _running-tests:
 
 ***************
  Running Tests
@@ -154,6 +165,8 @@ To run integration tests:
 .. code:: bash
 
    pytest --slowtest
+
+.. _building-documentation:
 
 ************************
  Building Documentation
@@ -180,6 +193,8 @@ The generated documentation will be in `docs/_build/html/index.html`.
 Documentation is also automatically generated for Pull Requests on
 ReadTheDocs.
 
+.. _code-review-process:
+
 *********************
  Code Review Process
 *********************
@@ -191,8 +206,8 @@ before enabling automated checks.
 
 ### Review Steps
 
-#. Ensure that all the [Development Guidelines](#development-guidelines)
-   criteria are met before submitting a Pull Request.
+#. Ensure that all the :ref:`development-guidelines` criteria are met
+   before submitting a Pull Request.
 #. Request a review from maintainers or other contributors, noting that
    support is on a best-efforts basis.
 #. After an initial review, a maintainer will enable automated checks to
