@@ -28,14 +28,14 @@ class GLU(nn.Module):
         The activation function to apply to the weights, by default
         nn.Sigmoid().
     """
+
     def __init__(self, variation: nn.Module | None = None):
         super().__init__()
         self.dim = self.W = self.V = None
         self.variation = variation if variation is not None else nn.Sigmoid()
 
     def _post_init(self, x: torch.Tensor) -> None:
-        """Initialize the weights and biases.
-        """
+        """Initialize the weights and biases."""
         self.dim = x.shape[-1]
         self.W = nn.Linear(self.dim, self.dim).to(x.device)
         self.V = nn.Linear(self.dim, self.dim).to(x.device)
@@ -48,21 +48,21 @@ class GLU(nn.Module):
 
 
 class SwiGLU(GLU):
-    """Swish GLU layer.
-    """
+    """Swish GLU layer."""
+
     def __init__(self):
         super().__init__(nn.SiLU())
 
 
 class ReGLU(GLU):
-    """ReLU GLU layer.
-    """
+    """ReLU GLU layer."""
+
     def __init__(self):
         super().__init__(nn.ReLU())
 
 
 class GeGLU(GLU):
-    """GELU GLU layer.
-    """
+    """GELU GLU layer."""
+
     def __init__(self):
         super().__init__(nn.GELU())
