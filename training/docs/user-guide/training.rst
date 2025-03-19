@@ -134,7 +134,7 @@ This can look like the following:
  Dataloader
 ***************************************
 The dataloader file contains information on how many workers are used, and the batch size.
-``num_workers`` relates to model parallelisation, for more information on this 
+``num_workers`` relates to model parallelisation, for more information on this
 see :ref:`Parallelisation <Parallelisation>`
 
 .. code:: yaml
@@ -154,8 +154,8 @@ see :ref:`Parallelisation <Parallelisation>`
       test: 20
 
 The grid points being modelled are defined. In many cases this will be the full grid.
-For limited area modelling, you may want to define a set of target indices which 
-mask/remove some grid points, leaving only the area being modelled. 
+For limited area modelling, you may want to define a set of target indices which
+mask/remove some grid points, leaving only the area being modelled.
 
 .. code:: yaml
 
@@ -165,12 +165,12 @@ mask/remove some grid points, leaving only the area being modelled.
       _target_: anemoi.training.data.grid_indices.FullGrid
       nodes_name: ${graph.data}
 
-The dataloader file also describes the files used for training, validation 
+The dataloader file also describes the files used for training, validation
 and testing, and the datasplit
 For machine learning, we separate our data into: training data, used to train the model;
-validation data, used to assess various version of the model throughout the model development 
+validation data, used to assess various version of the model throughout the model development
 process; and test data, used to assess a final version of the model.
-Best practice is to separate the data in time, ensuring the validation and test data 
+Best practice is to separate the data in time, ensuring the validation and test data
 are suitably independent from the training data.
 
 We define the start and end time of each section of the data. This can be given as a full date,
@@ -180,13 +180,13 @@ is used.
 The dataset used, and the frequency can be set spearately for the different parts of the
 dataset, for example, if test data is stored in a different file.
 
-By default, every variable within the dataset is used. If this is not desired, variables 
-can be listed within ``drop`` and they won't be used. 
+By default, every variable within the dataset is used. If this is not desired, variables
+can be listed within ``drop`` and they won't be used.
 Conversely, if only a few variables from the file are needed ``select`` can be used in
-place of drop, and only the listed variables are used. 
-The same overall set of variables must be used throughout training, validation and test. 
+place of drop, and only the listed variables are used.
+The same overall set of variables must be used throughout training, validation and test.
 If using different files, which contain different variables, the items listed in drop/select
-may vary. 
+may vary.
 
 .. code:: yaml
    dataset: ${hardware.paths.data}/${hardware.files.dataset}
