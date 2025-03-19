@@ -142,7 +142,7 @@ Directory Structure
 ==================
 
 #. Place new files in the appropriate package directory:
-   
+
    - Core functionality goes in ``src/anemoi/<package_name>/``.
    - Tests go in ``tests/``.
    - Documentation in ``docs/``.
@@ -150,7 +150,7 @@ Directory Structure
    and maintainability.
 
 .. note::
-   
+
    When adding new files, ensure they are properly included in
    ``__init__.py`` files if they should be part of the public API. Keep it minimal—avoid adding heavy logic.
    Use it to define package-level exports using __all__.
@@ -161,7 +161,7 @@ File Structure
 Within each file:
 
 #. Start with the license header and imports:
-   
+
    - Anemoi contributors license header.
    - Standard library imports.
    - Third-party imports.
@@ -170,7 +170,7 @@ Within each file:
 #. Follow with any module-level constants or configurations.
 
 #. Define classes and functions in a logical order:
-   
+
    - Base classes before derived classes.
    - Related functions grouped together.
    - Public API before private implementations.
@@ -195,7 +195,7 @@ Each new file should include:
 #. Use descriptive names that clearly indicate purpose or functionality.
 
 #. Files and Modules:
-   
+
    - Use lowercase with underscores
    - Examples:
      - ``reduced_gaussian_grid.py`` ✅
@@ -203,7 +203,7 @@ Each new file should include:
      - ``rgrid.py`` ❌ (too vague)
 
 #. Classes:
-   
+
    - Use PascalCase (CapWords)
    - Examples:
      - ``ReducedGaussianGridNodes`` ✅
@@ -212,7 +212,7 @@ Each new file should include:
      - ``Rgn`` ❌ (too cryptic)
 
 #. Functions and Variables:
-   
+
    - Use snake_case
    - Use verbs for functions, nouns for variables
    - Examples:
@@ -223,7 +223,7 @@ Each new file should include:
      - ``crds`` ❌ (too vague)
 
 #. Constants:
-   
+
    - Use uppercase with underscores
    - Examples:
      - ``MAX_GRID_RESOLUTION`` ✅
@@ -231,21 +231,21 @@ Each new file should include:
      - ``MaxGridResolution`` ❌
 
 #. Private Names:
-   
+
    - Prefix with single underscore for internal use
    - Examples:
      - ``_validate_input()`` ✅
      - ``_cached_result`` ✅
 
 #. Special Methods:
-   
+
    - Use double underscores for Python special methods
    - Examples:
      - ``__init__`` ✅
      - ``__call__`` ✅
 
 #. Type Variables:
-   
+
    - Use PascalCase, preferably single letters or short names
    - Examples:
      - ``T`` ✅ (for generic type)
@@ -253,16 +253,16 @@ Each new file should include:
      - ``EdgeAttr`` ✅
 
 #. Enums:
-   
+
    - Use PascalCase for enum class names
    - Use UPPERCASE for enum members
    - Examples:
      - ``class NodeType(Enum):
      -     SOURCE = "source"
-     -     TARGET = "target"`` 
+     -     TARGET = "target"``
 
 #. Test Names:
-   
+
    - Prefix with ``test_`` (methods) or ``Test`` (classes).
    - Be descriptive about what is being tested.
    - Include the scenario and expected outcome.
@@ -274,7 +274,7 @@ Each new file should include:
      - ``test1`` ❌ (meaningless)
 
 .. note::
-   
+
    Avoid abbreviations unless they are widely understood in the domain
    (e.g., ``lat``, ``lon`` for latitude/longitude). Clarity is more
    important than brevity.
@@ -324,4 +324,3 @@ Each new file should include:
 
 By following these guidelines, you'll contribute to a maintainable and
 robust codebase for Anemoi Training.
-
