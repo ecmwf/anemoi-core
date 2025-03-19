@@ -23,16 +23,18 @@ This package provides the *Anemoi* training functionality.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Introduction
 
-   overview
+   introduction/overview
+   introduction/installing
 
 .. toctree::
    :maxdepth: 1
-   :caption: Getting Started
+   :caption: User Guide
 
-   start/installing
-   start/training-your-first-model
-   start/hydra-intro
+   user-guide/quick-start-example
+   user-guide/building
+
 
 .. toctree::
    :maxdepth: 1
