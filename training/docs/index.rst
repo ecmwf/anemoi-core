@@ -41,6 +41,13 @@ This package provides the *Anemoi* training functionality.
    user-guide/tracking
    user-guide/benchmarking
    user-guide/distributed
+   user-guide/debugging
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Contributing
+
+   contributing
 
 .. toctree::
    :maxdepth: 1
