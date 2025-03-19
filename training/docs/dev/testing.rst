@@ -13,6 +13,32 @@ and best practices for contributing tests.
 We use pytest as our primary testing framework. Pytest offers a simple
 and powerful way to write and run tests.
 
+****************
+ Types of Tests
+****************
+
+1. Unit Tests
+=============
+
+-  Test individual components in isolation.
+-  Should constitute the majority of test cases.
+-  Unit tests reside in `tests/` or, for packages with integration
+   tests, in `tests/unit`
+
+2. Integration Tests
+====================
+
+-  Test how different components work together.
+-  Important for data processing pipelines and model training workflows.
+-  Integration tests reside in `tests/integration`.
+
+3. Functional Tests
+===================
+
+-  Test entire features or workflows from start to finish.
+-  Ensure that the system works as expected from a user's perspective.
+-  This is a work in progress.
+
 ***************
  Running Tests
 ***************
@@ -121,8 +147,8 @@ Use fixtures to set up common test data or objects:
        # Use the sample_dataset fixture in your test
        pass
 
-Mocking and Patching in Unit Tests
-==================================
+Mocking and Patching
+====================
 
 Use unittest.mock or pytest-mock for mocking external dependencies or
 complex objects:
@@ -137,8 +163,12 @@ complex objects:
        result = my_api_function()
        assert result == "mocked"
 
-Marking Long-Running Integration Tests
-======================================
+***************************
+ Writing Integration Tests
+***************************
+
+Marking Long-Running Tests
+==========================
 
 For long-running integration tests, we use the `--longtests` flag to
 ensure that they are run only when necessary. This means that you should
@@ -150,31 +180,35 @@ add the correspondong marker to these tests:
    def test_long():
          pass
 
-****************
- Types of Tests
-****************
+Configuration Handling
+======================
 
-1. Unit Tests
-=============
+Integration tests in anemoi-training, anemoi-datasets, etc., rely on
+appropriate handling of configuration files. Configuration management is
+essential to ensure that the tests remain reliable and maintainable. Our
+approach includes:
 
--  Test individual components in isolation.
--  Should constitute the majority of test cases.
--  Unit tests reside in `tests/` or, for packages with integration tests,
-   in `tests/unit`
+1. Using Configuration Templates: Always start with a configuration
+template from the repository to minimize redundancy and ensure
+consistency. We expect the templates to be consistent with the code base
+and have integration tests that check for this consistency.
 
-2. Integration Tests
-====================
+2. Test-specific Modifications: Apply only the necessary
+use-case-specific (e.g. related to the dataset) and testing-specific
+(e.g. batch_size or restricted date range) modifications to the
+template.
 
--  Test how different components work together.
--  Important for data processing pipelines and model training workflows.
--  Integration tests reside in `tests/integration`.
+3. Reducing Compute Load: Where possible, reduce the number of batches,
+epochs, batch sizes, number of dates etc.
 
-3. Functional Tests
-===================
+4. Debugging and Failures: When integration tests fail, check the config
+files (e.g. in `training/src/anemoi/training/config`) for
+inconsistencies with the code and update the config files if necessary.
+Also check if test-time modifications have introduced unintended
+changes.
 
--  Test entire features or workflows from start to finish.
--  Ensure that the system works as expected from a user's perspective.
--  This is a work in progress.
+For more details and package-specific examples, please refer to the
+package-level documentation.
 
 ***************
  Test Coverage
