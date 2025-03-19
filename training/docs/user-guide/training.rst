@@ -23,7 +23,7 @@ Anemoi Training requires two primary components to get started:
    module.
 
 These 2 steps are outlined in `the start guide
-<start/training-your-first-model>`_.
+<training-your-first-model>`_.
 
 Step 3: Configure the Training Process
 ======================================
