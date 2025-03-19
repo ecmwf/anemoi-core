@@ -30,6 +30,7 @@ class RemoveUnconnectedNodesSchema(BaseModel):
     save_mask_indices_to_attr: str = Field(example=None)
     "New attribute name to store the mask indices."
 
+
 class RestrictEdgeLengthSchema(BaseModel):
     target_: Literal["anemoi.graphs.processors.RestrictEdgeLength"] = Field(..., alias="_target_")
     "Post processor to edges longer than a threshold."
@@ -46,10 +47,11 @@ class RestrictEdgeLengthSchema(BaseModel):
     update_attributes: dict = Field(example=None)
     "Configuration of edge attributes to be (re)computed."
 
+
 ProcessorSchemas = Annotated[
     Union[
         RemoveUnconnectedNodesSchema,
         RestrictEdgeLengthSchema,
-    ], 
+    ],
     Field(discriminator="target_"),
 ]

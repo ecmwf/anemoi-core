@@ -80,8 +80,8 @@ undesirable. For example when using ``KNNEdges`` applied to all of the
 hidden mesh but only a subset of the data nodes (e.g. those in a LAM
 region) also connections are made to hidden mesh nodes very far away
 from the restricted set of data nodes. With this post-processor one can
-remove such edges, effectively providing a ``KNNedges`` algorithm applied
-only that part of the data mesh within a certain distance to the
+remove such edges, effectively providing a ``KNNedges`` algorithm
+applied only that part of the data mesh within a certain distance to the
 restricted set of data nodes.
 
 The ``RestrictEdgeLength`` post-processor also provides functionality to
