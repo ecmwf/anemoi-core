@@ -55,11 +55,11 @@ This package provides the *Anemoi* training functionality.
 
    dev/contributing
    dev/environment
-   dev/development-guidelines
+   dev/development_guidelines
    dev/documentation
-   dev/code-style
-   dev/code-structure
-   dev/code-of-conduct
+   dev/code_style
+   dev/code_structure
+   dev/code_of_conduct
    dev/hydra
    dev/testing
 
