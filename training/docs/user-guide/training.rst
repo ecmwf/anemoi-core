@@ -13,6 +13,8 @@ to configuring your model and executing the training pipeline.
 
 Anemoi Training requires two primary components to get started:
 
+Step 1 and 2:
+======================================
 #. **Graph Definition from Anemoi Graphs:** This defines the structure
    of your machine learning model, including the layers, connections,
    and operations that will be used during training.
@@ -74,14 +76,14 @@ according to the specified configuration.
 
 To execute training:
 
--  Run the training command, ensuring that all paths to the graph
+-  Run the training command given below, ensuring that all paths to the graph
    definition and dataset are correctly specified.
 -  Monitor the training process, adjusting parameters as needed to
    optimize model performance.
 -  Upon completion, the trained model will be registered and stored for
    further use.
 
-Then you make sure you have a GPU available and simply call:
+Make sure you have a GPU available and simply call:
 
 .. code:: bash
 
@@ -93,31 +95,39 @@ Then you make sure you have a GPU available and simply call:
  Data Routing
 **************
 
-Anemoi Training uses the Anemoi Datasets module to load the data. The
-dataset contains the entirety of variables we can use for training.
-Initial experiments in data-driven weather forecasting have used the
-same input variables as output variables.
+Anemoi Training uses the Anemoi Datasets module to load the data.
 
 Anemoi training implements data routing, in which you can specify which
-variables are used as ``forcings`` in the input only to inform the
-model, and which variables are used as ``diagnostics`` in the output
-only to be predicted by the model. All remaining variables will be
-treated as ``prognostic`` in the intial and forecast states.
+variables are used as ``forcings``; used as input only, and which variables 
+are as ``diagnostics``; appear as output only and to be predicted by the
+model. All remaining variables will be treated as ``prognostic``, i.e. 
+they appear as both inputs and outputs.
 
-Intuitively, ``forcings`` are the variables like solar insolation or
+``Forcings`` are variables such as solar insolation or
 land-sea-mask. These would make little sense to predict as they are
-external to the model. ``Diagnostics`` are the variables like
-precipitation that we want to predict, but which may not be available in
-forecast step zero due to technical limitations. ``Prognostic``
-variables are the variables like temperature or humidity that we want to
-predict and are available after data assimilation operationally.
+external to the model. These can be static (like the land-sea-mask)
+or dynamic (like solar insolation). 
+Note within anemoi, forcing does not have the classical NWP meaning of
+external variables which impact the model, such as wind forcing applied to 
+an ocean model. Instead, forcing here refers to any variable which is an
+input only. In some cases this includes 'traditional forcing', alongside 
+other variables.
+
+ ``Diagnostics`` includes the variables like precipitation that we want to predict,
+ but which may not be available in forecast step zero due to technical limitations.
+ These can aso include derived quantities which we wish to train the model to predict
+ directly, but do not want to use as inputs.
+
+``Prognostic`` variables are the variables like temperature or humidity that we want to
+predict and appear as both inputs and outputs.
 
 The user can specify the routing of the data by setting the
 ``config.data.forcings`` and ``config.data.diagnostics``. These are
 named strings, as Anemoi datasets enables us to address variables by
-name.
-
-This can look like the following:
+name. 
+Any variable in the dataset which is not listed as either forcing or diagnostic
+(or dropped, see :ref:`Dataloader <Dataloader>` below), will be classed as a
+prognostic variable.
 
 .. code:: yaml
 
@@ -127,8 +137,6 @@ This can look like the following:
          - land_sea_mask
       diagnostics:
          - total_precipitation
-
-
 
 ***************************************
  Dataloader
@@ -153,7 +161,7 @@ see :ref:`Parallelisation <Parallelisation>`
       validation: null
       test: 20
 
-The grid points being modelled are defined. In many cases this will be the full grid.
+The grid points being modelled are also defined. In many cases this will be the full grid.
 For limited area modelling, you may want to define a set of target indices which 
 mask/remove some grid points, leaving only the area being modelled. 
 
@@ -220,28 +228,28 @@ may vary.
 
 Machine learning models are sensitive to the scale of the input data. To
 ensure that the model can learn effectively, it is important to
-normalise the input data.
+normalise the input data, so all variables exhibit a similar range.
+This ensures variables have comparable contributions to the loss function, 
+and enables the model to learn effectively.
 
-Anemoi training provides preprocessors for different aspects of the
-training, with the normaliser being one of them. The normaliser
+The nornmaliser is one of many 'preprocessors' within anemoi, it
 implements multiple strategies that can be applied to the data using the
-config.
-
-Currently, the normaliser supports the following strategies:
+config. Currently, the normaliser supports the following strategies:
 
 -  ``none``: No normalisation is applied.
--  ``mean-std``: Standard normalisation is applied to the data.
--  ``min-max``: Min-max normalisation is applied to the data.
--  ``max``: Max normalisation is applied to the data.
+-  ``mean-std``: Data is normalised by subtracting the mean and dividing by the standard deviation
+-  ``std``: Data is normalised by dividing by the standard deviation.
+-  ``min-max``: Data is normalised by substracting the min value and dividing by the range.
+-  ``max``: Data is normalised by dividing by the max value.
 
-Values like the land-sea-mask do not require additional normalisation.
-However, variables like temperature or humidity should be normalised to
-ensure the model can learn effectively. Additionally, variables like the
-geopotential height should be max normalised to ensure the model can
-learn the vertical structure of the atmosphere.
+Values like the land-sea-mask do not require additional normalisation as they
+already span a range between 0 and 1.  Variables like temperature or
+humidity are usually normalised using ``mean-std``. Some variables like the
+geopotential height should be max normalised, so the 'zero' point and the proportional 
+distance from this point is retained,
 
-The user can specify the normalisation strategy, including the default
-by setting ``config.data.normaliser``, such that:
+The user can specify the normalisation strategy by choosing a default method, and
+additionally specifying specific cases for certain variables within ``config.data.normaliser``:
 
 .. code:: yaml
 
@@ -252,6 +260,19 @@ by setting ``config.data.normaliser``, such that:
       max:
          - geopotential_height
 
+An additional option in the normaliser overwrites statistics of specific variables onto others.
+This is primarily used for convective precipitation (cp), which is a fraction of total precipitation (tp),
+by overwriting the cp statistics with the tp statistics, we ensure the fractional relationship
+remains intact in the normalised space. Note that this is a design choice.
+
+.. code:: yaml
+
+   normaliser:
+      remap:
+        cp: tp
+
+
+
 *******************
 Imputer
 *******************
@@ -260,7 +281,11 @@ It is important to have no missing values (e.g. NaNs) in the data when training 
 of gradients and cause the model to predict only NaNs. For fields which contain missing values,
 we provide options to replace these values via an "imputer". During training NaN values are replaced with the specified value
 for the field. The default imputer is "none", which means no imputation is performed. The user can specify the imputer by setting
-``processors.imputer`` under the ``data/zarr.yaml`` file. An example of this is shown below:
+``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to impute with the mean value, ensuring that the variable 
+value over NaNs becomes zero after mean-std normalisation. Another option is to impute with a given constant.
+
+The ``DynamicInputImputer`` can be used for fields where the
+NaN locations change in time.
 
 .. code:: yaml
 
@@ -275,16 +300,12 @@ for the field. The default imputer is "none", which means no imputation is perfo
       _convert_: all
       config: ${data.imputer}
 
-There are other options for the imputer; constant values can by used, or the ``DynamicInputImputer`` can be used for fields where the
-NaN locations change in time.
-
 ***********************
  Loss function scaling
 ***********************
 
 It is possible to change the weighting given to each of the variables in
-the loss function by changing
-``config.training.variable_loss_scaling.pl.<pressure level variable>``
+the loss function by changing ``config.training.variable_loss_scaling.pl.<pressure level variable>``
 and ``config.training.variable_loss_scaling.sfc.<surface variable>``.
 
 It is also possible to change the scaling given to the pressure levels
@@ -326,19 +347,18 @@ learning rate scheduler. Docs for this scheduler can be found here
 https://github.com/huggingface/pytorch-image-models/blob/main/timm/scheduler/cosine_lr.py
 The user can configure the maximum learning rate by setting
 ``config.training.lr.rate``. Note that this learning rate is scaled by
-the number of GPUs where for the `data parallelism <distributed>`_.
+the number of GPUs with:
 
 .. code:: yaml
 
    global_learning_rate = config.training.lr.rate * num_gpus_per_node * num_nodes / gpus_per_model
 
 The user can also control the rate at which the learning rate decreases
-by setting the total number of iterations through
-``config.training.lr.iterations`` and the minimum learning rate reached
-through ``config.training.lr.min``. Note that the minimum learning rate
-is not scaled by the number of GPUs. The user can also control the
-warmup period by setting ``config.training.lr.warmup_t``. If the warmup
-period is set to 0, the learning rate will start at the maximum learning
+by setting the total number of iterations - ``config.training.lr.iterations`` 
+and the minimum learning rate reached - ``config.training.lr.min``.
+Note that the minimum learning rate is not scaled by the number of GPUs.
+The user can also control the warmup period by setting ``config.training.lr.warmup_t``.
+If the warmup period is set to 0, the learning rate will start at the maximum learning
 rate. If no warmup period is defined, a default warmup period of 1000
 iterations is used.
 
@@ -346,36 +366,51 @@ iterations is used.
  Rollout
 *********
 
-In the first stage of training, standard practice is to train the model
-on a 6 hour interval. Once this is completed, in the second stage of
-training, it is advisable to *rollout* and fine-tune the model error at
-longer leadtimes too. Generally for medium range forecasts, rollout is
-performed on 12 forecast steps (equivalent to 72 hours) incrementally.
-In other words, at each epoch another forecast step is added to the
-error term.
+Rollout training is when the model is iterated within the training process, producing forecasts
+for many future time steps. The loss is calculated on every step in the rollout period and averaged,
+and gradients backprogogated through the iteration process.
 
-Rollout requires the model training to be restarted so the user should
-make sure to set ``config.training.run_id`` equal to the run-id of the
+For example, if using ``rollout=3`` and a model with a 6 hour prediction step-size,
+when training the model predicts for time t+1, this is used as inputs to predict time t+2, 
+and this used to predict time t+3. The loss is calculated as
+``1/3 * ( (loss at t+1) + (loss at t+2) + (loss at t+3) )``
+Rollout training has been shown to improve stability for long auto-regressive inference runs, 
+by making the training objective is closer to the use case of forecasting arbitrary lead timestep
+through autoreggresive iteration of the model.
+
+In most cases, in the first stage of training, the model is trained for many epochs to
+perdict only one step (i.e. rollout.max = 1). Once this is completed, there is a second stage of
+training, which uses *rollout* to fine-tune the model error at
+longer leadtimes. The model begins with a rollout loss defined by ``rollout.start``, usually 1,
+and then every n epochs (defined by rollout.epoch_increment) the rollout value increases up till 
+``rollout.max``.
+
+.. code:: yaml
+   rollout:
+      start: 1
+      # increase rollout every n epochs
+      epoch_increment: 1
+      # maximum rollout to use
+      max: 12
+
+This two stage approach requires the model training to be restarted after stage one, see instructions below.
+The user should make sure to set ``config.training.run_id`` equal to the run-id of the
 first stage of training.
 
-Note, in the standard set-up, rollout is performed at the minimum
-learning rate and the number of batches used is reduced (using
-``config.dataloader.training.limit_batches``) to prevent any overfit to
+Note, for many purposes, it may make sense for the rollout stage (stage two) to performed at the minimum
+learning rate throughout and for the number of batches to be reduced (using
+``config.dataloader.training.limit_batches``) to prevent overfit to
 specific timesteps.
 
-To start rollout set ``config.training.rollout.epoch_increment`` equal
-to 1 (thus increasing the rollout step by 1 at every epoch) and set a
-maximum rollout by setting ``config.training.rollout.max`` (usually set
-to 12).
 
 ***************************
  Restarting a training run
 ***************************
 
-Whether it's because the training has exceeded the time limit on an HPC
+It may be necessary at certain points to restart
+the model training, i.e. because the training has exceeded the time limit on an HPC
 system or because the user wants to fine-tune the model from a specific
-point in the training, it may be necessary at certain points to restart
-the model training.
+point in the training.
 
 This can be done by setting ``config.training.run_id`` in the config
 file to be the *run_id* of the run that is being restarted. In this case
