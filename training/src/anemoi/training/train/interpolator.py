@@ -62,11 +62,17 @@ class GraphInterpolator(GraphForecaster):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        self.target_forcing_indices = itemgetter(*config.training.target_forcing.data)(
-            data_indices.data.input.name_to_index,
-        )
-        if isinstance(self.target_forcing_indices, int):
-            self.target_forcing_indices = [self.target_forcing_indices]
+        if len(config.training.target_forcing.data) >= 1:
+            self.target_forcing_indices = itemgetter(*config.training.target_forcing.data)(
+                data_indices.data.input.name_to_index,
+            )
+            if isinstance(self.target_forcing_indices, int):
+                self.target_forcing_indices = [self.target_forcing_indices]
+        else:
+            self.target_forcing_indices = []
+
+        self.use_time_fraction = config.training.target_forcing.time_fraction
+
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
@@ -96,22 +102,23 @@ class GraphInterpolator(GraphForecaster):
             self.data_indices.data.input.full,
         ]  # (bs, time, ens, latlon, nvar)
 
-        tfi = self.target_forcing_indices
+        num_tfi = len(self.target_forcing_indices)
         target_forcing = torch.empty(
             batch.shape[0],
             batch.shape[2],
             batch.shape[3],
-            len(tfi) + 1,
+            num_tfi + self.use_time_fraction,
             device=self.device,
             dtype=batch.dtype,
         )
         for interp_step in self.interp_times:
             # get the forcing information for the target interpolation time:
-            target_forcing[..., : len(tfi)] = batch[:, self.imap[interp_step], :, :, tfi]
-            target_forcing[..., -1] = (interp_step - self.boundary_times[1]) / (
-                self.boundary_times[1] - self.boundary_times[0]
-            )
-            # TODO(Magnus-SI): make fraction time one of a config given set of arbitrary custom forcing functions.
+            if num_tfi >= 1:
+                target_forcing[..., : num_tfi] = batch[:, self.imap[interp_step], :, :, self.target_forcing_indices]
+            if self.use_time_fraction:
+                target_forcing[..., -1] = (interp_step - self.boundary_times[-2]) / (
+                    self.boundary_times[-1] - self.boundary_times[-2]
+                )
 
             y_pred = self(x_bound, target_forcing)
             y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]

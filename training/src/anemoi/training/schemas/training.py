@@ -100,6 +100,8 @@ class TargetForcing(BaseModel):
 
     data: list[str] = Field(examples=["insolation"])
     "List of forcing parameters to use as input to the model at the interpolated step."
+    time_fraction: bool = Field(example=True)
+    "Use target time as a fraction between input boundary times as input."
 
 
 class LossScalingSchema(BaseModel):
@@ -301,7 +303,7 @@ class ForecasterSchema(BaseTrainingSchema):
 
 
 class InterpolationSchema(BaseTrainingSchema):
-    task: str = Field(default="anemoi.training.train.forecaster.GraphForecaster")
+    task: str = Field(default="anemoi.training.train.interpolator.GraphInterpolator")
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
