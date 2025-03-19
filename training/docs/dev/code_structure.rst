@@ -1,3 +1,5 @@
+.. _code-structure:
+
 ################
  Code Structure
 ################
