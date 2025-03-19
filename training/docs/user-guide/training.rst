@@ -98,19 +98,19 @@ Make sure you have a GPU available and simply call:
 Anemoi Training uses the Anemoi Datasets module to load the data.
 
 Anemoi training implements data routing, in which you can specify which
-variables are used as ``forcings``; used as input only, and which variables 
+variables are used as ``forcings``; used as input only, and which variables
 are as ``diagnostics``; appear as output only and to be predicted by the
-model. All remaining variables will be treated as ``prognostic``, i.e. 
+model. All remaining variables will be treated as ``prognostic``, i.e.
 they appear as both inputs and outputs.
 
 ``Forcings`` are variables such as solar insolation or
 land-sea-mask. These would make little sense to predict as they are
 external to the model. These can be static (like the land-sea-mask)
-or dynamic (like solar insolation). 
+or dynamic (like solar insolation).
 Note within anemoi, forcing does not have the classical NWP meaning of
-external variables which impact the model, such as wind forcing applied to 
+external variables which impact the model, such as wind forcing applied to
 an ocean model. Instead, forcing here refers to any variable which is an
-input only. In some cases this includes 'traditional forcing', alongside 
+input only. In some cases this includes 'traditional forcing', alongside
 other variables.
 
  ``Diagnostics`` includes the variables like precipitation that we want to predict,
@@ -124,7 +124,7 @@ predict and appear as both inputs and outputs.
 The user can specify the routing of the data by setting the
 ``config.data.forcings`` and ``config.data.diagnostics``. These are
 named strings, as Anemoi datasets enables us to address variables by
-name. 
+name.
 Any variable in the dataset which is not listed as either forcing or diagnostic
 (or dropped, see :ref:`Dataloader <Dataloader>` below), will be classed as a
 prognostic variable.
@@ -162,8 +162,8 @@ see :ref:`Parallelisation <Parallelisation>`
       test: 20
 
 The grid points being modelled are also defined. In many cases this will be the full grid.
-For limited area modelling, you may want to define a set of target indices which 
-mask/remove some grid points, leaving only the area being modelled. 
+For limited area modelling, you may want to define a set of target indices which
+mask/remove some grid points, leaving only the area being modelled.
 
 .. code:: yaml
 
@@ -229,7 +229,7 @@ may vary.
 Machine learning models are sensitive to the scale of the input data. To
 ensure that the model can learn effectively, it is important to
 normalise the input data, so all variables exhibit a similar range.
-This ensures variables have comparable contributions to the loss function, 
+This ensures variables have comparable contributions to the loss function,
 and enables the model to learn effectively.
 
 The nornmaliser is one of many 'preprocessors' within anemoi, it
@@ -245,7 +245,7 @@ config. Currently, the normaliser supports the following strategies:
 Values like the land-sea-mask do not require additional normalisation as they
 already span a range between 0 and 1.  Variables like temperature or
 humidity are usually normalised using ``mean-std``. Some variables like the
-geopotential height should be max normalised, so the 'zero' point and the proportional 
+geopotential height should be max normalised, so the 'zero' point and the proportional
 distance from this point is retained,
 
 The user can specify the normalisation strategy by choosing a default method, and
@@ -281,7 +281,7 @@ It is important to have no missing values (e.g. NaNs) in the data when training 
 of gradients and cause the model to predict only NaNs. For fields which contain missing values,
 we provide options to replace these values via an "imputer". During training NaN values are replaced with the specified value
 for the field. The default imputer is "none", which means no imputation is performed. The user can specify the imputer by setting
-``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to impute with the mean value, ensuring that the variable 
+``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to impute with the mean value, ensuring that the variable
 value over NaNs becomes zero after mean-std normalisation. Another option is to impute with a given constant.
 
 The ``DynamicInputImputer`` can be used for fields where the
@@ -354,7 +354,7 @@ the number of GPUs with:
    global_learning_rate = config.training.lr.rate * num_gpus_per_node * num_nodes / gpus_per_model
 
 The user can also control the rate at which the learning rate decreases
-by setting the total number of iterations - ``config.training.lr.iterations`` 
+by setting the total number of iterations - ``config.training.lr.iterations``
 and the minimum learning rate reached - ``config.training.lr.min``.
 Note that the minimum learning rate is not scaled by the number of GPUs.
 The user can also control the warmup period by setting ``config.training.lr.warmup_t``.
@@ -371,10 +371,10 @@ for many future time steps. The loss is calculated on every step in the rollout 
 and gradients backprogogated through the iteration process.
 
 For example, if using ``rollout=3`` and a model with a 6 hour prediction step-size,
-when training the model predicts for time t+1, this is used as inputs to predict time t+2, 
+when training the model predicts for time t+1, this is used as inputs to predict time t+2,
 and this used to predict time t+3. The loss is calculated as
 ``1/3 * ( (loss at t+1) + (loss at t+2) + (loss at t+3) )``
-Rollout training has been shown to improve stability for long auto-regressive inference runs, 
+Rollout training has been shown to improve stability for long auto-regressive inference runs,
 by making the training objective is closer to the use case of forecasting arbitrary lead timestep
 through autoreggresive iteration of the model.
 
@@ -382,7 +382,7 @@ In most cases, in the first stage of training, the model is trained for many epo
 perdict only one step (i.e. rollout.max = 1). Once this is completed, there is a second stage of
 training, which uses *rollout* to fine-tune the model error at
 longer leadtimes. The model begins with a rollout loss defined by ``rollout.start``, usually 1,
-and then every n epochs (defined by rollout.epoch_increment) the rollout value increases up till 
+and then every n epochs (defined by rollout.epoch_increment) the rollout value increases up till
 ``rollout.max``.
 
 .. code:: yaml
