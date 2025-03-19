@@ -97,7 +97,6 @@ Directory Structure
 .. note::
 
    Utility Functions Organization:
-
    - Use ``utils.py`` only for package-specific helper functions that don't fit in other modules.
    - If a utility function could be useful across multiple packages:
      - Move it to ``anemoi-utils`` package.
@@ -142,6 +141,7 @@ Within each file:
 
    - Use lowercase with underscores
    - Examples:
+
      - ``reduced_gaussian_grid.py`` ✅
      - ``ReducedGaussianGrid.py`` ❌
      - ``rgrid.py`` ❌ (too vague)
@@ -150,6 +150,7 @@ Within each file:
 
    - Use PascalCase (CapWords)
    - Examples:
+  
      - ``ReducedGaussianGridNodes`` ✅
      - ``MultiScaleEdges`` ✅
      - ``reduced_gaussian_grid_nodes`` ❌
@@ -160,6 +161,7 @@ Within each file:
    - Use snake_case
    - Use verbs for functions, nouns for variables
    - Examples:
+
      - ``calculate_edge_weights()`` ✅
      - ``get_coordinates()`` ✅
      - ``node_attributes`` ✅
@@ -170,6 +172,7 @@ Within each file:
 
    - Use uppercase with underscores
    - Examples:
+  
      - ``MAX_GRID_RESOLUTION`` ✅
      - ``DEFAULT_BATCH_SIZE`` ✅
      - ``MaxGridResolution`` ❌
@@ -178,29 +181,26 @@ Within each file:
 
    - Prefix with single underscore for internal use
    - Examples:
+  
      - ``_validate_input()`` ✅
      - ``_cached_result`` ✅
 
-#. Special Methods:
-
-   - Use double underscores for Python special methods
-   - Examples:
-     - ``__init__`` ✅
-     - ``__call__`` ✅
 
 #. Type Variables:
 
-   - Use PascalCase, preferably single letters or short names
+   - Use CamelCase, preferably single letters or short names
    - Examples:
+
      - ``T`` ✅ (for generic type)
      - ``NodeType`` ✅
      - ``EdgeAttr`` ✅
 
 #. Enums:
 
-   - Use PascalCase for enum class names
+   - Use CamelCase for enum class names
    - Use UPPERCASE for enum members
    - Examples:
+
      - ``class NodeType(Enum):
      -     SOURCE = "source"
      -     TARGET = "target"``
@@ -211,6 +211,7 @@ Within each file:
    - Be descriptive about what is being tested.
    - Include the scenario and expected outcome.
    - Examples:
+  
      - ``test_reduced_gaussian_grid_with_invalid_resolution`` ✅
      - ``test_edge_builder_handles_empty_graph`` ✅
      - ``test_coordinates_are_in_radians`` ✅
