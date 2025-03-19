@@ -129,13 +129,13 @@ by setting ``config.data.normaliser``, such that:
 
 An additional option in the normaliser overwrites statistics of specific variables onto others.
 This is primarily used for convective precipitation (cp), which is a fraction of total precipitation (tp),
-by overwriting the cp statistics with the tp statistics, we ensure the fractional relationship 
+by overwriting the cp statistics with the tp statistics, we ensure the fractional relationship
 remains intact in the normalised space. Note that this is a design choice.
 
 .. code:: yaml
 
    normaliser:
-      remap: 
+      remap:
         cp: tp
 
 
@@ -147,7 +147,7 @@ In machine learning, you cannot have missing values.
 .. code:: yaml
 
    imputer:
-      default: "none" 
+      default: "none"
 
 ***************************************
  Dataloader

@@ -35,7 +35,6 @@ This package provides the *Anemoi* training functionality.
    user-guide/quick-start-example
    user-guide/building
 
-
 .. toctree::
    :maxdepth: 1
    :caption: Using Anemoi Training
