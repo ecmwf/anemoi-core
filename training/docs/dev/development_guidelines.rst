@@ -45,7 +45,7 @@ When making commits to the repository, please follow these guidelines:
    - ``refactor!: restructure project layout`` (breaking change)
 
    Common types include:
-   
+
    - ``feat``: New feature
    - ``fix``: Bug fix
    - ``docs``: Documentation only
@@ -77,14 +77,14 @@ generate changelogs and determine version bumps automatically.
 When submitting Pull Requests (PRs), please follow these guidelines:
 
 #. Open a draft Pull Request early in your development process. This helps:
-   
+
    - Make your work visible to other contributors.
    - Get early feedback on your approach.
    - Avoid duplicate efforts.
    - Track progress on complex changes.
 
 #. Fill the PR template completely, including:
-   
+
    - Clear description of the changes.
    - Link to related issues using GitHub keywords (e.g., "Fixes #123").
    - List of notable changes.
@@ -95,27 +95,27 @@ When submitting Pull Requests (PRs), please follow these guidelines:
    the squash commit message when merged to ``main``.
 
 #. Keep your PR focused and of reasonable size:
-   
+
    - One PR should address one concern.
    - Split large changes into smaller, logical PRs.
    - Update documentation along with code changes.
 
 #. Before marking as ready for review:
-   
+
    - Ensure all tests pass locally.
    - Address any automated check failures.
    - Review your own changes.
    - Update based on any feedback received while in draft.
 
 #. When ready for review:
-   
+
    - Mark the PR as "Ready for Review"
    - Request reviews from appropriate team members.
    - Be responsive to review comments.
    - Update the PR description if significant changes are made.
 
 #. After approval:
-   
+
    - PRs are merged using squash merge to maintain a clean history.
    - The squash commit message will use the PR title.
 
@@ -129,6 +129,3 @@ When submitting Pull Requests (PRs), please follow these guidelines:
 *************
  Type Hints
 *************
-
-
-
