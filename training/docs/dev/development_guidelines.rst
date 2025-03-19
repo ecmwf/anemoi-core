@@ -27,7 +27,7 @@ Code Formatting
 =============
 
 #. We follow PEP 8 with some modifications:
-   
+
    - Line length is 120 characters (not 79).
    - Uses ``black`` for consistent formatting.
    - Uses ``isort`` for import sorting with:
@@ -36,7 +36,7 @@ Code Formatting
      - Project imports grouped under ``anemoi``.
 
 #. Import organization:
-   
+
    - Imports are sorted using ``isort``.
    - Force single-line imports.
    - Group order: standard library, third-party, anemoi packages.
@@ -55,7 +55,7 @@ Documentation Style
 =================
 
 #. Documentation follows strict guidelines:
-   
+
    - RST files are formatted using ``rstfmt``.
    - Docstrings must match function signatures (checked by ``docsig``).
    - Sphinx documentation is linted (``sphinx-lint``).
