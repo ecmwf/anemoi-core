@@ -14,9 +14,11 @@ import os
 import random
 from functools import cached_property
 from typing import TYPE_CHECKING
+from typing import Dict
 
 import numpy as np
 import torch
+import yaml
 from einops import rearrange
 from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
@@ -45,6 +47,7 @@ class NativeGridDataset(IterableDataset):
         shuffle: bool = True,
         label: str = "generic",
         effective_bs: int = 1,
+        custom_statistics_file: str = None,  # Add parameter for custom statistics file
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -65,7 +68,9 @@ class NativeGridDataset(IterableDataset):
         label : str, optional
             label for the dataset, by default "generic"
         effective_bs : int, default 1
-            effective batch size useful to compute the lenght of the dataset
+            effective batch size useful to compute the length of the dataset
+        custom_statistics_file : str, optional
+            Path to the custom statistics file, by default None
         """
         self.label = label
         self.effective_bs = effective_bs
@@ -100,10 +105,51 @@ class NativeGridDataset(IterableDataset):
         self.ensemble_dim: int = 2
         self.ensemble_size = self.data.shape[self.ensemble_dim]
 
+        # Store the path to the custom statistics file
+        self.custom_statistics_file = custom_statistics_file
+
+    def _get_custom_statistics(self, path: str) -> Dict:
+        """Load custom statistics from a YAML file.
+
+        Parameters
+        ----------
+        path : str
+            Path to the custom statistics file.
+
+        Returns
+        -------
+        Dict
+            Custom statistics dictionary.
+        """
+        with open(path) as file:
+            custom_statistics = yaml.safe_load(file)
+
+        out_dict = {}
+        for stype, stats in custom_statistics.items():
+            if stype not in self.data.statistics:
+                continue
+            n = self.data.statistics[stype].size
+            out_dict[stype] = np.copy(self.data.statistics[stype])
+            for name, value in stats.items():
+                if name in self.data.name_to_index:
+                    index = self.data.name_to_index[name]
+                    out_dict[stype][index] = value
+        return out_dict
+
+    @cached_property
+    def custom_statistics(self) -> Dict:
+        """Return custom statistics."""
+        if self.custom_statistics_file:
+            return self._get_custom_statistics(self.custom_statistics_file)
+        return {}
+
     @cached_property
     def statistics(self) -> dict:
         """Return dataset statistics."""
-        return self.data.statistics
+        default_statistics = self.data.statistics
+        # Merge custom statistics with default statistics
+        merged_statistics = {**default_statistics, **self.custom_statistics}
+        return merged_statistics
 
     @cached_property
     def metadata(self) -> dict:
