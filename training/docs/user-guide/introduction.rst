@@ -46,5 +46,4 @@ Whether you're new to machine learning for weather forecasting or an
 experienced practitioner, this guide will provide you with the knowledge
 and tools to make the most of Anemoi Training.
 
-Let's begin by exploring how to configure your training pipeline in the
-next section.
+Let's begin by training your first model in the next section.
