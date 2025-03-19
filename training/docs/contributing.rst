@@ -217,12 +217,12 @@ Run the sweep:
 By leveraging these Hydra features, you can create flexible,
 maintainable, and powerful configurations for Anemoi Training.
 
-###################
- Integration tests
-###################
+#################################
+ Integration tests and use cases
+#################################
 
 Integration tests in anemoi-training include both general integration
-tests and users test cases.
+tests and tests for specific use cases.
 
 ***************
  Running tests
@@ -278,14 +278,14 @@ Note that we also parametrize the fixture `architecture_config` to
 override the default model configuration in order to test different
 model architectures.
 
-****************************
- Adding a new test use case
-****************************
+************************
+ Adding a use case test
+************************
 
-To add a new test use case, follow these steps:
+To add a new use case, follow these steps:
 
-1. Use an Integration Test Template: To ensure maintainability, we
-recommend following the config handling guidelines detailed above in so
+1. Configuration Handling: To ensure maintainability, we recommend
+following the configuration handling guidelines detailed above, in so
 far as this makes sense for your use case.
 
 1. Best practices: Follow best practices, such as reducing compute load
