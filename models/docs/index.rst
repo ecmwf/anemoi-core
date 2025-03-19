@@ -106,6 +106,8 @@ You may also have to install pandoc on MacOS:
    :hidden:
    :caption: Recipe examples
 
+   usage/create_model
+
 .. toctree::
    :maxdepth: 1
    :hidden:
