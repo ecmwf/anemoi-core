@@ -131,4 +131,197 @@ When submitting Pull Requests (PRs), please follow these guidelines:
 *************
 
 
+*******************
+ File Organization
+*******************
+
+Proper file organization is crucial for maintaining a clean and maintainable codebase.
+Follow these guidelines when adding new files or modifying existing ones:
+
+Directory Structure
+==================
+
+#. Place new files in the appropriate package directory:
+   
+   - Core functionality goes in ``src/anemoi/<package_name>/``.
+   - Tests go in ``tests/``.
+   - Documentation in ``docs/``.
+   - Group related functionality together in the same module for better organization
+   and maintainability.
+
+.. note::
+   
+   When adding new files, ensure they are properly included in
+   ``__init__.py`` files if they should be part of the public API. Keep it minimal—avoid adding heavy logic.
+   Use it to define package-level exports using __all__.
+
+File Structure
+=============
+
+Within each file:
+
+#. Start with the license header and imports:
+   
+   - Anemoi contributors license header.
+   - Standard library imports.
+   - Third-party imports.
+   - Local imports.
+
+#. Follow with any module-level constants or configurations.
+
+#. Define classes and functions in a logical order:
+   
+   - Base classes before derived classes.
+   - Related functions grouped together.
+   - Public API before private implementations.
+
+Documentation
+============
+
+Each new file should include:
+
+#. Docstring explaining the purpose of the module.
+
+#. Clear documentation for public APIs.
+
+#. Example usage in docstrings where appropriate.
+
+#. References to related files or documentation.
+
+********************
+ Naming Conventions
+********************
+
+#. Use descriptive names that clearly indicate purpose or functionality.
+
+#. Files and Modules:
+   
+   - Use lowercase with underscores
+   - Examples:
+     - ``reduced_gaussian_grid.py`` ✅
+     - ``ReducedGaussianGrid.py`` ❌
+     - ``rgrid.py`` ❌ (too vague)
+
+#. Classes:
+   
+   - Use PascalCase (CapWords)
+   - Examples:
+     - ``ReducedGaussianGridNodes`` ✅
+     - ``MultiScaleEdges`` ✅
+     - ``reduced_gaussian_grid_nodes`` ❌
+     - ``Rgn`` ❌ (too cryptic)
+
+#. Functions and Variables:
+   
+   - Use snake_case
+   - Use verbs for functions, nouns for variables
+   - Examples:
+     - ``calculate_edge_weights()`` ✅
+     - ``get_coordinates()`` ✅
+     - ``node_attributes`` ✅
+     - ``calculateEdgeWeights()`` ❌
+     - ``crds`` ❌ (too vague)
+
+#. Constants:
+   
+   - Use uppercase with underscores
+   - Examples:
+     - ``MAX_GRID_RESOLUTION`` ✅
+     - ``DEFAULT_BATCH_SIZE`` ✅
+     - ``MaxGridResolution`` ❌
+
+#. Private Names:
+   
+   - Prefix with single underscore for internal use
+   - Examples:
+     - ``_validate_input()`` ✅
+     - ``_cached_result`` ✅
+
+#. Special Methods:
+   
+   - Use double underscores for Python special methods
+   - Examples:
+     - ``__init__`` ✅
+     - ``__call__`` ✅
+
+#. Type Variables:
+   
+   - Use PascalCase, preferably single letters or short names
+   - Examples:
+     - ``T`` ✅ (for generic type)
+     - ``NodeType`` ✅
+     - ``EdgeAttr`` ✅
+
+#. Enums:
+   
+   - Use PascalCase for enum class names
+   - Use UPPERCASE for enum members
+   - Examples:
+     - ``class NodeType(Enum):
+     -     SOURCE = "source"
+     -     TARGET = "target"`` 
+
+#. Test Names:
+   
+   - Prefix with ``test_`` (methods) or ``Test`` (classes).
+   - Be descriptive about what is being tested.
+   - Include the scenario and expected outcome.
+   - Examples:
+     - ``test_reduced_gaussian_grid_with_invalid_resolution`` ✅
+     - ``test_edge_builder_handles_empty_graph`` ✅
+     - ``test_coordinates_are_in_radians`` ✅
+     - ``testGrid`` ❌ (too vague)
+     - ``test1`` ❌ (meaningless)
+
+.. note::
+   
+   Avoid abbreviations unless they are widely understood in the domain
+   (e.g., ``lat``, ``lon`` for latitude/longitude). Clarity is more
+   important than brevity.
+
+********************************
+ Version Control Best Practices
+********************************
+
+#. Always use pre-commit hooks to ensure code quality and consistency.
+#. Never commit directly to the `develop` branch.
+#. Create a new branch for your feature or bug fix, e.g.,
+   `feature/<feature_name>` or `bugfix/<bug_name>`.
+#. Submit a Pull Request from your branch to `develop` for peer review
+   and testing.
+
+******************************
+ Code Style and Documentation
+******************************
+
+#. Follow PEP 8 guidelines for Python code style, the pre-commit hooks
+   will help enforce this.
+#. Write clear, concise docstrings for all classes and functions using
+   the Numpy style.
+#. Use type hints to improve code readability and catch potential
+   errors.
+#. Add inline comments for complex logic or algorithms.
+#. Use absolute imports within the package.
+#. Avoid wildcard (*) imports.
+
+
+*********
+ Testing
+*********
+
+#. Write unit tests for new features using pytest.
+#. Ensure all existing tests pass before submitting a Pull Request.
+#. Aim for high test coverage, especially for critical functionality.
+
+****************************
+ Performance Considerations
+****************************
+
+#. Profile your code to identify performance bottlenecks.
+#. Optimize critical paths and frequently called functions.
+#. Consider using vectorized operations when working with large
+   datasets.
+
+By following these guidelines, you'll contribute to a maintainable and
+robust codebase for Anemoi Training.
 
