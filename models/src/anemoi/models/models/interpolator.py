@@ -46,7 +46,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        self.num_target_forcings = len(model_config.training.target_forcing.data) + model_config.training.target_forcing.time_fraction
+        self.num_target_forcings = (
+            len(model_config.training.target_forcing.data) + model_config.training.target_forcing.time_fraction
+        )
         self.input_times = len(model_config.training.explicit_times.input)
         super().__init__(
             model_config=model_config, data_indices=data_indices, statistics=statistics, graph_data=graph_data

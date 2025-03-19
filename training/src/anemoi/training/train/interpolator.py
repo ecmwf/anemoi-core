@@ -114,7 +114,7 @@ class GraphInterpolator(GraphForecaster):
         for interp_step in self.interp_times:
             # get the forcing information for the target interpolation time:
             if num_tfi >= 1:
-                target_forcing[..., : num_tfi] = batch[:, self.imap[interp_step], :, :, self.target_forcing_indices]
+                target_forcing[..., :num_tfi] = batch[:, self.imap[interp_step], :, :, self.target_forcing_indices]
             if self.use_time_fraction:
                 target_forcing[..., -1] = (interp_step - self.boundary_times[-2]) / (
                     self.boundary_times[-1] - self.boundary_times[-2]
