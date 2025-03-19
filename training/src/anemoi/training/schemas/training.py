@@ -86,9 +86,9 @@ class ExplicitTimes(BaseModel):
     Starts at index 0. Input and output can overlap.
     """
 
-    input: list[NonNegativeInt] = Field(default=[0, 1])
+    input: list[NonNegativeInt] = Field(examples=[0, 1])
     "Input time indices."
-    target: list[NonNegativeInt] = Field(default=[2])
+    target: list[NonNegativeInt] = Field(examples=[2])
     "Target time indices."
 
 
@@ -298,12 +298,12 @@ class BaseTrainingSchema(BaseModel):
 
 
 class ForecasterSchema(BaseTrainingSchema):
-    task: str = Field(default="anemoi.training.train.forecaster.GraphForecaster")
+    task: str = Field(example="anemoi.training.train.forecaster.GraphForecaster")
     "Training objective."
 
 
 class InterpolationSchema(BaseTrainingSchema):
-    task: str = Field(default="anemoi.training.train.interpolator.GraphInterpolator")
+    task: str = Field(example="anemoi.training.train.interpolator.GraphInterpolator")
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
