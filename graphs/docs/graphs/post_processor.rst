@@ -80,7 +80,7 @@ undesirable. For example when using ``KNNEdges`` applied to all of the
 hidden mesh but only a subset of the data nodes (e.g. those in a LAM
 region) also connections are made to hidden mesh nodes very far away
 from the restricted set of data nodes. With this post-processor one can
-remove such edges, effectively providing a `KNNedges` algorithm applied
+remove such edges, effectively providing a ``KNNedges`` algorithm applied
 only that part of the data mesh within a certain distance to the
 restricted set of data nodes.
 
@@ -95,13 +95,13 @@ edges can affect those, e.g. their normalisation.
 
    post_processors:
    - _target_: anemoi.graphs.processors.RestrictEdgeLength
-    source_name: data                #source nodes of the edges to be processed
-    target_name: hidden              #target nodes of the edges to be processed
-    threshold: 20                    #edges longer than the threshold of 20 km will be removed
-    update_attributes:               #update edge attributes after postprocessing (optional)
-      edge_length:
-        _target_: anemoi.graphs.edges.attributes.EdgeLength
-        norm: unit-max
+     source_name: data                #source nodes of the edges to be processed
+     target_name: hidden              #target nodes of the edges to be processed
+     threshold: 20                    #edges longer than the threshold of 20 km will be removed
+     update_attributes:               #update edge attributes after postprocessing (optional)
+       edge_length:
+         _target_: anemoi.graphs.edges.attributes.EdgeLength
+         norm: unit-max
 
 The configuration above asks to (re)compute the edge length attribute
 after removal of edges longer than 20 km, something which can be
@@ -125,10 +125,10 @@ the threshold. An example usage:
    edges: ...
    postprocessors:
    - _target_: anemoi.graphs.processors.RestrictEdgeLength
-   source_name: data                #source nodes of the edges to be processed
-   target_name: hidden              #target nodes of the edges to be processed
-   threshold: 20                    #edges longer than this threshold (in km) will be removed
-   source_mask_attr_name: cutout    #optional
+     source_name: data                #source nodes of the edges to be processed
+     target_name: hidden              #target nodes of the edges to be processed
+     threshold: 20                    #edges longer than this threshold (in km) will be removed
+     source_mask_attr_name: cutout    #optional
 
 With this configuration only edges whose source is in the cutout region
 will be post-processed, i.e. those edges with source node outside the

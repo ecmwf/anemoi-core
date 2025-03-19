@@ -30,5 +30,26 @@ class RemoveUnconnectedNodesSchema(BaseModel):
     save_mask_indices_to_attr: str = Field(example=None)
     "New attribute name to store the mask indices."
 
+class RestrictEdgeLengthSchema(BaseModel):
+    target_: Literal["anemoi.graphs.processors.RestrictEdgeLength"] = Field(..., alias="_target_")
+    "Post processor to edges longer than a threshold."
+    source_name: str
+    "Source nodes of edges to be post-processed."
+    target_name: str
+    "Target nodes of edges to be post-processed."
+    threshold: float
+    "Treshold length (in km), edges longer than this length will be removed"
+    source_mask_attr_name: str = Field(example=None)
+    "Name of a Boolean mask attribute on sources nodes. Only edges whose source is True under this mask will be post-processed"
+    source_mask_attr_name: str = Field(example=None)
+    "Name of a Boolean mask attribute on target nodes. Only edges whose target is True under this mask will be post-processed"
+    update_attributes: dict = Field(example=None)
+    "Configuration of edge attributes to be (re)computed."
 
-ProcessorSchemas = Annotated[RemoveUnconnectedNodesSchema, Field(discriminator="target_")]
+ProcessorSchemas = Annotated[
+    Union[
+        RemoveUnconnectedNodesSchema,
+        RestrictEdgeLengthSchema,
+    ], 
+    Field(discriminator="target_"),
+]
