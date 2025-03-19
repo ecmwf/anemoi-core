@@ -73,13 +73,16 @@ will not be pruned, regardless of its connectivity status.
  RestrictEdgeLength
 ************************
 
-The ``RestrictEdgeLength`` post-processor will remove edges longer than a certain treshold (set in km).
-This can be useful when one or multiple edge builders create edges of various lenghts, some of which are undesirable.
-For example when using ``KNNEgges`` applied to all of the hidden mesh but only a subset of the data nodes (e.g. those in a LAM region),
-with this post-processor one can remove those edges connecting regions of the hidden mesh far away from the resitricted set of data nodes.
+The ``RestrictEdgeLength`` post-processor will remove edges longer than a certain treshold (set in km). 
+This can be useful when one or multiple edge builders create edges of various lenghts, some of which are undesirable. 
+For example when using ``KNNEdges`` applied to all of the hidden mesh but only a subset of the data nodes (e.g. those in a LAM region) 
+also connections are made to hidden mesh nodes very far away from the restricted set of data nodes. With this post-processor one can remove 
+such edges, effectively providing a `KNNedges` algorithm applied only that part of the data mesh within a certain distance to the restricted 
+set of data nodes.
 
 The ``RestrictEdgeLength`` post-processor also provides
-functionality to (re)compute edge attributes, since the removal of a large number of edges can affect those, e.g. their normalisation.
+functionality to (re)compute edge attributes, since the removal of a large number of edges can affect those, e.g. their normalisation. 
+
 .. code:: yaml
 
    nodes: ...
@@ -91,14 +94,16 @@ functionality to (re)compute edge attributes, since the removal of a large numbe
     target_name: hidden              #target nodes of the edges to be processed
     threshold: 20                    #edges longer than the threshold of 20 km will be removed
     update_attributes:               #update edge attributes after postprocessing (optional)
-      edge_length:                   # e.g.
+      edge_length:                   
         _target_: anemoi.graphs.edges.attributes.EdgeLength
-        norm: unit-max               # if long edges are removed by the postprocessor it will affect unit-max normalisation
-      ...                            # so this indicates to recompute the attribute after removal
+        norm: unit-max               
+
+The configuration above asks to (re)compute the edge length attribute after removal of edges longer than 20 km, 
+something which can be relevant since removing such longer edges will affect the normalisation of the edge length attribute.
 
 The ``RestrictEdgeLength`` post-processor also supports the
-``source_mask_attr_name`` and ``target_mask_attr_name`` arguments. These are optional but allow to specify
-a Boolean attribute of the source/target nodes, only those edges with source/target being ``True`` under this mask
+``source_mask_attr_name`` and ``target_mask_attr_name`` arguments. These are optional but allow to refer to
+a Boolean attribute of the source/target nodes and only those edges whose source/target is ``True`` under this Boolean mask 
 will be postprocessed. This can be useful if one wants to exclude a subset of edges that are allowed to be longer than the threshold.
 An example usage:
 
@@ -116,5 +121,5 @@ An example usage:
    threshold: 20                    #edges longer than this threshold (in km) will be removed
    source_mask_attr_name: cutout    #optional
 
-With this configuration only edges whose source is in the cutout region will be post-processed,
+With this configuration only edges whose source is in the cutout region will be post-processed, 
 i.e. those edges with source node outside the cutout region will be preserved regardless of their length.
