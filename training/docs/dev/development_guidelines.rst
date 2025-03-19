@@ -13,6 +13,75 @@ Please follow these development guidelines:
 #. Follow the :ref:`branching-guidelines`.
 #. Follow the :ref:`commit-guidelines`.
 
+
+.. _code-style:
+
+************************
+ Code Quality and Style
+************************
+
+We enforce consistent code style using pre-commit hooks. All code must follow
+these guidelines:
+
+Code Formatting
+=============
+
+#. We follow PEP 8 with some modifications:
+   
+   - Line length is 120 characters (not 79).
+   - Uses ``black`` for consistent formatting.
+   - Uses ``isort`` for import sorting with:
+     - Single line imports.
+     - Black-compatible formatting.
+     - Project imports grouped under ``anemoi``.
+
+#. Import organization:
+   
+   - Imports are sorted using ``isort``.
+   - Force single-line imports.
+   - Group order: standard library, third-party, anemoi packages.
+
+Linting
+=======
+
+We use ``ruff`` for code linting, which checks for:
+
+- Code style violations.
+- Potential bugs.
+- Complexity issues.
+- Best practices.
+
+Documentation Style
+=================
+
+#. Documentation follows strict guidelines:
+   
+   - RST files are formatted using ``rstfmt``.
+   - Docstrings must match function signatures (checked by ``docsig``).
+   - Sphinx documentation is linted (``sphinx-lint``).
+
+Pre-commit Checks
+===============
+
+All code is automatically checked using pre-commit hooks that verify:
+
+#. Code formatting:
+   - Black formatting.
+   - Import sorting.
+   - Line endings and trailing whitespace.
+
+#. Code quality:
+   - No debugger statements.
+   - No merge conflicts.
+   - Type annotations.
+   - No blanket ``noqa`` statements.
+
+#. Documentation:
+   - Docstring validation.
+   - RST formatting.
+   - Sphinx linting.
+
+
 .. _branching-guidelines:
 
 **********************
@@ -370,7 +439,7 @@ Properties should have concise but clear docstrings:
        """Number of nodes in the grid."""
        return len(self.coordinates)
 
-Type Hints
+ Type Hints
 =========
 
 Always combine docstrings with type hints for better code clarity and catch potential errors:
