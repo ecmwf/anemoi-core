@@ -23,4 +23,3 @@ Example:
 In `anemoi/training/diagnostics/callbacks.py`, the `BasePlotCallback`
 serves as a foundation for other plotting callbacks. New plotting
 features should subclass this base class.
-
