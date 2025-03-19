@@ -144,10 +144,10 @@ Directory Structure
    ``__init__.py`` files if they should be part of the public API. Keep it minimal.
    Use it to define package-level exports using __all__.
 
-.. note:: 
+.. note::
 
    Utility Functions Organization:
-   
+
    - Use ``utils.py`` only for package-specific helper functions that don't fit in other modules.
    - If a utility function could be useful across multiple packages:
      - Move it to ``anemoi-utils`` package.
@@ -329,7 +329,7 @@ Classes should have detailed docstrings following this format:
        - 'N' prefix for original reduced Gaussian grid
        - 'O' prefix for octahedral reduced Gaussian grid
        - Number indicates latitude lines between pole and equator
-       
+
        For example, 'O640' represents an octahedral grid with 640
        latitude lines between pole and equator.
        """
@@ -406,7 +406,7 @@ Even private methods should have basic documentation:
 
    def _validate_grid(self) -> None:
        """Validate the grid identifier format.
-       
+
        Raises
        ------
        ValueError
@@ -422,17 +422,17 @@ Even private methods should have basic documentation:
    - Use proper indentation in docstrings for readability.
    - Add inline comments for complex logic or algorithms.
    - To reference other documentation sections, use:
-     
+
      - ``:ref:`section-name``` for internal documentation links
      - ```Section Title <link>`_`` for external links
-     
+
      Example:
-     
+
      .. code-block:: python
-     
+
          """
          Process nodes in the graph.
-         
+
          See Also
          --------
          :ref:`graphs-post-processor` : Documentation about post-processing nodes
@@ -470,7 +470,7 @@ Profiling and Monitoring
 =======================
 
 #. Profile code to identify bottlenecks:
-   
+
    - Use ``cProfile`` for Python profiling.
    - Use ``torch.profiler`` for PyTorch operations.
    - Monitor memory usage with ``memory_profiler``.
@@ -479,7 +479,7 @@ Data Operations
 =============
 
 #. Optimize data handling:
-   
+
    - Use vectorized operations (NumPy/PyTorch) instead of loops.
    - Batch process data when possible.
    - Consider using ``torch.compile`` for PyTorch operations.
@@ -489,7 +489,7 @@ Memory Management
 ===============
 
 #. Be mindful of memory usage:
-   
+
    - Release unused resources promptly.
    - Use generators for large datasets.
    - Clear GPU memory when no longer needed.
@@ -498,7 +498,7 @@ Algorithm Optimization
 ====================
 
 #. Choose efficient algorithms and data structures:
-   
+
    - Use appropriate data structures (e.g., sets for lookups).
    - Cache expensive computations when appropriate.
 
