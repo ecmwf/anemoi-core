@@ -7,11 +7,80 @@
 Please follow these development guidelines:
 
 #. Open an issue before starting a feature or bug fix to discuss the
-   approach with maintainers adn other users.
+   approach with maintainers and other users.
 #. Ensure high-quality code with appropriate tests, documentation,
    linting, and style checks. TODO: Add reference to tests
 #. Follow the :ref:`branching-guidelines`.
 #. Follow the :ref:`commit-guidelines`.
+
+
+.. _code-style:
+
+************************
+ Code Quality and Style
+************************
+
+We enforce consistent code style using pre-commit hooks. All code must follow
+these guidelines:
+
+Code Formatting
+=============
+
+#. We follow PEP 8 with some modifications:
+
+   - Line length is 120 characters (not 79).
+   - Uses ``black`` for consistent formatting.
+   - Uses ``isort`` for import sorting with:
+     - Single line imports.
+     - Black-compatible formatting.
+     - Project imports grouped under ``anemoi``.
+
+#. Import organization:
+
+   - Imports are sorted using ``isort``.
+   - Force single-line imports.
+   - Group order: standard library, third-party, anemoi packages.
+
+Linting
+=======
+
+We use ``ruff`` for code linting, which checks for:
+
+- Code style violations.
+- Potential bugs.
+- Complexity issues.
+- Best practices.
+
+Documentation Style
+=================
+
+#. Documentation follows strict guidelines:
+
+   - RST files are formatted using ``rstfmt``.
+   - Docstrings must match function signatures (checked by ``docsig``).
+   - Sphinx documentation is linted (``sphinx-lint``).
+
+Pre-commit Checks
+===============
+
+All code is automatically checked using pre-commit hooks that verify:
+
+#. Code formatting:
+   - Black formatting.
+   - Import sorting.
+   - Line endings and trailing whitespace.
+
+#. Code quality:
+   - No debugger statements.
+   - No merge conflicts.
+   - Type annotations.
+   - No blanket ``noqa`` statements.
+
+#. Documentation:
+   - Docstring validation.
+   - RST formatting.
+   - Sphinx linting.
+
 
 .. _branching-guidelines:
 
@@ -46,13 +115,13 @@ When making commits to the repository, please follow these guidelines:
 
    Common types include:
 
-   - ``feat``: New feature
-   - ``fix``: Bug fix
-   - ``docs``: Documentation only
-   - ``style``: Code style changes
-   - ``refactor``: Code changes that neither fix bugs nor add features
-   - ``test``: Adding or modifying tests
-   - ``chore``: Maintenance tasks
+   - ``feat``: New feature.
+   - ``fix``: Bug fix.
+   - ``docs``: Documentation only.
+   - ``style``: Code style changes.
+   - ``refactor``: Code changes that neither fix bugs nor add features.
+   - ``test``: Adding or modifying tests.
+   - ``chore``: Maintenance tasks.
 
    Add ``!`` after the type/scope to indicate a breaking change.
 
@@ -120,17 +189,6 @@ When submitting Pull Requests (PRs), please follow these guidelines:
    - The squash commit message will use the PR title.
 
 
-
-****************
- Code Standards
-****************
-
-
-*************
- Type Hints
-*************
-
-
 *******************
  File Organization
 *******************
@@ -152,8 +210,21 @@ Directory Structure
 .. note::
 
    When adding new files, ensure they are properly included in
-   ``__init__.py`` files if they should be part of the public API. Keep it minimal—avoid adding heavy logic.
+   ``__init__.py`` files if they should be part of the public API. Keep it minimal.
    Use it to define package-level exports using __all__.
+
+.. note::
+
+   Utility Functions Organization:
+
+   - Use ``utils.py`` only for package-specific helper functions that don't fit in other modules.
+   - If a utility function could be useful across multiple packages:
+     - Move it to ``anemoi-utils`` package.
+     - Document its general-purpose nature.
+     - Ensure it remains stateless and reusable.
+   - Avoid using ``utils.py`` as a catch-all; if multiple related utilities emerge,
+     consider creating a dedicated module.
+
 
 File Structure
 =============
@@ -175,18 +246,10 @@ Within each file:
    - Related functions grouped together.
    - Public API before private implementations.
 
-Documentation
-============
+.. note::
 
-Each new file should include:
+   Use absolute imports within the package. Avoid wildcard (*) imports.
 
-#. Docstring explaining the purpose of the module.
-
-#. Clear documentation for public APIs.
-
-#. Example usage in docstrings where appropriate.
-
-#. References to related files or documentation.
 
 ********************
  Naming Conventions
@@ -279,48 +342,237 @@ Each new file should include:
    (e.g., ``lat``, ``lon`` for latitude/longitude). Clarity is more
    important than brevity.
 
-********************************
- Version Control Best Practices
-********************************
+**************
+ Documentation
+**************
 
-#. Always use pre-commit hooks to ensure code quality and consistency.
-#. Never commit directly to the `develop` branch.
-#. Create a new branch for your feature or bug fix, e.g.,
-   `feature/<feature_name>` or `bugfix/<bug_name>`.
-#. Submit a Pull Request from your branch to `develop` for peer review
-   and testing.
+We follow the `NumPy docstring style<https://numpydoc.readthedocs.io/en/latest/format.html>`_. All
+Python files should include proper documentation using the following guidelines:
 
-******************************
- Code Style and Documentation
-******************************
+Module Docstrings
+================
 
-#. Follow PEP 8 guidelines for Python code style, the pre-commit hooks
-   will help enforce this.
-#. Write clear, concise docstrings for all classes and functions using
-   the Numpy style.
-#. Use type hints to improve code readability and catch potential
-   errors.
-#. Add inline comments for complex logic or algorithms.
-#. Use absolute imports within the package.
-#. Avoid wildcard (*) imports.
+Each module should start with a docstring explaining its purpose:
+
+.. code-block:: python
+
+   """
+   Module for building and managing reduced Gaussian grid nodes.
+
+   This module provides functionality to create and manipulate nodes based on
+   ECMWF's reduced Gaussian grid system, supporting both original and octahedral
+   grid types.
+   """
+
+Class Docstrings
+===============
+
+Classes should have detailed docstrings following this format:
+
+.. code-block:: python
+
+   class ReducedGaussianGridNodes:
+       """Nodes from a reduced gaussian grid.
+
+       A gaussian grid is a latitude/longitude grid. The spacing of the latitudes
+       is not regular. However, the spacing of the lines of latitude is
+       symmetrical about the Equator.
+
+       Attributes
+       ----------
+       grid : str
+           The reduced gaussian grid identifier (e.g., 'O640')
+       name : str
+           Unique identifier for the nodes in the graph
+
+       Methods
+       -------
+       get_coordinates()
+           Get the lat-lon coordinates of the nodes.
+       register_nodes(graph, name)
+           Register the nodes in the graph.
+
+       Notes
+       -----
+       The grid identifier format follows ECMWF conventions:
+       - 'N' prefix for original reduced Gaussian grid
+       - 'O' prefix for octahedral reduced Gaussian grid
+       - Number indicates latitude lines between pole and equator
+
+       For example, 'O640' represents an octahedral grid with 640
+       latitude lines between pole and equator.
+       """
+
+Function Docstrings
+=================
+
+Functions should have clear docstrings with parameters, returns, and examples:
+
+.. code-block:: python
+
+   def get_coordinates(self) -> torch.Tensor:
+       """Get the coordinates of the nodes.
+
+       Returns
+       -------
+       torch.Tensor
+           A tensor of shape (num_nodes, 2) containing the latitude and longitude
+           coordinates in radians.
+
+       Examples
+       --------
+       >>> nodes = ReducedGaussianGridNodes("O640", "data")
+       >>> coords = nodes.get_coordinates()
+       >>> print(coords.shape)
+       torch.Size([6599680, 2])
+       """
+
+Property Docstrings
+=================
+
+Properties should have concise but clear docstrings:
+
+.. code-block:: python
+
+   @property
+   def num_nodes(self) -> int:
+       """Number of nodes in the grid."""
+       return len(self.coordinates)
+
+ Type Hints
+=========
+
+Always combine docstrings with type hints for better code clarity and catch potential errors:
+
+.. code-block:: python
+
+   def register_nodes(
+       self,
+       graph: HeteroData,
+       attrs_config: dict[str, dict] | None = None
+   ) -> HeteroData:
+       """Register nodes in the graph with optional attributes.
+
+       Parameters
+       ----------
+       graph : HeteroData
+           The graph to add nodes to
+       attrs_config : dict[str, dict] | None
+           Configuration for node attributes
+
+       Returns
+       -------
+       HeteroData
+           The updated graph with new nodes
+       """
+
+Private Methods
+=============
+
+Even private methods should have basic documentation:
+
+.. code-block:: python
+
+   def _validate_grid(self) -> None:
+       """Validate the grid identifier format.
+
+       Raises
+       ------
+       ValueError
+           If grid identifier doesn't match expected format
+       """
+
+.. note::
+
+   - Keep docstrings clear and concise while being informative.
+   - Include examples for non-obvious functionality.
+   - Document exceptions that might be raised.
+   - Update docstrings when changing function signatures.
+   - Use proper indentation in docstrings for readability.
+   - Add inline comments for complex logic or algorithms.
+   - To reference other documentation sections, use:
+
+     - ``:ref:`section-name``` for internal documentation links
+     - ```Section Title <link>`_`` for external links
+
+     Example:
+
+     .. code-block:: python
+
+         """
+         Process nodes in the graph.
+
+         See Also
+         --------
+         :ref:`graphs-post-processor` : Documentation about post-processing nodes
+         `PyG Documentation <https://pytorch-geometric.readthedocs.io/>`_ : External docs
+         anemoi.graphs.nodes.TriNodes : Reference to another class
+         """
 
 
 *********
  Testing
 *********
 
-#. Write unit tests for new features using pytest.
-#. Ensure all existing tests pass before submitting a Pull Request.
-#. Aim for high test coverage, especially for critical functionality.
+All code changes must include appropriate tests. For detailed testing guidelines
+and examples, see :ref:`testing-guidelines`.
+
+Key points:
+
+#. Use pytest for all test cases.
+#. Follow the :ref:`naming-conventions` for test files and functions.
+#. Run tests locally before submitting PRs (``pytest``).
+#. Add tests for both success and failure cases.
+
+.. note::
+   Pre-commit hooks will run a subset of tests. The full test suite
+   runs automatically on Pull Requests.
 
 ****************************
  Performance Considerations
 ****************************
 
-#. Profile your code to identify performance bottlenecks.
-#. Optimize critical paths and frequently called functions.
-#. Consider using vectorized operations when working with large
-   datasets.
+Performance is critical in scientific computing. Follow these guidelines to ensure
+efficient code:
 
-By following these guidelines, you'll contribute to a maintainable and
-robust codebase for Anemoi Training.
+Profiling and Monitoring
+=======================
+
+#. Profile code to identify bottlenecks:
+
+   - Use ``cProfile`` for Python profiling.
+   - Use ``torch.profiler`` for PyTorch operations.
+   - Monitor memory usage with ``memory_profiler``.
+
+Data Operations
+=============
+
+#. Optimize data handling:
+
+   - Use vectorized operations (NumPy/PyTorch) instead of loops.
+   - Batch process data when possible.
+   - Consider using ``torch.compile`` for PyTorch operations.
+   - Minimize data copying and type conversions.
+
+Memory Management
+===============
+
+#. Be mindful of memory usage:
+
+   - Release unused resources promptly.
+   - Use generators for large datasets.
+   - Clear GPU memory when no longer needed.
+
+Algorithm Optimization
+====================
+
+#. Choose efficient algorithms and data structures:
+
+   - Use appropriate data structures (e.g., sets for lookups).
+   - Cache expensive computations when appropriate.
+
+.. note::
+
+   Always benchmark performance improvements and document any critical
+   performance considerations in docstrings. Balance code readability
+   with performance optimizations.

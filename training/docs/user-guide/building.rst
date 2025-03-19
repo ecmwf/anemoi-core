@@ -142,12 +142,27 @@ remains intact in the normalised space. Note that this is a design choice.
 Imputer
 ===================
 
-In machine learning, you cannot have missing values.
+It is important to have no missing values (e.g. NaNs) in the data when training a model as this will break the backpropagation
+of gradients and cause the model to predict only NaNs. For fields which contain missing values,
+we provide options to replace these values via an "imputer". During training NaN values are replaced with the specified value
+for the field. The default imputer is "none", which means no imputation is performed. The user can specify the imputer by setting
+``processors.imputer`` under the ``data/zarr.yaml`` file. An example of this is shown below:
 
 .. code:: yaml
 
    imputer:
       default: "none"
+      mean:
+         - 2t
+
+   processors:
+   imputer:
+      _target_: anemoi.models.preprocessing.imputer.InputImputer
+      _convert_: all
+      config: ${data.imputer}
+
+There are other options for the imputer; constant values can by used, or the ``DynamicInputImputer`` can be used for fields where the
+NaN locations change in time.
 
 ***************************************
  Dataloader
