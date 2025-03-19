@@ -68,3 +68,53 @@ preserved. For example:
 
 In this configuration, any node with the attribute `important_nodes` set
 will not be pruned, regardless of its connectivity status.
+
+************************
+ RestrictEdgeLength
+************************
+
+The ``RestrictEdgeLength`` post-processor will remove edges longer than a certain treshold (set in km). 
+This can be useful when one or multiple edge builders create edges of various lenghts, some of which are undesirable. 
+For example when using ``KNNEgges`` applied to all of the hidden mesh but only a subset of the data nodes (e.g. those in a LAM region), 
+with this post-processor one can remove those edges connecting regions of the hidden mesh far away from the resitricted set of data nodes.
+
+The ``RestrictEdgeLength`` post-processor also provides
+functionality to (re)compute edge attributes, since the removal of a large number of edges can affect those, e.g. their normalisation. 
+.. code:: yaml
+
+   nodes: ...
+   edges: ...
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.RestrictEdgeLength
+    source_name: data                #source nodes of the edges to be processed
+    target_name: hidden              #target nodes of the edges to be processed
+    threshold: 20                    #edges longer than the threshold of 20 km will be removed
+    update_attributes:               #update edge attributes after postprocessing (optional)
+      edge_length:                   # e.g.
+        _target_: anemoi.graphs.edges.attributes.EdgeLength
+        norm: unit-max               # if long edges are removed by the postprocessor it will affect unit-max normalisation
+      ...                            # so this indicates to recompute the attribute after removal
+
+The ``RestrictEdgeLength`` post-processor also supports the
+``source_mask_attr_name`` and ``target_mask_attr_name`` arguments. These are optional but allow to specify
+a Boolean attribute of the source/target nodes, only those edges with source/target being ``True`` under this mask 
+will be postprocessed. This can be useful if one wants to exclude a subset of edges that are allowed to be longer than the threshold.
+An example usage:
+
+.. code:: yaml
+
+   nodes: ...
+      attributes:
+         cutout:
+            _target_: anemoi.graphs.nodes.attributes.CutOutMask
+   edges: ...
+   postprocessors:
+   - _target_: anemoi.graphs.processors.RestrictEdgeLength
+   source_name: data                #source nodes of the edges to be processed
+   target_name: hidden              #target nodes of the edges to be processed
+   threshold: 20                    #edges longer than this threshold (in km) will be removed
+   source_mask_attr_name: cutout    #optional
+
+With this configuration only edges whose source is in the cutout region will be post-processed, 
+i.e. those edges with source node outside the cutout region will be preserved regardless of their length.
