@@ -150,7 +150,7 @@ Within each file:
 
    - Use PascalCase (CapWords)
    - Examples:
-  
+
      - ``ReducedGaussianGridNodes`` ✅
      - ``MultiScaleEdges`` ✅
      - ``reduced_gaussian_grid_nodes`` ❌
@@ -172,7 +172,7 @@ Within each file:
 
    - Use uppercase with underscores
    - Examples:
-  
+
      - ``MAX_GRID_RESOLUTION`` ✅
      - ``DEFAULT_BATCH_SIZE`` ✅
      - ``MaxGridResolution`` ❌
@@ -181,7 +181,7 @@ Within each file:
 
    - Prefix with single underscore for internal use
    - Examples:
-  
+
      - ``_validate_input()`` ✅
      - ``_cached_result`` ✅
 
@@ -211,7 +211,7 @@ Within each file:
    - Be descriptive about what is being tested.
    - Include the scenario and expected outcome.
    - Examples:
-  
+
      - ``test_reduced_gaussian_grid_with_invalid_resolution`` ✅
      - ``test_edge_builder_handles_empty_graph`` ✅
      - ``test_coordinates_are_in_radians`` ✅
