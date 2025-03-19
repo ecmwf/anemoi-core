@@ -6,7 +6,7 @@ Anemoi training is designed so you can adjust key parts of the models
 and training process without needing to modify the underlying code.
 
 A basic introduction to the configuration system is provided in the
-`getting started <start/hydra-intro>`_ section. This section will go
+`getting started <hydra-intro>`_ section. This section will go
 into more detail on how to configure the training pipeline.
 
 ***********************
@@ -89,7 +89,7 @@ This can look like the following:
 
 
 Normalisation
-============
+===================
 
 
 Machine learning models are sensitive to the scale of the input data. To
@@ -140,7 +140,7 @@ remains intact in the normalised space. Note that this is a design choice.
 
 
 Imputer
-============
+===================
 
 In machine learning, you cannot have missing values.
 
@@ -153,52 +153,6 @@ In machine learning, you cannot have missing values.
  Dataloader
 ***************************************
 
-The dataloader file points...
-
-num_workers:
-  training: 8
-  validation: 8
-  test: 8
-batch_size:
-  training: 2
-  validation: 4
-  test: 4
-
-limit_batches:
-  training: null
-  validation: null
-  test: 20
-
-# set a custom mask for grid points.
-# Useful for LAM (dropping unconnected nodes from forcing dataset)
-grid_indices:
-  _target_: anemoi.training.data.grid_indices.FullGrid
-  nodes_name: ${graph.data}
-
-dataset: ${hardware.paths.data}/${hardware.files.dataset}
-
-training:
-  dataset: ${dataloader.dataset}
-  start: null
-  end: 2020
-  frequency: ${data.frequency}
-  drop:  []
-
-validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
-
-validation:
-  dataset: ${dataloader.dataset}
-  start: 2021
-  end: 2021
-  frequency: ${data.frequency}
-  drop:  []
-
-test:
-  dataset: ${dataloader.dataset}
-  start: 2022
-  end: null
-  frequency: ${data.frequency}
-  drop:  []
 
 ***************************************
  Diagnostics
@@ -231,7 +185,7 @@ For a more detailed read on connections in Graph Neural Networks,
 
 
  Processors
-============
+===================
 
 The processor is the part of the model that performs the computation on
 the latent space. The processor can be chosen to be a GNN,
@@ -289,7 +243,7 @@ coarser than the resolution of the base data.
 
 
 Encoders/Decoders
-============
+===================
 
 The encoder and decoder can be chosen to be a GNN or a GraphTransformer.
 This choice is independent of the processor, but currently the encoder
@@ -300,7 +254,7 @@ and decoder must be the same model type otherwise the code will break,
 ***************************************
 
 Loss function scaling
-============
+=============================
 
 It is possible to change the weighting given to each of the variables in
 the loss function by changing
@@ -339,7 +293,7 @@ setup
 
 
 Learning rate
-============
+===================
 
 Anemoi training uses the ``CosineLRScheduler`` from PyTorch as it's
 learning rate scheduler. Docs for this scheduler can be found here
@@ -363,7 +317,7 @@ rate. If no warmup period is defined, a default warmup period of 1000
 iterations is used.
 
 Rollout
-============
+===================
 
 In the first stage of training, standard practice is to train the model
 on a 6 hour interval. Once this is completed, in the second stage of
@@ -388,7 +342,7 @@ maximum rollout by setting ``config.training.rollout.max`` (usually set
 to 12).
 
 Restarting a training run
-============
+=============================
 
 Whether it's because the training has exceeded the time limit on an HPC
 system or because the user wants to fine-tune the model from a specific
@@ -413,7 +367,7 @@ restart from..
 
 
 Transfer Learning
-============
+===================
 
 Transfer learning allows the model to reuse knowledge from a previously
 trained checkpoint. This is particularly useful when the new task is
@@ -443,7 +397,7 @@ with similar characteristics.
 
 
 Model Freezing
-============
+===================
 
 Model freezing is a technique where specific parts (submodules) of a
 model are excluded from training. This is useful when certain parts of
