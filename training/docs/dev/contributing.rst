@@ -53,11 +53,20 @@ follow these steps:
 #. Request a review from maintainers or other contributors, which will
    follow the :ref:`code-review-process`.
 
+# TODO: mention documentation is automatically generated in PRs on
+readthedocs
+
 .. _code-review-process:
 
 *********************
  Code Review Process
 *********************
+
+The anemoi packages have a set of automated checks to enforce the coding
+guidelines. This is done through GitHub Actions, which will run the
+checks on every Pull Request. For security reasons, the maintainers of
+the Anemoi packages first need to review the code changes before running
+the automated checks.
 
 The Anemoi packages have a set of automated checks to enforce coding
 guidelines. These checks are run via GitHub Actions on every Pull
