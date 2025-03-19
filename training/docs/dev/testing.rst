@@ -13,6 +13,69 @@ and best practices for contributing tests.
 We use pytest as our primary testing framework. Pytest offers a simple
 and powerful way to write and run tests.
 
+****************
+ Types of Tests
+****************
+
+1. Unit Tests
+=============
+
+-  Test individual components in isolation.
+-  Should constitute the majority of test cases.
+-  Unit tests reside in `tests/` or, for packages with integration
+   tests, in `tests/unit`
+
+2. Integration Tests
+====================
+
+-  Test how different components work together.
+-  Important for data processing pipelines and model training workflows.
+-  Integration tests reside in `tests/integration`.
+
+3. Functional Tests
+===================
+
+-  Test entire features or workflows from start to finish.
+-  Ensure that the system works as expected from a user's perspective.
+-  This is a work in progress.
+
+***************
+ Running Tests
+***************
+
+Basic commands
+==============
+
+To run all unit tests:
+
+.. code:: bash
+
+   pytest
+
+To run tests in a specific file:
+
+.. code:: bash
+
+   pytest tests/unit/test_specific_feature.py
+
+To run tests with a specific mark:
+
+.. code:: bash
+
+   pytest -m slow
+
+Running Integration Tests
+=========================
+
+To run all integration tests, including slow-running tests, use the
+`--longtests` flag. Follow the package-specific instructions. For
+integration tests in anemoi-training, for instance, ensure that you have
+GPU available and run:
+
+.. code:: bash
+
+   pytest training/tests/integration/ --longtests
+
 ***************
  Writing Tests
 ***************
@@ -84,172 +147,8 @@ Use fixtures to set up common test data or objects:
        # Use the sample_dataset fixture in your test
        pass
 
-****************
- Types of Tests
-****************
-
-1. Unit Tests
-=============
-
-Test individual components in isolation. These should be the majority of
-your tests.
-
-2. Integration Tests
+Mocking and Patching
 ====================
-
-Test how different components work together. These are particularly
-important for data processing pipelines and model training workflows.
-
-Integration tests in anemoi-training include both general integration
-tests and tests for member state use cases.
-
-3. Functional Tests
-===================
-
-Test entire features or workflows from start to finish. These ensure
-that the system works as expected from a user's perspective.
-
-***************
- Running Tests
-***************
-
-To run all unit tests:
-
-.. code:: bash
-
-   pytest
-
-To run tests in a specific file:
-
-.. code:: bash
-
-   pytest tests/unit/test_specific_feature.py
-
-To run tests with a specific mark:
-
-.. code:: bash
-
-   pytest -m slow
-
-For integration tests, ensure that you have GPU available, then from the
-top-level directory of anemoi-core run:
-
-.. code:: bash
-
-   pytest training/tests/integration --longtests
-
-For long-running integration tests, we use the `--longtests` flag to
-ensure that they are run only when necessary. This means that you should
-add the correspondong marker to these tests:
-
-.. code:: python
-
-   @pytest.mark.longtests
-   def test_long():
-         pass
-
-**********************************************
- Integration tests and member state use cases
-**********************************************
-
-Configuration handling in integration tests
-===========================================
-
-Configuration management is essential to ensure that integration tests
-remain reliable and maintainable. Our approach includes:
-
-1. Using Configuration Templates: Always start with a configuration
-template from the repository to minimize redundancy and ensure
-consistency. We expect the templates to be consistent with the code base
-and have integration tests that check for this consistency.
-
-2. Test-specific Modifications: Apply only the necessary
-use-case-specific (e.g. dataset) and testing-specific (e.g. batch_size)
-modifications to the template. Use a config modification yaml, or hydra
-overrides for parametrization of a small number of config values.
-
-3. Reducing Compute Load: Where possible, reduce the number of batches,
-epochs, and batch sizes.
-
-4. Debugging and Failures: When integration tests fail, check the config
-files in `training/src/anemoi/training/config` for inconsistencies with
-the code and update the config files if necessary. Also check if
-test-time modifications have introduced unintended changes.
-
-Example of configuration handling
-=================================
-
-For an example, see `training/tests/integration/test_training_cycle.py`.
-The test uses a configuration based on the template
-`training/src/anemoi/training/config/basic.py`, i.e. the basic global
-model. It applies testing-specific modifications to reduce batch_size
-etc. as detailed in
-`training/tests/integration/test_training_cycle.yaml`. It furthermore
-applies use-case-specific modifications as detailed in
-`training/tests/integration/test_basic.yaml` to provide the location of
-our testing dataset compatible with the global model.
-
-Note that we also parametrize the fixture `architecture_config` to
-override the default model configuration in order to test different
-model architectures.
-
-Adding a member state use case test
-===================================
-
-To add a new member test use case, follow these steps:
-
-1. Use an Integration Test Template: To ensure maintainability, we
-recommend following the config handling guidelines detailed above in so
-far as this makes sense for your use case.
-
-2. Best practices: Follow best practices, such as reducing compute load
-and managing configurations via configuration files.
-
-3. Prepare the Data: Ensure the required dataset is uploaded to the EWC
-S3 before adding the test. Please get in touch about access.
-
-4. Subfolder Organization: Place your test and config files in a new
-subfolder within `training/tests/integration/` for clarity and ease of
-maintenance.
-
-5. Handling Test Failures: Complex use cases will likely require more
-test-time modifications. Check if these have overwritten expected
-configurations or are out-of-date with configuration changes in the
-templates.
-
-***************
- Test Coverage
-***************
-
-We use pytest-cov to measure test coverage. To run tests with coverage:
-
-.. code:: bash
-
-   pytest --cov=anemoi_training
-
-Aim for at least 80% coverage for new features, and strive to maintain
-or improve overall project coverage.
-
-************************
- Continuous Integration
-************************
-
-All tests are run automatically on our CI/CD pipeline for every pull
-request. Ensure all tests pass before submitting your PR.
-
-*********************
- Performance Testing
-*********************
-
-For performance-critical components:
-
-#. Write benchmarks.
-#. Compare performance before and after changes.
-#. Set up performance regression tests in CI.
-
-**********************
- Mocking and Patching
-**********************
 
 Use unittest.mock or pytest-mock for mocking external dependencies or
 complex objects:
@@ -263,6 +162,84 @@ complex objects:
 
        result = my_api_function()
        assert result == "mocked"
+
+***************************
+ Writing Integration Tests
+***************************
+
+Marking Long-Running Tests
+==========================
+
+For long-running integration tests, we use the `--longtests` flag to
+ensure that they are run only when necessary. This means that you should
+add the correspondong marker to these tests:
+
+.. code:: python
+
+   @pytest.mark.longtests
+   def test_long():
+         pass
+
+Configuration Handling
+======================
+
+Integration tests in anemoi-training, anemoi-datasets, etc., rely on
+appropriate handling of configuration files. Configuration management is
+essential to ensure that the tests remain reliable and maintainable. Our
+approach includes:
+
+1. Using Configuration Templates: Always start with a configuration
+template from the repository to minimize redundancy and ensure
+consistency. We expect the templates to be consistent with the code base
+and have integration tests that check for this consistency.
+
+2. Test-specific Modifications: Apply only the necessary
+use-case-specific (e.g. related to the dataset) and testing-specific
+(e.g. batch_size or restricted date range) modifications to the
+template.
+
+3. Reducing Compute Load: Where possible, reduce the number of batches,
+epochs, batch sizes, number of dates etc.
+
+4. Debugging and Failures: When integration tests fail, check the config
+files (e.g. in `training/src/anemoi/training/config`) for
+inconsistencies with the code and update the config files if necessary.
+Also check if test-time modifications have introduced unintended
+changes.
+
+For more details and package-specific examples, please refer to the
+package-level documentation.
+
+***************
+ Test Coverage
+***************
+
+We use pytest-cov to measure test coverage. To check coverage:
+
+.. code:: bash
+
+   pytest --cov=anemoi_training
+
+Aim for at least 80% coverage for new features, and strive to maintain
+or improve overall project coverage.
+
+************************
+ Continuous Integration
+************************
+
+All unit tests are run automatically on our CI/CD pipeline for every
+pull request after the initial review by maintainers. Ensure all tests
+pass before submitting your PR.
+
+*********************
+ Performance Testing
+*********************
+
+For performance-critical components:
+
+#. Write benchmarks.
+#. Compare performance before and after changes.
+#. Set up performance regression tests in CI.
 
 ****************
  Best Practices

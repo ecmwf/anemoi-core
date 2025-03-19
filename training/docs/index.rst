@@ -62,7 +62,7 @@ This package provides the *Anemoi* training functionality.
 .. toctree::
    :maxdepth: 1
    :caption: FAQ/Troubleshooting
-   
+
    user-guide/debugging
 
 *****************
