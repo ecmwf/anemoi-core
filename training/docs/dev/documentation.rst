@@ -22,7 +22,7 @@ your work.
 Steps for contributing documentation:
 
 -  Identify the most appropriate place for your addition (e.g.,
-   overall `Anemoi documentation<https://github.com/ecmwf/anemoi-docs>`_, 
+   overall `Anemoi documentation<https://github.com/ecmwf/anemoi-docs>`_,
    package-level documentation), and the relevant section (e.g., user guide,
    getting started, or developer guide).
 
