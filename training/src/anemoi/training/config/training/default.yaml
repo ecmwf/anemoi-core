@@ -19,6 +19,11 @@ precision: 16-mixed
 # Deepmind use k = 2 in their model
 multistep_input: 2
 
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+# If not null, has lists of non-negative indices for input and output, e.g.
+# input: [0, 1], output: [2]
+explicit_times: null
+
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1

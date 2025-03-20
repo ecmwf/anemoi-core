@@ -82,10 +82,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def relative_date_indices(self, val_rollout: int = 1) -> list:
         """Determine a list of relative time indices to load for each batch."""
-        if hasattr(self.config.training, "explicit_times"):
+        if self.config.training.explicit_times is not None:
             return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
 
-        # uses the old default of multistep, timeincrement and rollout.
+        # Calculate indices using multistep, timeincrement and rollout.
         # Use the maximum rollout to be expected
         rollout = max(
             (
@@ -102,9 +102,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def add_model_run_ids(self, data_reader: Callable) -> Callable:
         """Determine the model run id of each time index of the data and add to a data_reader object.
 
-        NOTE/TODO: This is only relevant when training on non-analysis and should be replaced with
-        a property of the dataset stored in data_reader.
-        Until then, assumes regular interval of changed model runs
+        NOTE: This is only relevant when training on non-analysis and could in the future be replaced with
+        a property of the dataset stored in data_reader. Now assumes regular interval of changed model runs
         """
         if not hasattr(self.config.dataloader, "model_run_info"):
             data_reader.model_run_ids = None
