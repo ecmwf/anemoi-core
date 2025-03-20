@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.5.0...graphs-0.5.1) (2025-03-20)
+
+
+### Bug Fixes
+
+* **graphs:** drop torch_geometric &lt; 2.5 dependency ([#207](https://github.com/ecmwf/anemoi-core/issues/207)) ([bf6c8af](https://github.com/ecmwf/anemoi-core/commit/bf6c8aff4b9289bb3d6195566c91aaa7b2d70f7a))
+* **graphs:** load graphs to cpu during inspection ([#206](https://github.com/ecmwf/anemoi-core/issues/206)) ([bb82adf](https://github.com/ecmwf/anemoi-core/commit/bb82adf7a0e285cd0a6068e05f0079450a07d10d))
+* **graphs:** torch_geometric version &lt; 2.5 ([#196](https://github.com/ecmwf/anemoi-core/issues/196)) ([843f944](https://github.com/ecmwf/anemoi-core/commit/843f9447aa919845c497f9f5c45997d99d30a4a9))
+
 ## [0.5.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.4.4...graphs-0.5.0) (2025-03-17)
 
 
