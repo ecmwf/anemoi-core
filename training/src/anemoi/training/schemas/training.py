@@ -203,6 +203,35 @@ LossSchemas = Union[
 ]
 
 
+class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
+    ddp_ens = "anemoi.training.distributed.strategy.DDPEnsGroupStrategy"
+    ddp = "anemoi.training.distributed.strategy.DDPStrategy"
+
+
+class BaseDDPStrategySchema(BaseModel):
+    """Strategy configuration."""
+
+    target_: ImplementedStrategiesUsingBaseDDPStrategySchema = Field(..., alias="_target_")
+    num_gpus_per_model: PositiveInt = Field(example=2)
+    "Number of GPUs per model."
+    # TODO(Ana): check why the read_group_size is not passed in the config
+    kwargs: dict[str, Any] = Field(default_factory=dict)
+    "Additional arguments to pass to the strategy."
+
+
+class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
+    """Strategy object from anemoi.training.strategy."""
+
+    num_gpus_per_ensemble: PositiveInt = Field(example=2)
+    "Number of GPUs per ensemble."
+
+
+StrategySchemas = Union[
+    BaseDDPStrategySchema,
+    DDPEnsGroupStrategyStrategySchema,
+]
+
+
 class GraphNodeAttributeSchema(BaseModel):
     target_: Literal["anemoi.training.losses.nodeweights.GraphNodeAttribute"] = Field(..., alias="_target_")
     "Node loss weights object from anemoi.training.losses."
@@ -241,7 +270,7 @@ class ScaleValidationMetrics(BaseModel):
     """List of metrics to keep in normalised space.."""
 
 
-class TrainingSchema(BaseModel):
+class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
     run_id: Union[str, None] = Field(example=None)
@@ -264,13 +293,11 @@ class TrainingSchema(BaseModel):
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
-    num_sanity_val_steps: PositiveInt = Field(example=6)
+    num_sanity_val_steps: NonNegativeInt = Field(example=6)
     "Sanity check runs n batches of val before starting the training routine."
     gradient_clip: GradientClip
     "Config for gradient clipping."
-    model_class: Any  # TODO: Fix this
-    "Forecaster to use."
-    strategy: Any  # TODO: Fix this
+    strategy: StrategySchemas
     "Strategy to use."
     ensemble_size_per_device: PositiveInt = Field(example=1)
     "Number of ensemble member per device"
@@ -302,3 +329,15 @@ class TrainingSchema(BaseModel):
     "List of metrics"
     node_loss_weights: NodeLossWeightsSchema
     "Node loss weights configuration."
+    task: str
+
+
+class ForecasterSchema(BaseTrainingSchema):
+    task: Literal[
+        "anemoi.training.train.forecaster.GraphForecaster",
+        "anemoi.training.train.forecaster.GraphEnsForecaster",
+    ] = Field(..., alias="model_class")
+    "Training objective."
+
+
+TrainingSchema = Union[ForecasterSchema]
