@@ -112,8 +112,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
         mr_len = self.config.dataloader.model_run_info.length  # model run length in number of date indices
         assert (
-            max(self.relative_date_indices) <= mr_len
-        ), f"Requested data length {max(self.relative_date_indices)} longer than model run length {mr_len}"
+            max(self.relative_date_indices(self.config.training.rollout.max)) < mr_len
+        ), f"Requested data length {max(self.relative_date_indices(self.config.training.rollout.max)) + 1} longer than model run length {mr_len}"
 
         data_reader.model_run_ids = (data_reader.dates - mr_start) // np.timedelta64(
             mr_len * frequency_to_seconds(self.config.data.frequency),
