@@ -140,10 +140,8 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        return (x_j, x_i)[self.nodes_axis.value][self.node_attr_name]
+        return (x_j, x_i)[self.nodes_axis.value]
 
-    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
-        return self.propagate(edge_index, x=x, size=size)
 
 
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
