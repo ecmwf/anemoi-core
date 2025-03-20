@@ -212,12 +212,14 @@ training:
   run_id: null
   fork_run_id: null
   transfer_learning: False # activate to perform transfer learning
+  task: anemoi.training.train.forecaster.GraphForecaster
   submodules_to_freeze: []
   num_sanity_val_steps: 2
   load_weights_only: false
   deterministic: false
   precision: 16-mixed
   multistep_input: 2
+  explicit_times: null
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0
