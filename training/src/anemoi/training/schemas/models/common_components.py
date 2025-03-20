@@ -15,34 +15,54 @@ from pydantic import NonNegativeInt
 from anemoi.training.schemas.utils import BaseModel
 
 
-class ActivationFunctons(str, Enum):
-    GELU = "GELU"
-    SiLU = "SiLU"
-    ELU = "ELU"
-    ReLU = "ReLU"
-    Tanh = "Tanh"
-    Sigmoid = "Sigmoid"
-    Hardshrink = "Hardshrink"
-    Hardsigmoid = "Hardsigmoid"
-    Hardtanh = "Hardtanh"
-    Hardswish = "Hardswish"
-    LeakyReLU = "LeakyReLU"
-    LogSigmoid = "LogSigmoid"
-    PReLU = "PReLU"
-    ReLU6 = "ReLU6"
-    SELU = "SELU"
-    CELU = "CELU"
-    Mish = "Mish"
-    Softplus = "Softplus"
-    Softshrink = "Softshrink"
-    Softsign = "Softsign"
-    Tanhshrink = "Tanhshrink"
-    Threshold = "Threshold"
-    GLU = "GLU"
+class ActivationFunctions(str, Enum):
+    # Linear Units
+    GELU = "torch.nn.GELU"
+    SiLU = "torch.nn.SiLU"
+    ELU = "torch.nn.ELU"
+    ReLU = "torch.nn.ReLU"
+    ReLU6 = "torch.nn.ReLU6"
+    LeakyReLU = "torch.nn.LeakyReLU"
+    PReLU = "torch.nn.PReLU"
+    SELU = "torch.nn.SELU"
+    CELU = "torch.nn.CELU"
+    Mish = "torch.nn.Mish"
+    Threshold = "torch.nn.Threshold"
+
+    # Gated Linear Units
+    GLU = "anemoi.models.layers.activations.GLU"
+    SwiGLU = "anemoi.models.layers.activations.SwiGLU"
+    ReGLU = "anemoi.models.layers.activations.ReGLU"
+    GeGLU = "anemoi.models.layers.activations.GeGLU"
+
+    # Mathematic functions
+    Tanh = "torch.nn.Tanh"
+    Tanhshrink = "torch.nn.Tanhshrink"
+    Sigmoid = "torch.nn.Sigmoid"
+    LogSigmoid = "torch.nn.LogSigmoid"
+    Sine = "anemoi.models.layers.activations.Sine"
+
+    # Soft activation functions
+    Softplus = "torch.nn.Softplus"
+    Softshrink = "torch.nn.Softshrink"
+    Softsign = "torch.nn.Softsign"
+
+    # Hard activation functions
+    Hardshrink = "torch.nn.Hardshrink"
+    Hardsigmoid = "torch.nn.Hardsigmoid"
+    Hardtanh = "torch.nn.Hardtanh"
+    Hardswish = "torch.nn.Hardswish"
+
+
+class ActivationFunctionSchema(BaseModel):
+    target_: ActivationFunctions = Field(..., alias="_target_")
+    "Activation function class implementation."
+    partial_: bool = Field(..., alias="_partial_")
+    "Should always be True to avoid using the same activation function object in the different layers."
 
 
 class TransformerModelComponent(BaseModel):
-    activation: ActivationFunctons = Field(example="GELU")
+    activation: ActivationFunctionSchema
     "Activation function to use for the transformer model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
@@ -57,7 +77,7 @@ class TransformerModelComponent(BaseModel):
 
 
 class GNNModelComponent(BaseModel):
-    activation: ActivationFunctons = Field(example="GELU")
+    activation: ActivationFunctionSchema
     "Activation function to use for the GNN model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."

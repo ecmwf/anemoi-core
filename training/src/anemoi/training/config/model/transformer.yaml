@@ -1,10 +1,13 @@
-activation: GELU
 num_channels: 1024
 cpu_offload: False
 output_mask: null
 
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+
+activation:
+  _target_: nn.torch.GELU
+  _partial_: True
 
 layer_kernels:
     LayerNorm:
