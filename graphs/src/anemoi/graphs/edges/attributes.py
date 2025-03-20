@@ -143,7 +143,6 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
         return (x_j, x_i)[self.nodes_axis.value]
 
 
-
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
     """
     Copy an attribute of the source node to the edge.
