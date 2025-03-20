@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from abc import ABC
 
-import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
@@ -35,6 +34,9 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
     icon_mesh   : str
         The name of the ICON mesh (defines both the processor mesh and the data)
     """
+
+    vertex_index: tuple[int, int]
+    sub_graph_address: str
 
     def __init__(
         self,
@@ -68,13 +70,7 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
-        edge_index = np.stack(
-            [
-                self.icon_sub_graph.edge_vertices[:, self.vertex_index[0]],
-                self.icon_sub_graph.edge_vertices[:, self.vertex_index[1]],
-            ],
-            axis=0,
-        )
+        edge_index = self.icon_sub_graph.edge_vertices[:, self.vertex_index].T
         return torch.from_numpy(edge_index)
 
 
@@ -85,7 +81,7 @@ class ICONTopologicalProcessorEdges(ICONTopologicalBaseEdgeBuilder):
     from ICON grid vertices.
     """
 
-    vertex_index: tuple[int, int] = (1, 0)
+    vertex_index: tuple[int, int] = (0, 1)
     sub_graph_address: str = "_multi_mesh"
 
 
@@ -97,7 +93,7 @@ class ICONTopologicalEncoderEdges(ICONTopologicalBaseEdgeBuilder):
     vertices.
     """
 
-    vertex_index: tuple[int, int] = (1, 0)
+    vertex_index: tuple[int, int] = (0, 1)
     sub_graph_address: str = "_cell_grid"
 
 
@@ -109,5 +105,5 @@ class ICONTopologicalDecoderEdges(ICONTopologicalBaseEdgeBuilder):
     circumcenters.
     """
 
-    vertex_index: tuple[int, int] = (0, 1)
+    vertex_index: tuple[int, int] = (1, 0)
     sub_graph_address: str = "_cell_grid"
