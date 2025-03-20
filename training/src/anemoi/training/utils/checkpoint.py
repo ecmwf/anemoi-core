@@ -73,7 +73,7 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
 
     # Load the checkpoint
-    checkpoint = torch.load(ckpt_path, map_location=model.device)
+    checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
 
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
