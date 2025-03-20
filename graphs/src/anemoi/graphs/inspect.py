@@ -49,7 +49,7 @@ class GraphInspector:
         **kwargs,
     ):
         self.path = path
-        self.graph = torch.load(self.path, weights_only=False, map_location='cpu')
+        self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
         self.output_path = output_path
         self.show_attribute_distributions = show_attribute_distributions
         self.show_nodes = show_nodes
