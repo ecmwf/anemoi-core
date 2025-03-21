@@ -27,6 +27,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -139,7 +140,7 @@ class GraphForecaster(pl.LightningModule):
         }
         self.updated_loss_mask = False
 
-        self.loss = self.get_loss_function(
+        self.loss = self.create_loss_function(
             config.model_dump(by_alias=True).training.training_loss,
             scalars=self.scalars,
             **loss_kwargs,
@@ -150,7 +151,7 @@ class GraphForecaster(pl.LightningModule):
             torch.nn.ModuleList,
         ), f"Loss function must be a `BaseWeightedLoss`, not a {type(self.loss).__name__!r}"
 
-        self.metrics = self.get_loss_function(
+        self.metrics = self.create_loss_function(
             config.model_dump(by_alias=True).training.validation_metrics,
             scalars=self.scalars,
             **loss_kwargs,
@@ -196,6 +197,56 @@ class GraphForecaster(pl.LightningModule):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x, self.model_comm_group)
+
+    def create_loss_function(
+        self,
+        config: DictConfig,
+        scalars: dict[str, tuple[int | tuple[int, ...] | torch.Tensor]] | None = None,
+        filter_wrap: bool = False,
+        **kwargs,
+    ) -> BaseWeightedLoss | torch.nn.ModuleList:
+        """
+        Wraps the instantiation of a loss function to allow selection of target and predicted variables.
+
+        This method creates a loss function based on the provided configuration.
+        If the configuration specifies a FilteringLossWrapper, it will recursively
+        instantiate the wrapped loss and apply the FilteringLossWrapper using self.data_indices.
+        Alternatively, if 'filter_wrap' is True, the instantiated loss function
+        will be wrapped with FilteringLossWrapper to allow filtering of target/predicted variables before comparison.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Loss function configuration. Can indicate a FilteringLossWrapper to enable variable selection.
+        scalars : dict[str, tuple[int | tuple[int, ...] | torch.Tensor]], optional
+            Scalars to be added to the loss function, by default None.
+        filter_wrap : bool, optional
+            Whether to wrap the loss function with FilteringLossWrapper using self.data_indices, by default False.
+        kwargs : Any
+            Additional arguments to pass to the loss function instantiation.
+
+        Returns
+        -------
+        BaseWeightedLoss or torch.nn.ModuleList
+            An instantiated loss function (or a ModuleList of loss functions) optionally wrapped to filter
+            target and predicted variables.
+        """
+
+        def full_name(type_: type) -> str:
+            return type_.__module__ + "." + type_.__name__
+
+        if config.get("_target_") == full_name(FilteringLossWrapper):
+            loss = self.create_loss_function(config.loss, filter_wrap=False, **kwargs)
+            config._content.pop("loss")
+            config._content.pop("_target_")
+            return FilteringLossWrapper(loss=loss, data_indices=self.data_indices, **config)
+
+        loss_function = self.get_loss_function(config, scalars=scalars, **kwargs)
+
+        if filter_wrap:
+            return FilteringLossWrapper(loss_function, self.data_indices)
+
+        return loss_function
 
     # Future import breaks other type hints TODO Harrison Cook
     @staticmethod
