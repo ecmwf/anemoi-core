@@ -20,7 +20,7 @@ processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
   activation: ${model.activation}
   num_layers: 16
-  num_chunks: 2
+  num_chunks: 8
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512

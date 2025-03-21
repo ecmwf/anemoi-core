@@ -189,6 +189,16 @@ class AnemoiTrainer:
                 freeze_submodule_by_name(model, submodule_name)
                 LOGGER.info("%s frozen successfully.", submodule_name.upper())
 
+        if self.config.training.activation_checkpointing.encoder:
+            LOGGER.info("Encoder activation checkpointing enabled.")
+            model.model.model.encoder_act_checkpointing = True
+        if self.config.training.activation_checkpointing.decoder:
+            LOGGER.info("Decoder activation checkpointing enabled.")
+            model.model.model.decoder_act_checkpointing = True
+        if self.config.training.activation_checkpointing.processor:
+            LOGGER.info("Processor activation checkpointing enabled.")
+            model.model.model.processor_act_checkpointing = True
+
         return model
 
     @rank_zero_only

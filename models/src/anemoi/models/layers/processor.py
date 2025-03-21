@@ -71,15 +71,18 @@ class BaseProcessor(nn.Module, ABC):
             ],
         )
 
-    def run_layers(self, data: tuple, *args, **kwargs) -> Tensor:
+    def run_layers(self, data: tuple, *args, act_checkpointing: bool = False, **kwargs) -> Tensor:
         """Run Layers with checkpoint."""
         for layer in self.proc:
-            data = checkpoint(layer, *data, *args, **kwargs, use_reentrant=False)
+            if act_checkpointing:
+                data = checkpoint(layer, *data, *args, **kwargs, use_reentrant=False)
+            else:
+                data = layer(*data, *args, **kwargs)
         return data
 
-    def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
+    def forward(self, x: Tensor, *args, act_checkpointing: bool = False, **kwargs) -> Tensor:
         """Example forward pass."""
-        x = self.run_layers((x,), *args, **kwargs)
+        x = self.run_layers((x,), *args, act_checkpointing=act_checkpointing, **kwargs)
         return x
 
 
@@ -167,6 +170,7 @@ class TransformerProcessor(BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], ...],
         model_comm_group: Optional[ProcessGroup] = None,
+        act_checkpointing: Optional[bool] = False,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -176,7 +180,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group)
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, act_checkpointing=act_checkpointing)
 
         return x
 
@@ -250,6 +254,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        act_checkpointing: Optional[bool] = False,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         edge_attr = self.trainable(self.edge_attr, batch_size)
@@ -264,7 +269,13 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
-        x, edge_attr = self.run_layers((x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group)
+        x, edge_attr = self.run_layers(
+            (x, edge_attr),
+            edge_index,
+            (shape_nodes, shape_nodes),
+            model_comm_group,
+            act_checkpointing=act_checkpointing,
+        )
 
         return x
 
@@ -341,6 +352,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        act_checkpointing: Optional[bool] = False,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -359,6 +371,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             (shape_nodes, shape_nodes, shapes_edge_attr),
             batch_size,
             model_comm_group,
+            act_checkpointing=act_checkpointing,
         )
 
         return x

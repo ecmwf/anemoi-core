@@ -23,7 +23,7 @@ processor:
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
-  num_chunks: 2
+  num_chunks: 8
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
   cpu_offload: ${model.cpu_offload}

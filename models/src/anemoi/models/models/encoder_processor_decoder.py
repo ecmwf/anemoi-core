@@ -56,6 +56,10 @@ class AnemoiModelEncProcDec(nn.Module):
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
 
+        self.encoder_act_checkpointing = False
+        self.decoder_act_checkpointing = False
+        self.processor_act_checkpointing = False
+
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self.data_indices = data_indices
@@ -145,7 +149,7 @@ class AnemoiModelEncProcDec(nn.Module):
         batch_size: int,
         shard_shapes: tuple[tuple[int, int], tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
-        use_reentrant: bool = False,
+        act_checkpointing: bool = False,
     ) -> Tensor:
         """Run mapper with activation checkpoint.
 
@@ -162,22 +166,19 @@ class AnemoiModelEncProcDec(nn.Module):
         model_comm_group : ProcessGroup
             model communication group, specifies which GPUs work together
             in one model instance
-        use_reentrant : bool, optional
-            Use reentrant, by default False
+        act_checkpointing : bool, optional
+            Use activation checkpointing
 
         Returns
         -------
         Tensor
             Mapped data
         """
-        return checkpoint(
-            mapper,
-            data,
-            batch_size=batch_size,
-            shard_shapes=shard_shapes,
-            model_comm_group=model_comm_group,
-            use_reentrant=use_reentrant,
-        )
+        kwargs = {"batch_size": batch_size, "shard_shapes": shard_shapes, "model_comm_group": model_comm_group}
+
+        if act_checkpointing:
+            return checkpoint(mapper, data, **kwargs, use_reentrant=False)
+        return mapper(data, **kwargs)
 
     def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
         batch_size = x.shape[0]
@@ -205,6 +206,7 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
             model_comm_group=model_comm_group,
+            act_checkpointing=self.encoder_act_checkpointing,
         )
 
         x_latent_proc = self.processor(
@@ -212,6 +214,7 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
             model_comm_group=model_comm_group,
+            act_checkpointing=self.processor_act_checkpointing,
         )
 
         # add skip connection (hidden -> hidden)
@@ -224,6 +227,7 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
             model_comm_group=model_comm_group,
+            act_checkpointing=self.decoder_act_checkpointing,
         )
 
         x_out = (

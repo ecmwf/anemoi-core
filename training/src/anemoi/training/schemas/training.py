@@ -80,6 +80,17 @@ class LR(BaseModel):
     "Number of warm up iteration. Default to 1000."
 
 
+class ActivationCheckpointing(BaseModel):
+    """Activation checkpointing configuration."""
+
+    encoder: bool = Field(example=False)
+    "Enable activation checkpointing for the encoder."
+    decoder: bool = Field(example=False)
+    "Enable activation checkpointing for the decoder."
+    processor: bool = Field(example=False)
+    "Enable activation checkpointing for the processor."
+
+
 class LossScalingSchema(BaseModel):
     default: int = 1
     "Default scaling value applied to the variables loss. Default to 1."
@@ -229,6 +240,8 @@ class TrainingSchema(BaseModel):
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
+    activation_checkpointing: ActivationCheckpointing = Field(default_factory=ActivationCheckpointing)
+    "Activation checkpointing configuration."
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
