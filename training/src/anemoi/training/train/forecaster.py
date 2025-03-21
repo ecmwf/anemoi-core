@@ -253,6 +253,11 @@ class GraphForecaster(pl.LightningModule):
 
         # Instantiate the loss function with the loss_init_config
         kwargs["_recursive_"] = kwargs.get("_recursive_", False)
+        # related to spatial losses
+        if config.get("x_dim", None) is not None and config.get("y_dim", None) is not None:
+            kwargs["x_dim"] = config.x_dim
+            kwargs["y_dim"] = config.y_dim
+
         loss_function = instantiate(loss_config, **kwargs)
 
         if not isinstance(loss_function, BaseWeightedLoss):
