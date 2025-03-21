@@ -67,7 +67,7 @@ First, let's take the model configuration ``transformer.yaml``:
 
 Typically the model is instantiated in ``anemoi-training`` or
 ``anemoi-inference``. For this example we will load the model
-configuration for itself to understand the different bits needed to
+configuration by itself to understand the different components needed to
 create a model.
 
 .. code:: python
