@@ -55,6 +55,8 @@ class NativeGridDataset(IterableDataset):
         label : str, optional
             label for the dataset, by default "generic"
         """
+        if relative_date_indices is None:
+            relative_date_indices = [0, 1, 2]
         self.label = label
 
         self.data = data_reader

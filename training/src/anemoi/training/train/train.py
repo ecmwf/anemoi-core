@@ -218,6 +218,7 @@ class AnemoiTrainer(ABC):
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
             "supporting_arrays": self.supporting_arrays,
+            "relative_date_indices": self.datamodule.relative_date_indices,
         }
 
         model_task = get_class(self.config.training.model_task)
