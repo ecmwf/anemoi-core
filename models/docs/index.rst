@@ -104,14 +104,14 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Recipe examples
+   :caption: User Guide
 
    usage/create_model
 
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Modules
+   :caption: API Reference
 
    modules/interface
    modules/models
@@ -119,8 +119,3 @@ You may also have to install pandoc on MacOS:
    modules/distributed
    modules/preprocessing
    modules/data_indices
-
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-   :caption: Developing Anemoi Models
