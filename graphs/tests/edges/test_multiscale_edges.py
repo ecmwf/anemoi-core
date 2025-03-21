@@ -21,18 +21,26 @@ from anemoi.graphs.nodes import TriNodes
 class TestMultiScaleEdgesInit:
     def test_init(self):
         """Test MultiScaleEdges initialization."""
-        assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1), MultiScaleEdges)
+        assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1, None), MultiScaleEdges)
+        assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=4), MultiScaleEdges)
+        assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=[1, 2, 3]), MultiScaleEdges)
 
     @pytest.mark.parametrize("x_hops", [-0.5, "hello", None, -4])
-    def test_fail_init(self, x_hops: str):
+    def test_fail_init_invalid_x_hops(self, x_hops: str):
         """Test MultiScaleEdges initialization with invalid x_hops."""
         with pytest.raises(AssertionError):
-            MultiScaleEdges("test_nodes", "test_nodes", x_hops)
+            MultiScaleEdges("test_nodes", "test_nodes", x_hops, None)
+
+    @pytest.mark.parametrize("scale_resolutions", [0, -1, [0], [-1], "invalid"])
+    def test_fail_init_invalid_scale_resolutions(self, scale_resolutions):
+        """Test MultiScaleEdges initialization with invalid scale_resolutions."""
+        with pytest.raises(AssertionError):
+            MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=scale_resolutions)
 
     def test_fail_init_diff_nodes(self):
         """Test MultiScaleEdges initialization with invalid nodes."""
         with pytest.raises(AssertionError):
-            MultiScaleEdges("test_nodes", "test_nodes2", 0)
+            MultiScaleEdges("test_nodes", "test_nodes2", 0, None)
 
 
 class TestMultiScaleEdgesTransform:
@@ -58,20 +66,30 @@ class TestMultiScaleEdgesTransform:
     def test_transform_same_src_dst_tri_nodes(self, tri_ico_graph: HeteroData):
         """Test MultiScaleEdges update method."""
 
-        edges = MultiScaleEdges("test_tri_nodes", "test_tri_nodes", 1)
+        edges = MultiScaleEdges("test_tri_nodes", "test_tri_nodes", 1, None)
         graph = edges.update_graph(tri_ico_graph)
         assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
 
     def test_transform_same_src_dst_hex_nodes(self, hex_ico_graph: HeteroData):
         """Test MultiScaleEdges update method."""
 
-        edges = MultiScaleEdges("test_hex_nodes", "test_hex_nodes", 1)
+        edges = MultiScaleEdges("test_hex_nodes", "test_hex_nodes", 1, None)
         graph = edges.update_graph(hex_ico_graph)
         assert ("test_hex_nodes", "to", "test_hex_nodes") in graph.edge_types
 
+    @pytest.mark.parametrize("scale_resolutions", [1, [1], [1, 2], None])
+    def test_transform_with_scale_resolutions(self, tri_ico_graph: HeteroData, scale_resolutions):
+        """Test MultiScaleEdges with different scale_resolutions configurations."""
+        edges = MultiScaleEdges("test_tri_nodes", "test_tri_nodes", 1, scale_resolutions=scale_resolutions)
+        graph = edges.update_graph(tri_ico_graph)
+
+        assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
+        assert len(graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index) > 0
+        assert graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index.dim() == 2
+
     def test_transform_fail_nodes(self, tri_ico_graph: HeteroData):
         """Test MultiScaleEdges update method with wrong node type."""
-        edges = MultiScaleEdges("fail_nodes", "fail_nodes", 1)
+        edges = MultiScaleEdges("fail_nodes", "fail_nodes", 1, None)
         with pytest.raises(ValueError):
             edges.update_graph(tri_ico_graph)
 
@@ -95,7 +113,7 @@ class TestMultiScaleEdgesStretched:
 
     def test_edges(self, tri_graph: HeteroData):
         """Test MultiScaleEdges update method."""
-        edges = MultiScaleEdges("hidden", "hidden", x_hops=1)
+        edges = MultiScaleEdges("hidden", "hidden", x_hops=1, scale_resolutions=None)
         graph = edges.update_graph(tri_graph)
         assert ("hidden", "to", "hidden") in graph.edge_types
         assert len(graph[("hidden", "to", "hidden")].edge_index) > 0
