@@ -39,6 +39,7 @@ class NativeGridDataset(IterableDataset):
         self,
         data_reader: Callable,
         grid_indices: type[BaseGridIndices],
+        relative_date_indices: list | None = None,
         rollout: int = 1,
         multistep: int = 1,
         timeincrement: int = 1,
@@ -54,6 +55,8 @@ class NativeGridDataset(IterableDataset):
             user function that opens and returns the anemoi-datasets array data
         grid_indices : Type[BaseGridIndices]
             indices of the grid to keep. Defaults to None, which keeps all spatial indices.
+        relative_date_indices : list, optional
+            relative date indices to extract, by default None
         rollout : int, optional
             length of rollout window, by default 12
         timeincrement : int, optional
@@ -67,6 +70,8 @@ class NativeGridDataset(IterableDataset):
         effective_bs : int, default 1
             effective batch size useful to compute the lenght of the dataset
         """
+        if relative_date_indices is None:
+            relative_date_indices = [0, 1, 2]
         self.label = label
         self.effective_bs = effective_bs
 
@@ -99,6 +104,9 @@ class NativeGridDataset(IterableDataset):
         assert self.multi_step > 0, "Multistep value must be greater than zero."
         self.ensemble_dim: int = 2
         self.ensemble_size = self.data.shape[self.ensemble_dim]
+
+        # relative index of dates to extract
+        self.relative_date_indices = relative_date_indices
 
     @cached_property
     def statistics(self) -> dict:

@@ -163,6 +163,7 @@ class AnemoiTrainer:
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "supporting_arrays": self.supporting_arrays,
+            "relative_date_indices": self.datamodule.relative_date_indices,
         }
 
         model = GraphForecaster(**kwargs)

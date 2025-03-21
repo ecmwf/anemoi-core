@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
+from typing import Optional
 
 import numpy as np
 import pytorch_lightning as pl
@@ -62,6 +63,7 @@ class GraphForecaster(pl.LightningModule):
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
+        relative_date_indices: Optional[dict] = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -79,6 +81,8 @@ class GraphForecaster(pl.LightningModule):
             Provenance information
         supporting_arrays : dict
             Supporting NumPy arrays to store in the checkpoint
+        relative_date_indices : dict, optional
+            Relative date indices from the datamodule, by default None
 
         """
         super().__init__()
@@ -100,6 +104,7 @@ class GraphForecaster(pl.LightningModule):
         )
         self.config = config
         self.data_indices = data_indices
+        self.relative_date_indices = relative_date_indices
 
         self.save_hyperparameters()
 
@@ -127,6 +132,8 @@ class GraphForecaster(pl.LightningModule):
 
         # Kwargs to pass to the loss function
         loss_kwargs = {"node_weights": self.node_weights}
+        if self.relative_date_indices is not None:
+            loss_kwargs["relative_date_indices"] = self.relative_date_indices
 
         # Scalars to include in the loss function, must be of form (dim, scalar)
         # Use -1 for the variable dimension, -2 for the latlon dimension
@@ -234,6 +241,7 @@ class GraphForecaster(pl.LightningModule):
             If scalar is not found in valid scalars
         """
         scalars = scalars or {}
+        relative_date_indices = kwargs.pop("relative_date_indices", None)
 
         if isinstance(config, ListConfig):
             return torch.nn.ModuleList(
@@ -250,6 +258,13 @@ class GraphForecaster(pl.LightningModule):
         loss_config = OmegaConf.to_container(config, resolve=True)
 
         scalars_to_include = loss_config.pop("scalars", [])
+        if config.get("time_weights", None) is not None and relative_date_indices is not None:
+            # lead time decay weights can apply to several loss
+            # functions of a CombinedLoss in a different way, so
+            # it needs to be setup at the loss level
+            time_weights = instantiate(config.time_weights)
+            time_weights = time_weights.weights(relative_date_indices)
+            kwargs["time_weights"] = time_weights
 
         # Instantiate the loss function with the loss_init_config
         kwargs["_recursive_"] = kwargs.get("_recursive_", False)

@@ -87,6 +87,31 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return IndexCollection(convert_to_omegaconf(self.config), self.ds_train.name_to_index)
 
     @cached_property
+    def relative_date_indices(self) -> list:
+        """Determine a list of relative time indices to load for each batch."""
+        multi_step = getattr(self.config.training, "multistep_input", 1)
+
+        if hasattr(self.config.training, "explicit_times"):
+            return sorted(
+                set(range(multi_step)).union(
+                    [t + multi_step - 1 for t in self.config.training.explicit_times.input],
+                    [t + multi_step - 1 for t in self.config.training.explicit_times.target],
+                ),
+            )
+
+        # uses the old default of multistep, timeincrement and rollout.
+        # Use the maximum rollout to be expected
+        rollout = (
+            self.config.training.rollout.max
+            if self.config.training.rollout.epoch_increment > 0
+            else self.config.training.rollout.start
+        )
+        # NOTE: --> for gradual rollout, max rollout dates is always fetched.
+        # But this was always the case in datamodule.py
+
+        return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
+
+    @cached_property
     def grid_indices(self) -> type[BaseGridIndices]:
         reader_group_size = self.config.dataloader.read_group_size
 
