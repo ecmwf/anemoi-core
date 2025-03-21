@@ -9,9 +9,9 @@ In this example we show how to create an instance of the
 Encoder-Processor-Decoder that uses a Graph Transformer for the encoder
 and decoder and a sliding window transformer [#f1]_ for the processor.
 
-Our implemented models are instantiated by hydra [#f2]_. Commonly used
-model configurations can be found in ``configs/models`` (see `Generating
-user config files
+Our implemented models are instantiated by omegaconf [#f2]_ and hydra
+[#f3]_. Commonly used model configurations can be found in
+``configs/models`` (see `Generating user config files
 <https://anemoi.readthedocs.io/projects/training/en/latest/start/hydra-intro.html#generating-user-config-files>`_)
 
 *********************
@@ -83,11 +83,13 @@ create a model.
 As described in :ref:`overview` we want to create a model interface that
 can be used for training and inference. For that we need to create the
 statistics, data indices and supporting arrays which is required for the
-pre- and postprocessing.
+pre- and postprocessing. These attributes are provided by the
+`anemoi-dataset
+<https://anemoi.readthedocs.io/projects/datasets/en/latest/index.html>`_.
 
-The **statistics** are usually loaded from the dataset, i.e
-``datamodule.statistics``. The statistics is simply a dictionary with
-the mean, stdev, maximum and minimum of the variables.
+The **statistics** are simply stored in a dictionary with the mean,
+stdev, maximum and minimum of the variables. They are usually loaded
+from the dataset, i.e. ``ds.statistics``:
 
 .. code:: python
 
@@ -98,9 +100,9 @@ the mean, stdev, maximum and minimum of the variables.
        "minimum": [0.0, 0.0, 0.0],
    }
 
-The **data indices** are usually loaded from the dataset, i.e
-``datamodule.data_indices``. The data indices is a dictionary with the
-forcing and diagnostic variables.
+**Data indices** is a dictionary with the forcing and diagnostic
+variables. They are usually created from the dataset, i.e.
+``ds.name_to_index```:
 
 .. code:: python
 
@@ -117,9 +119,9 @@ forcing and diagnostic variables.
    )
    data_indices = IndexCollection(data_config, name_to_index)
 
-The **supporting arrays** are usually loaded from the dataset with
-``datamodule.supporting_arrays``. The ``supporting_arrays`` is a
-dictionary with the latitudes and longitudes of the grid.
+**Supporting arrays** is a dictionary with the latitudes and longitudes
+of the grid and naturally comes from the dataset, i.e.
+``ds.supporting_arrays``.
 
 .. code:: python
 
@@ -219,5 +221,9 @@ In this example, ``model_interface.model`` is the following:
    https://arxiv.org/abs/2004.05150v2
 
 .. [#f2]
+
+   https://omegaconf.readthedocs.io/en/latest/
+
+.. [#f3]
 
    https://hydra-documentation.readthedocs.io/en/latest/
