@@ -43,9 +43,9 @@ functionality:
 
    python -m pip install "anemoi-models[docs]" # Install optional dependencies for generating docs
 
-.. literalinclude:: ../pyproject.toml 
+.. literalinclude:: ../pyproject.toml
    :language: toml
-   :start-at: optional-dependencies.docs 
+   :start-at: optional-dependencies.docs
    :end-before: optional-dependencies.tests
 
 **********************

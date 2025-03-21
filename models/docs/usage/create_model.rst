@@ -10,12 +10,13 @@ Encoder-Processor-Decoder that uses a Graph Transformer for the encoder
 and decoder and a sliding window transformer [#f1]_ for the processor.
 
 Our implemented models are instantiated by hydra [#f2]_. Commonly used
-model configurations can be found in ``configs/models``
-(see `Generating user config files <https://anemoi.readthedocs.io/projects/training/en/latest/start/hydra-intro.html#generating-user-config-files>`_)
+model configurations can be found in ``configs/models`` (see `Generating
+user config files
+<https://anemoi.readthedocs.io/projects/training/en/latest/start/hydra-intro.html#generating-user-config-files>`_)
 
-*****************************
+*********************
  Model Configuration
-*****************************
+*********************
 
 First, let's take the model configuration ``transformer.yaml``:
 
@@ -75,9 +76,9 @@ create a model.
 
    model_config = OmegaConf.load("transformer.yaml")
 
-********************************************************
+*******************************************************
  Define statistics, data indices and supporting arrays
-********************************************************
+*******************************************************
 
 As described in :ref:`overview` we want to create a model interface that
 can be used for training and inference. For that we need to create the
@@ -129,8 +130,8 @@ dictionary with the latitudes and longitudes of the grid.
 ********************
 
 All our currently implemented models are based on a graph encoder and
-decoder. The graph is created by the ``GraphCreator`` class which is part
-of the ``anemoi-graphs`` package (:ref:`anemoi-graphs`).
+decoder. The graph is created by the ``GraphCreator`` class which is
+part of the ``anemoi-graphs`` package (:ref:`anemoi-graphs`).
 
 .. code:: python
 
@@ -139,13 +140,12 @@ of the ``anemoi-graphs`` package (:ref:`anemoi-graphs`).
    graph_config = OmegaConf.load("graph.yaml")
    graph_data = GraphCreator(config=graph_config).create()
 
-
-**********************************
+************************
  Initializing the Model
-**********************************
+************************
 
-Now that we have all the pieces needed to create the model, we
-can call the ``AnemoiModelInterface`` class.
+Now that we have all the pieces needed to create the model, we can call
+the ``AnemoiModelInterface`` class.
 
 .. code:: python
 
@@ -159,8 +159,8 @@ can call the ``AnemoiModelInterface`` class.
        config=model_config,
    )
 
-The model interface includes the preprocessor, postprocessor and 
-the actual model (see :ref:`overview`).
+The model interface includes the preprocessor, postprocessor and the
+actual model (see :ref:`overview`).
 
 .. code:: python
 
@@ -170,21 +170,21 @@ the actual model (see :ref:`overview`).
 
 .. note::
 
-   During training the forward pass is done by the ``model_interface.forward``
-   method while during inference the ``model_interface.predict_step``.
-   Their difference is that the forward function assumes an already
-   normalized state and predicts the normalized state while the
-   predict_step performs the pre- and post-processing in addition to the
-   forward step.
+   During training the forward pass is done by the
+   ``model_interface.forward`` method while during inference the
+   ``model_interface.predict_step``. Their difference is that the
+   forward function assumes an already normalized state and predicts the
+   normalized state while the predict_step performs the pre- and
+   post-processing in addition to the forward step.
 
    -  ``y_norm = model_interface.forward(x_norm)`` with ``x_in`` and
       ``y_pred`` are normalized.
    -  ``y = model_interface.predict_step(x)`` with ``x`` and ``y`` are
       absolute values.
 
-**********************
- The ``pytorch`` Model 
-**********************
+***********************
+ The ``pytorch`` Model
+***********************
 
 The model architecture is in ``model_interface.model`` which is a
 ``pytorch.nn.Module``. The model therefore has a ``forward()`` function
