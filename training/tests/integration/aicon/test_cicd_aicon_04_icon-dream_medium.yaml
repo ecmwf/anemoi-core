@@ -219,7 +219,6 @@ training:
   deterministic: false
   precision: 16-mixed
   multistep_input: 2
-  explicit_times: null
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0

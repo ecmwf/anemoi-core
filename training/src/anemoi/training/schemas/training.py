@@ -293,8 +293,6 @@ class BaseTrainingSchema(BaseModel):
     "List of metrics"
     node_loss_weights: NodeLossWeightsSchema
     "Node loss weights configuration."
-    explicit_times: Union[ExplicitTimes, None] = None
-    "Time indices for input and output."
     task: str
     "Training objective."
 

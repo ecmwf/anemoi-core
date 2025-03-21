@@ -27,6 +27,7 @@ model:
 training:
   task: anemoi.training.train.interpolator.GraphInterpolator
 
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0,6]
     target: [1,2,3,4,5]
