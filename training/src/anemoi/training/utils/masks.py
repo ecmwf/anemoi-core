@@ -59,7 +59,7 @@ class Boolean1DMask(BaseMask):
     @staticmethod
     def _fill_masked_tensor(x: torch.Tensor, mask: torch.Tensor, fill_value: float | torch.Tensor) -> torch.Tensor:
         if isinstance(fill_value, torch.Tensor):
-            return x.masked_scatter(mask, fill_value)
+            return x.masked_scatter(mask, fill_value[mask])
         return x.masked_fill(mask, fill_value)
 
     def apply(self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan) -> torch.Tensor:
