@@ -55,7 +55,7 @@ class Boolean1DMask(BaseMask):
         target_shape[dim] = len(self.mask)
         mask = self.mask.reshape(target_shape)
         return mask.to(x.device)
-    
+
     def masked_select(self, input: torch.Tensor, dim: int, negate: bool = False) -> torch.Tensor:
         mask = self.mask
         if negate:
@@ -75,8 +75,11 @@ class Boolean1DMask(BaseMask):
             return x.masked_scatter(mask, fill_value)
         return x.masked_fill(mask, fill_value)
 
-    def apply(self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan, dim_sel: int  = 0) -> torch.Tensor:
+    def apply(
+        self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan, dim_sel: int = 0,
+    ) -> torch.Tensor:
         """Apply the mask to the input tensor.
+
         Parameters
         ----------
         x : torch.Tensor
