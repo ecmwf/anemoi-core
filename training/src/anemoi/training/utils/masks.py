@@ -76,7 +76,11 @@ class Boolean1DMask(BaseMask):
         return x.masked_fill(mask, fill_value)
 
     def apply(
-        self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan, dim_sel: int = 0,
+        self,
+        x: torch.Tensor,
+        dim: int,
+        fill_value: float | torch.Tensor = np.nan,
+        dim_sel: int = 0,
     ) -> torch.Tensor:
         """Apply the mask to the input tensor.
 
