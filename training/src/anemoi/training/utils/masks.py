@@ -56,18 +56,18 @@ class Boolean1DMask(BaseMask):
         mask = self.mask.reshape(target_shape)
         return mask.to(x.device)
 
-    def masked_select(self, input: torch.Tensor, dim: int, negate: bool = False) -> torch.Tensor:
+    def masked_select(self, x: torch.Tensor, dim: int, negate: bool = False) -> torch.Tensor:
         mask = self.mask
         if negate:
             mask = ~mask
-        assert len(mask) == input.shape[dim], "The mask should fit the size of the chosen dimension"
+        assert len(mask) == x.shape[dim], "The mask should fit the size of the chosen dimension"
         args = []
-        for i, size in enumerate(input.shape):
+        for i, size in enumerate(x.shape):
             if i != dim:
                 args.append(np.arange(size))
             else:
                 args.append(mask)
-        return input[np.ix_(*args)]
+        return x[np.ix_(*args)]
 
     @staticmethod
     def _fill_masked_tensor(x: torch.Tensor, mask: torch.Tensor, fill_value: float | torch.Tensor) -> torch.Tensor:
