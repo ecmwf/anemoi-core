@@ -55,24 +55,38 @@ class Boolean1DMask(BaseMask):
         target_shape[dim] = len(self.mask)
         mask = self.mask.reshape(target_shape)
         return mask.to(x.device)
+    
+    def masked_select(self, input: torch.Tensor, dim: int, negate: bool = False) -> torch.Tensor:
+        mask = self.mask
+        if negate:
+            mask = ~mask
+        assert len(mask) == input.shape[dim], "The mask should fit the size of the chosen dimension"
+        args = []
+        for i, size in enumerate(input.shape):
+            if i != dim:
+                args.append(np.arange(size))
+            else:
+                args.append(mask)
+        return input[np.ix_(*args)]
 
     @staticmethod
     def _fill_masked_tensor(x: torch.Tensor, mask: torch.Tensor, fill_value: float | torch.Tensor) -> torch.Tensor:
         if isinstance(fill_value, torch.Tensor):
-            return x.masked_scatter(mask, fill_value[mask])
+            return x.masked_scatter(mask, fill_value)
         return x.masked_fill(mask, fill_value)
 
-    def apply(self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan) -> torch.Tensor:
+    def apply(self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan, dim_sel: int  = 0) -> torch.Tensor:
         """Apply the mask to the input tensor.
-
         Parameters
         ----------
         x : torch.Tensor
             The input tensor to be masked.
         dim : int
-            The dimension along which to apply the mask.
+            The dimension along which to apply the mask to x.
         fill_value : float | torch.Tensor, optional
             The value to fill in the masked positions, by default np.nan.
+        dim_sel : int, optional
+            The dimension along which to select values out of fill_value using the mask
 
         Returns
         -------
@@ -80,7 +94,10 @@ class Boolean1DMask(BaseMask):
             The masked tensor with fill_value in the positions where the mask is False.
         """
         mask = self.broadcast_like(x, dim)
-        return Boolean1DMask._fill_masked_tensor(x, ~mask, fill_value)
+        fill_selection = fill_value
+        if isinstance(fill_value, torch.Tensor):
+            fill_selection = self.masked_select(fill_value, dim_sel, negate=True)
+        return Boolean1DMask._fill_masked_tensor(x, ~mask, fill_selection)
 
     def rollout_boundary(
         self,
@@ -108,6 +125,7 @@ class Boolean1DMask(BaseMask):
             pred_state[..., data_indices.model.input.prognostic],
             dim=2,
             fill_value=true_state[..., data_indices.data.output.prognostic],
+            dim_sel=2,
         )
 
         return pred_state
