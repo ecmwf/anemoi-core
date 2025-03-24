@@ -15,7 +15,7 @@ from anemoi.training.utils.masks import Boolean1DMask
 def test_apply_boolean1dmask(n=10, m=4) -> None:
     """Test Boolean1DMask(mask).apply()"""
     mask = torch.tensor([i < m for i in range(n)])
-    
+
     x = torch.tensor([-1 for i in range(n)], dtype=torch.float32)
     a = torch.rand(2, 3)
     b = torch.rand(3, 2)
