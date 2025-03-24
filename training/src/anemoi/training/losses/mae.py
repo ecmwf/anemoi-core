@@ -72,7 +72,6 @@ class WeightedMAELoss(BaseWeightedLoss):
             list of scalars to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
 
-
         Returns
         -------
         torch.Tensor
