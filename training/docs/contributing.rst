@@ -2,6 +2,7 @@
  General guidelines
 ####################
 
+Thank you for your interest in Anemoi Training!
 Please follow the :ref:`general Anemoi contributing guidelines
 <anemoi-docs:contributing>`.
 
