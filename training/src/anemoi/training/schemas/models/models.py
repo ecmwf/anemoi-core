@@ -36,6 +36,7 @@ LOGGER = logging.getLogger(__name__)
 class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
     ANEMOI_MODEL_ENC_HIERPROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
+    ANEMOI_MODEL_INTERPENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
 
 
 class Model(BaseModel):
@@ -119,6 +120,10 @@ class ModelSchema(PydanticBaseModel):
     "List of bounding configuration applied in order to the specified variables."
     output_mask: Union[str, None] = Field(example=None)  # !TODO CHECK!
     "Output mask, it must be a node attribute of the output nodes"
+    latent_skip: bool = True
+    "Add skip connection in latent space before/after processor. Currently only in interpolator."
+    grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
+    "Index of grid residual connection, or use none. Currently only in interpolator."
 
     processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
         ...,
