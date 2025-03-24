@@ -243,23 +243,23 @@ available, then from the top-level directory of anemoi-core run:
 Configuration management is essential to ensure that integration tests
 remain reliable and maintainable. Our approach includes:
 
-1. Using Configuration Templates: Always start with a configuration
-template from the repository to minimize redundancy and ensure
-consistency. We expect the templates to be consistent with the code base
-and have integration tests that check for this consistency.
+#. Using Configuration Templates: Always start with a configuration
+   template from the repository to minimize redundancy and ensure
+   consistency. We expect the templates to be consistent with the code base
+   and have integration tests that check for this consistency.
 
-1. Test-specific Modifications: Apply only the necessary
-use-case-specific (e.g. dataset) and testing-specific (e.g. batch_size)
-modifications to the template. Use a config modification yaml, or hydra
-overrides for parametrization of a small number of config values.
+#. Test-specific Modifications: Apply only the necessary
+   use-case-specific (e.g. dataset) and testing-specific (e.g. batch_size)
+   modifications to the template. Use a config modification yaml, or hydra
+   overrides for parametrization of a small number of config values.
 
-1. Reducing Compute Load: Where possible, reduce the number of batches,
-epochs, and batch sizes.
+#. Reducing Compute Load: Where possible, reduce the number of batches,
+   epochs, and batch sizes.
 
-1. Debugging and Failures: When integration tests fail, check the config
-files in `training/src/anemoi/training/config` for inconsistencies with
-the code and update the config files if necessary. Also check if
-test-time modifications have introduced unintended changes.
+#. Debugging and Failures: When integration tests fail, check the config
+   files in `training/src/anemoi/training/config` for inconsistencies with
+   the code and update the config files if necessary. Also check if
+   test-time modifications have introduced unintended changes.
 
 ***********************************
  Example of configuration handling
@@ -285,21 +285,21 @@ model architectures.
 
 To add a new use case, follow these steps:
 
-1. Configuration Handling: To ensure maintainability, we recommend
-following the configuration handling guidelines detailed above, in so
-far as this makes sense for your use case.
+#. Configuration Handling: To ensure maintainability, we recommend
+   following the configuration handling guidelines detailed above, in so
+   far as this makes sense for your use case.
 
-1. Best practices: Follow best practices, such as reducing compute load
-and managing configurations via configuration files.
+#. Best practices: Follow best practices, such as reducing compute load
+   and managing configurations via configuration files.
 
-1. Prepare the Data: Ensure the required dataset is uploaded to the EWC
-S3 before adding the test. Please get in touch about access.
+#. Prepare the Data: Ensure the required dataset is uploaded to the EWC
+   S3 before adding the test. Please get in touch about access.
 
-1. Subfolder Organization: Place your test and config files in a new
-subfolder within `training/tests/integration/` for clarity and ease of
-maintenance.
+#. Subfolder Organization: Place your test and config files in a new
+   subfolder within `training/tests/integration/` for clarity and ease of
+   maintenance.
 
-1. Handling Test Failures: Complex use cases will likely require more
-test-time modifications. Check if these have overwritten expected
-configurations or are out-of-date with configuration changes in the
-templates.
+#. Handling Test Failures: Complex use cases will likely require more
+   test-time modifications. Check if these have overwritten expected
+   configurations or are out-of-date with configuration changes in the
+   templates.
