@@ -75,7 +75,7 @@ class AnemoiTrainer:
 
             LOGGER.info("Config validated.")
 
-        self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
+        self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id) or bool(self.config.hardware.files.warm_start)
         self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None
 
@@ -170,15 +170,10 @@ class AnemoiTrainer:
 
         # Load the model weights
         if self.load_weights_only:
-            if hasattr(self.config.training, "transfer_learning"):
+            if hasattr(self.config.training, "transfer_learning") and self.config.training.transfer_learning:
                 # Sanify the checkpoint for transfer learning
-                if self.config.training.transfer_learning:
-                    LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
-                    model = transfer_learning_loading(model, self.last_checkpoint)
-                else:
-                    LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                    model = model_class.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
-
+                LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
+                model = transfer_learning_loading(model, self.last_checkpoint)
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 model = model_class.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
@@ -237,9 +232,14 @@ class AnemoiTrainer:
             return None
 
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
+        # FIX: This needs to be refactored.
+        if fork_id is None and bool(self.config.hardware.files.warm_start):
+            folder = ""
+        else:
+            folder = fork_id or self.lineage_run
         checkpoint = Path(
             self.config.hardware.paths.checkpoints.parent,
-            fork_id or self.lineage_run,
+            folder,
             self.config.hardware.files.warm_start or "last.ckpt",
         )
 
@@ -378,6 +378,7 @@ class AnemoiTrainer:
     def _update_paths(self) -> None:
         """Update the paths in the configuration."""
         self.lineage_run = None
+        print("run_id: ", self.run_id)
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
