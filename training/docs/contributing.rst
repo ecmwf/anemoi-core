@@ -245,20 +245,21 @@ remain reliable and maintainable. Our approach includes:
 
 #. Using Configuration Templates: Always start with a configuration
    template from the repository to minimize redundancy and ensure
-   consistency. We expect the templates to be consistent with the code base
-   and have integration tests that check for this consistency.
+   consistency. We expect the templates to be consistent with the code
+   base and have integration tests that check for this consistency.
 
 #. Test-specific Modifications: Apply only the necessary
-   use-case-specific (e.g. dataset) and testing-specific (e.g. batch_size)
-   modifications to the template. Use a config modification yaml, or hydra
-   overrides for parametrization of a small number of config values.
+   use-case-specific (e.g. dataset) and testing-specific (e.g.
+   batch_size) modifications to the template. Use a config modification
+   yaml, or hydra overrides for parametrization of a small number of
+   config values.
 
 #. Reducing Compute Load: Where possible, reduce the number of batches,
    epochs, and batch sizes.
 
 #. Debugging and Failures: When integration tests fail, check the config
-   files in `training/src/anemoi/training/config` for inconsistencies with
-   the code and update the config files if necessary. Also check if
+   files in `training/src/anemoi/training/config` for inconsistencies
+   with the code and update the config files if necessary. Also check if
    test-time modifications have introduced unintended changes.
 
 ***********************************
@@ -296,8 +297,8 @@ To add a new use case, follow these steps:
    S3 before adding the test. Please get in touch about access.
 
 #. Subfolder Organization: Place your test and config files in a new
-   subfolder within `training/tests/integration/` for clarity and ease of
-   maintenance.
+   subfolder within `training/tests/integration/` for clarity and ease
+   of maintenance.
 
 #. Handling Test Failures: Complex use cases will likely require more
    test-time modifications. Check if these have overwritten expected
