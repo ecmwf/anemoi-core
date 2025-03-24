@@ -12,8 +12,10 @@ import torch
 from anemoi.training.utils.masks import Boolean1DMask
 
 
-def test_apply_boolean1dmask(n=10, m=4) -> None:
-    """Test Boolean1DMask(mask).apply()"""
+def test_apply_boolean1dmask() -> None:
+    """Test Boolean1DMask(mask).apply()."""
+    n=10
+    m=4
     mask = torch.tensor([i < m for i in range(n)])
 
     x = torch.tensor([-1 for i in range(n)], dtype=torch.float32)
@@ -23,7 +25,7 @@ def test_apply_boolean1dmask(n=10, m=4) -> None:
     x = torch.tensordot(x, b, dims=0)
 
     # test case where fill_value is torch.Tensor
-    fill_value = torch.tensor([i for i in range(n)], dtype=torch.float32)
+    fill_value = torch.arange(n, dtype=torch.float32)
     c = torch.rand(2, 3)
     d = torch.rand(3, 2)
     fill_value = torch.tensordot(c, fill_value, dims=0)
@@ -32,7 +34,7 @@ def test_apply_boolean1dmask(n=10, m=4) -> None:
     expected_y0 = torch.tensor([-1 for i in range(m)], dtype=torch.float32)
     expected_y0 = torch.tensordot(a, expected_y0, dims=0)
     expected_y0 = torch.tensordot(expected_y0, b, dims=0)
-    expected_y1 = torch.tensor([i for i in range(m, n)], dtype=torch.float32)
+    expected_y1 = torch.arange(start=m, end=n, dtype=torch.float32)
     expected_y1 = torch.tensordot(c, expected_y1, dims=0)
     expected_y1 = torch.tensordot(expected_y1, d, dims=0)
     expected_y = torch.cat((expected_y0, expected_y1), dim=2)
