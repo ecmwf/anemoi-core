@@ -45,7 +45,7 @@ weather forecasting.
 .. toctree::
    :maxdepth: 1
    :glob:
-   :caption: Modules
+   :caption: API Reference
 
    modules/*
 
