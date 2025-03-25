@@ -6,6 +6,14 @@ Thank you for your interest in Anemoi Training! Please follow the
 :ref:`general Anemoi contributing guidelines
 <anemoi-docs:contributing>`.
 
+These include general guidelines for contributions to Anemoi, 
+instructions on setting up a development environment, and 
+guidelines on collaboration on GitHub, writing documentation, 
+testing, and code style.
+
+The following sections provide additional information for 
+contributing to Anemoi Training.
+
 ##########################
  Configuration guidelines
 ##########################
