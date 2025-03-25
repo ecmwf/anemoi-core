@@ -38,16 +38,16 @@ weather forecasting.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Contributing
-
-   contributing
-
-.. toctree::
-   :maxdepth: 1
    :glob:
    :caption: API Reference
 
    modules/*
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Contributing
+
+   contributing
 
 *****************
  Anemoi packages
