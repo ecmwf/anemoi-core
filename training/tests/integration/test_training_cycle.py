@@ -31,3 +31,13 @@ def test_training_cycle_architecture_configs(architecture_config: DictConfig) ->
 
 def test_config_validation_architecture_configs(architecture_config: DictConfig) -> None:
     BaseSchema(**architecture_config)
+
+
+@pytest.mark.longtests
+def test_training_cycle_grid_configs(stretched_config: DictConfig) -> None:
+    AnemoiTrainer(stretched_config).train()
+    shutil.rmtree(stretched_config.hardware.paths.output)
+
+
+def test_config_validation_grid_configs(stretched_config: DictConfig) -> None:
+    BaseSchema(**stretched_config)
