@@ -9,7 +9,6 @@
 
 
 import pytest
-from hydra.utils import instantiate
 
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
@@ -23,29 +22,26 @@ class TestGraphTransformerProcessorChunk:
         num_layers = 3
         num_heads: int = 16
         mlp_hidden_ratio: int = 4
-        activation: str = "GELU"
         edge_dim: int = 32
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = load_layer_kernels()
         return (
             num_channels,
             num_layers,
             layer_kernels,
             num_heads,
             mlp_hidden_ratio,
-            activation,
             edge_dim,
         )
 
     @pytest.fixture
     def processor_chunk(self, init):
-        num_channels, num_layers, layer_kernels, num_heads, mlp_hidden_ratio, activation, edge_dim = init
+        num_channels, num_layers, layer_kernels, num_heads, mlp_hidden_ratio, edge_dim = init
         return GraphTransformerProcessorChunk(
             num_channels=num_channels,
             num_layers=num_layers,
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            activation=activation,
             edge_dim=edge_dim,
         )
 

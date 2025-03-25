@@ -40,7 +40,6 @@ class TestGraphTransformerProcessor:
         num_chunks = 2
         num_heads = 16
         mlp_hidden_ratio = 4
-        activation = "GELU"
         cpu_offload = False
         sub_graph = fake_graph[("nodes", "to", "nodes")]
         edge_attributes = ["edge_attr1", "edge_attr2"]
@@ -55,7 +54,6 @@ class TestGraphTransformerProcessor:
             num_chunks,
             num_heads,
             mlp_hidden_ratio,
-            activation,
             cpu_offload,
             sub_graph,
             edge_attributes,
@@ -73,7 +71,6 @@ class TestGraphTransformerProcessor:
             num_chunks,
             num_heads,
             mlp_hidden_ratio,
-            activation,
             cpu_offload,
             sub_graph,
             edge_attributes,
@@ -88,7 +85,6 @@ class TestGraphTransformerProcessor:
             num_chunks=num_chunks,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            activation=activation,
             cpu_offload=cpu_offload,
             sub_graph=sub_graph,
             sub_graph_edge_attributes=edge_attributes,
@@ -105,7 +101,6 @@ class TestGraphTransformerProcessor:
             num_chunks,
             _num_heads,
             _mlp_hidden_ratio,
-            _activation,
             _cpu_offload,
             _sub_graph,
             _edge_attributes,
@@ -127,7 +122,6 @@ class TestGraphTransformerProcessor:
             _num_chunks,
             _num_heads,
             _mlp_hidden_ratio,
-            _activation,
             _cpu_offload,
             _sub_graph,
             _edge_attributes,

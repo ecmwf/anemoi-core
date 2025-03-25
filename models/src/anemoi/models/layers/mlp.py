@@ -29,7 +29,6 @@ class MLP(nn.Module):
         out_features: int,
         layer_kernels: DotDict,
         n_extra_layers: int = 0,
-        activation: str = "SiLU",
         final_activation: bool = False,
         layer_norm: bool = True,
         checkpoints: bool = False,
@@ -45,12 +44,10 @@ class MLP(nn.Module):
         out_features : int
             Number of output features
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         n_extra_layers : int, optional
             Number of extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
         final_activation : bool, optional
             Whether to apply a final activation function to last layer, by default True
         layer_norm : bool, optional
@@ -62,25 +59,21 @@ class MLP(nn.Module):
         -------
         nn.Module
             Returns a MLP module
-
-        Raises
-        ------
-        RuntimeError
-            If activation function is not supported
         """
         super().__init__()
 
-        Linear = layer_kernels["Linear"]
-        LayerNorm = layer_kernels["LayerNorm"]
+        Linear = layer_kernels.Linear
+        LayerNorm = layer_kernels.LayerNorm
+        Activation = layer_kernels.Activation
 
-        mlp1 = nn.Sequential(Linear(in_features, hidden_dim), activation())
+        mlp1 = nn.Sequential(Linear(in_features, hidden_dim), Activation())
         for _ in range(n_extra_layers + 1):
             mlp1.append(Linear(hidden_dim, hidden_dim))
-            mlp1.append(activation())
+            mlp1.append(Activation())
         mlp1.append(Linear(hidden_dim, out_features))
 
         if final_activation:
-            mlp1.append(activation())
+            mlp1.append(Activation())
 
         if layer_norm:
             mlp1.append(LayerNorm(normalized_shape=out_features))

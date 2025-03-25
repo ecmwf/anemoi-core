@@ -13,6 +13,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.mapper import BaseMapper
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestBaseMapper:
@@ -29,16 +30,16 @@ class TestBaseMapper:
         hidden_dim: int = 128
         out_channels_dst: int = 5
         cpu_offload: bool = False
-        activation: str = "SiLU"
         trainable_size: int = 6
+        layer_kernels = load_layer_kernels()
         return (
             in_channels_src,
             in_channels_dst,
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
+            layer_kernels,
         )
 
     @pytest.fixture
@@ -49,16 +50,16 @@ class TestBaseMapper:
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
+            layer_kernels,
         ) = mapper_init
         return BaseMapper(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
+            layer_kernels=layer_kernels,
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
-            activation=activation,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -72,8 +73,8 @@ class TestBaseMapper:
             hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
+            _layer_kernels,
         ) = mapper_init
         return (
             torch.rand(in_channels_src, hidden_dim),
@@ -102,15 +103,15 @@ class TestBaseMapper:
             hidden_dim,
             out_channels_dst,
             _cpu_offload,
-            activation,
             _trainable_size,
+            layer_kernels,
         ) = mapper_init
         assert isinstance(mapper, BaseMapper)
         assert mapper.in_channels_src == in_channels_src
         assert mapper.in_channels_dst == in_channels_dst
         assert mapper.hidden_dim == hidden_dim
         assert mapper.out_channels_dst == out_channels_dst
-        assert mapper.activation == activation
+        assert isinstance(mapper.activation, layer_kernels.Activation)
 
     def test_pre_process(self, mapper, pair_tensor):
         x = pair_tensor

@@ -10,7 +10,6 @@
 
 import pytest
 import torch
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from torch import nn
 from torch_geometric.data import HeteroData
@@ -34,13 +33,12 @@ class TestGraphTransformerBaseMapper:
             {
                 "LayerNorm": {
                     "_target_": "torch.nn.LayerNorm",
-                    "_partial_": True,
                 },
-                "Linear": {"_target_": "torch.nn.Linear", "_partial_": True, "bias": False},
+                "Linear": {"_target_": "torch.nn.Linear", "bias": False},
+                "Activation": {"_target_": "torch.nn.SiLU"},
             }
         )
-        layer_kernels = load_layer_kernels(kernel_config)
-        return instantiate(layer_kernels)
+        return load_layer_kernels(kernel_config)
 
     @pytest.fixture
     def mapper_init(self, layer_kernels):
@@ -49,7 +47,6 @@ class TestGraphTransformerBaseMapper:
         hidden_dim: int = 256
         out_channels_dst: int = 5
         cpu_offload: bool = False
-        activation: str = "SiLU"
         trainable_size: int = 6
         num_heads: int = 16
         mlp_hidden_ratio: int = 7
@@ -59,7 +56,6 @@ class TestGraphTransformerBaseMapper:
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             num_heads,
             mlp_hidden_ratio,
@@ -74,7 +70,6 @@ class TestGraphTransformerBaseMapper:
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             num_heads,
             mlp_hidden_ratio,
@@ -86,7 +81,6 @@ class TestGraphTransformerBaseMapper:
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
-            activation=activation,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -103,7 +97,6 @@ class TestGraphTransformerBaseMapper:
             _hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
@@ -136,18 +129,17 @@ class TestGraphTransformerBaseMapper:
             hidden_dim,
             out_channels_dst,
             _cpu_offload,
-            activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
-            _layer_kernels,
+            layer_kernels,
         ) = mapper_init
         assert isinstance(mapper, GraphTransformerBaseMapper)
         assert mapper.in_channels_src == in_channels_src
         assert mapper.in_channels_dst == in_channels_dst
         assert mapper.hidden_dim == hidden_dim
         assert mapper.out_channels_dst == out_channels_dst
-        assert mapper.activation == activation
+        assert isinstance(mapper.activation, layer_kernels.Activation)
         assert mapper.emb_nodes_dst.bias is None
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
@@ -159,7 +151,6 @@ class TestGraphTransformerBaseMapper:
             _hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
@@ -201,7 +192,6 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             num_heads,
             mlp_hidden_ratio,
@@ -213,7 +203,6 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
-            activation=activation,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -230,7 +219,6 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
@@ -257,7 +245,6 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
@@ -304,7 +291,6 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
@@ -316,7 +302,6 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
-            activation=activation,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -331,7 +316,6 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
@@ -358,7 +342,6 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim,
             out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,
@@ -379,7 +362,6 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             hidden_dim,
             out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _num_heads,
             _mlp_hidden_ratio,

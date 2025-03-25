@@ -32,33 +32,39 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
-def load_layer_kernels(kernel_config: Optional[DotDict] = {}) -> DotDict:
+def load_layer_kernels(kernel_config: Optional[DotDict] = {}) -> DotDict["str" : nn.Module]:
     """Load layer kernels from the config.
 
-    Args:
-        kernel_config : Optional[DotDict]
-            Kernel configuration
+    This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.
 
-    Returns:
-        DotDict: hydra partial instantiation of the layer kernels
+    Parameters
+    ----------
+    kernel_config : Optional[DotDict]
+        Kernel configuration
+
+    Returns
+    -------
+    DotDict
+        Container with layer factories.
     """
     # If self.layer_kernels entry is missing from the config, use torch.nn kernels
     default_kernels = {
-        "Linear": {"_target_": "torch.nn.Linear", "_partial_": True},
-        "LayerNorm": {"_target_": "torch.nn.LayerNorm", "_partial_": True},
+        "Linear": {"_target_": "torch.nn.Linear"},
+        "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
+        "Activation": {"_target_": "torch.nn.GELU"},
     }
-    layer_kernels = {**default_kernels, **kernel_config}
+
+    layer_kernels = DotDict()
 
     # Loop through all kernels in the layer_kernels config entry and try import them
-    for kernel in layer_kernels:
-        kernel_entry = layer_kernels[kernel]
+    for name, kernel_entry in (default_kernels | kernel_config).items():
         try:
-            instantiate(kernel_entry)
+            layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
         except InstantiationException:
             LOGGER.info(
-                f"{kernel_entry['_target_']} not found! check your config.model.layer_kernel.{kernel} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+                f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
             )
             raise InstantiationException
         else:
-            LOGGER.info(f"{kernel} kernel: {kernel_entry}")
+            LOGGER.info(f"{name} kernel: {kernel_entry}")
     return layer_kernels

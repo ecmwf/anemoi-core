@@ -49,15 +49,15 @@ def layer_kernels():
 class TestMLP:
     def test_init(self, num_features, hdim, num_out_feature, layer_kernels):
         """Test MLP initialization."""
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, n_extra_layers=0, activation="SiLU")
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, n_extra_layers=0)
         assert isinstance(mlp, MLP)
         assert isinstance(mlp.model, torch.nn.Sequential)
         assert len(mlp.model) == 6
 
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 0, "ReLU", False, False, False)
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 0, False, False, False)
         assert len(mlp.model) == 5
 
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 1, "SiLU", False, False, False)
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 1, False, False, False)
         assert len(mlp.model) == 7
 
     def test_forwards(self, batch_size, nlatlon, num_features, hdim, num_out_feature, layer_kernels):

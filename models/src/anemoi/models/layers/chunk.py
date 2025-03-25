@@ -37,7 +37,6 @@ class BaseProcessorChunk(nn.Module, ABC):
         num_channels: int,
         num_layers: int,
         *args,
-        activation: str = "GELU",
         **kwargs,
     ) -> None:
         """Initialize BaseProcessorChunk."""
@@ -75,7 +74,6 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         window_size: int,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
-        activation: str = "GELU",
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
@@ -90,7 +88,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         num_layers : int
             Number of layers
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         window_size: int,
             1/2 size of shifted window for attention computation
@@ -98,8 +96,6 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
         dropout_p: float
             Dropout probability used for multi-head self attention, default 0.0
         attention_implementation: str, optional
@@ -117,7 +113,6 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             num_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
             num_heads=num_heads,
-            activation=activation,
             window_size=window_size,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
@@ -148,7 +143,6 @@ class GNNProcessorChunk(BaseProcessorChunk):
         num_layers: int,
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
-        activation: str = "SiLU",
         edge_dim: Optional[int] = None,
     ) -> None:
         """Initialize GNNProcessorChunk.
@@ -160,12 +154,10 @@ class GNNProcessorChunk(BaseProcessorChunk):
         num_layers : int
             Number of message passing blocks.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         mlp_extra_layers : int, optional
             Extra num_layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
         edge_dim: int, by default None
             Embed edges with input dimension edge_dim,
             if None: assume embedding is not required
@@ -179,7 +171,6 @@ class GNNProcessorChunk(BaseProcessorChunk):
                 out_features=num_channels,
                 layer_kernels=layer_kernels,
                 n_extra_layers=mlp_extra_layers,
-                activation=activation,
             )
         else:
             self.emb_edges = None
@@ -190,7 +181,6 @@ class GNNProcessorChunk(BaseProcessorChunk):
             num_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
         )
 
     def forward(
@@ -222,7 +212,6 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         layer_kernels: DotDict,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
-        activation: str = "GELU",
         edge_dim: Optional[int] = None,
     ) -> None:
         """Initialize GraphTransformerProcessorChunk.
@@ -234,14 +223,12 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         num_layers : int
             Number of layers.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         num_heads: int
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
         edge_dim: int, by default None
             Embed edges with input dimension edge_dim
         """
@@ -255,7 +242,6 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             edge_dim=edge_dim,
             num_heads=num_heads,
             layer_kernels=layer_kernels,
-            activation=activation,
         )
 
     def forward(

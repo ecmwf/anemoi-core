@@ -41,8 +41,8 @@ def custom_layer_kernels():
 def test_kernels_init(default_layer_kernels):
     """Test that the layer kernels are instantiated."""
     channels = 10
-    linear_layer = default_layer_kernels["Linear"](in_features=channels, out_features=channels)
-    layer_norm = default_layer_kernels["LayerNorm"](normalized_shape=channels)
+    linear_layer = default_layer_kernels.Linear(in_features=channels, out_features=channels)
+    layer_norm = default_layer_kernels.LayerNorm(normalized_shape=channels)
     assert isinstance(linear_layer, torch.nn.Linear)
     assert isinstance(layer_norm, torch.nn.LayerNorm)
     assert linear_layer.bias.shape == torch.Size([channels])
@@ -51,8 +51,8 @@ def test_kernels_init(default_layer_kernels):
 
 def test_custom_kernels(custom_layer_kernels):
     """Test that the custom layer kernels are instantiated."""
-    linear_layer = custom_layer_kernels["Linear"](in_features=10, out_features=10)
-    layer_norm = custom_layer_kernels["LayerNorm"](normalized_shape=10)
+    linear_layer = custom_layer_kernels.Linear(in_features=10, out_features=10)
+    layer_norm = custom_layer_kernels.LayerNorm(normalized_shape=10)
 
     assert linear_layer.bias is None
     assert layer_norm.bias is None

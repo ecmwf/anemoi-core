@@ -67,7 +67,6 @@ class TransformerProcessorBlock(BaseBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        activation: str,
         window_size: int,
         layer_kernels: DotDict,
         dropout_p: float = 0.0,
@@ -77,8 +76,8 @@ class TransformerProcessorBlock(BaseBlock):
     ):
         super().__init__()
 
-        self.layer_norm_attention = layer_kernels["LayerNorm"](normalized_shape=num_channels)
-        self.layer_norm_mlp = layer_kernels["LayerNorm"](normalized_shape=num_channels)
+        self.layer_norm_attention = layer_kernels.LayerNorm(normalized_shape=num_channels)
+        self.layer_norm_mlp = layer_kernels.LayerNorm(normalized_shape=num_channels)
 
         self.attention = MultiHeadSelfAttention(
             num_heads=num_heads,
@@ -94,9 +93,9 @@ class TransformerProcessorBlock(BaseBlock):
         )
 
         self.mlp = nn.Sequential(
-            layer_kernels["Linear"](num_channels, hidden_dim),
-            activation(),
-            layer_kernels["Linear"](hidden_dim, num_channels),
+            layer_kernels.Linear(num_channels, hidden_dim),
+            layer_kernels.Activation(),
+            layer_kernels.Linear(hidden_dim, num_channels),
         )
 
     def forward(
@@ -117,7 +116,6 @@ class GraphConvBaseBlock(BaseBlock):
         out_channels: int,
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
-        activation: str = "SiLU",
         update_src_nodes: bool = True,
         num_chunks: int = 1,
         **kwargs,
@@ -131,12 +129,10 @@ class GraphConvBaseBlock(BaseBlock):
         out_channels : int
             Number of output channels.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         mlp_extra_layers : int, optional
             Extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
         update_src_nodes: bool, by default True
             Update src if src and dst nodes are given
         num_chunks : int, by default 1
@@ -153,7 +149,6 @@ class GraphConvBaseBlock(BaseBlock):
             out_channels,
             layer_kernels,
             n_extra_layers=mlp_extra_layers,
-            activation=activation,
         )
 
         self.conv = GraphConv(
@@ -161,7 +156,6 @@ class GraphConvBaseBlock(BaseBlock):
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
         )
 
     @abstractmethod
@@ -184,7 +178,6 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         out_channels: int,
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
-        activation: str = "SiLU",
         update_src_nodes: bool = True,
         num_chunks: int = 1,
         **kwargs,
@@ -195,7 +188,6 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
             update_src_nodes=update_src_nodes,
             num_chunks=num_chunks,
             **kwargs,
@@ -242,7 +234,6 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         out_channels: int,
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
-        activation: str = "SiLU",
         update_src_nodes: bool = True,
         num_chunks: int = 1,
         **kwargs,
@@ -253,7 +244,6 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
             update_src_nodes=update_src_nodes,
             num_chunks=num_chunks,
             **kwargs,
@@ -311,7 +301,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         layer_kernels: DotDict,
         num_heads: int = 16,
         bias: bool = True,
-        activation: str = "GELU",
         num_chunks: int = 1,
         update_src_nodes: bool = False,
         **kwargs,
@@ -327,14 +316,12 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_dim : int,
             Edge dimension
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         num_heads : int,
             Number of heads
         bias : bool, by default True,
             Add bias or not
-        activation : str, optional
-            Activation function, by default "GELU"
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         """
@@ -347,34 +334,34 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.num_chunks = num_chunks
 
-        linear = layer_kernels["Linear"]
-        layerNorm = layer_kernels["LayerNorm"]
-        self.lin_key = linear(in_channels, num_heads * self.out_channels_conv)
-        self.lin_query = linear(in_channels, num_heads * self.out_channels_conv)
-        self.lin_value = linear(in_channels, num_heads * self.out_channels_conv)
-        self.lin_self = linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
-        self.lin_edge = linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
+        Linear = layer_kernels.Linear
+        LayerNorm = layer_kernels.LayerNorm
+        self.lin_key = Linear(in_channels, num_heads * self.out_channels_conv)
+        self.lin_query = Linear(in_channels, num_heads * self.out_channels_conv)
+        self.lin_value = Linear(in_channels, num_heads * self.out_channels_conv)
+        self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
+        self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
         self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
-        self.projection = linear(out_channels, out_channels)
+        self.projection = Linear(out_channels, out_channels)
 
-        self.layer_norm_attention = layerNorm(normalized_shape=in_channels)
-        self.layer_norm_mlp = layerNorm(normalized_shape=out_channels)
+        self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
+        self.layer_norm_mlp = LayerNorm(normalized_shape=out_channels)
 
         self.node_dst_mlp = nn.Sequential(
             self.layer_norm_mlp,
-            linear(out_channels, hidden_dim),
-            activation(),
-            linear(hidden_dim, out_channels),
+            Linear(out_channels, hidden_dim),
+            layer_kernels.Activation(),
+            Linear(hidden_dim, out_channels),
         )
 
         if self.update_src_nodes:
             self.node_src_mlp = nn.Sequential(
                 self.layer_norm_mlp,
-                linear(out_channels, hidden_dim),
-                activation(),
-                linear(hidden_dim, out_channels),
+                Linear(out_channels, hidden_dim),
+                layer_kernels.Activation(),
+                Linear(hidden_dim, out_channels),
             )
 
     def shard_qkve_heads(
@@ -452,7 +439,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         layer_kernels: DotDict,
         num_heads: int = 16,
         bias: bool = True,
-        activation: str = "GELU",
         num_chunks: int = 1,
         update_src_nodes: bool = False,
         **kwargs,
@@ -468,14 +454,12 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_dim : int,
             Edge dimension
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         num_heads : int,
             Number of heads
         bias : bool, by default True,
             Add bias or not
-        activation : str, optional
-            Activation function, by default "GELU"
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         """
@@ -487,14 +471,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             bias=bias,
-            activation=activation,
             num_chunks=num_chunks,
             update_src_nodes=update_src_nodes,
             **kwargs,
         )
 
         self.layer_norm_attention_src = self.layer_norm_attention
-        self.layer_norm_attention_dest = layer_kernels["LayerNorm"](normalized_shape=in_channels)
+        self.layer_norm_attention_dest = layer_kernels.LayerNorm(normalized_shape=in_channels)
 
     def forward(
         self,
@@ -583,7 +566,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         layer_kernels: DotDict,
         num_heads: int = 16,
         bias: bool = True,
-        activation: str = "GELU",
         num_chunks: int = 1,
         update_src_nodes: bool = False,
         **kwargs,
@@ -599,14 +581,12 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_dim : int,
             Edge dimension
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         num_heads : int,
             Number of heads
         bias : bool, by default True,
             Add bias or not
-        activation : str, optional
-            Activation function, by default "GELU"
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         """
@@ -619,7 +599,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             bias=bias,
-            activation=activation,
             num_chunks=num_chunks,
             update_src_nodes=update_src_nodes,
             **kwargs,

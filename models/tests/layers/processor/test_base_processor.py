@@ -11,6 +11,7 @@
 import pytest
 
 from anemoi.models.layers.processor import BaseProcessor
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 @pytest.fixture
@@ -18,20 +19,20 @@ def processor_init():
     num_layers = 4
     num_channels = 128
     num_chunks = 2
-    activation = "GELU"
+    layer_kernels = load_layer_kernels()
     cpu_offload = False
-    return num_layers, num_channels, num_chunks, activation, cpu_offload
+    return num_layers, num_channels, num_chunks, layer_kernels, cpu_offload
 
 
 @pytest.fixture()
 def base_processor(processor_init):
-    num_layers, num_channels, num_chunks, activation, cpu_offload = processor_init
+    num_layers, num_channels, num_chunks, layer_kernels, cpu_offload = processor_init
     return BaseProcessor(
         num_layers,
         num_channels=num_channels,
         num_chunks=num_chunks,
-        activation=activation,
         cpu_offload=cpu_offload,
+        layer_kernels=layer_kernels,
     )
 
 

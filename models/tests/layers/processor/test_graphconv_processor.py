@@ -10,7 +10,6 @@
 
 import pytest
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph import TrainableTensor
@@ -39,21 +38,19 @@ class TestGNNProcessor:
         num_channels = 128
         num_chunks = 2
         mlp_extra_layers = 0
-        activation = "SiLU"
         cpu_offload = False
         sub_graph = fake_graph[("nodes", "to", "nodes")]
         edge_attributes = ["edge_attr1", "edge_attr2"]
         src_grid_size = 0
         dst_grid_size = 0
         trainable_size = 8
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = load_layer_kernels()
         return (
             num_layers,
             layer_kernels,
             num_channels,
             num_chunks,
             mlp_extra_layers,
-            activation,
             cpu_offload,
             sub_graph,
             edge_attributes,
@@ -70,7 +67,6 @@ class TestGNNProcessor:
             num_channels,
             num_chunks,
             mlp_extra_layers,
-            activation,
             cpu_offload,
             sub_graph,
             edge_attributes,
@@ -84,7 +80,6 @@ class TestGNNProcessor:
             num_channels=num_channels,
             num_chunks=num_chunks,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
             cpu_offload=cpu_offload,
             sub_graph=sub_graph,
             sub_graph_edge_attributes=edge_attributes,
@@ -100,7 +95,6 @@ class TestGNNProcessor:
             num_channels,
             num_chunks,
             _mlp_extra_layers,
-            _activation,
             _cpu_offload,
             _sub_graph,
             _edge_attributes,
@@ -121,7 +115,6 @@ class TestGNNProcessor:
             num_channels,
             _num_chunks,
             _mlp_extra_layers,
-            _activation,
             _cpu_offload,
             _sub_graph,
             _edge_attributes,

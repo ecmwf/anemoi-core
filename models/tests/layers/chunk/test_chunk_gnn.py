@@ -35,7 +35,6 @@ class TestGNNProcessorChunk:
             num_layers=num_layers,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation="SiLU",
             edge_dim=edge_dim,
         )
 

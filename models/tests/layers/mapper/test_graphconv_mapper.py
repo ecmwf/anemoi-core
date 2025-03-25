@@ -10,7 +10,6 @@
 
 import pytest
 import torch
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from torch import nn
 from torch_geometric.data import HeteroData
@@ -34,13 +33,12 @@ class TestGNNBaseMapper:
             {
                 "LayerNorm": {
                     "_target_": "torch.nn.LayerNorm",
-                    "_partial_": True,
                 },
-                "Linear": {"_target_": "torch.nn.Linear", "_partial_": True, "bias": False},
+                "Linear": {"_target_": "torch.nn.Linear", "bias": False},
+                "Activation": {"_target_": "torch.nn.SiLU"},
             }
         )
-        layer_kernels = load_layer_kernels(kernel_config)
-        return instantiate(layer_kernels)
+        return load_layer_kernels(kernel_config)
 
     @pytest.fixture
     def mapper_init(self, layer_kernels):
@@ -49,7 +47,6 @@ class TestGNNBaseMapper:
         hidden_dim: int = 256
         out_channels_dst: int = 8
         cpu_offload: bool = False
-        activation: str = "SiLU"
         trainable_size: int = 6
         return (
             in_channels_src,
@@ -57,7 +54,6 @@ class TestGNNBaseMapper:
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             layer_kernels,
         )
@@ -70,7 +66,6 @@ class TestGNNBaseMapper:
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             layer_kernels,
         ) = mapper_init
@@ -80,7 +75,6 @@ class TestGNNBaseMapper:
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
-            activation=activation,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -95,7 +89,6 @@ class TestGNNBaseMapper:
             _hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _layer_kernels,
         ) = mapper_init
@@ -126,16 +119,15 @@ class TestGNNBaseMapper:
             hidden_dim,
             out_channels_dst,
             _cpu_offload,
-            activation,
             _trainable_size,
-            _layer_kernels,
+            layer_kernels,
         ) = mapper_init
         assert isinstance(mapper, GNNBaseMapper)
         assert mapper.in_channels_src == in_channels_src
         assert mapper.in_channels_dst == in_channels_dst
         assert mapper.hidden_dim == hidden_dim
         assert mapper.out_channels_dst == out_channels_dst
-        assert mapper.activation == activation
+        assert mapper.activation == layer_kernels.Activation()
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         # Should be a no-op in the base class
@@ -146,7 +138,6 @@ class TestGNNBaseMapper:
             _hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _layer_kernels,
         ) = mapper_init
@@ -186,7 +177,6 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             layer_kernels,
         ) = mapper_init
@@ -196,7 +186,6 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
-            activation=activation,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -211,7 +200,6 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
             hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _layer_kernels,
         ) = mapper_init
@@ -236,7 +224,6 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
             hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _layer_kernels,
         ) = mapper_init
@@ -281,7 +268,6 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             hidden_dim,
             out_channels_dst,
             cpu_offload,
-            activation,
             trainable_size,
             layer_kernels,
         ) = mapper_init
@@ -291,7 +277,6 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
-            activation=activation,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -306,7 +291,6 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             hidden_dim,
             _out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _layer_kernels,
         ) = mapper_init
@@ -331,7 +315,6 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             hidden_dim,
             out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _layer_kernels,
         ) = mapper_init
@@ -350,7 +333,6 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             hidden_dim,
             out_channels_dst,
             _cpu_offload,
-            _activation,
             _trainable_size,
             _layer_kernels,
         ) = mapper_init

@@ -22,7 +22,6 @@ def transformer_processor_init():
     window_size = 10
     num_channels = 128
     num_chunks = 2
-    activation = "GELU"
     cpu_offload = False
     num_heads = 16
     mlp_hidden_ratio = 4
@@ -37,7 +36,6 @@ def transformer_processor_init():
         window_size,
         num_channels,
         num_chunks,
-        activation,
         cpu_offload,
         num_heads,
         mlp_hidden_ratio,
@@ -55,7 +53,6 @@ def transformer_processor(transformer_processor_init):
         window_size,
         num_channels,
         num_chunks,
-        activation,
         cpu_offload,
         num_heads,
         mlp_hidden_ratio,
@@ -69,7 +66,6 @@ def transformer_processor(transformer_processor_init):
         window_size=window_size,
         num_channels=num_channels,
         num_chunks=num_chunks,
-        activation=activation,
         cpu_offload=cpu_offload,
         num_heads=num_heads,
         mlp_hidden_ratio=mlp_hidden_ratio,
@@ -86,7 +82,6 @@ def test_transformer_processor_init(transformer_processor, transformer_processor
         _window_size,
         num_channels,
         num_chunks,
-        _activation,
         _cpu_offload,
         _num_heads,
         _mlp_hidden_ratio,
@@ -107,7 +102,6 @@ def test_transformer_processor_forward(transformer_processor, transformer_proces
         _window_size,
         num_channels,
         _num_chunks,
-        _activation,
         _cpu_offload,
         _num_heads,
         _mlp_hidden_ratio,
