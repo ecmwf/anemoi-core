@@ -233,7 +233,7 @@ maintainable, and powerful configurations for Anemoi Training.
 Integration tests in anemoi-training include both general integration
 tests and those for specific use cases.
 
-For more information on testing more, please refer to the :ref:`general
+For more information on testing, please refer to the :ref:`general
 Anemoi testing guidelines <anemoi-docs:testing-guidelines>`.
 
 ***************
