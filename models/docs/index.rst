@@ -23,25 +23,31 @@ models from existing recipes but with their own data.
 of the *Anemoi* packages to train graph neural networks for data-driven
 weather forecasting.
 
--  :doc:`overview`
--  :doc:`installing`
+.. toctree::
+   :maxdepth: 1
+   :caption: Introduction
+
+   introduction/overview
+   introduction/installing
 
 .. toctree::
    :maxdepth: 1
-   :hidden:
+   :caption: User Guide
 
-   overview
-   installing
-
-*********
- Modules
-*********
+   usage/create_model.rst
 
 .. toctree::
    :maxdepth: 1
    :glob:
+   :caption: API Reference
 
    modules/*
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Contributing
+
+   contributing
 
 *****************
  Anemoi packages
