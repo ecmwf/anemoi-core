@@ -129,7 +129,7 @@ class NativeGridDataset(IterableDataset):
             self.data.missing,
             len(self.data),
             np.array(self.relative_date_indices, dtype=np.int64),
-            self.data.model_run_ids,
+            self.data.trajectory_ids,
         )
 
     def set_comm_group_info(

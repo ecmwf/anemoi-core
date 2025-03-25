@@ -17,7 +17,7 @@ def get_usable_indices(
     missing_indices: set[int],
     series_length: int,
     relative_indices: np.ndarray,
-    model_run_ids: np.ndarray | None = None,
+    trajectory_ids: np.ndarray | None = None,
 ) -> np.ndarray:
     """Get the usable indices of a series with missing indices.
 
@@ -29,8 +29,8 @@ def get_usable_indices(
         Length of the series.
     relative_indices: array[np.int64]
         Array of relative indices requested at each index i.
-    model_run_ids: array[np.int64]
-        Array of integers of length series length that contains the id of a model run.
+    trajectory_ids: array[np.int64]
+        Array of integers of length series length that indicates which forecast trajectory a time index belongs to.
         When training on analysis: None
 
     Returns
@@ -41,9 +41,9 @@ def get_usable_indices(
     usable_indices = np.arange(series_length - max(relative_indices))
 
     # Avoid crossing model runs by selecting only relative indices with the same model run id
-    if model_run_ids is not None:
+    if trajectory_ids is not None:
         rel_run = usable_indices[None] + relative_indices[:, None]
-        include = (model_run_ids[rel_run] == model_run_ids[rel_run[0]]).all(axis=0)
+        include = (trajectory_ids[rel_run] == trajectory_ids[rel_run[0]]).all(axis=0)
         usable_indices = usable_indices[include]
 
     # Missing indices

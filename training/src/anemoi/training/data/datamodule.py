@@ -99,14 +99,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         multi_step = self.config.training.multistep_input
         return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
 
-    def add_model_run_ids(self, data_reader: Callable) -> Callable:
-        """Determine the model run id of each time index of the data and add to a data_reader object.
+    def add_trajectory_ids(self, data_reader: Callable) -> Callable:
+        """Determine an index of forecast trajectories associated with the time index and add to a data_reader object.
+
+        This is needed for interpolation to ensure that the interpolator is trained on consistent time slices.
 
         NOTE: This is only relevant when training on non-analysis and could in the future be replaced with
         a property of the dataset stored in data_reader. Now assumes regular interval of changed model runs
         """
         if not hasattr(self.config.dataloader, "model_run_info"):
-            data_reader.model_run_ids = None
+            data_reader.trajectory_ids = None
             return data_reader
 
         mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
@@ -116,7 +118,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         ), f"""Requested data length {max(self.relative_date_indices(self.config.training.rollout.max)) + 1}
                 longer than model run length {mr_len}"""
 
-        data_reader.model_run_ids = (data_reader.dates - mr_start) // np.timedelta64(
+        data_reader.trajectory_ids = (data_reader.dates - mr_start) // np.timedelta64(
             mr_len * frequency_to_seconds(self.config.data.frequency),
             "s",
         )
@@ -207,7 +209,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> NativeGridDataset:
 
-        data_reader = self.add_model_run_ids(data_reader)  # NOTE: Temporary
+        data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
 
         # Compute effective batch size
         effective_bs = (
