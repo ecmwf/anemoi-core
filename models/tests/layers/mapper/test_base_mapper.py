@@ -7,13 +7,26 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import dataclass
 
 import pytest
 import torch
+from torch import nn
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.mapper import BaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
+
+
+@dataclass
+class BaseMapperConfig:
+    in_channels_src: int = 3
+    in_channels_dst: int = 3
+    hidden_dim: int = 128
+    out_channels_dst: int = 5
+    cpu_offload: bool = False
+    trainable_size: int = 6
+    layer_kernels = load_layer_kernels()
 
 
 class TestBaseMapper:
@@ -25,93 +38,52 @@ class TestBaseMapper:
 
     @pytest.fixture
     def mapper_init(self):
-        in_channels_src: int = 3
-        in_channels_dst: int = 3
-        hidden_dim: int = 128
-        out_channels_dst: int = 5
-        cpu_offload: bool = False
-        trainable_size: int = 6
-        layer_kernels = load_layer_kernels()
-        return (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            cpu_offload,
-            trainable_size,
-            layer_kernels,
-        )
+        return BaseMapperConfig()
 
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
-        (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            cpu_offload,
-            trainable_size,
-            layer_kernels,
-        ) = mapper_init
+
         return BaseMapper(
-            in_channels_src=in_channels_src,
-            in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
-            layer_kernels=layer_kernels,
-            out_channels_dst=out_channels_dst,
-            cpu_offload=cpu_offload,
-            sub_graph=fake_graph[("src", "to", "dst")],
+            in_channels_src=mapper_init.in_channels_src,
+            in_channels_dst=mapper_init.in_channels_dst,
+            hidden_dim=mapper_init.hidden_dim,
+            layer_kernels=mapper_init.layer_kernels,
+            out_channels_dst=mapper_init.out_channels_dst,
+            cpu_offload=mapper_init.cpu_offload,
+            sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            trainable_size=trainable_size,
+            trainable_size=mapper_init.trainable_size,
         )
 
     @pytest.fixture
     def pair_tensor(self, mapper_init):
-        (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            _out_channels_dst,
-            _cpu_offload,
-            _trainable_size,
-            _layer_kernels,
-        ) = mapper_init
         return (
-            torch.rand(in_channels_src, hidden_dim),
-            torch.rand(in_channels_dst, hidden_dim),
+            torch.rand(mapper_init.in_channels_src, mapper_init.hidden_dim),
+            torch.rand(mapper_init.in_channels_dst, mapper_init.hidden_dim),
         )
 
     @pytest.fixture
     def fake_graph(self) -> HeteroData:
         """Fake graph."""
         graph = HeteroData()
-        graph[("src", "to", "dst")].edge_index = torch.concat(
+        graph[("nodes", "to", "nodes")].edge_index = torch.concat(
             [
                 torch.randint(0, self.NUM_SRC_NODES, (1, self.NUM_EDGES)),
                 torch.randint(0, self.NUM_DST_NODES, (1, self.NUM_EDGES)),
             ],
             axis=0,
         )
-        graph[("src", "to", "dst")].edge_attr1 = torch.rand((self.NUM_EDGES, 1))
-        graph[("src", "to", "dst")].edge_attr2 = torch.rand((self.NUM_EDGES, 32))
+        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 1))
+        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 32))
         return graph
 
     def test_initialization(self, mapper, mapper_init):
-        (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            _cpu_offload,
-            _trainable_size,
-            layer_kernels,
-        ) = mapper_init
         assert isinstance(mapper, BaseMapper)
-        assert mapper.in_channels_src == in_channels_src
-        assert mapper.in_channels_dst == in_channels_dst
-        assert mapper.hidden_dim == hidden_dim
-        assert mapper.out_channels_dst == out_channels_dst
-        assert isinstance(mapper.activation, layer_kernels.Activation)
+        assert mapper.in_channels_src == mapper_init.in_channels_src
+        assert mapper.in_channels_dst == mapper_init.in_channels_dst
+        assert mapper.hidden_dim == mapper_init.hidden_dim
+        assert mapper.out_channels_dst == mapper_init.out_channels_dst
+        assert isinstance(mapper.activation, nn.Module)
 
     def test_pre_process(self, mapper, pair_tensor):
         x = pair_tensor

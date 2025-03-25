@@ -1,7 +1,6 @@
 import pytest
 import torch
 from hydra.errors import InstantiationException
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from anemoi.models.layers.utils import load_layer_kernels
@@ -14,11 +13,10 @@ def default_layer_kernels():
         {
             "LayerNorm": {
                 "_target_": "torch.nn.LayerNorm",
-                "_partial_": True,
             },
         }
     )
-    return instantiate(load_layer_kernels(kernels_config))
+    return load_layer_kernels(kernels_config)
 
 
 @pytest.fixture
@@ -35,7 +33,7 @@ def custom_layer_kernels():
             "Linear": {"_target_": "torch.nn.Linear", "_partial_": True, "bias": False},
         }
     )
-    return instantiate(load_layer_kernels(kernels_config))
+    return load_layer_kernels(kernels_config)
 
 
 def test_kernels_init(default_layer_kernels):

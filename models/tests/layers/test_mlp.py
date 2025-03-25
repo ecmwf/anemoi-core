@@ -10,7 +10,6 @@
 
 import pytest
 import torch
-from hydra.utils import instantiate
 
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.utils import load_layer_kernels
@@ -43,7 +42,7 @@ def num_out_feature():
 
 @pytest.fixture
 def layer_kernels():
-    return instantiate(load_layer_kernels())
+    return load_layer_kernels()
 
 
 class TestMLP:

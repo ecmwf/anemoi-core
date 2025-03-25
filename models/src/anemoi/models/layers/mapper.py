@@ -45,8 +45,8 @@ class BaseMapper(nn.Module, ABC):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: int,
         layer_kernels: DotDict,
-        out_channels_dst: Optional[int] = None,
         cpu_offload: bool = False,
         **kwargs,
     ) -> None:
@@ -182,16 +182,16 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: Optional[int] = None,
         trainable_size: int,
+        num_chunks: int,
         num_heads: int,
+        mlp_hidden_ratio: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
-        num_chunks: int = 1,
-        mlp_hidden_ratio: int = 4,
-        out_channels_dst: Optional[int] = None,
         cpu_offload: bool = False,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
         layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
@@ -204,24 +204,34 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int, optional
+            Output channels of the destination node, by default None
         trainable_size : int
             Trainable tensor of edge
+        num_chunks : int
+            Number of chunks to split into
         num_heads: int
-            Number of heads to use, default 16
+            Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
+            ratio of mlp hidden dimension to embedding dimension
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
         layer_kernels : DotDict, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -247,7 +257,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         self.offload_layers(cpu_offload)
 
-        self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
+        self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim, bias=False)
 
     def forward(
         self,
@@ -288,17 +298,17 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: int,
         trainable_size: int,
+        num_chunks: int,
         num_heads: int,
+        mlp_hidden_ratio: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
-        layer_kernels: DotDict,
-        num_chunks: int = 1,
         cpu_offload: bool = False,
-        mlp_hidden_ratio: int = 4,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        out_channels_dst: Optional[int] = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
 
@@ -310,23 +320,35 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int
+            Output channels of the destination node, by default None
         trainable_size : int
             Trainable tensor of edge
+        num_chunks : int
+            Number of chunks to split into
         num_heads: int
-            Number of heads to use, default 16
+            Number of heads in transformer
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
-        cpu_offload : bool, optional
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
+        cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            trainable_size,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
+            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             num_heads=num_heads,
@@ -360,17 +382,17 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: int,
         trainable_size: int,
+        num_chunks: int,
         num_heads: int,
+        mlp_hidden_ratio: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
-        layer_kernels: DotDict,
-        mlp_hidden_ratio: int = 4,
-        num_chunks: int = 1,
         cpu_offload: bool = False,
-        sub_graph: Optional[HeteroData] = None,
-        out_channels_dst: Optional[int] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
 
@@ -382,26 +404,36 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int
+            Output channels of the destination node
         trainable_size : int
             Trainable tensor of edge
+        num_chunks : int
+            Number of chunks to split into
         num_heads: int
-            Number of heads to use, default 16
+            Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
+            Tatio of mlp hidden dimension to embedding dimension
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
-        layer_kernels : DotDict
+        layer_kernels : DotDict, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            trainable_size,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
+            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             num_heads=num_heads,
@@ -435,16 +467,16 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: int,
         trainable_size: int,
+        num_chunks: int,
+        mlp_extra_layers: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
-        layer_kernels: DotDict,
-        num_chunks: int = 1,
         cpu_offload: bool = False,
-        mlp_extra_layers: int = 0,
-        out_channels_dst: Optional[int] = None,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GNNBaseMapper.
 
@@ -456,17 +488,27 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int
+            Output channels of the destination node
         trainable_size : int
             Trainable tensor of edge
-        mlp_extra_layers : int, optional
-            Number of extra layers in MLP, by default 0
         num_chunks : int
-            Do message passing in X chunks
+            Number of chunks to split into
+        num_heads: int
+            Number of heads in transformer
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
-        layer_kernels : DotDict
+        layer_kernels : DotDict, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -477,6 +519,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
         )
 
         self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
@@ -540,16 +583,16 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: int,
         trainable_size: int,
+        num_chunks: int,
+        mlp_extra_layers: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
-        layer_kernels: DotDict,
-        num_chunks: int = 1,
         cpu_offload: bool = False,
-        mlp_extra_layers: int = 0,
-        out_channels_dst: Optional[int] = None,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GNNForwardMapper.
 
@@ -561,16 +604,24 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        edge_dim : int
+        out_channels_dst : int
+            Output channels of the destination node, by default None
+        trainable_size : int
             Trainable tensor of edge
+        num_chunks: int
+            Number of chunks to split into
         mlp_extra_layers : int, optional
             Number of extra layers in MLP, by default 0
-        num_chunks : int
-            Do message passing in X chunks
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
@@ -579,8 +630,8 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
-            trainable_size=trainable_size,
             out_channels_dst=out_channels_dst,
+            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
@@ -628,16 +679,16 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: int,
         trainable_size: int,
+        num_chunks: int,
+        mlp_extra_layers: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
-        layer_kernels: DotDict,
-        num_chunks: int = 1,
         cpu_offload: bool = False,
-        out_channels_dst: Optional[int] = None,
-        mlp_extra_layers: int = 0,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GNNBackwardMapper.
 
@@ -649,16 +700,24 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        edge_dim : int
+        out_channels_dst : int
+            Output channels of the destination node
+        trainable_size : int
             Trainable tensor of edge
-        mlp_extra_layers : int, optional
-            Number of extra layers in MLP, by default 0
-        num_chunks : int
-            Do message passing in X chunks
-        cpu_offload : bool, optional
+        num_chunks: int
+            Number of chunks to split into
+        mlp_extra_layers : int
+            Number of extra layers in MLP
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
+        cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml

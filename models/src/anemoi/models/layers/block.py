@@ -230,6 +230,7 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
 
     def __ini__(
         self,
+        *,
         in_channels: int,
         out_channels: int,
         layer_kernels: DotDict,

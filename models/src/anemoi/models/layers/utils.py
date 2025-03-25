@@ -32,7 +32,7 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
-def load_layer_kernels(kernel_config: Optional[DotDict] = {}) -> DotDict["str" : nn.Module]:
+def load_layer_kernels(kernel_config: Optional[DotDict] = None) -> DotDict["str" : nn.Module]:
     """Load layer kernels from the config.
 
     This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.
@@ -54,10 +54,13 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = {}) -> DotDict["str" :
         "Activation": {"_target_": "torch.nn.GELU"},
     }
 
+    if kernel_config is None:
+        kernel_config = DotDict()
+
     layer_kernels = DotDict()
 
     # Loop through all kernels in the layer_kernels config entry and try import them
-    for name, kernel_entry in (default_kernels | kernel_config).items():
+    for name, kernel_entry in {**default_kernels, **kernel_config}.items():
         try:
             layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
         except InstantiationException:

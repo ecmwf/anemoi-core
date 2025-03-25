@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import dataclass
 
 import pytest
 
@@ -14,40 +15,42 @@ from anemoi.models.layers.processor import BaseProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 
 
-@pytest.fixture
-def processor_init():
+@dataclass
+class ProcessorInit:
     num_layers = 4
     num_channels = 128
     num_chunks = 2
     layer_kernels = load_layer_kernels()
     cpu_offload = False
-    return num_layers, num_channels, num_chunks, layer_kernels, cpu_offload
+
+
+@pytest.fixture
+def processor_init():
+    return ProcessorInit()
 
 
 @pytest.fixture()
 def base_processor(processor_init):
-    num_layers, num_channels, num_chunks, layer_kernels, cpu_offload = processor_init
     return BaseProcessor(
-        num_layers,
-        num_channels=num_channels,
-        num_chunks=num_chunks,
-        cpu_offload=cpu_offload,
-        layer_kernels=layer_kernels,
+        num_layers=processor_init.num_layers,
+        num_channels=processor_init.num_channels,
+        num_chunks=processor_init.num_chunks,
+        cpu_offload=processor_init.cpu_offload,
+        layer_kernels=processor_init.layer_kernels,
     )
 
 
 def test_base_processor_init(processor_init, base_processor):
-    num_layers, num_channels, num_chunks, *_ = processor_init
 
     assert isinstance(base_processor.num_chunks, int), "num_layers should be an integer"
     assert isinstance(base_processor.num_channels, int), "num_channels should be an integer"
 
     assert (
-        base_processor.num_chunks == num_chunks
-    ), f"num_chunks ({base_processor.num_chunks}) should be equal to the input num_chunks ({num_chunks})"
+        base_processor.num_chunks == processor_init.num_chunks
+    ), f"num_chunks ({base_processor.num_chunks}) should be equal to the input num_chunks ({processor_init.num_chunks})"
     assert (
-        base_processor.num_channels == num_channels
-    ), f"num_channels ({base_processor.num_channels}) should be equal to the input num_channels ({num_channels})"
+        base_processor.num_channels == processor_init.num_channels
+    ), f"num_channels ({base_processor.num_channels}) should be equal to the input num_channels ({processor_init.num_channels})"
     assert (
-        base_processor.chunk_size == num_layers // num_chunks
-    ), f"chunk_size ({base_processor.chunk_size}) should be equal to num_layers // num_chunks ({num_layers // num_chunks})"
+        base_processor.chunk_size == processor_init.num_layers // processor_init.num_chunks
+    ), f"chunk_size ({base_processor.chunk_size}) should be equal to num_layers // num_chunks ({processor_init.num_layers // processor_init.num_chunks})"
