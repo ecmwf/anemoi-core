@@ -10,46 +10,40 @@
 import torch
 
 from anemoi.training.utils.masks import Boolean1DMask
+from anemoi.training.utils.masks import NoOutputMask
 
 
-def test_apply_boolean1dmask() -> None:
-    """Test Boolean1DMask(mask).apply()."""
-    n = 10
-    m = 4
-    mask = torch.tensor([i < m for i in range(n)])
+def test_boolean1d_apply() -> None:
+    num_points = 10
+    x = torch.reshape(torch.arange(1, num_points + 1), (1, 1, num_points, 1))
+    y = -x.clone()
+    mask = torch.arange(num_points) % 2 == 0
+    bool_1d = Boolean1DMask(mask)
 
-    x = torch.tensor([-1 for i in range(n)], dtype=torch.float32)
-    a = torch.rand(2, 3)
-    b = torch.rand(3, 2)
-    x = torch.tensordot(a, x, dims=0)
-    x = torch.tensordot(x, b, dims=0)
+    x_1 = bool_1d.apply(x, dim=2, fill_value=y)
 
-    # test case where fill_value is torch.Tensor
-    fill_value = torch.arange(n, dtype=torch.float32)
-    c = torch.rand(2, 3)
-    d = torch.rand(3, 2)
-    fill_value = torch.tensordot(c, fill_value, dims=0)
-    fill_value = torch.tensordot(fill_value, d, dims=0)
-    y = Boolean1DMask(mask).apply(x, dim=2, fill_value=fill_value, dim_sel=2)
-    expected_y0 = torch.tensor([-1 for i in range(m)], dtype=torch.float32)
-    expected_y0 = torch.tensordot(a, expected_y0, dims=0)
-    expected_y0 = torch.tensordot(expected_y0, b, dims=0)
-    expected_y1 = torch.arange(start=m, end=n, dtype=torch.float32)
-    expected_y1 = torch.tensordot(c, expected_y1, dims=0)
-    expected_y1 = torch.tensordot(expected_y1, d, dims=0)
-    expected_y = torch.cat((expected_y0, expected_y1), dim=2)
-    assert torch.equal(y, expected_y)
+    assert x_1.shape == x.shape
+    assert torch.all(x_1[:, :, ~mask, :] < 0)
+    assert torch.all(x_1[:, :, ~mask, :] == y[:, :, ~mask, :])
+    assert torch.all(x_1[:, :, mask, :] > 0)
+    assert torch.all(x_1[:, :, mask, :] == x[:, :, mask, :])
 
-    # test case where fill_value is float
-    fill_value = torch.rand(1).item()
-    y = Boolean1DMask(mask).apply(x, dim=2, fill_value=fill_value)
-    expected_y0 = torch.tensor([-1 for i in range(m)], dtype=torch.float32)
-    expected_y0 = torch.tensordot(a, expected_y0, dims=0)
-    expected_y0 = torch.tensordot(expected_y0, b, dims=0)
-    expected_y1 = torch.tensor([fill_value for i in range(m, n)], dtype=torch.float32)
-    c = torch.full((2, 3), 1, dtype=torch.float32)
-    d = torch.full((3, 2), 1, dtype=torch.float32)
-    expected_y1 = torch.tensordot(c, expected_y1, dims=0)
-    expected_y1 = torch.tensordot(expected_y1, d, dims=0)
-    expected_y = torch.cat((expected_y0, expected_y1), dim=2)
-    assert torch.equal(y, expected_y)
+    x_2 = bool_1d.apply(x, dim=2, fill_value=0)
+
+    assert x_2.shape == x.shape
+    assert torch.all(x_2[:, :, ~mask, :] == 0)
+    assert torch.all(x_2[:, :, mask, :] > 0)
+    assert torch.all(x_2[:, :, mask, :] == x[:, :, mask, :])
+
+
+def test_nooutput_apply() -> None:
+    num_points = 10
+    x = torch.reshape(torch.arange(1, num_points + 1), (1, 1, num_points, 1))
+    y = -x.clone()
+
+    no_mask = NoOutputMask()
+
+    x_1 = no_mask.apply(x, dim=2, fill_value=y)
+
+    assert x_1.shape == x.shape
+    assert torch.all(x_1 == x)
