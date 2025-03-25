@@ -14,7 +14,6 @@ collaboration on GitHub, writing documentation, testing, and code style.
  Unit tests
 ************
 
-
 anemoi-models include unit tests that can be executed locally using
 pytest. For more information on testing, please refer to the
 :ref:`general Anemoi testing guidelines

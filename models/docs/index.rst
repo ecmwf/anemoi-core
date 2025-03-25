@@ -23,7 +23,6 @@ models from existing recipes but with their own data.
 of the *Anemoi* packages to train graph neural networks for data-driven
 weather forecasting.
 
-
 .. toctree::
    :maxdepth: 1
    :caption: Introduction
@@ -42,7 +41,6 @@ weather forecasting.
    :caption: Contributing
 
    contributing
-
 
 .. toctree::
    :maxdepth: 1
