@@ -97,6 +97,7 @@ class Boolean1DMask(BaseMask):
         """
         if isinstance(fill_value, torch.Tensor):
             indices = (~self.mask).nonzero(as_tuple=True)[0]
+            indices = indices.to(x.get_device())
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
         mask = self.broadcast_like(x, dim)
