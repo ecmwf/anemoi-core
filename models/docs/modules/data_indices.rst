@@ -41,7 +41,7 @@ config entry:
        - "tp"
        - "cp"
 
-.. figure:: ../schemas/data_indices.png
+.. figure:: ../_static/data_indices.png
    :alt: Schematic of IndexCollection with Data Indexing on Data and Model levels.
    :align: center
 
