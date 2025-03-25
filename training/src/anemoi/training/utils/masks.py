@@ -84,11 +84,9 @@ class Boolean1DMask(BaseMask):
         x : torch.Tensor
             The input tensor to be masked.
         dim : int
-            The dimension along which to apply the mask to x.
+            The dimension along which to apply the mask.
         fill_value : float | torch.Tensor, optional
             The value to fill in the masked positions, by default np.nan.
-        dim_sel : int, optional
-            The dimension along which to select values out of fill_value using the mask
 
         Returns
         -------
