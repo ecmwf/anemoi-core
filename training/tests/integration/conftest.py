@@ -24,12 +24,12 @@ from omegaconf import OmegaConf
 )
 def architecture_config(request: pytest.FixtureRequest, testing_modifications_with_temp_dir: OmegaConf) -> None:
     overrides = request.param
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_basic"):
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(
-            config_name="debug",
+            config_name="config",
             overrides=overrides,
         )  # apply architecture overrides to template since they override a default
-        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_basic.yaml")
+        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
         cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
         OmegaConf.resolve(cfg)
         return cfg
