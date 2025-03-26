@@ -1,6 +1,6 @@
-#############################################
- Basic Training Configuration and Validation
-#############################################
+##############################
+ Basic Training Configuration
+##############################
 
 Anemoi training is designed so you can adjust key parts of the models
 and training process without needing to modify the underlying code.

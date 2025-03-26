@@ -1,8 +1,8 @@
 .. _hydra-intro:
 
-##################################
- Configuration Basics Using Hydra
-##################################
+######################
+ Configuration Basics
+######################
 
 Anemoi training is set up in a way that you should be able to modify key
 components of both the models and training without changing the code.

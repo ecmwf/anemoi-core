@@ -1,14 +1,16 @@
-###########################
- Training your first model
-###########################
+##############
+ Basic Set-Up
+##############
 
-Once Anemoi training is installed, you can run your first model with
+Once Anemoi training is installed, you can test your installation by
+running
 
 .. code:: bash
 
    anemoi-training train
 
-which will use the default model configurations with missing values.
+which will use the default model configurations with missing values
+to lauch a training run.
 
 The training script will intentionally crash as it does not know where
 your data is stored.

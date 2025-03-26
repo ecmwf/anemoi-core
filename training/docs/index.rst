@@ -33,7 +33,7 @@ This package provides the *Anemoi* training functionality.
    :caption: User Guide
 
    user-guide/overview
-   user-guide/training-your-first-model
+   user-guide/basic-set-up
    user-guide/hydra-intro
    user-guide/configuring
    user-guide/training

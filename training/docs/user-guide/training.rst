@@ -1,6 +1,6 @@
-#####################################
- Training and Advanced Configuration
-#####################################
+##########
+ Training
+##########
 
 The Anemoi Training module is the heart of the framework where machine
 learning models for weather forecasting are trained. This section will
