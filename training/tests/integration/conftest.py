@@ -8,12 +8,23 @@
 # nor does it submit to any jurisdiction.
 
 
+import os
 from pathlib import Path
 
 import pytest
 from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
+
+
+@pytest.fixture(autouse=True)
+def set_working_directory() -> None:
+    """Automatically set the working directory to the repo root."""
+    repo_root = Path(__file__).resolve().parent
+    while not (repo_root / ".git").exists() and repo_root != repo_root.parent:
+        repo_root = repo_root.parent
+
+    os.chdir(repo_root)
 
 
 @pytest.fixture(
