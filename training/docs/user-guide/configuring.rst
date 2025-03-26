@@ -354,7 +354,7 @@ contains a list of all the possible schemas for graph nodes attributes.
       PlanarAreaWeightSchema
       | SphericalAreaWeightSchema
       | CutOutMaskSchema
-      | NonmissingZarrVariableSchema
+      | NonmissingAnemoiDatasetVariableSchema
       | BooleanOperationSchema
    ]
 
@@ -379,10 +379,10 @@ with the following error:
    graph.nodes.data.attributes.area_weight.CutOutMaskSchema._target_
    Input should be 'anemoi.graphs.nodes.attributes.CutOutMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.data.attributes.area_weight.NonmissingZarrVariableSchema._target_
-   Input should be 'anemoi.graphs.nodes.attributes.NonmissingZarrVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+   graph.nodes.data.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.data.attributes.area_weight.NonmissingZarrVariableSchema.variable
+   graph.nodes.data.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema.variable
    Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
       For further information visit https://errors.pydantic.dev/2.10/v/missing
    graph.nodes.data.attributes.area_weight.BooleanOperationSchema._target_
@@ -397,10 +397,10 @@ with the following error:
    graph.nodes.hidden.attributes.area_weight.CutOutMaskSchema._target_
    Input should be 'anemoi.graphs.nodes.attributes.CutOutMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.hidden.attributes.area_weight.NonmissingZarrVariableSchema._target_
-   Input should be 'anemoi.graphs.nodes.attributes.NonmissingZarrVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+   graph.nodes.hidden.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.hidden.attributes.area_weight.NonmissingZarrVariableSchema.variable
+   graph.nodes.hidden.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema.variable
    Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
       For further information visit https://errors.pydantic.dev/2.10/v/missing
    graph.nodes.hidden.attributes.area_weight.BooleanOperationSchema._target_

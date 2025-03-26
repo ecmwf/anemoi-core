@@ -5,6 +5,6 @@ nodes:
       # ...
     attributes:
       land_mask:
-        _target_: anemoi.graphs.nodes.attributes.NonmissingZarrVariable
+        _target_: anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable
         variable: lsm
   hidden: ...

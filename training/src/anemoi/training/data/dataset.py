@@ -39,9 +39,7 @@ class NativeGridDataset(IterableDataset):
         self,
         data_reader: Callable,
         grid_indices: type[BaseGridIndices],
-        rollout: int = 1,
-        multistep: int = 1,
-        timeincrement: int = 1,
+        relative_date_indices: list,
         shuffle: bool = True,
         label: str = "generic",
         effective_bs: int = 1,
@@ -54,12 +52,8 @@ class NativeGridDataset(IterableDataset):
             user function that opens and returns the anemoi-datasets array data
         grid_indices : Type[BaseGridIndices]
             indices of the grid to keep. Defaults to None, which keeps all spatial indices.
-        rollout : int, optional
-            length of rollout window, by default 12
-        timeincrement : int, optional
-            time increment between samples, by default 1
-        multistep : int, optional
-            collate (t-1, ... t - multistep) into the input state vector, by default 1
+        relative_date_indices: list
+            list of time indices to load from the data relative to the current sample i in __iter__
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
@@ -72,8 +66,6 @@ class NativeGridDataset(IterableDataset):
 
         self.data = data_reader
 
-        self.rollout = rollout
-        self.timeincrement = timeincrement
         self.grid_indices = grid_indices
 
         # lazy init
@@ -95,10 +87,11 @@ class NativeGridDataset(IterableDataset):
         self.shuffle = shuffle
 
         # Data dimensions
-        self.multi_step = multistep
-        assert self.multi_step > 0, "Multistep value must be greater than zero."
         self.ensemble_dim: int = 2
         self.ensemble_size = self.data.shape[self.ensemble_dim]
+
+        # relative index of dates to extract
+        self.relative_date_indices = relative_date_indices
 
     @cached_property
     def statistics(self) -> dict:
@@ -129,15 +122,15 @@ class NativeGridDataset(IterableDataset):
     def valid_date_indices(self) -> np.ndarray:
         """Return valid date indices.
 
-        A date t is valid if we can sample the sequence
-            (t - multistep + 1, ..., t + rollout)
-        without missing data (if time_increment is 1).
-
-        If there are no missing dates, total number of valid ICs is
-        dataset length minus rollout minus additional multistep inputs
-        (if time_increment is 1).
+        A date t is valid if we can sample the elements t + i
+        for every relative_date_index i.
         """
-        return get_usable_indices(self.data.missing, len(self.data), self.rollout, self.multi_step, self.timeincrement)
+        return get_usable_indices(
+            self.data.missing,
+            len(self.data),
+            np.array(self.relative_date_indices, dtype=np.int64),
+            self.data.trajectory_ids,
+        )
 
     def set_comm_group_info(
         self,
@@ -276,18 +269,22 @@ class NativeGridDataset(IterableDataset):
         )
 
         for i in shuffled_chunk_indices:
-            start = i - (self.multi_step - 1) * self.timeincrement
-            end = i + (self.rollout + 1) * self.timeincrement
+            start = i + self.relative_date_indices[0]
+            end = i + self.relative_date_indices[-1] + 1
+            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
+            # data[start...] will be replaced with data[self.relative_date_indices + i]
 
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
                 # Load only shards into CPU memory
-                x = self.data[start : end : self.timeincrement, :, :, grid_shard_indices]
+                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+
             else:
                 # Load full grid in CPU memory, select grid_shard after
                 # Note that anemoi-datasets currently doesn't support slicing + indexing
                 # in the same operation.
-                x = self.data[start : end : self.timeincrement, :, :, :]
+                x = self.data[start:end:timeincrement, :, :, :]
                 x = x[..., grid_shard_indices]  # select the grid shard
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
@@ -298,9 +295,7 @@ class NativeGridDataset(IterableDataset):
         return f"""
             {super().__repr__()}
             Dataset: {self.data}
-            Rollout: {self.rollout}
-            Multistep: {self.multi_step}
-            Timeincrement: {self.timeincrement}
+            Relative dates: {self.relative_date_indices}
         """
 
 

@@ -56,17 +56,15 @@ class AnemoiModelEncProcDec(nn.Module):
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
 
-        self._calculate_shapes_and_indices(data_indices)
-        self._assert_matching_indices(data_indices)
-        self.data_indices = data_indices
-        self.statistics = statistics
-
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        self._calculate_shapes_and_indices(data_indices)
+        self._assert_matching_indices(data_indices)
+        self.data_indices = data_indices
+        self.statistics = statistics
 
         # read config.model.layer_kernels to get the implementation for certain layers
         self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", DotDict()))
@@ -74,7 +72,7 @@ class AnemoiModelEncProcDec(nn.Module):
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
-            in_channels_src=input_dim,
+            in_channels_src=self.input_dim,
             in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
             hidden_dim=self.num_channels,
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
@@ -97,7 +95,7 @@ class AnemoiModelEncProcDec(nn.Module):
         self.decoder = instantiate(
             model_config.model.decoder,
             in_channels_src=self.num_channels,
-            in_channels_dst=input_dim,
+            in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.num_output_channels,
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
@@ -124,6 +122,9 @@ class AnemoiModelEncProcDec(nn.Module):
         self.num_output_channels = len(data_indices.internal_model.output)
         self._internal_input_idx = data_indices.internal_model.input.prognostic
         self._internal_output_idx = data_indices.internal_model.output.prognostic
+        self.input_dim = (
+            self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
 
