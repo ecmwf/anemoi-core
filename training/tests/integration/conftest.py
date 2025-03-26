@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 
 
 @pytest.fixture(autouse=True)
-def set_working_directory():
+def set_working_directory() -> None:
     """Automatically set the working directory to the repo root."""
     repo_root = Path(__file__).resolve().parent
     while not (repo_root / ".git").exists() and repo_root != repo_root.parent:
