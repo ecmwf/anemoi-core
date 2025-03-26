@@ -69,5 +69,5 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None) -> DotDict["str"
             )
             raise InstantiationException
         else:
-            LOGGER.info(f"{name} kernel: {kernel_entry}")
+            LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
     return layer_kernels
