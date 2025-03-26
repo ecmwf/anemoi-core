@@ -44,16 +44,16 @@ This package provides the *Anemoi* training functionality.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Contributing
+   :glob:
+   :caption: API Reference
 
-   contributing
+   modules/*
 
 .. toctree::
    :maxdepth: 1
-   :glob:
-   :caption: Modules
+   :caption: Contributing
 
-   modules/*
+   contributing
 
 .. toctree::
    :maxdepth: 1
