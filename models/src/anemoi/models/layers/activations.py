@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from typing import Optional
+
 import torch
 from torch import nn
 
@@ -29,7 +31,7 @@ class GLU(nn.Module):
         nn.Sigmoid().
     """
 
-    def __init__(self, variation: nn.Module | None = None):
+    def __init__(self, variation: Optional[nn.Module] = None):
         super().__init__()
         self.dim = self.W = self.V = None
         self.variation = variation if variation is not None else nn.Sigmoid()
