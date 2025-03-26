@@ -81,23 +81,6 @@ To install the package, you can use the following command:
 
 Get more information in the :ref:`installing-graphs` section.
 
-**************
- Contributing
-**************
-
-.. code:: bash
-
-   git clone ...
-   cd anemoi-graphs
-   pip install .[dev]
-   pip install -r docs/requirements.txt
-
-You may also have to install pandoc on MacOS:
-
-.. code:: bash
-
-   brew install pandoc
-
 ***********************
  Other Anemoi packages
 ***********************
