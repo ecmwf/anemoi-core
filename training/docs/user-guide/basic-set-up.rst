@@ -9,8 +9,8 @@ running
 
    anemoi-training train
 
-which will use the default model configurations with missing values
-to lauch a training run.
+which will use the default model configurations with missing values to
+lauch a training run.
 
 The training script will intentionally crash as it does not know where
 your data is stored.
