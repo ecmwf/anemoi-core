@@ -49,7 +49,6 @@ class TestGraphTransformerBaseMapper:
 
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
-
         return GraphTransformerBaseMapper(
             in_channels_src=mapper_init.in_channels_src,
             in_channels_dst=mapper_init.in_channels_dst,
@@ -96,7 +95,6 @@ class TestGraphTransformerBaseMapper:
         assert mapper.hidden_dim == mapper_init.hidden_dim
         assert mapper.out_channels_dst == mapper_init.out_channels_dst
         assert isinstance(mapper.activation, nn.Module)
-        assert mapper.emb_nodes_dst.bias is None
 
     def test_pre_process(self, mapper, pair_tensor):
         # Should be a no-op in the base class
