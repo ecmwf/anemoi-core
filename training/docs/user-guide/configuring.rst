@@ -1,14 +1,13 @@
-##########################
+#############################################
  Basic Training Configuration and Validation
-##########################
+#############################################
 
 Anemoi training is designed so you can adjust key parts of the models
 and training process without needing to modify the underlying code.
 
 A basic introduction to the configuration system is provided in
-:ref:`<hydra-intro>`. 
-This section will go into more
-detail on how to configure the training pipeline.
+:ref:`<hydra-intro>`. This section will go into more detail on how to
+configure the training pipeline.
 
 ***********************
  Default Config Groups
@@ -154,7 +153,6 @@ or combine everything together
 .. code:: bash
 
    anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
-
 
 .. _config-validation:
 

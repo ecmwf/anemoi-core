@@ -1,8 +1,8 @@
 .. _hydra-intro:
 
-#####################
+##################################
  Configuration Basics Using Hydra
-#####################
+##################################
 
 Anemoi training is set up in a way that you should be able to modify key
 components of both the models and training without changing the code.
@@ -91,5 +91,5 @@ The following missing config options which must be overridden by users:
 
 The configuration is validated using `Pydantic` before a training run
 starts. To turn this off, you can use the `--no-validation` flag in your
-top-level config. For more information on validation, see 
+top-level config. For more information on validation, see
 :ref:`config-validation`.
