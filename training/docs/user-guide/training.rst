@@ -14,7 +14,8 @@ to configuring your model and executing the training pipeline.
 Anemoi Training requires two primary components to get started:
 
 Step 1 and 2:
-======================================
+=============
+
 #. **Graph Definition from Anemoi Graphs:** This defines the structure
    of your machine learning model, including the layers, connections,
    and operations that will be used during training.
@@ -76,8 +77,8 @@ according to the specified configuration.
 
 To execute training:
 
--  Run the training command given below, ensuring that all paths to the graph
-   definition and dataset are correctly specified.
+-  Run the training command given below, ensuring that all paths to the
+   graph definition and dataset are correctly specified.
 -  Monitor the training process, adjusting parameters as needed to
    optimize model performance.
 -  Upon completion, the trained model will be registered and stored for
@@ -98,36 +99,35 @@ Make sure you have a GPU available and simply call:
 Anemoi Training uses the Anemoi Datasets module to load the data.
 
 Anemoi training implements data routing, in which you can specify which
-variables are used as ``forcings``; used as input only, and which variables
-are as ``diagnostics``; appear as output only and to be predicted by the
-model. All remaining variables will be treated as ``prognostic``, i.e.
-they appear as both inputs and outputs.
+variables are used as ``forcings``; used as input only, and which
+variables are as ``diagnostics``; appear as output only and to be
+predicted by the model. All remaining variables will be treated as
+``prognostic``, i.e. they appear as both inputs and outputs.
 
-``Forcings`` are variables such as solar insolation or
-land-sea-mask. These would make little sense to predict as they are
-external to the model. These can be static (like the land-sea-mask)
-or dynamic (like solar insolation).
-Note within anemoi, forcing does not have the classical NWP meaning of
-external variables which impact the model, such as wind forcing applied to
-an ocean model. Instead, forcing here refers to any variable which is an
-input only. In some cases this includes 'traditional forcing', alongside
-other variables.
+``Forcings`` are variables such as solar insolation or land-sea-mask.
+These would make little sense to predict as they are external to the
+model. These can be static (like the land-sea-mask) or dynamic (like
+solar insolation). Note within anemoi, forcing does not have the
+classical NWP meaning of external variables which impact the model, such
+as wind forcing applied to an ocean model. Instead, forcing here refers
+to any variable which is an input only. In some cases this includes
+'traditional forcing', alongside other variables.
 
- ``Diagnostics`` includes the variables like precipitation that we want to predict,
- but which may not be available in forecast step zero due to technical limitations.
- These can aso include derived quantities which we wish to train the model to predict
- directly, but do not want to use as inputs.
+   ``Diagnostics`` includes the variables like precipitation that we
+   want to predict, but which may not be available in forecast step zero
+   due to technical limitations. These can aso include derived
+   quantities which we wish to train the model to predict directly, but
+   do not want to use as inputs.
 
-``Prognostic`` variables are the variables like temperature or humidity that we want to
-predict and appear as both inputs and outputs.
+``Prognostic`` variables are the variables like temperature or humidity
+that we want to predict and appear as both inputs and outputs.
 
 The user can specify the routing of the data by setting the
 ``config.data.forcings`` and ``config.data.diagnostics``. These are
 named strings, as Anemoi datasets enables us to address variables by
-name.
-Any variable in the dataset which is not listed as either forcing or diagnostic
-(or dropped, see :ref:`Dataloader <Dataloader>` below), will be classed as a
-prognostic variable.
+name. Any variable in the dataset which is not listed as either forcing
+or diagnostic (or dropped, see :ref:`Dataloader <Dataloader>` below),
+will be classed as a prognostic variable.
 
 .. code:: yaml
 
@@ -138,12 +138,14 @@ prognostic variable.
       diagnostics:
          - total_precipitation
 
-***************************************
+************
  Dataloader
-***************************************
-The dataloader file contains information on how many workers are used, and the batch size.
-``num_workers`` relates to model parallelisation, for more information on this
-see :ref:`Parallelisation <Parallelisation>`
+************
+
+The dataloader file contains information on how many workers are used,
+and the batch size. ``num_workers`` relates to model parallelisation,
+for more information on this see :ref:`Parallelisation
+<Parallelisation>`
 
 .. code:: yaml
 
@@ -161,9 +163,10 @@ see :ref:`Parallelisation <Parallelisation>`
       validation: null
       test: 20
 
-The grid points being modelled are also defined. In many cases this will be the full grid.
-For limited area modelling, you may want to define a set of target indices which
-mask/remove some grid points, leaving only the area being modelled.
+The grid points being modelled are also defined. In many cases this will
+be the full grid. For limited area modelling, you may want to define a
+set of target indices which mask/remove some grid points, leaving only
+the area being modelled.
 
 .. code:: yaml
 
@@ -173,54 +176,33 @@ mask/remove some grid points, leaving only the area being modelled.
       _target_: anemoi.training.data.grid_indices.FullGrid
       nodes_name: ${graph.data}
 
-The dataloader file also describes the files used for training, validation
-and testing, and the datasplit
-For machine learning, we separate our data into: training data, used to train the model;
-validation data, used to assess various version of the model throughout the model development
-process; and test data, used to assess a final version of the model.
-Best practice is to separate the data in time, ensuring the validation and test data
-are suitably independent from the training data.
+The dataloader file also describes the files used for training,
+validation and testing, and the datasplit For machine learning, we
+separate our data into: training data, used to train the model;
+validation data, used to assess various version of the model throughout
+the model development process; and test data, used to assess a final
+version of the model. Best practice is to separate the data in time,
+ensuring the validation and test data are suitably independent from the
+training data.
 
-We define the start and end time of each section of the data. This can be given as a full date,
-or just the year, or year and month, in these cases the first of the month/first of the year
-is used.
+We define the start and end time of each section of the data. This can
+be given as a full date, or just the year, or year and month, in these
+cases the first of the month/first of the year is used.
 
-The dataset used, and the frequency can be set spearately for the different parts of the
-dataset, for example, if test data is stored in a different file.
+The dataset used, and the frequency can be set spearately for the
+different parts of the dataset, for example, if test data is stored in a
+different file.
 
-By default, every variable within the dataset is used. If this is not desired, variables
-can be listed within ``drop`` and they won't be used.
-Conversely, if only a few variables from the file are needed ``select`` can be used in
-place of drop, and only the listed variables are used.
-The same overall set of variables must be used throughout training, validation and test.
-If using different files, which contain different variables, the items listed in drop/select
-may vary.
+By default, every variable within the dataset is used. If this is not
+desired, variables can be listed within ``drop`` and they won't be used.
+Conversely, if only a few variables from the file are needed ``select``
+can be used in place of drop, and only the listed variables are used.
+The same overall set of variables must be used throughout training,
+validation and test. If using different files, which contain different
+variables, the items listed in drop/select may vary.
 
-.. code:: yaml
-   dataset: ${hardware.paths.data}/${hardware.files.dataset}
-
-   training:
-      dataset: ${dataloader.dataset}
-      start: null
-      end: 2020
-      frequency: ${data.frequency}
-      drop:  []
-
-   validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
-
-   validation:
-      dataset: ${dataloader.dataset}
-      start: 2021-01-01
-      end: 2021
-      frequency: ${data.frequency}
-      drop:  []
-
-   test:
-      dataset: ${dataloader.dataset}
-      start: 2022-01
-      end: null
-      frequency: ${data.frequency}
-      drop:  []
+.. literalinclude:: yaml/dataloader.yaml
+   :language: yaml
 
 ***************
  Normalisation
@@ -228,8 +210,8 @@ may vary.
 
 Machine learning models are sensitive to the scale of the input data. To
 ensure that the model can learn effectively, it is important to
-normalise the input data, so all variables exhibit a similar range.
-This ensures variables have comparable contributions to the loss function,
+normalise the input data, so all variables exhibit a similar range. This
+ensures variables have comparable contributions to the loss function,
 and enables the model to learn effectively.
 
 The nornmaliser is one of many 'preprocessors' within anemoi, it
@@ -237,19 +219,22 @@ implements multiple strategies that can be applied to the data using the
 config. Currently, the normaliser supports the following strategies:
 
 -  ``none``: No normalisation is applied.
--  ``mean-std``: Data is normalised by subtracting the mean and dividing by the standard deviation
+-  ``mean-std``: Data is normalised by subtracting the mean and dividing
+   by the standard deviation
 -  ``std``: Data is normalised by dividing by the standard deviation.
--  ``min-max``: Data is normalised by substracting the min value and dividing by the range.
+-  ``min-max``: Data is normalised by substracting the min value and
+   dividing by the range.
 -  ``max``: Data is normalised by dividing by the max value.
 
-Values like the land-sea-mask do not require additional normalisation as they
-already span a range between 0 and 1.  Variables like temperature or
-humidity are usually normalised using ``mean-std``. Some variables like the
-geopotential height should be max normalised, so the 'zero' point and the proportional
-distance from this point is retained,
+Values like the land-sea-mask do not require additional normalisation as
+they already span a range between 0 and 1. Variables like temperature or
+humidity are usually normalised using ``mean-std``. Some variables like
+the geopotential height should be max normalised, so the 'zero' point
+and the proportional distance from this point is retained,
 
-The user can specify the normalisation strategy by choosing a default method, and
-additionally specifying specific cases for certain variables within ``config.data.normaliser``:
+The user can specify the normalisation strategy by choosing a default
+method, and additionally specifying specific cases for certain variables
+within ``config.data.normaliser``:
 
 .. code:: yaml
 
@@ -260,10 +245,12 @@ additionally specifying specific cases for certain variables within ``config.dat
       max:
          - geopotential_height
 
-An additional option in the normaliser overwrites statistics of specific variables onto others.
-This is primarily used for convective precipitation (cp), which is a fraction of total precipitation (tp),
-by overwriting the cp statistics with the tp statistics, we ensure the fractional relationship
-remains intact in the normalised space. Note that this is a design choice.
+An additional option in the normaliser overwrites statistics of specific
+variables onto others. This is primarily used for convective
+precipitation (cp), which is a fraction of total precipitation (tp), by
+overwriting the cp statistics with the tp statistics, we ensure the
+fractional relationship remains intact in the normalised space. Note
+that this is a design choice.
 
 .. code:: yaml
 
@@ -271,21 +258,24 @@ remains intact in the normalised space. Note that this is a design choice.
       remap:
         cp: tp
 
+*********
+ Imputer
+*********
 
+It is important to have no missing values (e.g. NaNs) in the data when
+training a model as this will break the backpropagation of gradients and
+cause the model to predict only NaNs. For fields which contain missing
+values, we provide options to replace these values via an "imputer".
+During training NaN values are replaced with the specified value for the
+field. The default imputer is "none", which means no imputation is
+performed. The user can specify the imputer by setting
+``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to
+impute with the mean value, ensuring that the variable value over NaNs
+becomes zero after mean-std normalisation. Another option is to impute
+with a given constant.
 
-*******************
-Imputer
-*******************
-
-It is important to have no missing values (e.g. NaNs) in the data when training a model as this will break the backpropagation
-of gradients and cause the model to predict only NaNs. For fields which contain missing values,
-we provide options to replace these values via an "imputer". During training NaN values are replaced with the specified value
-for the field. The default imputer is "none", which means no imputation is performed. The user can specify the imputer by setting
-``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to impute with the mean value, ensuring that the variable
-value over NaNs becomes zero after mean-std normalisation. Another option is to impute with a given constant.
-
-The ``DynamicInputImputer`` can be used for fields where the
-NaN locations change in time.
+The ``DynamicInputImputer`` can be used for fields where the NaN
+locations change in time.
 
 .. code:: yaml
 
@@ -305,7 +295,8 @@ NaN locations change in time.
 ***********************
 
 It is possible to change the weighting given to each of the variables in
-the loss function by changing ``config.training.variable_loss_scaling.pl.<pressure level variable>``
+the loss function by changing
+``config.training.variable_loss_scaling.pl.<pressure level variable>``
 and ``config.training.variable_loss_scaling.sfc.<surface variable>``.
 
 It is also possible to change the scaling given to the pressure levels
@@ -354,38 +345,43 @@ the number of GPUs with:
    global_learning_rate = config.training.lr.rate * num_gpus_per_node * num_nodes / gpus_per_model
 
 The user can also control the rate at which the learning rate decreases
-by setting the total number of iterations - ``config.training.lr.iterations``
-and the minimum learning rate reached - ``config.training.lr.min``.
-Note that the minimum learning rate is not scaled by the number of GPUs.
-The user can also control the warmup period by setting ``config.training.lr.warmup_t``.
-If the warmup period is set to 0, the learning rate will start at the maximum learning
-rate. If no warmup period is defined, a default warmup period of 1000
+by setting the total number of iterations -
+``config.training.lr.iterations`` and the minimum learning rate reached
+- ``config.training.lr.min``. Note that the minimum learning rate is not
+scaled by the number of GPUs. The user can also control the warmup
+period by setting ``config.training.lr.warmup_t``. If the warmup period
+is set to 0, the learning rate will start at the maximum learning rate.
+If no warmup period is defined, a default warmup period of 1000
 iterations is used.
 
 *********
  Rollout
 *********
 
-Rollout training is when the model is iterated within the training process, producing forecasts
-for many future time steps. The loss is calculated on every step in the rollout period and averaged,
-and gradients backprogogated through the iteration process.
+Rollout training is when the model is iterated within the training
+process, producing forecasts for many future time steps. The loss is
+calculated on every step in the rollout period and averaged, and
+gradients backprogogated through the iteration process.
 
-For example, if using ``rollout=3`` and a model with a 6 hour prediction step-size,
-when training the model predicts for time t+1, this is used as inputs to predict time t+2,
-and this used to predict time t+3. The loss is calculated as
-``1/3 * ( (loss at t+1) + (loss at t+2) + (loss at t+3) )``
-Rollout training has been shown to improve stability for long auto-regressive inference runs,
-by making the training objective is closer to the use case of forecasting arbitrary lead timestep
-through autoreggresive iteration of the model.
+For example, if using ``rollout=3`` and a model with a 6 hour prediction
+step-size, when training the model predicts for time t+1, this is used
+as inputs to predict time t+2, and this used to predict time t+3. The
+loss is calculated as ``1/3 * ( (loss at t+1) + (loss at t+2) + (loss at
+t+3) )`` Rollout training has been shown to improve stability for long
+auto-regressive inference runs, by making the training objective is
+closer to the use case of forecasting arbitrary lead timestep through
+autoreggresive iteration of the model.
 
-In most cases, in the first stage of training, the model is trained for many epochs to
-perdict only one step (i.e. rollout.max = 1). Once this is completed, there is a second stage of
-training, which uses *rollout* to fine-tune the model error at
-longer leadtimes. The model begins with a rollout loss defined by ``rollout.start``, usually 1,
-and then every n epochs (defined by rollout.epoch_increment) the rollout value increases up till
-``rollout.max``.
+In most cases, in the first stage of training, the model is trained for
+many epochs to perdict only one step (i.e. rollout.max = 1). Once this
+is completed, there is a second stage of training, which uses *rollout*
+to fine-tune the model error at longer leadtimes. The model begins with
+a rollout loss defined by ``rollout.start``, usually 1, and then every n
+epochs (defined by rollout.epoch_increment) the rollout value increases
+up till ``rollout.max``.
 
 .. code:: yaml
+
    rollout:
       start: 1
       # increase rollout every n epochs
@@ -393,24 +389,25 @@ and then every n epochs (defined by rollout.epoch_increment) the rollout value i
       # maximum rollout to use
       max: 12
 
-This two stage approach requires the model training to be restarted after stage one, see instructions below.
-The user should make sure to set ``config.training.run_id`` equal to the run-id of the
-first stage of training.
+This two stage approach requires the model training to be restarted
+after stage one, see instructions below. The user should make sure to
+set ``config.training.run_id`` equal to the run-id of the first stage of
+training.
 
-Note, for many purposes, it may make sense for the rollout stage (stage two) to performed at the minimum
-learning rate throughout and for the number of batches to be reduced (using
+Note, for many purposes, it may make sense for the rollout stage (stage
+two) to performed at the minimum learning rate throughout and for the
+number of batches to be reduced (using
 ``config.dataloader.training.limit_batches``) to prevent overfit to
 specific timesteps.
-
 
 ***************************
  Restarting a training run
 ***************************
 
-It may be necessary at certain points to restart
-the model training, i.e. because the training has exceeded the time limit on an HPC
-system or because the user wants to fine-tune the model from a specific
-point in the training.
+It may be necessary at certain points to restart the model training,
+i.e. because the training has exceeded the time limit on an HPC system
+or because the user wants to fine-tune the model from a specific point
+in the training.
 
 This can be done by setting ``config.training.run_id`` in the config
 file to be the *run_id* of the run that is being restarted. In this case
