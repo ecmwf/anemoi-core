@@ -136,7 +136,7 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Recipe examples
+   :caption: Recipe Examples
 
    usage/getting_started
    usage/limited_area
@@ -144,7 +144,7 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Building graphs
+   :caption: User Guide
 
    graphs/introduction
    graphs/node_coordinates
@@ -156,7 +156,7 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Modules
+   :caption: API Reference
 
    modules/node_builder
    modules/edge_builder
@@ -169,7 +169,7 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Developing Anemoi Graphs
+   :caption: Contributing
 
    dev/contributing
    dev/code_structure
