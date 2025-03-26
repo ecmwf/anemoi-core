@@ -62,8 +62,6 @@ class ActivationFunctionSchema(BaseModel):
 
 
 class TransformerModelComponent(BaseModel):
-    activation: ActivationFunctionSchema
-    "Activation function to use for the transformer model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
     cpu_offload: bool = Field(example=False)
@@ -77,8 +75,6 @@ class TransformerModelComponent(BaseModel):
 
 
 class GNNModelComponent(BaseModel):
-    activation: ActivationFunctionSchema
-    "Activation function to use for the GNN model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
     trainable_size: NonNegativeInt = Field(example=8)
