@@ -171,6 +171,4 @@ You may also have to install pandoc on MacOS:
    :hidden:
    :caption: Contributing
 
-   dev/contributing
-   dev/code_structure
-   dev/testing
+   contributing
