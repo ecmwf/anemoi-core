@@ -1,5 +1,5 @@
 ##########
- Training
+ Training and Advanced Configuration
 ##########
 
 The Anemoi Training module is the heart of the framework where machine
