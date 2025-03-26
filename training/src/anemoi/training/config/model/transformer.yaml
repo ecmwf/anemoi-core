@@ -5,23 +5,21 @@ output_mask: null
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
-activation:
-  _target_: nn.torch.GELU
-  _partial_: True
 
 layer_kernels:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-      _partial_: True
-      #Any arguments to your chosen function go here e.g.
-    Linear:
-      _target_: torch.nn.Linear
-      _partial_: True
-      #Any arguments to your chosen function go here e.g.
+  LayerNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    #Any arguments to your chosen function go here e.g.
+  Linear:
+    _target_: torch.nn.Linear
+    #Any arguments to your chosen function go here e.g.
+  Activation:
+    _target_: nn.torch.GELU
+    #Any arguments to your chosen function go here e.g.
+
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
-  activation: ${model.activation}
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
@@ -38,7 +36,6 @@ encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -49,7 +46,6 @@ decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
