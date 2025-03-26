@@ -9,8 +9,8 @@ running
 
    anemoi-training train
 
-which will use the default model configurations with missing values
-to lauch a training run.
+which will use the default model configurations with missing values to
+lauch a training run.
 
 The training script will intentionally crash as it does not know where
 your data is stored.
@@ -22,6 +22,8 @@ in the `Anemoi Training repository
 ``src/anemoi/training/config/``. Alternatively, the next section will
 show you how to :ref:`generate a user config file <Configuring the
 Training>`.
+
+.. _prep-training-components:
 
 *******************************
  Preparing training components

@@ -25,8 +25,7 @@ Step 1 and 2:
    and formatted according to the specifications of the Anemoi Datasets
    module.
 
-These 2 steps are outlined in `the start guide
-<training-your-first-model>`_.
+These 2 steps are outlined in :ref:`prep-training-components`.
 
 Step 3: Configure the Training Process
 ======================================
