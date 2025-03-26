@@ -16,6 +16,7 @@ from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
 
+
 @pytest.fixture(autouse=True)
 def set_working_directory():
     """Automatically set the working directory to the repo root."""
@@ -23,7 +24,8 @@ def set_working_directory():
     while not (repo_root / ".git").exists() and repo_root != repo_root.parent:
         repo_root = repo_root.parent
 
-    os.chdir(repo_root) 
+    os.chdir(repo_root)
+
 
 @pytest.fixture(
     params=[
