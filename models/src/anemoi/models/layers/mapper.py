@@ -257,7 +257,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         self.offload_layers(cpu_offload)
 
-        self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim, bias=False)
+        self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
 
     def forward(
         self,
