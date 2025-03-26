@@ -79,7 +79,7 @@ To install the package, you can use the following command:
 
    pip install anemoi-graphs
 
-Get more information in the :ref:`installing <installing>` section.
+Get more information in the :ref:`installing-graphs` section.
 
 **************
  Contributing
