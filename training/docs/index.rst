@@ -32,7 +32,7 @@ This package provides the *Anemoi* training functionality.
    :maxdepth: 1
    :caption: User Guide
 
-   user-guide/introduction
+   user-guide/overview
    user-guide/training-your-first-model
    user-guide/hydra-intro
    user-guide/configuring
@@ -41,7 +41,6 @@ This package provides the *Anemoi* training functionality.
    user-guide/tracking
    user-guide/benchmarking
    user-guide/distributed
-   user-guide/debugging
 
 .. toctree::
    :maxdepth: 1
@@ -58,23 +57,9 @@ This package provides the *Anemoi* training functionality.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Developing Anemoi
-
-   dev/contributing
-   dev/environment
-   dev/development_guidelines
-   dev/documentation
-   dev/code_style
-   dev/code_structure
-   dev/code_of_conduct
-   dev/hydra
-   dev/testing
-
-.. toctree::
-   :maxdepth: 1
    :caption: FAQ/Troubleshooting
 
-   user-guide/debugging
+   troubleshooting
 
 *****************
  Anemoi packages
