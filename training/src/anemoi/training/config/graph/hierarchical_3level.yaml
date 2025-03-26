@@ -94,6 +94,7 @@ edge_builders:
   process:
     _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
+    scale_resolutions: null
     source_mask_attr_name: null
     target_mask_attr_name: null
   upscale:
