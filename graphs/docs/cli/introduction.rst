@@ -1,7 +1,7 @@
 .. _cli-introduction:
 
 ##################
-Command line usage
+Command line tool
 ##################
 
 When you install the `anemoi-graphs` package, a command line tool will also be installed
@@ -56,9 +56,9 @@ processor edges are defined with ``anemoi.graphs.edges.MultiScaleEdges`` edge bu
    <iframe src="../_static/processor.html" width="100%" height="500" frameborder="0"></iframe>
 
 
-=======================
-Command line interface
-=======================
+===================
+Command line usage
+===================
 
 Create Command
 --------------
