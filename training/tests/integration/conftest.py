@@ -62,3 +62,12 @@ def testing_modifications_with_temp_dir(tmp_path: Path) -> OmegaConf:
     temp_dir = str(tmp_path)
     testing_modifications.hardware.paths.output = temp_dir
     return testing_modifications
+
+@pytest.fixture
+def lam_config(testing_modifications_with_temp_dir: OmegaConf) -> None:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_basic"):
+        template = compose(config_name="lam")
+        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
+        cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+        OmegaConf.resolve(cfg)
+        return cfg
