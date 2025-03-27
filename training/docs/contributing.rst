@@ -278,12 +278,12 @@ remain reliable and maintainable. Our approach includes:
 
 For an example, see `training/tests/integration/test_training_cycle.py`.
 The test uses a configuration based on the template
-`training/src/anemoi/training/config/basic.py`, i.e. the basic global
+`training/src/anemoi/training/config/config.yaml`, i.e. the basic global
 model. It applies testing-specific modifications to reduce batch_size
 etc. as detailed in
-`training/tests/integration/test_training_cycle.yaml`. It furthermore
-applies use-case-specific modifications as detailed in
-`training/tests/integration/test_basic.yaml` to provide the location of
+`training/tests/integration/config/testing_modifications.yaml`. 
+It furthermore applies use-case-specific modifications as detailed in
+`training/tests/integration/test_config.yaml` to provide the location of
 our testing dataset compatible with the global model.
 
 Note that we also parametrize the fixture `architecture_config` to
