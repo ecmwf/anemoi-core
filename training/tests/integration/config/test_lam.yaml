@@ -39,6 +39,7 @@ data:
     std:
     - "tp"
     min-max:
+    max:
     none:
     - "cos_latitude"
     - "cos_longitude"
