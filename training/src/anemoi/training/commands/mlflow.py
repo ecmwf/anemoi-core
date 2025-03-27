@@ -178,7 +178,7 @@ class MlFlow(Command):
             from hydra import initialize
 
             from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
-            from anemoi.training.diagnostics.mlflow.utils import log_hyperparams_in_mlflow
+            from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
             # Load configuration and resolve schema
             with initialize(version_base=None, config_path="./"):
@@ -213,7 +213,7 @@ class MlFlow(Command):
             mlflow.set_tracking_uri(config.diagnostics.log.mlflow.tracking_uri)
             client.set_tag(run_id, "mlflow.user", args.owner)
             client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
-            log_hyperparams_in_mlflow(
+            AnemoiMLflowLogger.log_hyperparams_in_mlflow(
                 client,
                 run_id,
                 config,
