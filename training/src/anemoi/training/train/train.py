@@ -234,14 +234,11 @@ class AnemoiTrainer:
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
         # FIX: This needs to be refactored.
         if fork_id is None and bool(self.config.hardware.files.warm_start):
-            folder = ""
+            folder = Path(self.config.hardware.paths.checkpoints).parent
         else:
-            folder = fork_id or self.lineage_run
-        checkpoint = Path(
-            self.config.hardware.paths.checkpoints.parent,
-            folder,
-            self.config.hardware.files.warm_start or "last.ckpt",
-        )
+            folder = Path(self.config.hardware.paths.checkpoints.parent, fork_id or self.lineage_run)
+        
+        checkpoint = folder / (self.config.hardware.files.warm_start or "last.ckpt")
 
         # Check if the last checkpoint exists
         if Path(checkpoint).exists():
