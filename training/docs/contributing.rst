@@ -281,8 +281,8 @@ The test uses a configuration based on the template
 `training/src/anemoi/training/config/config.yaml`, i.e. the basic global
 model. It applies testing-specific modifications to reduce batch_size
 etc. as detailed in
-`training/tests/integration/config/testing_modifications.yaml`. 
-It furthermore applies use-case-specific modifications as detailed in
+`training/tests/integration/config/testing_modifications.yaml`. It
+furthermore applies use-case-specific modifications as detailed in
 `training/tests/integration/test_config.yaml` to provide the location of
 our testing dataset compatible with the global model.
 
