@@ -1,6 +1,8 @@
-#####################
- Basic Configuration
-#####################
+.. _hydra-intro:
+
+######################
+ Configuration Basics
+######################
 
 Anemoi training is set up in a way that you should be able to modify key
 components of both the models and training without changing the code.
@@ -46,10 +48,6 @@ can then modify this file to suit their needs.
 These config files are YAML files, which can be easily read and
 modified.
 
-***********************
- Configuring the Model
-***********************
-
 They are split across files based on topic. For example, the hardware
 config is in the hardware folder. The model config is in the model
 folder.
@@ -69,7 +67,7 @@ added to the training command like so:
    anemoi-training train --config-name=debug
 
 ****************************
- Important Config overrides
+ Important Config Overrides
 ****************************
 
 The following missing config options which must be overridden by users:
@@ -93,4 +91,5 @@ The following missing config options which must be overridden by users:
 
 The configuration is validated using `Pydantic` before a training run
 starts. To turn this off, you can use the `--no-validation` flag in your
-top-level config.
+top-level config. For more information on validation, see
+:ref:`config-validation`.

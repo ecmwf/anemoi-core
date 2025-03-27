@@ -1,0 +1,24 @@
+dataset: ${hardware.paths.data}/${hardware.files.dataset}
+
+training:
+  dataset: ${dataloader.dataset}
+  start: null
+  end: 2020
+  frequency: ${data.frequency}
+  drop:  []
+
+validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
+
+validation:
+  dataset: ${dataloader.dataset}
+  start: 2021-01-01
+  end: 2021
+  frequency: ${data.frequency}
+  drop:  []
+
+test:
+  dataset: ${dataloader.dataset}
+  start: 2022-01
+  end: null
+  frequency: ${data.frequency}
+  drop:  []
