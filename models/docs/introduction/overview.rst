@@ -11,7 +11,7 @@ forecasting.
 
 The anemoi-models package has the following dependencies in the code:
 
-.. figure:: schemas/anemoi-models_schematic.png
+.. figure:: ../_static/anemoi-models_schematic.png
    :alt: Dependencies and initial structure of anemoi models
    :align: center
 
