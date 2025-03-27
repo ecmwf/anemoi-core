@@ -16,8 +16,8 @@ hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
   files:
-    dataset: stretched/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v2-hmsi-testing.zarr
-    forcing_dataset: stretched/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset: regional-use-cases/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v2-hmsi-testing.zarr
+    forcing_dataset: regional-use-cases/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
 
 # need this since some variables set in the default zarr config are not part of the dataset
 data:
