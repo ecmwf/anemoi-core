@@ -12,8 +12,7 @@
 
 The *anemoi-graphs* package is a collection of tools enabling you to
 design custom graphs for training data-driven weather models. It is one
-of the packages within the `anemoi framework
-<https://anemoi-docs.readthedocs.io/en/latest/>`_.
+of the packages within the :ref:`anemoi framework <anemoi-docs:index>`.
 
 **************
  About Anemoi
