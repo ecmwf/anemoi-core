@@ -61,7 +61,7 @@ class PathsSchema(BaseModel):
     "Path to the data directory."
     graph: Union[Path, None] = None
     "Path to the graph directory."
-    truncation: Path
+    truncation: Union[Path, None] = None
     "Path to the truncation matrix directory."
     output: Union[Path, None] = None
     "Path to the output directory."
