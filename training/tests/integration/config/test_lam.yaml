@@ -1,0 +1,51 @@
+# Modifications for the local area model template "lam.yaml"
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+        thinning: 25 # ???-value in lam template
+      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+  training:
+    start: "2017-01-01"
+    end: "2017-01-07"
+  validation:
+    start: "2017-01-08"
+    end: "2017-01-10"
+
+hardware:
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
+  files:
+    dataset: stretched/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v2-hmsi-testing.zarr
+    forcing_dataset: stretched/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+
+# need this since some variables set in the default zarr config are not part of the dataset
+data:
+  forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  - "lsm"
+  diagnostic:
+  - "tp"
+
+  normalizer:
+    default: "mean-std"
+    std:
+    - "tp"
+    min-max:
+    none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "lsm"
