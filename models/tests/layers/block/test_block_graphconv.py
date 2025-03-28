@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from hydra.utils import instantiate
 from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -25,7 +24,7 @@ class TestGraphConvProcessorBlock:
         in_channels=st.integers(min_value=1, max_value=100),
         out_channels=st.integers(min_value=1, max_value=100),
         mlp_extra_layers=st.integers(min_value=1, max_value=5),
-        activation=st.sampled_from(["ReLU", "GELU", "Tanh"]),
+        activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU", "anemoi.models.layers.activations.GLU"]),
         update_src_nodes=st.booleans(),
         num_chunks=st.integers(min_value=1, max_value=10),
     )
@@ -39,13 +38,18 @@ class TestGraphConvProcessorBlock:
         update_src_nodes,
         num_chunks,
     ):
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = load_layer_kernels(
+            {
+                "Activation": {
+                    "_target_": activation,
+                }
+            }
+        )
         block = GraphConvProcessorBlock(
             in_channels=in_channels,
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
             update_src_nodes=update_src_nodes,
             num_chunks=num_chunks,
         )
@@ -63,7 +67,7 @@ class TestGraphConvMapperBlock:
         in_channels=st.integers(min_value=1, max_value=100),
         out_channels=st.integers(min_value=1, max_value=100),
         mlp_extra_layers=st.integers(min_value=1, max_value=5),
-        activation=st.sampled_from(["ReLU", "GELU", "Tanh"]),
+        activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU", "anemoi.models.layers.activations.GLU"]),
         update_src_nodes=st.booleans(),
         num_chunks=st.integers(min_value=1, max_value=10),
     )
@@ -77,13 +81,18 @@ class TestGraphConvMapperBlock:
         update_src_nodes,
         num_chunks,
     ):
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = load_layer_kernels(
+            {
+                "Activation": {
+                    "_target_": activation,
+                }
+            }
+        )
         block = GraphConvMapperBlock(
             in_channels=in_channels,
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
             update_src_nodes=update_src_nodes,
             num_chunks=num_chunks,
         )

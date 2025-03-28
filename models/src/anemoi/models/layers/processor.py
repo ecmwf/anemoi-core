@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -35,12 +35,12 @@ class BaseProcessor(nn.Module, ABC):
 
     def __init__(
         self,
+        *,
         num_layers: int,
-        *args,
-        num_channels: int = 128,
-        num_chunks: int = 2,
-        activation: str = "GELU",
+        num_channels: int,
+        num_chunks: int,
         cpu_offload: bool = False,
+        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize BaseProcessor."""
@@ -88,20 +88,19 @@ class TransformerProcessor(BaseProcessor):
 
     def __init__(
         self,
+        *,
         num_layers: int,
-        layer_kernels: DotDict,
-        *args,
-        window_size: Optional[int] = None,
-        num_channels: int = 128,
-        num_chunks: int = 2,
-        activation: str = "GELU",
-        cpu_offload: bool = False,
-        num_heads: int = 16,
-        mlp_hidden_ratio: int = 4,
+        num_channels: int,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
         dropout_p: float = 0.1,
         attention_implementation: str = "flash_attention",
-        softcap: float = 0.0,
+        softcap: float = 0,
         use_alibi_slopes: bool = False,
+        window_size: Optional[int] = None,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -109,39 +108,41 @@ class TransformerProcessor(BaseProcessor):
         Parameters
         ----------
         num_layers : int
-            Number of num_layers
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
-            Defined in config/models/<model>.yaml
-        window_size: int,
-            1/2 size of shifted window for attention computation
+            Number of layers
         num_channels : int
-            number of channels
-        heads: int
-            Number of heads to use, default 16
+            Number of channels
+        num_chunks: int
+            Number of chunks in processor
+        num_heads: int
+            Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
+            ratio of mlp hidden dimension to embedding dimension
         dropout_p: float, optional
-            Dropout probability used for multi-head self attention, default 0.0
+            Dropout probability used for multi-head self attention, default 0.1
         attention_implementation: str, optional
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
         softcap : float, optional
-            Anything > 0 activates softcapping flash attention, by default None
-        use_alibi_slopes : bool, optional
-            Use aLiBI option, only used for flash attention, by default None
+            Anything > 0 activates softcapping flash attention, by default 0
+        use_alibi_slopes : bool
+            Use aLiBI option, only used for flash attention, by default False
+        window_size: int, optional
+            1/2 size of shifted window for attention computation, by default None
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
             num_layers=num_layers,
             num_channels=num_channels,
             window_size=window_size,
             num_chunks=num_chunks,
-            activation=activation,
             cpu_offload=cpu_offload,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
+            layer_kernels=layer_kernels,
         )
 
         self.build_layers(
@@ -152,7 +153,6 @@ class TransformerProcessor(BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             num_heads=num_heads,
             window_size=window_size,
-            activation=activation,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
             softcap=softcap,
@@ -186,45 +186,56 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
 
     def __init__(
         self,
+        *,
+        num_channels: int,
         num_layers: int,
-        layer_kernels: DotDict,
-        *args,
-        trainable_size: int = 8,
-        num_channels: int = 128,
-        num_chunks: int = 2,
-        mlp_extra_layers: int = 0,
-        activation: str = "SiLU",
+        num_chunks: int,
+        mlp_extra_layers: int,
+        trainable_size: int,
+        src_grid_size: int,
+        dst_grid_size: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         cpu_offload: bool = False,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
+        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize GNNProcessor.
 
         Parameters
         ----------
-        num_channels : int
-            Number of Channels
         num_layers : int
             Number of layers
-        num_chunks : int, optional
-            Number of num_chunks, by default 2
+        num_channels : int
+            Number of channels
+        num_chunks: int
+            Number of chunks in processor
         mlp_extra_layers : int, optional
-            Number of extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
-        cpu_offload : bool, optional
+            Number of extra layers in MLP
+        trainable_size : int
+            Size of trainable tensor
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
+        sub_graph : HeteroData
+            Graph for sub graph in GNN
+        sub_graph_edge_attributes : list[str]
+            Sub graph edge attributes
+        cpu_offload : bool
             Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+
         """
         super().__init__(
             num_channels=num_channels,
             num_layers=num_layers,
             num_chunks=num_chunks,
-            activation=activation,
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
+            layer_kernels=layer_kernels,
         )
 
         self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
@@ -233,14 +244,14 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
 
         kwargs = {
             "mlp_extra_layers": mlp_extra_layers,
-            "activation": activation,
+            "layer_kernels": layer_kernels,
             "edge_dim": None,
         }
 
-        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, layer_kernels, **kwargs)
+        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, **kwargs)
 
         kwargs["edge_dim"] = self.edge_dim  # Edge dim for first layer
-        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, layer_kernels, **kwargs)
+        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, **kwargs)
 
         self.offload_layers(cpu_offload)
 
@@ -274,19 +285,19 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
 
     def __init__(
         self,
+        *,
         num_layers: int,
-        layer_kernels: DotDict,
-        trainable_size: int = 8,
-        num_channels: int = 128,
-        num_chunks: int = 2,
-        num_heads: int = 16,
-        mlp_hidden_ratio: int = 4,
-        activation: str = "GELU",
+        num_channels: int,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
+        trainable_size: int,
+        src_grid_size: int,
+        dst_grid_size: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
         cpu_offload: bool = False,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
+        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerProcessor.
@@ -297,25 +308,36 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             Number of layers
         num_channels : int
             Number of channels
-        num_chunks : int, optional
-            Number of num_chunks, by default 2
-        heads: int
-            Number of heads to use, default 16
+        num_chunks: int
+            Number of chunks in processor
+        num_heads: int
+            Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
+            ratio of mlp hidden dimension to embedding dimension
+        trainable_size : int
+            Size of trainable tensor
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
+        sub_graph : HeteroData
+            Graph for sub graph in GNN
+        sub_graph_edge_attributes : list[str]
+            Sub graph edge attributes
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
             num_channels=num_channels,
             num_layers=num_layers,
             num_chunks=num_chunks,
-            activation=activation,
             cpu_offload=cpu_offload,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
+            layer_kernels=layer_kernels,
         )
 
         self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
@@ -329,7 +351,6 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            activation=activation,
             edge_dim=self.edge_dim,
         )
 
