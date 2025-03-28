@@ -57,7 +57,7 @@ class BaseSchema(BaseModel):
     """Model configuration."""
     training: TrainingSchema
     """Training configuration."""
-    no_validation: bool = False
+    config_validation: bool = True
     """Flag to disable validation of the configuration"""
 
     @model_validator(mode="after")
@@ -105,7 +105,7 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Model configuration."""
     training: Any
     """Training configuration."""
-    no_validation: bool = False
+    config_validation: bool = False
     """Flag to disable validation of the configuration"""
 
     def model_dump(self, by_alias: bool = False) -> dict:
