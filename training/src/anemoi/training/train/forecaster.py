@@ -412,7 +412,7 @@ class GraphForecaster(pl.LightningModule):
             self.data_indices.internal_model.output.prognostic,
         ]
 
-        x[:, -1] = self.output_mask.rollout_boundary(x[:, -1], batch[:, -1], self.data_indices)
+        x[:, -1] = self.output_mask.rollout_boundary(x[:, -1], batch[:, self.multi_step + rollout_step], self.data_indices)
 
         # get new "constants" needed for time-varying fields
         x[:, -1, :, :, self.data_indices.internal_model.input.forcing] = batch[
