@@ -153,19 +153,3 @@ the Anemoi ecosystem:
 
 This integration ensures a smooth workflow from data preparation to
 model deployment in operational settings.
-
-*****************
- Getting Started
-*****************
-
-To begin using Anemoi Training, we recommend following the "Getting
-Started" guide, which will walk you through the installation process,
-basic configuration, and training your first model. As you become more
-familiar with the framework, you can explore the detailed user guide and
-module documentation to leverage its full capabilities.
-
-Whether you're a researcher exploring new machine learning approaches
-for weather forecasting or a practitioner looking to implement
-data-driven models in operational settings, Anemoi Training provides the
-tools and flexibility to support your work in advancing the field of
-meteorological prediction.
