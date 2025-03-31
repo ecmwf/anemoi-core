@@ -76,7 +76,3 @@ def test_main(get_trainer: tuple) -> None:
     trainer, initial_sum, final_sum = get_trainer
     assert trainer
     assert initial_sum != final_sum
-
-
-if __name__ == "__main__":
-    test_main(trainer())
