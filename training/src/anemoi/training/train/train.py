@@ -296,7 +296,7 @@ class AnemoiTrainer:
 
     @cached_property
     def supporting_arrays(self) -> dict:
-        return self.datamodule.supporting_arrays
+        return self.datamodule.supporting_arrays | self.truncation_data
 
     @cached_property
     def profiler(self) -> PyTorchProfiler | None:
