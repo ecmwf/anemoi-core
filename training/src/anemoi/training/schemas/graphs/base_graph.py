@@ -55,7 +55,7 @@ class BaseGraphSchema(PydanticBaseModel):
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)
     data: str = Field(example="data")
     "Key name for the data nodes. Default to 'data'."
-    hidden: str = Field(example="hidden")
+    hidden: Union[str, list[str]] = Field(example="hidden")
     "Key name for the hidden nodes. Default to 'hidden'."
     # TODO(Helen): Needs to be adjusted for more complex graph setups
 
