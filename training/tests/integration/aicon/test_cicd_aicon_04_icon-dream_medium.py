@@ -34,6 +34,7 @@ mpl.use("agg")
 
 @typechecked
 def aicon_config(output_dir: Optional[str] = None) -> DictConfig:
+    """Generate AICON config and overwrite output paths, if output_dir is given."""
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
@@ -45,7 +46,14 @@ def aicon_config(output_dir: Optional[str] = None) -> DictConfig:
 
 
 @typechecked
-def trainer(config: DictConfig) -> AnemoiTrainer:
+def trainer(config: DictConfig) -> tuple[AnemoiTrainer, float, float]:
+    """
+    Download the grid required to train AICON and run the Trainer.
+
+    Downloading the grid is required as the AICON grid is currently required as a netCDF file.
+
+    Returns testable objects.
+    """
     grid_filename = config.graph.nodes.icon_mesh.node_builder.grid_filename
     with tempfile.NamedTemporaryFile(suffix=".nc") as grid_fp:
         if grid_filename.startswith(("http://", "https://")):
@@ -55,9 +63,9 @@ def trainer(config: DictConfig) -> AnemoiTrainer:
             config.graph.nodes.icon_mesh.node_builder.grid_filename = grid_fp.name
 
         trainer = AnemoiTrainer(config)
-        initial_sum = torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum()
+        initial_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
         trainer.train()
-        final_sum = torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum()
+        final_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
     return trainer, initial_sum, final_sum
 
 
