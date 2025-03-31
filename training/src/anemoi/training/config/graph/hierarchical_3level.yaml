@@ -84,7 +84,7 @@ edges:
 
   - source_name: "hidden_2"
     target_name: "hidden_2"
-    edge_builders: 
+    edge_builders:
     - ${graph.edge_builders.process}
     attributes: ${graph.attributes.edges}
 
