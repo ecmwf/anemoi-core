@@ -20,8 +20,11 @@ import pytest
 import torch
 from hydra import compose
 from hydra import initialize
+from omegaconf import DictConfig
+from typeguard import typechecked
 
 import anemoi.training
+from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
@@ -29,7 +32,8 @@ os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).pa
 mpl.use("agg")
 
 
-def trainer(output_dir: Optional[str] = None) -> AnemoiTrainer:
+@typechecked
+def aicon_config(output_dir: Optional[str] = None) -> DictConfig:
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
@@ -37,6 +41,11 @@ def trainer(output_dir: Optional[str] = None) -> AnemoiTrainer:
         config.hardware.paths.output = output_dir
         config.hardware.paths.graph = output_dir
 
+    return config
+
+
+@typechecked
+def trainer(config: DictConfig) -> AnemoiTrainer:
     grid_filename = config.graph.nodes.icon_mesh.node_builder.grid_filename
     with tempfile.NamedTemporaryFile(suffix=".nc") as grid_fp:
         if grid_filename.startswith(("http://", "https://")):
@@ -55,7 +64,11 @@ def trainer(output_dir: Optional[str] = None) -> AnemoiTrainer:
 @pytest.fixture
 def get_trainer() -> tuple:
     with tempfile.TemporaryDirectory() as output_dir:
-        return trainer(output_dir=output_dir)
+        return trainer(aicon_config(output_dir=output_dir))
+
+
+def test_config_validation_aicon() -> None:
+    BaseSchema(**aicon_config())
 
 
 @pytest.mark.longtests
