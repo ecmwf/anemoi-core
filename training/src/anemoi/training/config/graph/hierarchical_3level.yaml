@@ -32,55 +32,66 @@ edges:
   # Encoder configuration
   - source_name: "data"
     target_name: "hidden_1"
-    edge_builder:
-      _target_: anemoi.graphs.edges.CutOffEdges
+    edge_builders:
+    - _target_: anemoi.graphs.edges.CutOffEdges
       cutoff_factor: 0.6
+      source_mask_attr_name: null
+      target_mask_attr_name: null
     attributes: ${graph.attributes.edges}
 
     # Decoder configuration
   - source_name: "hidden_1"
     target_name: "data"
-    edge_builder:
-      _target_: anemoi.graphs.edges.KNNEdges
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
       num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
     attributes: ${graph.attributes.edges}
 
   # Hierarchical connections: downscale
   - source_name: "hidden_1"
     target_name: "hidden_2"
-    edge_builder: ${graph.edge_builders.downscale}
+    edge_builders:
+    - ${graph.edge_builders.downscale}
     attributes: ${graph.attributes.edges}
 
   - source_name: "hidden_2"
     target_name: "hidden_3"
-    edge_builder: ${graph.edge_builders.downscale}
+    edge_builders:
+    - ${graph.edge_builders.downscale}
     attributes: ${graph.attributes.edges}
 
   # Hierarchical connections: upscale
   - source_name: "hidden_3"
     target_name: "hidden_2"
-    edge_builder: ${graph.edge_builders.upscale}
+    edge_builders:
+    - ${graph.edge_builders.upscale}
     attributes: ${graph.attributes.edges}
 
   - source_name: "hidden_2"
     target_name: "hidden_1"
-    edge_builder: ${graph.edge_builders.upscale}
+    edge_builders:
+    - ${graph.edge_builders.upscale}
     attributes: ${graph.attributes.edges}
 
   # Hierarchical connections: same level
   - source_name: "hidden_1"
     target_name: "hidden_1"
-    edge_builder: ${graph.edge_builders.process}
+    edge_builders:
+    - ${graph.edge_builders.process}
     attributes: ${graph.attributes.edges}
 
   - source_name: "hidden_2"
     target_name: "hidden_2"
-    edge_builder: ${graph.edge_builders.process}
+    edge_builders: 
+    - ${graph.edge_builders.process}
     attributes: ${graph.attributes.edges}
 
   - source_name: "hidden_3"
     target_name: "hidden_3"
-    edge_builder: ${graph.edge_builders.process}
+    edge_builders:
+    - ${graph.edge_builders.process}
     attributes: ${graph.attributes.edges}
 
 
