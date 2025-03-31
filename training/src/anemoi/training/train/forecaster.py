@@ -413,7 +413,9 @@ class GraphForecaster(pl.LightningModule):
         ]
 
         x[:, -1] = self.output_mask.rollout_boundary(
-            x[:, -1], batch[:, self.multi_step + rollout_step], self.data_indices,
+            x[:, -1],
+            batch[:, self.multi_step + rollout_step],
+            self.data_indices,
         )
 
         # get new "constants" needed for time-varying fields
