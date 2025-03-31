@@ -40,6 +40,8 @@ edges:
     edge_builders:
     - _target_: anemoi.graphs.edges.KNNEdges
       num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
     attributes: ${graph.attributes.edges}
 
   # Hierarchical connections: downscale
