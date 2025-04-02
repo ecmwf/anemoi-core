@@ -532,28 +532,33 @@ class BenchmarkProfiler(Profiler):
         batch_size_tr = self.config.dataloader.batch_size.training
         batch_size_val = self.config.dataloader.batch_size.validation
 
-        training_rates_array = np.array(progressbar.training_rates)
-        speed_metrics["training_avg_throughput"] = training_rates_array.mean()
-        speed_metrics["training_avg_throughput_per_sample"] = training_rates_array.mean() / batch_size_tr
+        num_iters_per_epoch = len(self.time_profiler.recorded_durations["run_training_batch"]) / len(
+            self.time_profiler.recorded_durations["run_training_epoch"],
+        )
+        average_throughput = 1 / (
+            np.array(self.time_profiler.recorded_durations["run_training_epoch"]).mean() / num_iters_per_epoch
+        )  # overall throughput, includes dataloading and training
+        average_compute_throughput = 1 / (
+            np.array(self.time_profiler.recorded_durations["run_training_batch"]).mean()
+        )  # just forward pass on GPU
 
-        validation_rates_array = np.array(progressbar.validation_rates)
-        speed_metrics["validation_avg_throughput"] = validation_rates_array.mean()
-        speed_metrics["validation_avg_throughput_per_sample"] = validation_rates_array.mean() / batch_size_val
-
-        # Calculate per_sample metrics
+        speed_metrics["avg_training_throughput"] = average_throughput
+        speed_metrics["avg_training_compute_throughput"] = average_compute_throughput
         speed_metrics["avg_training_dataloader_throughput"] = (
             1 / np.array(self.time_profiler.recorded_durations["[_TrainingEpochLoop].train_dataloader_next"]).mean()
         )
-        speed_metrics["avg_training_dataloader_throughput_per_sample"] = (
-            speed_metrics["avg_training_dataloader_throughput"] / batch_size_tr
-        )
 
-        speed_metrics["avg_validation_dataloader_throughput"] = (
-            1 / np.array(self.time_profiler.recorded_durations["[_EvaluationLoop].val_next"]).mean()
-        )
-        speed_metrics["avg_validation_dataloader_throughput_per_sample"] = (
-            speed_metrics["avg_validation_dataloader_throughput"] / batch_size_val
-        )
+        if batch_size_tr > 1:
+            speed_metrics["avg_training_throughput_per_sample"] = average_throughput / batch_size_tr
+            speed_metrics["avg_training_compute_throughput_per_sample"] = average_compute_throughput / batch_size_tr
+            speed_metrics["avg_training_dataloader_throughput_per_sample"] = (
+                speed_metrics["avg_training_dataloader_throughput"] / batch_size_tr
+            )
+
+        validation_rates_array = np.array(progressbar.validation_rates)
+        speed_metrics["avg_validation_throughput"] = validation_rates_array.mean()
+        if batch_size_val > 1:
+            speed_metrics["avg_validation_throughput_per_sample"] = validation_rates_array.mean() / batch_size_val
 
         if self.time_rows_dict:
             speed_metrics.update(self.time_rows_dict)
