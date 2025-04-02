@@ -67,7 +67,7 @@ class AnemoiModelEncProcDec(nn.Module):
         self.statistics = statistics
 
         # read config.model.layer_kernels to get the implementation for certain layers
-        self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", {}))
+        self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", DotDict()))
 
         # Encoder data -> hidden
         self.encoder = instantiate(
