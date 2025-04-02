@@ -106,7 +106,8 @@ class ConfigGenerator(Command):
         if args.subcommand == "validate":
             LOGGER.info("Validating configs.")
             LOGGER.warning(
-                "Note that this command is not taking into account if your config has a no_validation flag."
+                "Note that this command is not taking into account if your config has set \
+                    the config_validation flag to false."
                 "So this command will validate the config regardless of the flag.",
             )
             self.validate_config(args.config_name, args.mask_env_vars)
