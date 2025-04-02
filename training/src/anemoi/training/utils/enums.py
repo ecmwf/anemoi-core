@@ -7,18 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .combined import CombinedLoss
-from .huber import HuberLoss
-from .logcosh import LogCoshLoss
-from .mae import MAELoss
-from .mse import MSELoss
-from .rmse import RMSELoss
+from enum import Enum
 
-__all__ = [
-    "CombinedLoss",
-    "HuberLoss",
-    "LogCoshLoss",
-    "MAELoss",
-    "MSELoss",
-    "RMSELoss",
-]
+
+class TensorDim(Enum):
+    BATCH_SIZE = 0
+    ENSEMBLE_DIM = 1
+    GRID = 2
+    VARIABLE = 3

@@ -5,8 +5,8 @@
 This module is used to define the loss function used to train the model.
 
 Anemoi-training exposes a couple of loss functions by default to be
-used, all of which are subclassed from ``BaseWeightedLoss``. This class
-enables scalar multiplication, and graph node weighting.
+used, all of which are subclassed from ``BaseLoss``. This class enables
+scaler multiplication, and graph node weighting.
 
 .. automodule:: anemoi.training.losses.weightedloss
    :members:
@@ -47,13 +47,13 @@ reference it in the config as follows:
       # loss function kwargs here
 
 *********
- Scalars
+ Scalers
 *********
 
 In addition to node scaling, the loss function can also be scaled by a
-scalar. These are provided by the ``Forecaster`` class, and a user can
+scaler. These are provided by the ``Forecaster`` class, and a user can
 define whether to include them in the loss function by setting
-``scalars`` in the loss config dictionary.
+``scalers`` in the loss config dictionary.
 
 .. code:: yaml
 
@@ -61,12 +61,14 @@ define whether to include them in the loss function by setting
    training_loss:
       # loss class to initialise
       _target_: anemoi.training.losses.mse.WeightedMSELoss
-      scalars: ['scalar1', 'scalar2']
+      scalers: ['scaler1', 'scaler2']
 
-Currently, the following scalars are available for use:
+Scalers can be added as options for the loss functions using the
+`scaler` builders in `config.training.scaler`.
 
--  ``variable``: Scale by the feature/variable weights as defined in the
-   config ``config.training.variable_loss_scaling``.
+``*`` is a valid entry to use all `scalers` given, if a scaler is to be
+excluded add `!scaler_name`, i.e. ``['*', '!scaler_1']``, and
+``scaler_1`` will not be added.
 
 ********************
  Validation Metrics
@@ -81,24 +83,24 @@ name
 Scaling Validation Losses
 =========================
 
-Validation metrics can **not** by default be scaled by scalars across
-the variable dimension, but can be by all other scalars. If you want to
+Validation metrics can **not** by default be scaled by scalers across
+the variable dimension, but can be by all other scalers. If you want to
 scale a validation metric by the variable weights, it must be added to
 `config.training.scale_validation_metrics`.
 
 These metrics are then kept in the normalised, preprocessed space, and
-thus the indexing of scalars aligns with the indexing of the tensors.
+thus the indexing of scalers aligns with the indexing of the tensors.
 
 By default, only `all` is kept in the normalised space and scaled.
 
 .. code:: yaml
 
-   # List of validation metrics to keep in normalised space, and scalars to be applied
+   # List of validation metrics to keep in normalised space, and scalers to be applied
    # Use '*' in reference all metrics, or a list of metric names.
    # Unlike above, variable scaling is possible due to these metrics being
    # calculated in the same way as the training loss, within the internal model space.
    scale_validation_metrics:
-   scalars_to_apply: ['variable']
+   scalers_to_apply: ['variable']
    metrics:
       - 'all'
       # - "*"
@@ -108,17 +110,16 @@ By default, only `all` is kept in the normalised space and scaled.
 ***********************
 
 Additionally, you can define your own loss function by subclassing
-``BaseWeightedLoss`` and implementing the ``forward`` method, or by
-subclassing ``FunctionalWeightedLoss`` and implementing the
-``calculate_difference`` function. The latter abstracts the scaling, and
-node weighting, and allows you to just specify the difference
-calculation.
+``BaseLoss`` and implementing the ``forward`` method, or by subclassing
+``BaseLoss`` and implementing the ``calculate_difference`` function. The
+latter abstracts the scaling, and node weighting, and allows you to just
+specify the difference calculation.
 
 .. code:: python
 
-   from anemoi.training.losses.weightedloss import FunctionalWeightedLoss
+   from anemoi.training.losses.weightedloss import BaseLoss
 
-   class MyLossFunction(FunctionalWeightedLoss):
+   class MyLossFunction(BaseLoss):
       def calculate_difference(self, pred, target):
          return (pred - target) ** 2
 
@@ -142,8 +143,9 @@ losses above.
    training_loss:
       _target_: anemoi.training.losses.combined.CombinedLoss
       losses:
-         - _target_: anemoi.training.losses.mse.WeightedMSELoss
-         - _target_: anemoi.training.losses.mae.WeightedMAELoss
+         - __target__: anemoi.training.losses.mse.WeightedMSELoss
+         - __target__: anemoi.training.losses.mae.WeightedMAELoss
+      scalers: ['variable']
       loss_weights: [1.0,0.5]
       scalars: ['variable']
 
@@ -190,7 +192,7 @@ option ``config.training.loss_gradient_scaling=True``.
 
 ``ScaleTensor`` is a class that can record and apply arbitrary scaling
 factors to tensors. It supports relative indexing, combining multiple
-scalars over the same dimensions, and is only constructed at
+scalers over the same dimensions, and is only constructed at
 broadcasting time, so the shape can be resolved to match the tensor
 exactly.
 
