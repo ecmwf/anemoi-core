@@ -237,8 +237,7 @@ class ScaleTensor:
         return self
 
     def remove_scalar(self, scalar_to_remove: str | int) -> ScaleTensor:
-        """
-        Remove scalar from ScaleTensor.
+        """Remove scalar from ScaleTensor.
 
         Parameters
         ----------
@@ -261,8 +260,7 @@ class ScaleTensor:
         return self
 
     def freeze_state(self) -> FrozenStateRecord:  # noqa: F821
-        """
-        Freeze the state of the Scalar with a context manager.
+        """Freeze the state of the Scalar with a context manager.
 
         Any changes made will be reverted on exit.
 

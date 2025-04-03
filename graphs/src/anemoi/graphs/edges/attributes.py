@@ -143,8 +143,7 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 
 
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
-    """
-    Copy an attribute of the source node to the edge.
+    """Copy an attribute of the source node to the edge.
     Used for example to identify if an encoder edge originates from a LAM or global node.
 
     Attributes
