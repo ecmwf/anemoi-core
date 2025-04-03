@@ -79,7 +79,7 @@ class TimeLimit(pl.callbacks.Callback):
         if timedelta(seconds=time.time() - self._start_time) < self.limit:
             return
 
-        LOGGER.info("Time limit of %s seconds reached. Stopping training.", frequency_to_string(self.limit))
+        LOGGER.info("Time limit of %s reached. Stopping training.", frequency_to_string(self.limit))
         trainer.should_stop = True
         self._log_to_file(trainer)
 

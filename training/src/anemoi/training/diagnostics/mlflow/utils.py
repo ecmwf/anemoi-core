@@ -120,3 +120,37 @@ def expand_iterables(
         else:
             expanded_params[key] = expand(value)
     return expanded_params
+
+
+def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Clean up params to avoid issues with mlflow.
+
+    Too many logged params will make the server take longer to render the
+    experiment.
+
+    Parameters
+    ----------
+    params : dict[str, Any]
+        Parameters to clean up.
+
+    Returns
+    -------
+    dict[str, Any]
+        Cleaned up params ready for MlFlow.
+    """
+    prefixes_to_remove = [
+        "hardware",
+        "data",
+        "dataloader",
+        "model",
+        "training",
+        "diagnostics",
+        "graph",
+        "metadata.config",
+        "metadata.dataset.variables_metadata",
+        "metadata.dataset.specific.forward.forward.attrs.variables_metadata",
+    ]
+    keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
+    for key in keys_to_remove:
+        del params[key]
+    return params
