@@ -39,7 +39,7 @@ class TestGraphConvProcessorBlock:
         update_src_nodes,
         num_chunks,
     ):
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
         block = GraphConvProcessorBlock(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -77,7 +77,7 @@ class TestGraphConvMapperBlock:
         update_src_nodes,
         num_chunks,
     ):
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
         block = GraphConvMapperBlock(
             in_channels=in_channels,
             out_channels=out_channels,

@@ -26,8 +26,9 @@ class TestTransformerProcessorChunk:
         activation: str = "GELU"
         window_size: int = 13
         dropout_p: float = 0.1
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
         attention_implementation = "scaled_dot_product_attention"
+        qk_norm = True
 
         # num_heads must be evenly divisible by num_channels for MHSA
         return (
@@ -40,6 +41,7 @@ class TestTransformerProcessorChunk:
             window_size,
             dropout_p,
             attention_implementation,
+            qk_norm,
         )
 
     @pytest.fixture
@@ -54,6 +56,7 @@ class TestTransformerProcessorChunk:
             window_size,
             dropout_p,
             attention_implementation,
+            qk_norm,
         ) = init
         return TransformerProcessorChunk(
             num_channels=num_channels,
@@ -62,6 +65,7 @@ class TestTransformerProcessorChunk:
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,
+            qk_norm=qk_norm,
             window_size=window_size,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
