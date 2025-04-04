@@ -42,6 +42,7 @@ cover/
 
 # Documentation
 docs/_build/
+docs/_api/
 /site
 *.mo
 *.pot
@@ -119,7 +120,7 @@ tmp/
 temp/
 logs/
 _dev/
-outputs/
+outputs
 *tmp_data/
 
 # Project specific
@@ -130,7 +131,6 @@ bar
 ~$images.pptx
 test.py
 test.ipynb
-cutout.png
 _version.py
 *.to_upload
 tempCodeRunnerFile.python
