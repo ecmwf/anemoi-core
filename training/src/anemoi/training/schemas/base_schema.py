@@ -24,6 +24,7 @@ from pydantic_core import ValidationError
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema  # noqa: TC001
 from anemoi.models.schemas.models import ModelSchema  # noqa: TC001
+from anemoi.utils.schemas import BaseModel
 
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
@@ -33,7 +34,6 @@ from .diagnostics import DiagnosticsSchema  # noqa: TC001
 from .hardware import HardwareSchema  # noqa: TC001
 from .training import TrainingSchema  # noqa: TC001
 from .utils import CUSTOM_MESSAGES
-from .utils import BaseModel
 from .utils import convert_errors
 
 _object_setattr = _model_construction.object_setattr

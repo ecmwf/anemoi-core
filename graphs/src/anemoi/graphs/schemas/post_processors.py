@@ -14,8 +14,9 @@ import logging
 from typing import Annotated
 from typing import Literal
 
-from pydantic import BaseModel
 from pydantic import Field
+
+from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 

@@ -25,8 +25,7 @@ from pydantic import field_validator
 from pydantic import model_validator
 
 from anemoi.training.schemas.utils import allowed_values
-
-from .utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 
 class GradientClip(BaseModel):

@@ -12,7 +12,7 @@ from enum import Enum
 from pydantic import Field
 from pydantic import NonNegativeInt
 
-from .utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 
 class ActivationFunctons(str, Enum):

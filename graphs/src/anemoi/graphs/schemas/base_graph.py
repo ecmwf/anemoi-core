@@ -16,12 +16,13 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import model_validator
 
+from anemoi.utils.schemas import BaseModel
+
 from .edge_attributes_schemas import EdgeAttributeSchema  # noqa: TC001
 from .edge_schemas import EdgeBuilderSchemas  # noqa: TC001
 from .node_attributes_schemas import NodeAttributeSchemas  # noqa: TC001
 from .node_schemas import NodeBuilderSchemas  # noqa: TC001
 from .post_processors import ProcessorSchemas  # noqa: TC001
-from .utils import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
