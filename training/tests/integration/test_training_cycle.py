@@ -66,7 +66,8 @@ def test_training_cycle_stretched(stretched_config: DictConfig) -> None:
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = os.path.join(os.path.basename(tmp_path_dataset), name_dataset)
     use_case_modifications.hardware.files.forcing_dataset = os.path.join(
-        os.path.basename(tmp_path_forcing_dataset), name_forcing_dataset,
+        os.path.basename(tmp_path_forcing_dataset),
+        name_forcing_dataset,
     )
 
     cfg = OmegaConf.merge(template, testing_modifications, use_case_modifications)
@@ -116,7 +117,8 @@ if __name__ == "__main__":
 
         name_forcing_dataset = use_case_modifications.hardware.files.forcing_dataset
         url_forcing_dataset = os.path.join(
-            "anemoi-integration-tests/regional-use-cases/", name_forcing_dataset + ".tgz",
+            "anemoi-integration-tests/regional-use-cases/",
+            name_forcing_dataset + ".tgz",
         )
         tmp_path_forcing_dataset = get_test_archive(url_forcing_dataset)
 
@@ -125,7 +127,8 @@ if __name__ == "__main__":
         use_case_modifications.hardware.paths.data = tmp_dir
         use_case_modifications.hardware.files.dataset = os.path.join(os.path.basename(tmp_path_dataset), name_dataset)
         use_case_modifications.hardware.files.forcing_dataset = os.path.join(
-            os.path.basename(tmp_path_forcing_dataset), name_forcing_dataset,
+            os.path.basename(tmp_path_forcing_dataset),
+            name_forcing_dataset,
         )
 
         cfg = OmegaConf.merge(template, testing_modifications, use_case_modifications)
