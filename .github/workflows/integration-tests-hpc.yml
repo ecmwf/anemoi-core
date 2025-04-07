@@ -1,4 +1,4 @@
-name: integration-tests-hpc
+name: integration-tests-hpc-gpu
 
  # Controls when the workflow will run
 on:
