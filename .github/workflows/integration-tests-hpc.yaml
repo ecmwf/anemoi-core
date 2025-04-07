@@ -1,4 +1,4 @@
-name: ci-hpc
+name: integration-tests-hpc
 
  # Controls when the workflow will run
 on:
