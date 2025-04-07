@@ -3,7 +3,7 @@ dataloader:
   dataset:
     cutout:
       - dataset: ${hardware.paths.data}/${hardware.files.dataset}
-        thinning: 5 # ???-value in stretched config
+        thinning: 25 # ???-value in stretched config
       - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
   training:
     start: "2017-01-01"
@@ -23,7 +23,6 @@ data:
   - "cos_local_time"
   - "sin_julian_day"
   - "sin_local_time"
-  - "lsm"
   diagnostic:
   - tp
   remapped:
@@ -42,7 +41,6 @@ data:
     - "cos_local_time"
     - "sin_julian_day"
     - "sin_local_time"
-    - "lsm"
 
 training:
   node_loss_weights:
@@ -52,14 +50,8 @@ hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
   files:
-    dataset: regional-use-cases/cerra-rr-an-oper-0001-mars-20p0-2017-2017-6h-v2-hmsi-testing.zarr
+    dataset: regional-use-cases/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
     forcing_dataset: regional-use-cases/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
-  # paths:
-  #   data: /home/mlx/ai-ml/datasets
-  # files:
-  #   dataset: cerra-rr-an-oper-0001-mars-20p0-2017-2017-6h-v2-hmsi-testing.zarr
-  #   forcing_dataset: aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
-
 
 graph:
   nodes:

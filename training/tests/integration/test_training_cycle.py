@@ -33,14 +33,14 @@ def test_config_validation_architecture_configs(architecture_config: DictConfig)
     BaseSchema(**architecture_config)
 
 
-# @pytest.mark.longtests
-# def test_training_cycle_stretched(stretched_config: DictConfig) -> None:
-#     AnemoiTrainer(stretched_config).train()
-#     shutil.rmtree(stretched_config.hardware.paths.output)
+@pytest.mark.longtests
+def test_training_cycle_stretched(stretched_config: DictConfig) -> None:
+    AnemoiTrainer(stretched_config).train()
+    shutil.rmtree(stretched_config.hardware.paths.output)
 
 
-# def test_config_validation_stretched(stretched_config: DictConfig) -> None:
-#     BaseSchema(**stretched_config)
+def test_config_validation_stretched(stretched_config: DictConfig) -> None:
+    BaseSchema(**stretched_config)
 
 
 @pytest.mark.longtests
@@ -51,3 +51,21 @@ def test_training_cycle_lam(lam_config: DictConfig) -> None:
 
 def test_config_validation_lam(lam_config: DictConfig) -> None:
     BaseSchema(**lam_config)
+
+
+if __name__ == "__main__":
+    from pathlib import Path
+
+    from hydra import compose
+    from hydra import initialize
+    from omegaconf import OmegaConf
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
+        template = compose(config_name="lam")
+        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
+        testing_modifications = OmegaConf.load(
+            Path.cwd() / "training/tests/integration/config/testing_modifications.yaml",
+        )
+        cfg = OmegaConf.merge(template, testing_modifications, use_case_modifications)
+        OmegaConf.resolve(cfg)
+        AnemoiTrainer(cfg).train()
