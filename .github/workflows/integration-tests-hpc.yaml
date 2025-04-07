@@ -1,0 +1,43 @@
+name: ci-hpc
+
+ # Controls when the workflow will run
+on:
+  schedule:
+    - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
+  workflow_dispatch:
+  push:
+    branches:
+      - test/hpc-gpu-integration-test
+
+     # Trigger after public PR approved for CI
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  pytest:
+    runs-on: hpc
+    if: ${{ !github.event.pull_request.head.repo.fork && github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci' }}
+    steps:
+      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+        with:
+          template: |
+            set -eux
+            module load python3
+            REPO_NAME=anemoi-core
+            REPO_BRANCH=${{ github.head_ref || github.ref_name }}
+            git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
+            cd $REPO_NAME
+            python3 -m venv .venv
+            source .venv/bin/activate
+            pip install --upgrade pip
+            pip install -e ./training[all,tests]
+            pip install -e ./models[all,tests]
+            pip install -e ./graphs[all,tests]
+            python3 -m pytest training/tests/integration --longtests
+            deactivate
+            rm -rf $REPO_NAME
+          sbatch_options: |
+            #SBATCH --job-name=anemoi_core_pytest
+            #SBATCH --time=00:10:00
+            #SBATCH --qos=nf
+          troika_user: ${{ secrets.HPC_CI_SSH_USER }}
