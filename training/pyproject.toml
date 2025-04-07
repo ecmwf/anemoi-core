@@ -50,7 +50,6 @@ dependencies = [
   "matplotlib>=3.7.1",
   "mlflow>=2.11.1",
   "numpy<2",                          # Pinned until we can confirm it works with anemoi graphs
-  "pydantic>=2.9",
   "pynvml>=11.5",
   "pyshtools>=4.10.4",
   "pytorch-lightning>=2.1",
