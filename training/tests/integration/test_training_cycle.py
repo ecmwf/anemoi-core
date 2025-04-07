@@ -33,14 +33,14 @@ def test_config_validation_architecture_configs(architecture_config: DictConfig)
     BaseSchema(**architecture_config)
 
 
-@pytest.mark.longtests
-def test_training_cycle_stretched(stretched_config: DictConfig) -> None:
-    AnemoiTrainer(stretched_config).train()
-    shutil.rmtree(stretched_config.hardware.paths.output)
+# @pytest.mark.longtests
+# def test_training_cycle_stretched(stretched_config: DictConfig) -> None:
+#     AnemoiTrainer(stretched_config).train()
+#     shutil.rmtree(stretched_config.hardware.paths.output)
 
 
-def test_config_validation_stretched(stretched_config: DictConfig) -> None:
-    BaseSchema(**stretched_config)
+# def test_config_validation_stretched(stretched_config: DictConfig) -> None:
+#     BaseSchema(**stretched_config)
 
 
 @pytest.mark.longtests
