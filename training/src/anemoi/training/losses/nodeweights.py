@@ -13,7 +13,7 @@ import logging
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import AreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class GraphNodeAttribute:
         torch.Tensor
             area weights of the target nodes
         """
-        return AreaWeights(norm="unit-max", fill_value=0).compute(graph_data, self.target)
+        return SphericalAreaWeights(norm="unit-max", fill_value=0).compute(graph_data, self.target)
 
     def weights(self, graph_data: HeteroData, attr_weight: torch.Tensor = None) -> torch.Tensor:
         """Returns weight of type self.node_attribute for nodes self.target.

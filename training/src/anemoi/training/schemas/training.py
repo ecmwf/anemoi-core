@@ -80,6 +80,30 @@ class LR(BaseModel):
     "Number of warm up iteration. Default to 1000."
 
 
+class ExplicitTimes(BaseModel):
+    """Time indices for input and output.
+
+    Starts at index 0. Input and output can overlap.
+    """
+
+    input: list[NonNegativeInt] = Field(examples=[0, 1])
+    "Input time indices."
+    target: list[NonNegativeInt] = Field(examples=[2])
+    "Target time indices."
+
+
+class TargetForcing(BaseModel):
+    """Forcing parameters for target output times.
+
+    Extra forcing parameters to use as input to distinguish between different target times.
+    """
+
+    data: list[str] = Field(examples=["insolation"])
+    "List of forcing parameters to use as input to the model at the interpolated step."
+    time_fraction: bool = Field(example=True)
+    "Use target time as a fraction between input boundary times as input."
+
+
 class LossScalingSchema(BaseModel):
     default: int = 1
     "Default scaling value applied to the variables loss. Default to 1."
@@ -108,7 +132,10 @@ class PressureLevelScalerSchema(BaseModel):
     "Slope of the scaling function."
 
 
-PossibleScalars = Annotated[str, AfterValidator(partial(allowed_values, values=["variable", "loss_weights_mask", "*"]))]
+PossibleScalars = Annotated[
+    str,
+    AfterValidator(partial(allowed_values, values=["limited_area_mask", "variable", "loss_weights_mask", "*"])),
+]
 
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
@@ -117,6 +144,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     mae = "anemoi.training.losses.mae.WeightedMAELoss"
     logcosh = "anemoi.training.losses.logcosh.WeightedLogCoshLoss"
     huber = "anemoi.training.losses.huber.WeightedHuberLoss"
+    limited_mse = "anemoi.training.losses.limitedarea.WeightedMSELossLimitedArea"
 
 
 class BaseLossSchema(BaseModel):
@@ -227,7 +255,7 @@ class ScaleValidationMetrics(BaseModel):
     """List of metrics to keep in normalised space.."""
 
 
-class TrainingSchema(BaseModel):
+class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
     run_id: Union[str, None] = Field(example=None)
@@ -282,3 +310,22 @@ class TrainingSchema(BaseModel):
     "List of metrics"
     node_loss_weights: list[NodeLossWeightsSchema]
     "Node loss weights configuration."
+    task: str
+    "Training objective."
+
+
+class ForecasterSchema(BaseTrainingSchema):
+    task: str = Field(example="anemoi.training.train.forecaster.GraphForecaster")
+    "Training objective."
+
+
+class InterpolationSchema(BaseTrainingSchema):
+    task: str = Field(example="anemoi.training.train.interpolator.GraphInterpolator")
+    "Training objective."
+    explicit_times: ExplicitTimes
+    "Time indices for input and output."
+    target_forcing: TargetForcing
+    "Forcing parameters for target output times."
+
+
+TrainingSchema = Union[ForecasterSchema, InterpolationSchema]
