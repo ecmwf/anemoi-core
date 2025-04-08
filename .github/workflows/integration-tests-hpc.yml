@@ -5,11 +5,8 @@ on:
   schedule:
     - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
   workflow_dispatch:
-  push:
-    branches:
-      - test/hpc-gpu-integration-test
 
-     # Trigger after public PR approved for CI
+ # Trigger after public PR approved for CI
   pull_request_target:
     types: [labeled]
 
