@@ -10,7 +10,6 @@
 
 import os
 from pathlib import Path
-from typing import Callable
 
 import pytest
 from hydra import compose
@@ -44,73 +43,104 @@ def testing_modifications_with_temp_dir(tmp_path: Path) -> OmegaConf:
         ["model=graphtransformer"],
     ],
 )
-def architecture_config(
+def architecture_config(request: pytest.FixtureRequest, testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    overrides = request.param
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+        template = compose(
+            config_name="config",
+            overrides=overrides,
+        )  # apply architecture overrides to template since they override a default
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+@pytest.fixture(
+    params=[
+        ["model=gnn"],
+        ["model=graphtransformer"],
+    ],
+)
+def architecture_config_with_data(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
-) -> Callable[[bool], OmegaConf]:
+) -> OmegaConf:
+
     overrides = request.param
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+        template = compose(
+            config_name="config",
+            overrides=overrides,
+        )  # apply architecture overrides to template since they override a default
 
-    def _create_config(download_data: bool = False) -> Callable[[bool], OmegaConf]:
-        with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
-            template = compose(
-                config_name="config",
-                overrides=overrides,
-            )  # apply architecture overrides to template since they override a default
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    tmp_dir, dataset = _download_datasets(use_case_modifications)
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = dataset
 
-        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
-
-        if download_data:
-            tmp_dir, dataset = _download_datasets(use_case_modifications)
-            use_case_modifications.hardware.paths.data = tmp_dir
-            use_case_modifications.hardware.files.dataset = dataset
-
-        cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-        OmegaConf.resolve(cfg)
-        return cfg
-
-    return _create_config
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
 
 
 @pytest.fixture
-def stretched_config(testing_modifications_with_temp_dir: OmegaConf) -> Callable[[bool], OmegaConf]:
-    def _create_config(download_data: bool = False) -> Callable[[bool], OmegaConf]:
-        with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
-            template = compose(config_name="stretched")
+def stretched_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
+        template = compose(config_name="stretched")
 
-        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
 
-        if download_data:
-            tmp_dir, dataset, forcing_dataset = _download_datasets(use_case_modifications, forcing_dataset=True)
-            use_case_modifications.hardware.paths.data = tmp_dir
-            use_case_modifications.hardware.files.dataset = dataset
-            use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
-
-        cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-        OmegaConf.resolve(cfg)
-        return cfg
-
-    return _create_config
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
 
 
 @pytest.fixture
-def lam_config(testing_modifications_with_temp_dir: OmegaConf) -> Callable[[bool], OmegaConf]:
-    def _create_config(download_data: bool = False) -> Callable[[bool], OmegaConf]:
-        with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_lam"):
-            template = compose(config_name="lam")
+def stretched_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
+        template = compose(config_name="stretched")
 
-        use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
 
-        if download_data:
-            tmp_dir, dataset, forcing_dataset = _download_datasets(use_case_modifications, forcing_dataset=True)
-            use_case_modifications.hardware.paths.data = tmp_dir
-            use_case_modifications.hardware.files.dataset = dataset
-            use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
+    tmp_dir, dataset, forcing_dataset = _download_datasets(use_case_modifications, forcing_dataset=True)
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = dataset
+    use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
 
-        cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-        OmegaConf.resolve(cfg)
-        return cfg
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
 
-    return _create_config
+
+@pytest.fixture
+def lam_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_lam"):
+        template = compose(config_name="lam")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+@pytest.fixture
+def lam_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_lam"):
+        template = compose(config_name="lam")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
+
+    tmp_dir, dataset, forcing_dataset = _download_datasets(use_case_modifications, forcing_dataset=True)
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = dataset
+    use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
 
 
 def _download_datasets(config: OmegaConf, forcing_dataset: bool = False) -> list[str]:
