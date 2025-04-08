@@ -113,7 +113,6 @@ line-length = 120
 src = [ "src" ]
 exclude = [ "docs/" ]
 
-preview = true
 lint.select = [
   "A", # flake8 builtins
   # "ANN", # flake8-annotations
