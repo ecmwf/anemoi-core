@@ -208,7 +208,7 @@ class LogsMonitor:
         # split lines and keep \n at the end of each line
         lines = [e + b"\n" for e in data.split(b"\n") if e]
 
-        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")  # noqa: RUF039
+        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")
 
         def _handle_csi(line: bytes) -> bytes:
             # removes the cursor up and down symbols from the line

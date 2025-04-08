@@ -8,9 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-"""Command place holder. Delete when we have real commands.
-
-"""
+"""Command place holder. Delete when we have real commands."""
 
 from . import Command
 
