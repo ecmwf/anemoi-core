@@ -368,18 +368,8 @@ class GraphForecaster(pl.LightningModule):
 
     @staticmethod
     def get_node_weights(config: DictConfig, graph_data: HeteroData) -> torch.Tensor:
-
-        modifiers = {name: instantiate(mod) for name, mod in config.training.node_loss_weights.items()}
-
-        node_weights = None
-        for name, mod in modifiers.items():
-            LOGGER.info("Modifying Node Weights with a %s", name)
-            if node_weights is not None:
-                node_weights = mod.weights(graph_data=graph_data, attr_weight=node_weights)
-            else:
-                node_weights = mod.weights(graph_data=graph_data, attr_weight=None)
-
-        return node_weights
+        node_weighting = instantiate(config.node_loss_weights)
+        return node_weighting.weights(graph_data)
 
     def set_model_comm_group(
         self,

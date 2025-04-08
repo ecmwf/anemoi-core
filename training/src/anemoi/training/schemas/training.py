@@ -308,7 +308,7 @@ class BaseTrainingSchema(BaseModel):
     "Configuration of the pressure level scaler apllied in the loss computation."
     metrics: list[str]
     "List of metrics"
-    node_loss_weights: list[NodeLossWeightsSchema]
+    node_loss_weights: NodeLossWeightsSchema
     "Node loss weights configuration."
     task: str
     "Training objective."

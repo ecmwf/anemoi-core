@@ -139,9 +139,8 @@ pressure_level_scaler:
   slope: 0.001
 
 node_loss_weights:
-  area_weight:
-    _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
-    target_nodes: ${graph.data}
-    node_attribute: area_weight
+  _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
+  target_nodes: ${graph.data}
+  node_attribute: area_weight
 
 submodules_to_freeze: []
