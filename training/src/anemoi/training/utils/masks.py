@@ -57,12 +57,26 @@ class Boolean1DMask(BaseMask):
         return mask.to(x.device)
 
     @staticmethod
-    def _fill_masked_tensor(x: torch.Tensor, mask: torch.Tensor, fill_value: float | torch.Tensor) -> torch.Tensor:
-        if isinstance(fill_value, torch.Tensor):
-            return x.masked_scatter(mask, fill_value)
+    def _fill_tensor_with_tensor(
+        x: torch.Tensor,
+        indices: torch.Tensor,
+        fill_value: torch.Tensor,
+        dim: int,
+    ) -> torch.Tensor:
+        assert fill_value.ndim == 4, "fill_value has to be shape (bs, ens, latlon, nvar)"
+        fill_value = torch.index_select(fill_value, dim, indices)  # The mask is applied over the latlon dim
+        return x.index_copy_(dim, indices, fill_value)
+
+    @staticmethod
+    def _fill_tensor_with_float(x: torch.Tensor, mask: torch.Tensor, fill_value: float) -> torch.Tensor:
         return x.masked_fill(mask, fill_value)
 
-    def apply(self, x: torch.Tensor, dim: int, fill_value: float | torch.Tensor = np.nan) -> torch.Tensor:
+    def apply(
+        self,
+        x: torch.Tensor,
+        dim: int,
+        fill_value: float | torch.Tensor = np.nan,
+    ) -> torch.Tensor:
         """Apply the mask to the input tensor.
 
         Parameters
@@ -79,8 +93,12 @@ class Boolean1DMask(BaseMask):
         torch.Tensor
             The masked tensor with fill_value in the positions where the mask is False.
         """
+        if isinstance(fill_value, torch.Tensor):
+            indices = (~self.mask).nonzero(as_tuple=True)[0].to(x.device)
+            return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
+
         mask = self.broadcast_like(x, dim)
-        return Boolean1DMask._fill_masked_tensor(x, ~mask, fill_value)
+        return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
     def rollout_boundary(
         self,
