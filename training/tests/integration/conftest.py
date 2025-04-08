@@ -76,9 +76,9 @@ def architecture_config_with_data(
         )  # apply architecture overrides to template since they override a default
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
-    tmp_dir, dataset = _download_datasets(use_case_modifications)
+    tmp_dir, rel_paths = _download_datasets(use_case_modifications, ["dataset"])
     use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = dataset
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -104,7 +104,7 @@ def stretched_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
 
-    tmp_dir, dataset, forcing_dataset = _download_datasets(use_case_modifications, forcing_dataset=True)
+    tmp_dir, (dataset, forcing_dataset) = _download_datasets(use_case_modifications, ["dataset", "forcing_dataset"])
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = dataset
     use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
@@ -133,7 +133,7 @@ def lam_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> Omeg
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
 
-    tmp_dir, dataset, forcing_dataset = _download_datasets(use_case_modifications, forcing_dataset=True)
+    tmp_dir, (dataset, forcing_dataset) = _download_datasets(use_case_modifications, ["dataset", "forcing_dataset"])
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = dataset
     use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
@@ -143,20 +143,19 @@ def lam_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> Omeg
     return cfg
 
 
-def _download_datasets(config: OmegaConf, forcing_dataset: bool = False) -> list[str]:
-    url_dataset = config.hardware.files.dataset + ".tgz"
-    name_dataset = Path(config.hardware.files.dataset).name
-    tmp_path_dataset = get_test_archive(url_dataset)
+def _download_datasets(config: OmegaConf, list_datasets: list[str]) -> tuple[str, list[str]]:
+    tmp_paths = []
+    dataset_names = []
 
-    if forcing_dataset:
-        url_forcing_dataset = config.hardware.files.forcing_dataset + ".tgz"
-        name_forcing_dataset = Path(config.hardware.files.forcing_dataset).name
-        tmp_path_forcing_dataset = get_test_archive(url_forcing_dataset)
+    for dataset in list_datasets:
+        url_dataset = config.hardware.files[dataset] + ".tgz"
+        name_dataset = Path(config.hardware.files[dataset]).name
+        tmp_path_dataset = get_test_archive(url_dataset)
+        tmp_paths.append(tmp_path_dataset)
+        dataset_names.append(name_dataset)
 
-        tmp_dir = os.path.commonprefix([tmp_path_dataset, tmp_path_forcing_dataset])[:-1]  # remove trailing slash
-        rel_path_dataset = Path(tmp_path_dataset).name + "/" + name_dataset
-        rel_path_forcing_dataset = Path(tmp_path_forcing_dataset).name + "/" + name_forcing_dataset
-
-        return tmp_dir, rel_path_dataset, rel_path_forcing_dataset
-
-    return tmp_path_dataset, name_dataset
+    if len(list_datasets) == 1:
+        return tmp_paths[0], dataset_names
+    tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
+    rel_paths = [Path(path).name + "/" + name for (name, path) in zip(dataset_names, tmp_paths)]
+    return tmp_dir, rel_paths
