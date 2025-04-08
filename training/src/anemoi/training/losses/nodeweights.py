@@ -79,7 +79,6 @@ class GraphNodeAttribute:
         torch.Tensor
             weight of target nodes
         """
-
         if self.node_attribute in graph_data[self.target]:
             attr_weight = graph_data[self.target][self.node_attribute].squeeze()
 
