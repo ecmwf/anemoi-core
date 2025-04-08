@@ -1,9 +1,9 @@
-name: nighty-integration-tests-hpc-gpu
+name: nightly-integration-tests-hpc-gpu
 
  # Controls when the workflow will run
 on:
   schedule:
-    - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
+    - cron: "0 22 * * *"  # every day at 22pm on default(main) branch
   workflow_dispatch:
 
  # Trigger after public PR approved for CI
@@ -11,9 +11,24 @@ on:
     types: [labeled]
 
 jobs:
-  pytest:
+  check_date:
+    runs-on: ubuntu-latest
+    name: Check latest commit
+    outputs:
+      should_run: ${{ steps.should_run.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: print latest_commit
+        run: echo ${{ github.sha }}
+      - id: should_run
+        continue-on-error: true
+        name: check latest commit is less than a day
+        if: ${{ github.event_name == 'schedule' }}
+        run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
+  integration-tests:
     runs-on: hpc
-    if: ${{ !github.event.pull_request.head.repo.fork && github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci' }}
+    needs: check_date
+    if: ${{ needs.check_date.outputs.should_run != 'false' && (!github.event.pull_request.head.repo.fork && github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci') }}
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -22,7 +37,7 @@ jobs:
             module load python3
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
-            git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
+            git clone --depth 1 -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
