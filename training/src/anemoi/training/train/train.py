@@ -97,7 +97,7 @@ class AnemoiTrainer:
     @cached_property
     def datamodule(self) -> AnemoiDatasetsDataModule:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(self.config, self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
         LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
