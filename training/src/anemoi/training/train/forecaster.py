@@ -118,20 +118,12 @@ class GraphForecaster(pl.LightningModule):
         self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(config.training, data_indices)
 
         # Check if the model is a stretched grid
-        graph_hidden_names = config.graph.hidden
-        if "hidden" in graph_hidden_names:
-            if graph_data["hidden"].node_type == "StretchedTriNodes":
-                mask_name = config.graph.nodes.hidden.node_builder.mask_attr_name
-                limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
-            else:
-                limited_area_mask = torch.ones((1,))
-
+        if graph_data["hidden"].node_type == "StretchedTriNodes":
+            graph_config = convert_to_omegaconf(self.config).graph
+            mask_name = graph_config.nodes.hidden.node_builder.mask_attr_name
+            limited_area_mask = graph_data[graph_config.data][mask_name].squeeze().bool()
         else:
-            if graph_data[graph_hidden_names[0]].node_type == "StretchedTriNodes":
-                mask_name = config.graph.nodes.hidden_1.node_builder.mask_attr_name
-                limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
-            else:
-                limited_area_mask = torch.ones((1,))
+            limited_area_mask = torch.ones((1,))
 
         # Kwargs to pass to the loss function
         loss_kwargs = {"node_weights": self.node_weights}
@@ -420,7 +412,11 @@ class GraphForecaster(pl.LightningModule):
             self.data_indices.internal_model.output.prognostic,
         ]
 
-        x[:, -1] = self.output_mask.rollout_boundary(x[:, -1], batch[:, -1], self.data_indices)
+        x[:, -1] = self.output_mask.rollout_boundary(
+            x[:, -1],
+            batch[:, self.multi_step + rollout_step],
+            self.data_indices,
+        )
 
         # get new "constants" needed for time-varying fields
         x[:, -1, :, :, self.data_indices.internal_model.input.forcing] = batch[

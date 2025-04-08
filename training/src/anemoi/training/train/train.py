@@ -21,6 +21,7 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from hydra.utils import get_class
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
@@ -88,6 +89,10 @@ class AnemoiTrainer:
         # Update paths to contain the run ID
         self._update_paths()
 
+        # Update dry_run_id attribute, check if checkpoint exists
+        self._get_dry_run_id()
+
+        # Check for dry run, i.e. run id without data
         self._log_information()
 
     @cached_property
@@ -170,7 +175,7 @@ class AnemoiTrainer:
             "supporting_arrays": self.supporting_arrays,
         }
 
-        # Dynamically instantiate the model
+        model_class = get_class(self.config.training.task)
         model = model_class(**kwargs)
 
         # Load the model weights
@@ -207,15 +212,21 @@ class AnemoiTrainer:
     @cached_property
     def run_id(self) -> str:
         """Unique identifier for the current run."""
+        # When a run ID is provided
         if self.config.training.run_id and not self.config.training.fork_run_id:
             # Return the provided run ID - reuse run_id if resuming run
             return self.config.training.run_id
 
+        # When a run ID has been created externally and we want to fork a run
+        if self.config.training.run_id and self.config.training.fork_run_id:
+            return self.config.training.run_id
+
+        # When we rely on mlflow to create a new run ID
         if self.config.diagnostics.log.mlflow.enabled:
             # if using mlflow with a new run get the run_id from mlflow
             return self._get_mlflow_run_id()
 
-        # Generate a random UUID
+        # When no run ID is provided a random one is generated
         import uuid
 
         return str(uuid.uuid4())
@@ -398,6 +409,14 @@ class AnemoiTrainer:
         LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
         LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
 
+    def _get_dry_run_id(self) -> None:
+        """Check if the run ID is dry, e.g. without a checkpoint."""
+        if self.config.hardware.paths.checkpoints.is_dir():
+            self.dry_run_id = False
+        else:
+            LOGGER.info("Starting from a dry run ID.")
+            self.dry_run_id = True
+
     @cached_property
     def strategy(self) -> DDPGroupStrategy:
         """Training strategy."""
@@ -438,11 +457,10 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
-
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
-            ckpt_path=None if self.load_weights_only else self.last_checkpoint,
+            ckpt_path=None if (self.load_weights_only or self.dry_run_id) else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
