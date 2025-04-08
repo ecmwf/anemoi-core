@@ -23,7 +23,6 @@ diagnostics:
     callbacks: []
 hardware:
   files:
-    graph: ???
     truncation: ${data.resolution}-O32-linear.mat.npz
     truncation_inv: O32-${data.resolution}-linear.mat.npz
     graph: graph_anemoi_new_${data.resolution}.pt
