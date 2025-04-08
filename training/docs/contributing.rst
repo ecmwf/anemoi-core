@@ -267,6 +267,11 @@ remain reliable and maintainable. Our approach includes:
 #. Reducing Compute Load: Where possible, reduce the number of batches,
    epochs, and batch sizes.
 
+#. Downloading Test Data Early: To reduce test time, download the required
+   dataset at the beginning of the test. Use the utilities provided in
+   anemoi-utils to fetch the data, and update the relevant configuration
+   entries accordingly.
+
 #. Debugging and Failures: When integration tests fail, check the config
    files in `training/src/anemoi/training/config` for inconsistencies
    with the code and update the config files if necessary. Also check if
