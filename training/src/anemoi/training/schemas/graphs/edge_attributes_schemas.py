@@ -10,16 +10,35 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Literal
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
 
 
-class EdgeAttributeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.edges.attributes.EdgeLength", "anemoi.graphs.edges.attributes.EdgeDirection"] = (
-        Field("anemoi.graphs.edges.attributes.EdgeLength", alias="_target_")
-    )
-    "Edge attributes object from anemoi.graphs.edges."
+class ImplementedEdgeAttributeSchema(str, Enum):
+    edge_length = "anemoi.graphs.edges.attributes.EdgeLength"
+    edge_dirs = "anemoi.graphs.edges.attributes.EdgeDirection"
+    azimuth = "anemoi.graphs.edges.attributes.Azimuth"
+
+
+class BaseEdgeAttributeSchema(BaseModel):
+    target_: ImplementedEdgeAttributeSchema = Field(..., alias="_target_")
+    "Edge attribute builder object from anemoi.graphs.edges.attributes"
     norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
     "Normalisation method applied to the edge attribute."
+
+
+class EdgeAttributeFromNodeSchema(BaseModel):
+    target_: Literal[
+        "anemoi.graphs.edges.attributes.AttributeFromSourceNode",
+        "anemoi.graphs.edges.attributes.AttributeFromTargetNode",
+    ] = Field(..., alias="_target_")
+    "Edge attributes from node attribute"
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-std")
+    "Normalisation method applied to the edge attribute."
+
+
+EdgeAttributeSchema = Union[BaseEdgeAttributeSchema, EdgeAttributeFromNodeSchema]

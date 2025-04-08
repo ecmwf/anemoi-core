@@ -119,8 +119,9 @@ class GraphForecaster(pl.LightningModule):
 
         # Check if the model is a stretched grid
         if graph_data["hidden"].node_type == "StretchedTriNodes":
-            mask_name = config.graph.nodes.hidden.node_builder.mask_attr_name
-            limited_area_mask = graph_data[config.graph.data][mask_name].squeeze().bool()
+            graph_config = convert_to_omegaconf(self.config).graph
+            mask_name = graph_config.nodes.hidden.node_builder.mask_attr_name
+            limited_area_mask = graph_data[graph_config.data][mask_name].squeeze().bool()
         else:
             limited_area_mask = torch.ones((1,))
 
@@ -411,7 +412,11 @@ class GraphForecaster(pl.LightningModule):
             self.data_indices.internal_model.output.prognostic,
         ]
 
-        x[:, -1] = self.output_mask.rollout_boundary(x[:, -1], batch[:, -1], self.data_indices)
+        x[:, -1] = self.output_mask.rollout_boundary(
+            x[:, -1],
+            batch[:, self.multi_step + rollout_step],
+            self.data_indices,
+        )
 
         # get new "constants" needed for time-varying fields
         x[:, -1, :, :, self.data_indices.internal_model.input.forcing] = batch[
