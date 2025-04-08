@@ -70,3 +70,10 @@ class BooleanBaseNodeAttribute(BaseNodeAttribute, ABC):
 
     def __init__(self) -> None:
         super().__init__(norm=None, dtype="bool")
+
+
+class FloatBaseNodeAttribute(BaseNodeAttribute, ABC):
+    """Base class for float node attributes."""
+
+    def __init__(self, norm: str | None = None) -> None:
+        super().__init__(norm=norm, dtype="float")
