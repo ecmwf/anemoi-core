@@ -1,7 +1,7 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
-- datamodule: single
+- datamodule: ens
 - diagnostics: evaluation
 - hardware: example
 - graph: encoder_decoder_only
@@ -43,8 +43,6 @@ dataloader:
 
 data:
   resolution: o96
-datamodule:
-  _target_: anemoi.training.data.datamodule.AnemoiEnsDatasetsDataModule
 
 training:
   model_task: anemoi.training.train.forecaster.GraphEnsForecaster
