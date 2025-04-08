@@ -12,7 +12,7 @@ dataloader:
     start: "2017-01-08"
     end: "2017-01-10"
 
-# need this since some variables set in the default zarr config are not part of the dataset
+# need this modification since some variables set in the default zarr config are not part of the dataset
 data:
   forcing:
   - "cos_latitude"
@@ -48,10 +48,10 @@ training:
 
 hardware:
   paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/regional-use-cases
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:
-    dataset: cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
-    forcing_dataset: aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset: anemoi-integration-tests/regional-use-cases/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+    forcing_dataset: anemoi-integration-tests/regional-use-cases/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
 
 graph:
   nodes:
