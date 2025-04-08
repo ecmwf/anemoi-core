@@ -51,5 +51,5 @@ jobs:
           sbatch_options: |
             #SBATCH --job-name=anemoi_core_pytest
             #SBATCH --time=00:10:00
-            #SBATCH --qos=nf
+            #SBATCH --qos=ng
           troika_user: ${{ secrets.HPC_CI_SSH_USER }}
