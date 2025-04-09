@@ -98,7 +98,11 @@ class AnemoiTrainer:
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = instantiate(convert_to_omegaconf(self.config).datamodule, self.config, self.graph_data)
+        datamodule = instantiate(
+            convert_to_omegaconf(self.config).datamodule,
+            convert_to_omegaconf(self.config),
+            self.graph_data,
+        )
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
         LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
@@ -425,7 +429,9 @@ class AnemoiTrainer:
 
     def _get_dry_run_id(self) -> None:
         """Check if the run ID is dry, e.g. without a checkpoint."""
-        if self.config.hardware.paths.checkpoints.is_dir():
+        # The Path casting is needed because in some multiple-gpu use cases
+        # ranks > 0 checkpoint paths are Python strings.
+        if Path(self.config.hardware.paths.checkpoints).is_dir():
             self.dry_run_id = False
         else:
             LOGGER.info("Starting from a dry run ID.")
