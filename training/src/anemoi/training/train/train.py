@@ -425,6 +425,8 @@ class AnemoiTrainer:
 
     def _get_dry_run_id(self) -> None:
         """Check if the run ID is dry, e.g. without a checkpoint."""
+        # The Path casting is needed because in some multiple-gpu case
+        # ranks > 0 checkpoint paths are Python strings.
         if Path(self.config.hardware.paths.checkpoints).is_dir():
             self.dry_run_id = False
         else:
