@@ -60,6 +60,7 @@ class AnemoiModelInterface(torch.nn.Module):
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict = None,
+        truncation_data: dict,
     ) -> None:
         super().__init__()
         self.config = config
@@ -67,6 +68,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.multi_step = self.config.training.multistep_input
         self.graph_data = graph_data
         self.statistics = statistics
+        self.truncation_data = truncation_data
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
@@ -91,6 +93,7 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
+            truncation_data=self.truncation_data,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
