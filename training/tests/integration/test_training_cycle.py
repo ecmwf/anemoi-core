@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -23,6 +24,7 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 LOGGER = logging.getLogger(__name__)
 
 
+@skip_if_offline
 @pytest.mark.longtests
 def test_training_cycle_architecture_configs(architecture_config_with_data: DictConfig) -> None:
     AnemoiTrainer(architecture_config_with_data).train()
@@ -33,6 +35,7 @@ def test_config_validation_architecture_configs(architecture_config: DictConfig)
     BaseSchema(**architecture_config)
 
 
+@skip_if_offline
 @pytest.mark.longtests
 def test_training_cycle_stretched(stretched_config_with_data: DictConfig) -> None:
     AnemoiTrainer(stretched_config_with_data).train()
@@ -43,6 +46,7 @@ def test_config_validation_stretched(stretched_config: DictConfig) -> None:
     BaseSchema(**stretched_config)
 
 
+@skip_if_offline
 @pytest.mark.longtests
 def test_training_cycle_lam(lam_config_with_data: DictConfig) -> None:
     AnemoiTrainer(lam_config_with_data).train()
