@@ -31,11 +31,12 @@ def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout
     embed_dim = (
         num_heads * embed_dim_multiplier
     )  # TODO: Make assert in MHSA to check if embed_dim is divisible by num_heads
-    layer_kernels = instantiate(load_layer_kernels())
+    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     mhsa = MultiHeadSelfAttention(
         num_heads,
         embed_dim,
         layer_kernels,
+        qk_norm=True,
         dropout_p=dropout_p,
         attention_implementation=attention_implementation,
         softcap=softcap,
@@ -46,6 +47,8 @@ def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout
     assert mhsa.embed_dim == embed_dim
     assert mhsa.head_dim == embed_dim // num_heads
     assert dropout_p == mhsa.dropout_p
+    assert mhsa.q_norm.bias is None
+    assert mhsa.k_norm.bias is None
 
 
 @pytest.mark.gpu
@@ -59,7 +62,7 @@ def test_multi_head_self_attention_init(num_heads, embed_dim_multiplier, dropout
 def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels())
+    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     mhsa = MultiHeadSelfAttention(
         num_heads,
         embed_dim,
@@ -86,7 +89,7 @@ def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim
 def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels())
+    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     mhsa = MultiHeadSelfAttention(
         num_heads,
         embed_dim,

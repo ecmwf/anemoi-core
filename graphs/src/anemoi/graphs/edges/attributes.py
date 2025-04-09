@@ -139,10 +139,7 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
             raise AttributeError(f"{self.__class__.__name__} class must set 'node_idx' attribute.")
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        return (x_j, x_i)[self.node_idx][self.node_attr_name]
-
-    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
-        return self.propagate(edge_index, x=x, size=size)
+        return (x_j, x_i)[self.node_idx]
 
 
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):

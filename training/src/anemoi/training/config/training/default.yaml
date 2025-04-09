@@ -33,8 +33,20 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# use ZeroRedundancyOptimizer ; saves memory for larger models
-zero_optimizer: False
+# Optimizer settings
+optimizer:
+  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
+  kwargs:
+    betas: [0.9, 0.95]
+
+# select model
+model_task: anemoi.training.train.forecaster.GraphForecaster
+
+# select strategy
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  read_group_size: ${dataloader.read_group_size}
 
 # loss functions
 
@@ -96,10 +108,10 @@ max_epochs: null
 max_steps: 150000
 
 lr:
+  warmup: 1000 # number of warmup iterations
   rate: 0.625e-4 #local_lr
   iterations: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
   min: 3e-7 #Not scaled by #GPU
-  warmup_t: 1000
 
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
 # in order to keep a constant global_lr

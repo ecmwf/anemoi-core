@@ -15,26 +15,27 @@ import logging
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import Any
 
 import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from hydra.utils import get_class
+from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from scipy.sparse import load_npz
 
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
-from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -88,12 +89,20 @@ class AnemoiTrainer:
         # Update paths to contain the run ID
         self._update_paths()
 
+        # Update dry_run_id attribute, check if checkpoint exists
+        self._get_dry_run_id()
+
+        # Check for dry run, i.e. run id without data
         self._log_information()
 
     @cached_property
-    def datamodule(self) -> AnemoiDatasetsDataModule:
+    def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(self.config, self.graph_data)
+        datamodule = instantiate(
+            convert_to_omegaconf(self.config).datamodule,
+            convert_to_omegaconf(self.config),
+            self.graph_data,
+        )
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
         LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
@@ -154,18 +163,38 @@ class AnemoiTrainer:
         )
 
     @cached_property
-    def model(self) -> GraphForecaster:
+    def truncation_data(self) -> dict:
+        """Truncation data.
+
+        Loads truncation data.
+        """
+        truncation_data = {}
+        if self.config.hardware.files.truncation is not None:
+            truncation_data["down"] = load_npz(
+                Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation),
+            )
+        if self.config.hardware.files.truncation_inv is not None:
+            truncation_data["up"] = load_npz(
+                Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation_inv),
+            )
+
+        return truncation_data
+
+    @cached_property
+    def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         kwargs = {
             "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
+            "truncation_data": self.truncation_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model = GraphForecaster(**kwargs)
+        model_task = get_class(self.config.training.model_task)
+        model = model_task(**kwargs)
 
         # Load the model weights
         if self.load_weights_only:
@@ -176,11 +205,11 @@ class AnemoiTrainer:
                     model = transfer_learning_loading(model, self.last_checkpoint)
                 else:
                     LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                    model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                    model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                model = GraphForecaster.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -201,15 +230,21 @@ class AnemoiTrainer:
     @cached_property
     def run_id(self) -> str:
         """Unique identifier for the current run."""
+        # When a run ID is provided
         if self.config.training.run_id and not self.config.training.fork_run_id:
             # Return the provided run ID - reuse run_id if resuming run
             return self.config.training.run_id
 
+        # When a run ID has been created externally and we want to fork a run
+        if self.config.training.run_id and self.config.training.fork_run_id:
+            return self.config.training.run_id
+
+        # When we rely on mlflow to create a new run ID
         if self.config.diagnostics.log.mlflow.enabled:
             # if using mlflow with a new run get the run_id from mlflow
             return self._get_mlflow_run_id()
 
-        # Generate a random UUID
+        # When no run ID is provided a random one is generated
         import uuid
 
         return str(uuid.uuid4())
@@ -392,12 +427,20 @@ class AnemoiTrainer:
         LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
         LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
 
+    def _get_dry_run_id(self) -> None:
+        """Check if the run ID is dry, e.g. without a checkpoint."""
+        # The Path casting is needed because in some multiple-gpu use cases
+        # ranks > 0 checkpoint paths are Python strings.
+        if Path(self.config.hardware.paths.checkpoints).is_dir():
+            self.dry_run_id = False
+        else:
+            LOGGER.info("Starting from a dry run ID.")
+            self.dry_run_id = True
+
     @cached_property
-    def strategy(self) -> DDPGroupStrategy:
-        """Training strategy."""
-        return DDPGroupStrategy(
-            self.config.hardware.num_gpus_per_model,
-            self.config.dataloader.read_group_size,
+    def strategy(self) -> Any:
+        return instantiate(
+            convert_to_omegaconf(self.config).training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
@@ -432,11 +475,10 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
-
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
-            ckpt_path=None if self.load_weights_only else self.last_checkpoint,
+            ckpt_path=None if (self.load_weights_only or self.dry_run_id) else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
