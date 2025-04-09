@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import datetime
-import importlib
 import logging
 from functools import cached_property
 from pathlib import Path
@@ -184,7 +183,6 @@ class AnemoiTrainer:
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        
         kwargs = {
             "config": self.config,
             "data_indices": self.data_indices,
