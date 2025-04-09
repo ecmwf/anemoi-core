@@ -19,7 +19,6 @@ import numpy as np
 import torch
 from einops import rearrange
 from torch.utils.data import IterableDataset
-from torch.utils.data import get_worker_info
 
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
@@ -42,7 +41,6 @@ class NativeGridDataset(IterableDataset):
         relative_date_indices: list,
         shuffle: bool = True,
         label: str = "generic",
-        effective_bs: int = 1,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -58,11 +56,8 @@ class NativeGridDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
-        effective_bs : int, default 1
-            effective batch size useful to compute the lenght of the dataset
         """
         self.label = label
-        self.effective_bs = effective_bs
 
         self.data = data_reader
 
@@ -80,6 +75,9 @@ class NativeGridDataset(IterableDataset):
 
         self.reader_group_rank = 0
         self.reader_group_size = 1
+
+        self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
+        self.sample_comm_group_id = 0
 
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
@@ -165,6 +163,9 @@ class NativeGridDataset(IterableDataset):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
+        self.sample_comm_group_id = model_comm_group_id
+        self.sample_comm_num_groups = model_comm_num_groups
+
         assert self.reader_group_size >= 1, "reader_group_size must be positive"
 
         LOGGER.debug(
@@ -193,9 +194,9 @@ class NativeGridDataset(IterableDataset):
         self.worker_id = worker_id
 
         # Divide this equally across shards (one shard per group!)
-        shard_size = len(self.valid_date_indices) // self.model_comm_num_groups
-        shard_start = self.model_comm_group_id * shard_size
-        shard_end = (self.model_comm_group_id + 1) * shard_size
+        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
+        shard_start = self.sample_comm_group_id * shard_size
+        shard_end = (self.sample_comm_group_id + 1) * shard_size
 
         shard_len = shard_end - shard_start
         self.n_samples_per_worker = shard_len // n_workers
@@ -204,8 +205,8 @@ class NativeGridDataset(IterableDataset):
         high = min(shard_start + (worker_id + 1) * self.n_samples_per_worker, shard_end)
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
-        LOGGER.debug(
-            "Worker %d (pid %d, global_rank %d, model comm group %d) has low/high range %d / %d",
+        LOGGER.info(
+            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
             worker_id,
             os.getpid(),
             self.global_rank,
@@ -221,10 +222,10 @@ class NativeGridDataset(IterableDataset):
         self.rng = np.random.default_rng(seed=base_seed)
         sanity_rnd = self.rng.random(1)
 
-        LOGGER.debug(
+        LOGGER.info(
             (
                 "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                "group_rank %d, base_seed %d), sanity rnd %f"
+                "group_rank %d, seed group id %d, base_seed %d, sanity rnd %f)"
             ),
             worker_id,
             self.label,
@@ -232,6 +233,7 @@ class NativeGridDataset(IterableDataset):
             self.global_rank,
             self.model_comm_group_id,
             self.model_comm_group_rank,
+            self.sample_comm_group_id,
             base_seed,
             sanity_rnd,
         )
@@ -257,7 +259,7 @@ class NativeGridDataset(IterableDataset):
         LOGGER.debug(
             (
                 "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                "model comm group %d, group_rank %d using indices[0:10]: %s"
+                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
             ),
             os.getpid(),
             self.label,
@@ -265,6 +267,7 @@ class NativeGridDataset(IterableDataset):
             self.global_rank,
             self.model_comm_group_id,
             self.model_comm_group_rank,
+            self.sample_comm_group_id,
             shuffled_chunk_indices[:10],
         )
 
@@ -297,30 +300,3 @@ class NativeGridDataset(IterableDataset):
             Dataset: {self.data}
             Relative dates: {self.relative_date_indices}
         """
-
-
-def worker_init_func(worker_id: int) -> None:
-    """Configures each dataset worker process.
-
-    Calls WeatherBenchDataset.per_worker_init() on each dataset object.
-
-    Parameters
-    ----------
-    worker_id : int
-        Worker ID
-
-    Raises
-    ------
-    RuntimeError
-        If worker_info is None
-
-    """
-    worker_info = get_worker_info()  # information specific to each worker process
-    if worker_info is None:
-        LOGGER.error("worker_info is None! Set num_workers > 0 in your dataloader!")
-        raise RuntimeError
-    dataset_obj = worker_info.dataset  # the copy of the dataset held by this worker process.
-    dataset_obj.per_worker_init(
-        n_workers=worker_info.num_workers,
-        worker_id=worker_id,
-    )
