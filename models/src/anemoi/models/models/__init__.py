@@ -18,6 +18,7 @@ __all__ = [
     "AnemoiModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiModelEncProcDecInterpolator",
+    "AnemoiEnsModelEncProcDec",
     "AnemoiModelAutoEncoder",
     "AnemoiModelHierarchicalAutoEncoder",
 ]
