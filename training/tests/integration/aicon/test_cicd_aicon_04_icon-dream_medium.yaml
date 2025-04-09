@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------
 
 # set to true to switch off config validation
-no_validation: False
+config_validation: True
 
 hardware:
   paths:
