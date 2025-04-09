@@ -1,0 +1,23 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- datamodule: single
+- diagnostics: evaluation
+- hardware: example
+- graph: encoder_decoder_only
+- model: graphtransformer
+- training: default
+- _self_
+
+no_validation: False
+
+data:
+  frequency: 1h
+  resolution: o96
+
+model:
+  model:
+    _target_: anemoi.models.models.AnemoiModelAutoEncoder
+
+training:
+  model_task: anemoi.training.train.forecaster.GraphAutoEncoder
