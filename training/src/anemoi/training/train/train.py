@@ -419,6 +419,8 @@ class AnemoiTrainer:
             self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
             self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
+        else:  # To have type consistency between all ranks
+            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints)
 
         LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
         LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
