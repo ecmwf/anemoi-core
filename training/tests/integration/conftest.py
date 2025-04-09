@@ -32,8 +32,7 @@ def set_working_directory() -> None:
 @pytest.fixture
 def testing_modifications_with_temp_dir(tmp_path: Path) -> OmegaConf:
     testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/testing_modifications.yaml")
-    temp_dir = str(tmp_path)
-    testing_modifications.hardware.paths.output = temp_dir
+    testing_modifications.hardware.paths.output = str(tmp_path)
     return testing_modifications
 
 
