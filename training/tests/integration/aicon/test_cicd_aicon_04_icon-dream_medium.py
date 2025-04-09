@@ -13,9 +13,9 @@
 import os
 import pathlib
 import tempfile
+from collections.abc import Iterator
 from functools import reduce
 from operator import getitem
-from typing import Optional
 
 import matplotlib as mpl
 import pytest
@@ -34,47 +34,45 @@ os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).pa
 mpl.use("agg")
 
 
+@pytest.fixture
 @typechecked
-def aicon_config(output_dir: Optional[str] = None) -> DictConfig:
-    """Generate AICON config and overwrite output paths, if output_dir is given."""
+def aicon_config_with_tmp_dir() -> Iterator[DictConfig]:
+    """Get AICON config with temporary output paths."""
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
-    if output_dir is not None:
+    with tempfile.TemporaryDirectory() as output_dir:
         config.hardware.paths.output = output_dir
         config.hardware.paths.graph = output_dir
+        yield config
 
-    return config
 
-
+@pytest.fixture
 @typechecked
-def train(config: DictConfig) -> tuple[AnemoiTrainer, float, float]:
-    """
-    Download the grid required to train AICON and run the Trainer.
+def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig) -> Iterator[DictConfig]:
+    """Temporarily download the ICON grid specified in the config.
 
     Downloading the grid is required as the AICON grid is currently required as a netCDF file.
-
-    Returns testable objects.
     """
-    grid_filename = config.graph.nodes.icon_mesh.node_builder.grid_filename
     with tempfile.NamedTemporaryFile(suffix=".nc") as grid_fp:
+        grid_filename = aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename
         if grid_filename.startswith(("http://", "https://")):
             import urllib.request
 
             urllib.request.urlretrieve(grid_filename, grid_fp.name)  # noqa: S310
-            config.graph.nodes.icon_mesh.node_builder.grid_filename = grid_fp.name
-
-        trainer = AnemoiTrainer(config)
-        initial_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
-        trainer.train()
-        final_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
-    return trainer, initial_sum, final_sum
+            aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = grid_fp.name
+        yield aicon_config_with_tmp_dir
 
 
 @pytest.fixture
-def get_trainer() -> tuple:
-    with tempfile.TemporaryDirectory() as output_dir:
-        return train(aicon_config(output_dir=output_dir))
+@typechecked
+def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, float, float]:
+    """Train AICON and return testable objects."""
+    trainer = AnemoiTrainer(aicon_config_with_grid)
+    initial_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
+    trainer.train()
+    final_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
+    return trainer, initial_sum, final_sum
 
 
 @typechecked
@@ -88,13 +86,15 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
         raise KeyError("missing metadata" + keys) from None
 
 
-def test_config_validation_aicon() -> None:
-    BaseSchema(**aicon_config())
+@typechecked
+def test_config_validation_aicon(aicon_config_with_grid: DictConfig) -> None:
+    BaseSchema(**aicon_config_with_grid)
 
 
 @pytest.mark.longtests
-def test_main(get_trainer: tuple) -> None:
-    trainer, initial_sum, final_sum = get_trainer
+@typechecked
+def test_aicon_training(trained_aicon: tuple) -> None:
+    trainer, initial_sum, final_sum = trained_aicon
     assert initial_sum != final_sum
 
     assert_metadatakeys(
