@@ -1,6 +1,7 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
+- datamodule: single
 - diagnostics: evaluation
 - hardware: example
 - graph: limited_area
