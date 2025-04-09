@@ -8,9 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from collections.abc import Generator
-from typing import Optional
-from typing import Union
+from collections.abc import Mapping
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -64,41 +62,20 @@ class GraphAutoEncoder(GraphForecaster):
             supporting_arrays=supporting_arrays,
         )
 
-    def rollout_step(
+    def _step(
         self,
         batch: torch.Tensor,
-        rollout: Optional[int] = None,
-        training_mode: bool = True,
+        batch_idx: int,
         validation_mode: bool = False,
-    ) -> Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]:
-        """Rollout step for the forecaster.
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
 
-        Will run pre_processors on batch, but not post_processors on predictions.
+        del batch_idx
+        batch = self.allgather_batch(batch)
 
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch to use for rollout
-        rollout : Optional[int], optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
-        validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        metrics = {}
+        y_preds = []
 
-        Yields
-        ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
-            Loss value, metrics, and predictions (per step)
-
-        Returns
-        -------
-        None
-            None
-        """
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
 
@@ -113,26 +90,21 @@ class GraphAutoEncoder(GraphForecaster):
             ...,
             self.data_indices.internal_data.input.full,
         ]  # (bs, multi_step, latlon, nvar)
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
 
-        for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-            y_pred = self(x)
-            y = batch[:, 0, ..., self.data_indices.internal_data.output.full]
+        y_pred = self(x)
+        y = batch[:, 0, ..., self.data_indices.internal_data.output.full]
 
-            loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
+        loss += checkpoint(self.loss, y_pred, y, use_reentrant=False)
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+        metrics_next = {}
+        if validation_mode:
+            metrics_next = self.calculate_val_metrics(
+                y_pred,
+                y,
+                1,
+            )
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred,
-                    y,
-                    rollout_step,
-                )
-            yield loss, metrics_next, y_pred
+        metrics.update(metrics_next)
+        y_preds.extend(y_pred)
+
+        return loss, metrics, y_preds
