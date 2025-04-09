@@ -13,6 +13,8 @@
 import os
 import pathlib
 import tempfile
+from functools import reduce
+from operator import getitem
 from typing import Optional
 
 import matplotlib as mpl
@@ -46,7 +48,7 @@ def aicon_config(output_dir: Optional[str] = None) -> DictConfig:
 
 
 @typechecked
-def trainer(config: DictConfig) -> tuple[AnemoiTrainer, float, float]:
+def train(config: DictConfig) -> tuple[AnemoiTrainer, float, float]:
     """
     Download the grid required to train AICON and run the Trainer.
 
@@ -72,7 +74,18 @@ def trainer(config: DictConfig) -> tuple[AnemoiTrainer, float, float]:
 @pytest.fixture
 def get_trainer() -> tuple:
     with tempfile.TemporaryDirectory() as output_dir:
-        return trainer(aicon_config(output_dir=output_dir))
+        return train(aicon_config(output_dir=output_dir))
+
+
+@typechecked
+def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None:
+    """Test presence of metadata required for inference."""
+    try:
+        for keys in metadata_keys:
+            reduce(getitem, keys, metadata)
+    except KeyError:
+        keys = "".join(f"[{k!r}]" for k in keys)
+        raise KeyError("missing metadata" + keys) from None
 
 
 def test_config_validation_aicon() -> None:
@@ -82,5 +95,21 @@ def test_config_validation_aicon() -> None:
 @pytest.mark.longtests
 def test_main(get_trainer: tuple) -> None:
     trainer, initial_sum, final_sum = get_trainer
-    assert trainer
     assert initial_sum != final_sum
+
+    assert_metadatakeys(
+        trainer.metadata,
+        ("config", "data", "timestep"),
+        ("config", "graph", "nodes", "icon_mesh", "node_builder", "max_level_dataset"),
+        ("config", "training", "precision"),
+        ("data_indices", "data", "input", "diagnostic"),
+        ("data_indices", "data", "input", "full"),
+        ("data_indices", "data", "output", "full"),
+        ("data_indices", "model", "input", "forcing"),
+        ("data_indices", "model", "input", "full"),
+        ("data_indices", "model", "input", "prognostic"),
+        ("data_indices", "model", "output", "full"),
+        ("dataset", "shape"),
+    )
+
+    assert torch.is_tensor(trainer.graph_data["data"].x), "data coordinates not present"
