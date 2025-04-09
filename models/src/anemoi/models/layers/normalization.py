@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from typing import List
 from typing import Union
 
 from torch import Size
@@ -53,12 +52,12 @@ class ConditionalLayerNorm(nn.Module):
         self.autocast = autocast
 
         if w_one_bias_zero_init:
-            nn.init.ones_(self.scale.weight)
+            nn.init.zeros_(self.scale.weight)
             nn.init.zeros_(self.scale.bias)
             nn.init.zeros_(self.bias.weight)
             nn.init.zeros_(self.bias.bias)
 
-    def forward(self, input: List[Tensor, Tensor]) -> Tensor:
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
         """Conditional Layer Normalization.
 
         Parameters
@@ -73,7 +72,6 @@ class ConditionalLayerNorm(nn.Module):
         Tensor
             The output tensor.
         """
-        x, cond = input
         scale = self.scale(cond)
         bias = self.bias(cond)
         out = self.norm(x)

@@ -35,8 +35,13 @@ LOGGER = logging.getLogger(__name__)
 
 class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
+    ANEMOI_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDec"
+    ANEMOI_ENS_MODEL_ENC_PROC_DEC = "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec"
+    ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_ENC_HIERPROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
+    ANEMOI_MODEL_ENC_HIERPROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_INTERPENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
+    ANEMOI_MODEL_INTERPENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
 
 
 class Model(BaseModel):
@@ -108,12 +113,14 @@ Bounding = Annotated[
 ]
 
 
-class ModelSchema(PydanticBaseModel):
+class BaseModelSchema(PydanticBaseModel):
 
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     model: Model = Field(default_factory=Model)
     "Model schema."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
     bounding: list[Bounding]
@@ -134,3 +141,24 @@ class ModelSchema(PydanticBaseModel):
     "GNN encoder schema."
     decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema] = Field(..., discriminator="target_")
     "GNN decoder schema."
+
+
+class NoiseInjectorSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.ensemble.NoiseConditioning"] = Field(..., alias="_target_")
+    "Noise injection layer class"
+    noise_std: NonNegativeInt = Field(example=1)
+    "Standard deviation of the noise to be injected."
+    noise_channels_dim: NonNegativeInt = Field(example=4)
+    "Number of channels in the noise tensor."
+    noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
+    "Hidden dimension of the MLP used to process the noise."
+    inject_noise: bool = Field(default=True)
+    "Whether to inject noise or not."
+
+
+class EnsModelSchema(BaseModelSchema):
+    noise_injector: NoiseInjectorSchema = Field(default_factory=list)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
+
+
+ModelSchema = Union[BaseModelSchema, EnsModelSchema]
