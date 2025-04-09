@@ -46,7 +46,7 @@ class TestGNNProcessor:
         src_grid_size = 0
         dst_grid_size = 0
         trainable_size = 8
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
         return (
             num_layers,
             layer_kernels,

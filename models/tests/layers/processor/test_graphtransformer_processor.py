@@ -47,7 +47,8 @@ class TestGraphTransformerProcessor:
         src_grid_size = 0
         dst_grid_size = 0
         trainable_size = 6
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+        qk_norm = True
         return (
             num_layers,
             layer_kernels,
@@ -62,6 +63,7 @@ class TestGraphTransformerProcessor:
             src_grid_size,
             dst_grid_size,
             trainable_size,
+            qk_norm,
         )
 
     @pytest.fixture
@@ -80,6 +82,7 @@ class TestGraphTransformerProcessor:
             src_grid_size,
             dst_grid_size,
             trainable_size,
+            qk_norm,
         ) = graphtransformer_init
         return GraphTransformerProcessor(
             num_layers,
@@ -89,6 +92,7 @@ class TestGraphTransformerProcessor:
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,
+            qk_norm=qk_norm,
             cpu_offload=cpu_offload,
             sub_graph=sub_graph,
             sub_graph_edge_attributes=edge_attributes,
@@ -112,6 +116,7 @@ class TestGraphTransformerProcessor:
             _src_grid_size,
             _dst_grid_size,
             _trainable_size,
+            _qk_norm,
         ) = graphtransformer_init
         assert graphtransformer_processor.num_chunks == num_chunks
         assert graphtransformer_processor.num_channels == num_channels
@@ -134,6 +139,7 @@ class TestGraphTransformerProcessor:
             _src_grid_size,
             _dst_grid_size,
             trainable_size,
+            _qk_norm,
         ) = graphtransformer_init
         x = torch.rand((self.NUM_EDGES, num_channels))
         shard_shapes = [list(x.shape)]

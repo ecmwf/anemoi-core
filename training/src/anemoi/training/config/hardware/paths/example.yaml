@@ -1,5 +1,6 @@
 data: ???
 output: ???
+truncation: ???
 logs:
   base: ${hardware.paths.output}logs/
   wandb: ${hardware.paths.logs.base}

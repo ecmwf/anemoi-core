@@ -24,7 +24,7 @@ class TestGNNProcessorChunk:
         num_layers = 3
         mlp_extra_layers = 3
         edge_dim = None
-        layer_kernels = instantiate(load_layer_kernels())
+        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
         return num_channels, num_layers, layer_kernels, mlp_extra_layers, edge_dim
 
     @pytest.fixture

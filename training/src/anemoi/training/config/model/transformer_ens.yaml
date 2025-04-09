@@ -1,0 +1,147 @@
+activation: GELU
+num_channels: 1024
+output_mask: null
+cpu_offload: False
+
+model:
+  _target_: anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec
+
+layer_kernels:
+  processor:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+      _partial_: True
+      normalized_shape: ${model.num_channels}
+      condition_shape: ${model.noise_injector.noise_channels_dim}
+      w_one_bias_zero_init: True
+      autocast: false
+      #Any arguments to your chosen function go here
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+      #Any arguments to your chosen function go here
+    QueryNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+      bias: False
+      #Any arguments to your chosen function go here
+    KeyNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+      bias: False
+      #Any arguments to your chosen function go here
+  encoder:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+      _partial_: True
+      #Any arguments to your chosen function go here
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+      #Any arguments to your chosen function go here
+  decoder:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+      _partial_: True
+      #Any arguments to your chosen function go here
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+      #Any arguments to your chosen function go here
+
+noise_injector:
+  _target_: anemoi.models.layers.ensemble.NoiseConditioning
+  noise_std: 1
+  noise_channels_dim: 4
+  noise_mlp_hidden_dim: 32
+  inject_noise: True
+
+processor:
+  _target_: anemoi.models.layers.processor.TransformerProcessor
+  activation: ${model.activation}
+  num_layers: 16
+  num_chunks: 2
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  window_size: 512
+  dropout_p: 0.0
+  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  qk_norm: True # Transformer and GraphTransformer only
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
+  cpu_offload: ${model.cpu_offload}
+
+
+encoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+
+
+
+decoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  initialise_data_extractor_zero: True
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+
+
+
+trainable_parameters:
+  data: 8
+  hidden: 8
+  data2hidden: 8
+  hidden2data: 8
+
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+# Bounding configuration
+bounding: #These are applied in order
+
+  # Bound tp (total precipitation) with a Relu bounding layer
+  # ensuring a range of [0, infinity) to avoid negative precipitation values.
+  - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+    variables:
+    - tp
+
+  # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
+  # This guarantees that cp is physically consistent with tp by restricting cp
+  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
+  # NOTE: If this bounding strategy is used, the normalization of cp must be
+  # changed to "std" normalization, and the "cp" statistics should be remapped
+  # to those of tp to ensure consistency.
+
+  # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+  #   variables:
+  #   - cp
+  #   min_val: 0
+  #   max_val: 1
+  #   total_var: tp
+
+  # [OPTIONAL] NormalizedReluBounding
+  # This is an extension of the Relu bounding in case the thrshold to be used
+  # is not 0. For example, in case of the sea surface temperature we don't use
+  # [0, infinity), buth rather [-2C, infinity). We do not want the water
+  # temperature to be below the freezing temperature.
+
+  # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
+  #   variables: [sst]
+  #   min_val: [-2]
+  #   normalizer: ['mean-std']
