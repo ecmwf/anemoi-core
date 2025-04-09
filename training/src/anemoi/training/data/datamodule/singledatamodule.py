@@ -22,7 +22,6 @@ from anemoi.datasets.data import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
 
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.training.data.grid_indices import BaseGridIndices
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -78,7 +78,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def data_indices(self) -> IndexCollection:
-        return IndexCollection(convert_to_omegaconf(self.config), self.ds_train.name_to_index)
+        return IndexCollection(self.config, self.ds_train.name_to_index)
 
     def relative_date_indices(self, val_rollout: int = 1) -> list:
         """Determine a list of relative time indices to load for each batch."""
@@ -129,7 +129,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         reader_group_size = self.config.dataloader.read_group_size
 
         grid_indices = instantiate(
-            self.config.model_dump(by_alias=True).dataloader.grid_indices,
+            self.config.dataloader.grid_indices,
             reader_group_size=reader_group_size,
         )
         grid_indices.setup(self.graph_data)
@@ -166,7 +166,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
-            open_dataset(self.config.model_dump().dataloader.training),
+            open_dataset(self.config.dataloader.training),
             label="train",
         )
 
@@ -179,7 +179,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 self.config.dataloader.validation.start,
             )
         return self._get_dataset(
-            open_dataset(self.config.model_dump().dataloader.validation),
+            open_dataset(self.config.dataloader.validation),
             shuffle=False,
             val_rollout=self.config.dataloader.validation_rollout,
             label="validation",
@@ -196,7 +196,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             f"test start date {self.config.dataloader.test.start}"
         )
         return self._get_dataset(
-            open_dataset(self.config.model_dump().dataloader.test),
+            open_dataset(self.config.dataloader.test),
             shuffle=False,
             label="test",
         )
@@ -223,9 +223,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         assert stage in {"training", "validation", "test"}
         return DataLoader(
             ds,
-            batch_size=self.config.model_dump().dataloader.batch_size[stage],
+            batch_size=self.config.dataloader.batch_size[stage],
             # number of worker processes
-            num_workers=self.config.model_dump().dataloader.num_workers[stage],
+            num_workers=self.config.dataloader.num_workers[stage],
             # use of pinned memory can speed up CPU-to-GPU data transfers
             # see https://pytorch.org/docs/stable/notes/cuda.html#cuda-memory-pinning
             pin_memory=self.config.dataloader.pin_memory,
