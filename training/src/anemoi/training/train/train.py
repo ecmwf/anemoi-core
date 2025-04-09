@@ -419,15 +419,13 @@ class AnemoiTrainer:
             self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
             self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
-        else:  # To have type consistency between all ranks
-            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints)
 
         LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
         LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
 
     def _get_dry_run_id(self) -> None:
         """Check if the run ID is dry, e.g. without a checkpoint."""
-        if self.config.hardware.paths.checkpoints.is_dir():
+        if Path(self.config.hardware.paths.checkpoints).is_dir():
             self.dry_run_id = False
         else:
             LOGGER.info("Starting from a dry run ID.")
