@@ -184,11 +184,7 @@ class AnemoiTrainer:
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        # Extract module and class
-        module_name, class_name = self.config.training.task.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        model_class = getattr(module, class_name)
-
+        
         kwargs = {
             "config": self.config,
             "data_indices": self.data_indices,
