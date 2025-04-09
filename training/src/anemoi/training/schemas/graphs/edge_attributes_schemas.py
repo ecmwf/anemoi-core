@@ -14,8 +14,9 @@ from enum import Enum
 from typing import Literal
 from typing import Union
 
-from pydantic import BaseModel
 from pydantic import Field
+
+from anemoi.training.schemas.utils import BaseModel
 
 
 class ImplementedEdgeAttributeSchema(str, Enum):
