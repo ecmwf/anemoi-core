@@ -36,7 +36,7 @@ log:
     offline: False
     log_model: False
     project: 'Anemoi'
-    entity: null
+    entity: ???
     # logger options (these probably come with some overhead)
     gradients: False
     parameters: False
