@@ -22,7 +22,7 @@ data:
 
 model:
   model:
-    _target_: anemoi.models.models.AnemoiModelEncProcDecInterpolator
+    _target_: anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator
   latent_skip: False # True/False for skip connection on latent mesh
   grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
 
