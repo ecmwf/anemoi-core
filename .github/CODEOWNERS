@@ -1,0 +1,10 @@
+# Workflows
+/.github/ @ecmwf/AnemoiSecurity
+
+# Project configs
+/graphs/pyproject.toml @ecmwf/AnemoiSecurity
+/models/pyproject.toml @ecmwf/AnemoiSecurity
+/training/pyproject.toml @ecmwf/AnemoiSecurity
+
+/.pre-commit-config.yaml @ecmwf/AnemoiSecurity
+/.release-please-config.json @ecmwf/AnemoiSecurity
