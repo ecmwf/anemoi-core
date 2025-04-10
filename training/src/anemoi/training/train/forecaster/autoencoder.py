@@ -9,6 +9,7 @@
 
 import logging
 from collections.abc import Mapping
+from typing import Optional
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -34,6 +35,7 @@ class GraphAutoEncoder(GraphForecaster):
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
+        truncation_data: Optional[dict] = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -60,7 +62,11 @@ class GraphAutoEncoder(GraphForecaster):
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
+            truncation_data=truncation_data,
         )
+
+        assert self.rollout == 1, "Rollout must be 1 for autoencoder"
+        assert self.rollout_epoch_increment == 0, "Rollout epoch increment must be 1 for autoencoder"
 
     def _step(
         self,
@@ -101,7 +107,7 @@ class GraphAutoEncoder(GraphForecaster):
             metrics_next = self.calculate_val_metrics(
                 y_pred,
                 y,
-                1,
+                rollout_step=0,
             )
 
         metrics.update(metrics_next)

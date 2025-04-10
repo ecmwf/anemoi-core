@@ -14,7 +14,6 @@ from typing import Optional
 import einops
 import numpy as np
 import torch
-from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
@@ -94,55 +93,40 @@ class AnemoiModelEncProcDec(nn.Module):
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
 
         # Encoder data -> hidden
-        try:
-            self.encoder = instantiate(
-                model_config.model.encoder,
-                in_channels_src=self.input_dim,
-                in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
-                hidden_dim=self.num_channels,
-                sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                layer_kernels=self.layer_kernels,
-            )
 
-        except InstantiationException:
-            LOGGER.info(
-                f"Could not instantiate {model_config.model.encoder}, might cause errors later if this module is used."
-            )
+        self.encoder = instantiate(
+            model_config.model.encoder,
+            in_channels_src=self.input_dim,
+            in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
+            hidden_dim=self.num_channels,
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            layer_kernels=self.layer_kernels_encoder,
+        )
 
         # Processor hidden -> hidden
-        try:
-            self.processor = instantiate(
-                model_config.model.processor,
-                num_channels=self.num_channels,
-                sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                layer_kernels=self.layer_kernels,
-            )
-        except InstantiationException:
-            LOGGER.info(
-                f"Could not instantiate {model_config.model.processor}, might cause errors later if this module is used."
-            )
+        self.processor = instantiate(
+            model_config.model.processor,
+            num_channels=self.num_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            layer_kernels=self.layer_kernels_processor,
+        )
 
         # Decoder hidden -> data
-        try:
-            self.decoder = instantiate(
-                model_config.model.decoder,
-                in_channels_src=self.num_channels,
-                in_channels_dst=self.input_dim,
-                hidden_dim=self.num_channels,
-                out_channels_dst=self.num_output_channels,
-                sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-                layer_kernels=self.layer_kernels,
-            )
-        except InstantiationException:
-            LOGGER.info(
-                f"Could not instantiate {model_config.model.decoder}, might cause errors later if this module is used."
-            )
+        self.decoder = instantiate(
+            model_config.model.decoder,
+            in_channels_src=self.num_channels,
+            in_channels_dst=self.input_dim,
+            hidden_dim=self.num_channels,
+            out_channels_dst=self.num_output_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            layer_kernels=self.layer_kernels_decoder,
+        )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
