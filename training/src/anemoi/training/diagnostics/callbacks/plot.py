@@ -663,7 +663,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             (model._graph_name_hidden, model._graph_name_data): model.decoder,
         }
 
-        if hasattr(model, "processor") and isinstance(model.processor, GraphEdgeMixin):
+        if isinstance(model.processor, GraphEdgeMixin):
             trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
 
         return {name: module for name, module in trainable_modules.items() if module.trainable.trainable is not None}
