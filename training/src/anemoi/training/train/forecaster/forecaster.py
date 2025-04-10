@@ -212,26 +212,26 @@ class GraphForecaster(pl.LightningModule):
         ----------
         config : DictConfig
             Loss function configuration, should include `scalars` if scalars are to be added to the loss function.
-        scalars : dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]] | None,
-            Scalars which can be added to the loss function. Defaults to None.,
-            If a scalar is to be added to the loss, ensure it is in `scalars` in the loss config
-            E.g.
-                If `scalars: ['variable']` is set in the config, and `variable` in `scalars`
-                `variable` will be added to the scalar of the loss function.
+        scalars : dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]] | None
+            Scalars which can be added to the loss function. Defaults to None.
+            If a 'scalar' is to be added to the loss, ensure it is in 'scalars' in the loss config.
+            For instance, if 'scalars: ['variable']' is set in the config, and 'variable' in 'scalars'
+            'variable' will be added to the scalar of the loss function.
         kwargs : Any
             Additional arguments to pass to the loss function
 
         Returns
         -------
-        Union[BaseWeightedLoss, torch.nn.ModuleList]
-            Loss function, or list of metrics
+        BaseWeightedLoss | torch.nn.ModuleList
+            The loss function to use for training
 
         Raises
         ------
         TypeError
-            If not a subclass of `BaseWeightedLoss`
+            If not a subclass of 'BaseWeightedLoss'
         ValueError
             If scalar is not found in valid scalars
+
         """
         scalars = scalars or {}
 
@@ -454,10 +454,6 @@ class GraphForecaster(pl.LightningModule):
         Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
             Loss value, metrics, and predictions (per step)
 
-        Returns
-        -------
-        None
-            None
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
@@ -572,17 +568,17 @@ class GraphForecaster(pl.LightningModule):
 
         Parameters
         ----------
-            y_pred: torch.Tensor
-                Predicted ensemble
-            y: torch.Tensor
-                Ground truth (target).
-            rollout_step: int
-                Rollout step
+        y_pred: torch.Tensor
+            Predicted ensemble
+        y: torch.Tensor
+            Ground truth (target).
+        rollout_step: int
+            Rollout step
 
         Returns
         -------
-            val_metrics, preds:
-                validation metrics and predictions
+        val_metrics, preds:
+            validation metrics and predictions
         """
         metrics = {}
         y_postprocessed = self.model.post_processors(y, in_place=False)
@@ -686,9 +682,6 @@ class GraphForecaster(pl.LightningModule):
         batch_idx : int
             Batch inces
 
-        Returns
-        -------
-        None
         """
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
@@ -719,6 +712,14 @@ class GraphForecaster(pl.LightningModule):
         return val_loss, y_preds
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
+        """Configure the optimizers and learning rate scheduler.
+
+        Returns
+        -------
+        tuple[list[torch.optim.Optimizer], list[dict]]
+            List of optimizers and list of dictionaries containing the
+            learning rate scheduler
+        """
         if self.optimizer_settings.zero:
             optimizer = ZeroRedundancyOptimizer(
                 self.trainer.model.parameters(),
@@ -739,4 +740,5 @@ class GraphForecaster(pl.LightningModule):
             t_initial=self.lr_iterations,
             warmup_t=self.lr_warmup,
         )
+
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]

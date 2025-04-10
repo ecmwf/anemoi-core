@@ -41,8 +41,22 @@ To configure the training:
    the command line interface.
 -  Replace all "missing" values in config `???` with the appropriate
    values for your training setup.
+-  Choose the model task and model type from :ref:`Models <Models>`.
 -  Optionally, customize additional components like the normaliser or
    optimization strategies to enhance model performance.
+
+*****************
+ Parallelization
+*****************
+
+Anemoi Training supports different parallelization strategies based on
+the training task (see :ref:`Strategy <strategy target>`):
+
+-  **DDPGroupStrategy**: Used for deterministic training tasks
+-  **DDPEnsGroupStrategy**: Used for ensemble training tasks
+
+These strategies are automatically selected based on the model task
+specified in the configuration.
 
 Step 4: Set Up Experiment Tracking (Optional)
 =============================================
@@ -112,11 +126,11 @@ as wind forcing applied to an ocean model. Instead, forcing here refers
 to any variable which is an input only. In some cases this includes
 'traditional forcing', alongside other variables.
 
-   ``Diagnostics`` includes the variables like precipitation that we
-   want to predict, but which may not be available in forecast step zero
-   due to technical limitations. These can aso include derived
-   quantities which we wish to train the model to predict directly, but
-   do not want to use as inputs.
+``Diagnostics`` includes the variables like precipitation that we want
+to predict, but which may not be available in forecast step zero due to
+technical limitations. These can aso include derived quantities which we
+wish to train the model to predict directly, but do not want to use as
+inputs.
 
 ``Prognostic`` variables are the variables like temperature or humidity
 that we want to predict and appear as both inputs and outputs.
@@ -137,14 +151,27 @@ will be classed as a prognostic variable.
       diagnostics:
          - total_precipitation
 
+**************
+ Data Modules
+**************
+
+Anemoi Training provides different data modules to handle various model
+tasks:
+
+-  **AnemoiDatasetDataModule**: Standard data module for deterministic
+   training
+-  **AnemoiEnsDatasetsDataModule**: Specialized data module for ensemble
+   training using EDA (Ensemble Data Assimilation) input
+
+The choice of data module depends on your training task and input data
+requirements.
+
 ************
  Dataloader
 ************
 
 The dataloader file contains information on how many workers are used,
-and the batch size. ``num_workers`` relates to model parallelisation,
-for more information on this see :ref:`Parallelisation
-<Parallelisation>`
+and the batch size. ``num_workers`` relates to model parallelisation.
 
 .. code:: yaml
 
@@ -288,6 +315,27 @@ locations change in time.
       _target_: anemoi.models.preprocessing.imputer.InputImputer
       _convert_: all
       config: ${data.imputer}
+
+****************
+ Loss Functions
+****************
+
+Anemoi Training supports various loss functions for different training
+tasks and easily allows for custom loss functions to be added.
+
+.. code:: yaml
+
+   training_loss:
+      _target_: anemoi.training.losses.mse.WeightedMSELoss
+      # class kwargs
+
+The choice of loss function depends on the model task and the desired
+properties of the forecast.
+
+For ensemble training, the following loss functions are available: -
+**Kernel CRPS**: Continuous Ranked Probability Score using kernel
+density estimation - **AlmostFairKernelCRPS**: A variant of Kernel CRPS
+which accounts for the number of ensemble members used.
 
 ***********************
  Loss function scaling

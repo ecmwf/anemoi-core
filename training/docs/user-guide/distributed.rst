@@ -45,9 +45,36 @@ number of GPUs you wish to shard the model across. It is recommended to
 only shard if the model does not fit in GPU memory, as data distribution
 is a much more efficient way to parallelise the training.
 
+Anemoi Training provides different sharding strategies depending if the
+model task is deterministic or ensemble based.
+
+For deterministic models, the ``DDPGroupStrategy`` is used: .. code::
+yaml
+
+   strategy:
+      _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+      num_gpus_per_model: ${hardware.num_gpus_per_model}
+      read_group_size: ${dataloader.read_group_size}
+
 When using model sharding, ``config.dataloader.read_group_size`` allows
 for sharded data loading in subgroups. This should be set to the number
 of GPUs per model for optimal performance.
+
+For ensemble models, the ``DDPEnsGroupStrategy`` is used which in
+addition to sharding the model also distributes the ensemble members
+across GPUs:
+
+.. code:: yaml
+
+   strategy:
+     _target_: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
+     num_gpus_per_model: ${hardware.num_gpus_per_model}
+     read_group_size: ${dataloader.read_group_size}
+
+This requires setting ``config.hardware.num_gpus_per_ensemble`` to the
+number of GPUs you wish to parallelise the ensemble members across and
+``config.training.ensemble_size_per_device`` to the number of ensemble
+members per GPU.
 
 *********
  Example
