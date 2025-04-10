@@ -18,8 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-
-from .forecaster import GraphForecaster
+from anemoi.training.train.forecaster import GraphForecaster
 
 LOGGER = logging.getLogger(__name__)
 

@@ -12,7 +12,6 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
@@ -21,7 +20,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -36,7 +35,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         *,
         model_config: DotDict,
         data_indices: dict,
-        statistics: dict,
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
@@ -59,7 +57,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # Unpack config for hierarchical graph
         self.level_process = model_config.model.enable_hierarchical_level_processing
-        self.skip = model_config.model.skip_connections
 
         # hidden_dims is the dimentionality of features at each depth
         self.hidden_dims = {
@@ -69,7 +66,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self.data_indices = data_indices
-        self.statistics = statistics
 
         self.multi_step = model_config.training.multistep_input
 
@@ -79,26 +75,16 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
-        # read config.model.layer_kernels to get the implementation for certain layers
-        self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", {}))
-
         # Encoder data -> hidden
-        try:
-            self.encoder = instantiate(
-                model_config.model.encoder,
-                in_channels_src=input_dim,
-                in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[0]],
-                hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
-                sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_hidden_names[0])],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[0]],
-                layer_kernels=self.layer_kernels,
-            )
-        except InstantiationException or AssertionError as e:
-            print(e)
-            LOGGER.info(
-                f"Could not instantiate {model_config.model.encoder}, might cause errors later if this module is used."
-            )
+        self.encoder = instantiate(
+            model_config.model.encoder,
+            in_channels_src=input_dim,
+            in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[0]],
+            hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_hidden_names[0])],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[0]],
+        )
 
         # Level processors
         if self.level_process:
@@ -115,7 +101,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     src_grid_size=self.node_attributes.num_nodes[nodes_names],
                     dst_grid_size=self.node_attributes.num_nodes[nodes_names],
                     num_layers=model_config.model.level_process_num_layers,
-                    layer_kernels=self.layer_kernels,
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
@@ -125,27 +110,17 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     src_grid_size=self.node_attributes.num_nodes[nodes_names],
                     dst_grid_size=self.node_attributes.num_nodes[nodes_names],
                     num_layers=model_config.model.level_process_num_layers,
-                    layer_kernels=self.layer_kernels,
                 )
 
-        try:
-            print("About to do processor")
-            self.processor = instantiate(
-                model_config.model.processor,
-                num_channels=self.hidden_dims[self._graph_hidden_names[self.num_hidden - 1]],
-                sub_graph=self._graph_data[
-                    (self._graph_hidden_names[self.num_hidden - 1], "to", self._graph_hidden_names[self.num_hidden - 1])
-                ],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
-                layer_kernels=self.layer_kernels,
-            )
-            print("Done")
-        except InstantiationException or AssertionError as e:
-            print("Exception occurred: ", e)
-            LOGGER.info(
-                f"Could not instantiate {model_config.model.processor}, might cause errors later if this module is used."
-            )
+        self.processor = instantiate(
+            model_config.model.processor,
+            num_channels=self.hidden_dims[self._graph_hidden_names[self.num_hidden - 1]],
+            sub_graph=self._graph_data[
+                (self._graph_hidden_names[self.num_hidden - 1], "to", self._graph_hidden_names[self.num_hidden - 1])
+            ],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[self.num_hidden - 1]],
+        )
 
         # Downscale
         self.downscale = nn.ModuleDict()
@@ -162,7 +137,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
-                layer_kernels=self.layer_kernels,
             )
 
         # Upscale
@@ -181,40 +155,37 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
-                layer_kernels=self.layer_kernels,
             )
 
         # Decoder hidden -> data
-        try:
-            self.decoder = instantiate(
-                model_config.model.decoder,
-                in_channels_src=self.hidden_dims[self._graph_hidden_names[0]],
-                in_channels_dst=input_dim,
-                hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
-                out_channels_dst=self.num_output_channels,
-                sub_graph=self._graph_data[(self._graph_hidden_names[0], "to", self._graph_name_data)],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[0]],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-                layer_kernels=self.layer_kernels,
-            )
-        except InstantiationException or AssertionError as e:
-            print(e)
-            LOGGER.info(
-                f"Could not instantiate {model_config.model.decoder}, might cause errors later if this module is used."
-            )
+        self.decoder = instantiate(
+            model_config.model.decoder,
+            in_channels_src=self.hidden_dims[self._graph_hidden_names[0]],
+            in_channels_dst=input_dim,
+            hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
+            out_channels_dst=self.num_output_channels,
+            sub_graph=self._graph_data[(self._graph_hidden_names[0], "to", self._graph_name_data)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[0]],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+        )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
             [
-                instantiate(
-                    cfg,
-                    name_to_index=self.data_indices.internal_model.output.name_to_index,
-                    statistics=self.statistics,
-                    name_to_index_stats=self.data_indices.data.input.name_to_index,
-                )
+                instantiate(cfg, name_to_index=self.data_indices.internal_model.output.name_to_index)
                 for cfg in getattr(model_config.model, "bounding", [])
             ]
         )
+
+    def _create_trainable_attributes(self) -> None:
+        """Create all trainable attributes."""
+        self.trainable_data = TrainableTensor(trainable_size=self.trainable_data_size, tensor_size=self._data_grid_size)
+        self.trainable_hidden = nn.ModuleDict()
+
+        for hidden in self._graph_hidden_names:
+            self.trainable_hidden[hidden] = TrainableTensor(
+                trainable_size=self.trainable_hidden_size, tensor_size=self._hidden_grid_sizes[hidden]
+            )
 
     def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
         batch_size = x.shape[0]
@@ -301,9 +272,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
             )
 
-            if self.skip:
-                # Add skip connections
-                curr_latent = curr_latent + x_skip[dst_hidden_name]
+            # Add skip connections
+            curr_latent = curr_latent + x_skip[dst_hidden_name]
 
             # Processing at same level
             if self.level_process:
