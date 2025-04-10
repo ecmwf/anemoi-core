@@ -22,7 +22,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        **kwargs,
     ) -> None:
         """Initializes the graph neural network.
 
