@@ -267,6 +267,11 @@ remain reliable and maintainable. Our approach includes:
 #. Reducing Compute Load: Where possible, reduce the number of batches,
    epochs, and batch sizes.
 
+#. Downloading Test Data Early: To reduce test time, download the
+   required dataset at the beginning of the test. Use the utilities
+   provided in anemoi-utils to fetch the data, and update the relevant
+   configuration entries accordingly.
+
 #. Debugging and Failures: When integration tests fail, check the config
    files in `training/src/anemoi/training/config` for inconsistencies
    with the code and update the config files if necessary. Also check if
@@ -278,12 +283,12 @@ remain reliable and maintainable. Our approach includes:
 
 For an example, see `training/tests/integration/test_training_cycle.py`.
 The test uses a configuration based on the template
-`training/src/anemoi/training/config/basic.py`, i.e. the basic global
+`training/src/anemoi/training/config/config.yaml`, i.e. the basic global
 model. It applies testing-specific modifications to reduce batch_size
 etc. as detailed in
-`training/tests/integration/test_training_cycle.yaml`. It furthermore
-applies use-case-specific modifications as detailed in
-`training/tests/integration/test_basic.yaml` to provide the location of
+`training/tests/integration/config/testing_modifications.yaml`. It
+furthermore applies use-case-specific modifications as detailed in
+`training/tests/integration/test_config.yaml` to provide the location of
 our testing dataset compatible with the global model.
 
 Note that we also parametrize the fixture `architecture_config` to

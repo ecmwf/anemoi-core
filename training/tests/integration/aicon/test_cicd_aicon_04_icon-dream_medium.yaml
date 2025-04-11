@@ -16,8 +16,8 @@
 # 11/2024, DWD
 # ---------------------------------------------------------------
 
-# set to true to switch off config validation
-no_validation: False
+# set to true to switch on config validation
+config_validation: True
 
 hardware:
   paths:
@@ -105,6 +105,10 @@ graph:
       edge_dirs:
         _target_: anemoi.graphs.edges.attributes.EdgeDirection
         norm: unit-std
+
+datamodule:
+  _target_: anemoi.training.data.datamodule.AnemoiDatasetsDataModule
+
 
 data:
   resolution: mrl${data.refinement}
@@ -212,7 +216,7 @@ training:
   run_id: null
   fork_run_id: null
   transfer_learning: False # activate to perform transfer learning
-  task: anemoi.training.train.forecaster.GraphForecaster
+  model_task: anemoi.training.train.forecaster.GraphForecaster
   submodules_to_freeze: []
   num_sanity_val_steps: 2
   load_weights_only: false
@@ -226,7 +230,15 @@ training:
   swa:
     enabled: false
     lr: 0.0001
-  zero_optimizer: false
+  optimizer:
+    zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
+    kwargs:
+      betas: [0.9, 0.95]
+  # select strategy
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    num_gpus_per_model: ${hardware.num_gpus_per_model}
+    read_group_size: ${dataloader.read_group_size}
   loss_gradient_scaling: false
   rollout:
     start: 1
@@ -237,7 +249,7 @@ training:
     rate: 6.25e-05
     iterations: 300000
     min: 3.0e-07
-    warmup_t: 1000
+    warmup: 1000
   variable_loss_scaling:
     default: 1
     pl:
