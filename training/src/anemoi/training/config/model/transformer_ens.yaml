@@ -1,4 +1,3 @@
-activation: GELU
 num_channels: 1024
 output_mask: null
 cpu_offload: False
@@ -15,7 +14,6 @@ noise_injector:
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
-  activation: ${model.activation}
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
@@ -41,7 +39,6 @@ encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -54,7 +51,6 @@ decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
