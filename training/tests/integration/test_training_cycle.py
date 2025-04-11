@@ -28,7 +28,6 @@ LOGGER = logging.getLogger(__name__)
 @pytest.mark.longtests
 def test_training_cycle_architecture_configs(architecture_config_with_data: DictConfig) -> None:
     AnemoiTrainer(architecture_config_with_data).train()
-    shutil.rmtree(architecture_config_with_data.hardware.paths.data)
 
 
 def test_config_validation_architecture_configs(architecture_config: DictConfig) -> None:
@@ -39,7 +38,6 @@ def test_config_validation_architecture_configs(architecture_config: DictConfig)
 @pytest.mark.longtests
 def test_training_cycle_stretched(stretched_config_with_data: DictConfig) -> None:
     AnemoiTrainer(stretched_config_with_data).train()
-    shutil.rmtree(stretched_config_with_data.hardware.paths.data)
 
 
 def test_config_validation_stretched(stretched_config: DictConfig) -> None:
@@ -50,7 +48,6 @@ def test_config_validation_stretched(stretched_config: DictConfig) -> None:
 @pytest.mark.longtests
 def test_training_cycle_lam(lam_config_with_data: DictConfig) -> None:
     AnemoiTrainer(lam_config_with_data).train()
-    shutil.rmtree(lam_config_with_data.hardware.paths.data)
 
 
 def test_config_validation_lam(lam_config: DictConfig) -> None:
