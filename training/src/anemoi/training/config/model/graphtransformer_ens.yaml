@@ -10,7 +10,6 @@ layer_kernels:
   processor:
     LayerNorm:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      _partial_: True
       normalized_shape: ${model.num_channels}
       condition_shape: ${model.noise_injector.noise_channels_dim}
       w_one_bias_zero_init: True
@@ -18,36 +17,22 @@ layer_kernels:
       #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear
-      _partial_: True
-      #Any arguments to your chosen function go here
     QueryNorm:
       _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
       bias: False
-      #Any arguments to your chosen function go here
     KeyNorm:
       _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
       bias: False
-      #Any arguments to your chosen function go here
   encoder:
     LayerNorm:
       _target_: torch.nn.LayerNorm
-      _partial_: True
-      #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear
-      _partial_: True
-      #Any arguments to your chosen function go here
   decoder:
     LayerNorm:
       _target_: torch.nn.LayerNorm
-      _partial_: True
-      #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear
-      _partial_: True
-      #Any arguments to your chosen function go here
 
 noise_injector:
   _target_: anemoi.models.layers.ensemble.NoiseConditioning

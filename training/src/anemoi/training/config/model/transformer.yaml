@@ -13,7 +13,6 @@ layer_kernels:
       #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear
-      #Any arguments to your chosen function go here
     Activation:
       _target_: nn.torch.GELU
     QueryNorm:

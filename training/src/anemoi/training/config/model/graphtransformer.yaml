@@ -23,8 +23,6 @@ layer_kernels:
     KeyNorm:
       _target_: anemoi.models.layers.normalization.AutocastLayerNorm
       bias: False
-    Activation:
-      _target_: nn.torch.GELU
   encoder:
     LayerNorm:
       _target_: torch.nn.LayerNorm
@@ -36,7 +34,6 @@ layer_kernels:
   decoder:
     LayerNorm:
       _target_: torch.nn.LayerNorm
-      #Any arguments to your chosen function go here e.g.
     Linear:
       _target_: torch.nn.Linear
     Activation:
