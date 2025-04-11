@@ -106,3 +106,25 @@ def haversine_distance(source_coords: torch.Tensor, target_coords: torch.Tensor)
     )
     c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
     return c
+
+def get_edge_attributes(config: dict, source_name: str, target_name: str) -> dict:
+    """Get edge attributes out of a graph config
+
+    Parameters
+    ----------
+    config : dict
+        The graph configuration.
+    source_name : str
+        Name of source nodes of edges to be considered
+    target_name : str
+        Name of target nodes of edges to be considered
+    Returns
+    -------
+    dict
+        Dictionary of the form {attribute_name: attribute}
+    """
+    attrs={}
+    for edge in config['edges']:
+        if edge['source_name'] == source_name and edge['target_name'] == target_name:
+            attrs.update(edge['attributes'])
+    return attrs

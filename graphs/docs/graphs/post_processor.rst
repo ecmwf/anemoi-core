@@ -84,8 +84,7 @@ remove such edges, effectively providing a ``KNNedges`` algorithm
 applied only that part of the data mesh within a certain distance to the
 restricted set of data nodes.
 
-The ``RestrictEdgeLength`` post-processor also provides functionality to
-(re)compute edge attributes, since the removal of a large number of
+After the long edges are removed the edge attributes are recomputed, since the removal of a large number of
 edges can affect those, e.g. their normalisation.
 
 .. code:: yaml
@@ -98,15 +97,6 @@ edges can affect those, e.g. their normalisation.
      source_name: data                #source nodes of the edges to be processed
      target_name: hidden              #target nodes of the edges to be processed
      threshold: 20                    #edges longer than the threshold of 20 km will be removed
-     update_attributes:               #update edge attributes after postprocessing (optional)
-       edge_length:
-         _target_: anemoi.graphs.edges.attributes.EdgeLength
-         norm: unit-max
-
-The configuration above asks to (re)compute the edge length attribute
-after removal of edges longer than 20 km, something which can be
-relevant since removing such longer edges will affect the normalisation
-of the edge length attribute.
 
 The ``RestrictEdgeLength`` post-processor also supports the
 ``source_mask_attr_name`` and ``target_mask_attr_name`` arguments. These

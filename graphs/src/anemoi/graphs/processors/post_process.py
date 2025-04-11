@@ -14,12 +14,12 @@ from abc import ABC
 from abc import abstractmethod
 
 import torch
+from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
-
-# from anemoi.graphs.edges.attributes import EdgeBaseAttribute
 from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.utils import get_edge_attributes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 class PostProcessor(ABC):
 
     @abstractmethod
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(self, graph: HeteroData, graph_config: dict) -> HeteroData:
         raise NotImplementedError(f"The {self.__class__.__name__} class does not implement the method update_graph().")
 
 
@@ -79,13 +79,15 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
 
         return graph
 
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(self, graph: HeteroData, graph_config: dict) -> HeteroData:
         """Post-process the graph.
 
         Parameters
         ----------
         graph: HeteroData
             The graph to post-process.
+        graph_config: dict
+            The configuration the graph was created from.
 
         Returns
         -------
@@ -163,20 +165,16 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         Name of the source nodes of edges to remove.
     target_name: str
         Name of the target nodes of edges to remove.
-    update_attributes: dict , optional
-        edge attributes to be updated after removal of edges
     """
 
     def __init__(
         self,
         source_name: str,
         target_name: str,
-        update_attributes: dict | None = {},
     ) -> None:
         self.source_name = source_name
         self.target_name = target_name
         self.edges_name = (self.source_name, "to", self.target_name)
-        self.update_attrs = update_attributes
         self.mask: torch.Tensor = None
 
     def removing_edges(self, graph: HeteroData) -> HeteroData:
@@ -192,22 +190,25 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     @abstractmethod
     def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
 
-    def update_attributes(self, graph: HeteroData) -> HeteroData:
+    def recompute_attributes(self, graph: HeteroData, graph_config: dict) -> HeteroData:
         """Recompute attributes"""
-        for attr_name, edge_attr_builder in self.update_attrs.items():
-            LOGGER.info(f"Updating edge attribute {attr_name}.")
-            graph[self.edges_name][attr_name] = edge_attr_builder(
+        edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
+        for attr_name, edge_attr_builder in edge_attributes.items():
+            LOGGER.info(f"Recomputing edge attribute {attr_name}.")
+            graph[self.edges_name][attr_name] = instantiate(edge_attr_builder)(
                 x=(graph[self.source_name], graph[self.target_name]), edge_index=graph[self.edges_name].edge_index
             )
         return graph
 
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(self, graph: HeteroData, graph_config: dict) -> HeteroData:
         """Post-process the graph.
 
         Parameters
         ----------
         graph: HeteroData
             The graph to post-process.
+        graph_config: dict
+            The configuration the graph was created from.
 
         Returns
         -------
@@ -217,7 +218,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self.mask = self.compute_mask(graph)
         LOGGER.info(f"Removing {(~self.mask).sum()} edges from {self.edges_name}.")
         graph = self.removing_edges(graph)
-        graph = self.update_attributes(graph)
+        graph = self.recompute_attributes(graph, graph_config)
         return graph
 
 
@@ -234,8 +235,6 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
          the postprocessing will be restricted to edges with source node having True in this mask_attr
     target_mask_attr_name: str, optional
         the postprocessing will be restricted to edges with target node having True in this mask_attr
-    update_attributes: dict , optional
-        edge attributes to be updated after removal of edges
     Methods
     -------
     compute_mask(graph)
@@ -249,9 +248,8 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         threshold: float,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
-        update_attributes: dict | None = {},
     ) -> None:
-        super().__init__(source_name, target_name, update_attributes)
+        super().__init__(source_name, target_name)
         self.treshold = threshold
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
