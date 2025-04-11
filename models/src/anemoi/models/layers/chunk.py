@@ -59,7 +59,12 @@ class BaseProcessorChunk(nn.Module, ABC):
 
     @abstractmethod
     def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
     ) -> Tensor: ...
 
 
@@ -74,6 +79,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         window_size: int,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
+        qk_norm: bool = False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
@@ -96,6 +102,8 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         dropout_p: float
             Dropout probability used for multi-head self attention, default 0.0
         attention_implementation: str, optional
@@ -113,6 +121,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             num_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
             num_heads=num_heads,
+            qk_norm=qk_norm,
             window_size=window_size,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
@@ -127,9 +136,10 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         shapes: list,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
     ) -> Tensor:
         for i in range(self.num_layers):
-            x = self.blocks[i](x, shapes, batch_size, model_comm_group=model_comm_group)
+            x = self.blocks[i](x, shapes, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return (x,)  # return tuple for consistency with other processors
 
@@ -191,13 +201,16 @@ class GNNProcessorChunk(BaseProcessorChunk):
         shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **kwargs,
     ) -> OptPairTensor:
         x_out = x * 1.0  # required for pytorch >= 2.1
         if self.emb_edges:
             edge_attr = self.emb_edges(edge_attr)
 
         for i in range(self.num_layers):
-            x_out, edge_attr = self.blocks[i](x_out, edge_attr, edge_index, shapes, model_comm_group, size=size)
+            x_out, edge_attr = self.blocks[i](
+                x_out, edge_attr, edge_index, shapes, model_comm_group=model_comm_group, size=size, **kwargs
+            )
 
         return x_out, edge_attr
 
@@ -212,6 +225,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         layer_kernels: DotDict,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
+        qk_norm: bool = False,
         edge_dim: Optional[int] = None,
     ) -> None:
         """Initialize GraphTransformerProcessorChunk.
@@ -229,6 +243,8 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         edge_dim: int, by default None
             Embed edges with input dimension edge_dim
         """
@@ -242,6 +258,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             edge_dim=edge_dim,
             num_heads=num_heads,
             layer_kernels=layer_kernels,
+            qk_norm=qk_norm,
         )
 
     def forward(
@@ -253,8 +270,11 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **kwargs,
     ) -> OptPairTensor:
         for i in range(self.num_layers):
-            x, edge_attr = self.blocks[i](x, edge_attr, edge_index, shapes, batch_size, model_comm_group, size=size)
+            x, edge_attr = self.blocks[i](
+                x, edge_attr, edge_index, shapes, batch_size, model_comm_group=model_comm_group, size=size, **kwargs
+            )
 
         return x, edge_attr

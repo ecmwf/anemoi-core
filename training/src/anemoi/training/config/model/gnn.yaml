@@ -6,16 +6,30 @@ model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
 
+# The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+# TODO: Add this to documentation.
 layer_kernels:
-  LayerNorm:
-    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-    #Any arguments to your chosen function go here e.g.
-  Linear:
-    _target_: torch.nn.Linear
-    #Any arguments to your chosen function go here e.g.
-  Activation:
-    _target_: nn.torch.GELU
-    #Any arguments to your chosen function go here e.g.
+  processor:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: nn.torch.GELU
+  encoder:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: nn.torch.GELU
+  decoder:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: nn.torch.GELU
 
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor

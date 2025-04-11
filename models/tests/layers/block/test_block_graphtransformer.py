@@ -31,6 +31,7 @@ def init():
     num_heads = 8
     num_chunks = 2
     layer_kernels = load_layer_kernels()
+    qk_norm = True
     return (
         in_channels,
         hidden_dim,
@@ -40,6 +41,7 @@ def init():
         bias,
         num_heads,
         num_chunks,
+        qk_norm,
     )
 
 
@@ -54,6 +56,7 @@ def block(init):
         bias,
         num_heads,
         num_chunks,
+        qk_norm,
     ) = init
     return GraphTransformerProcessorBlock(
         in_channels=in_channels,
@@ -65,6 +68,7 @@ def block(init):
         bias=bias,
         update_src_nodes=False,
         num_chunks=num_chunks,
+        qk_norm=qk_norm,
     )
 
 
@@ -78,6 +82,7 @@ def test_GraphTransformerProcessorBlock_init(init, block):
         _bias,
         num_heads,
         num_chunks,
+        _qk_norm,
     ) = init
     assert isinstance(
         block, GraphTransformerProcessorBlock
@@ -97,6 +102,8 @@ def test_GraphTransformerProcessorBlock_init(init, block):
     assert isinstance(
         block.node_dst_mlp, torch.nn.Sequential
     ), "block.node_dst_mlp is not an instance of torch.nn.Sequential"
+    assert block.q_norm.bias is None
+    assert block.k_norm.bias is None
 
 
 def test_GraphTransformerProcessorBlock_shard_qkve_heads(init, block):
@@ -109,6 +116,7 @@ def test_GraphTransformerProcessorBlock_shard_qkve_heads(init, block):
         _bias,
         num_heads,
         _num_chunks,
+        _qk_norm,
     ) = init
     query = torch.randn(in_channels, num_heads * block.out_channels_conv)
     key = torch.randn(in_channels, num_heads * block.out_channels_conv)
@@ -133,6 +141,7 @@ def test_GraphTransformerProcessorBlock_shard_output_seq(init, block):
         _bias,
         num_heads,
         _num_chunks,
+        _qk_norm,
     ) = init
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
     shapes = (10, 10, 10)
@@ -152,6 +161,7 @@ def test_GraphTransformerProcessorBlock_forward_backward(init, block):
         _bias,
         _num_heads,
         _num_chunks,
+        _qk_norm,
     ) = init
 
     # Generate random input tensor
@@ -196,6 +206,7 @@ def mapper_block(init):
         bias,
         num_heads,
         num_chunks,
+        qk_norm,
     ) = init
     return GraphTransformerMapperBlock(
         in_channels=in_channels,
@@ -207,6 +218,7 @@ def mapper_block(init):
         bias=bias,
         update_src_nodes=False,
         num_chunks=num_chunks,
+        qk_norm=qk_norm,
     )
 
 
@@ -220,6 +232,7 @@ def test_GraphTransformerMapperBlock_init(init, mapper_block):
         _bias,
         num_heads,
         num_chunks,
+        _qk_norm,
     ) = init
     block = mapper_block
     assert isinstance(block, GraphTransformerMapperBlock), "block is not an instance of GraphTransformerMapperBlock"
@@ -250,6 +263,7 @@ def test_GraphTransformerMapperBlock_shard_qkve_heads(init, mapper_block):
         _bias,
         num_heads,
         _num_chunks,
+        _qk_norm,
     ) = init
     block = mapper_block
     query = torch.randn(in_channels, num_heads * block.out_channels_conv)
@@ -275,6 +289,7 @@ def test_GraphTransformerMapperBlock_shard_output_seq(init, mapper_block):
         _bias,
         num_heads,
         _num_chunks,
+        _qk_norm,
     ) = init
     block = mapper_block
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
@@ -294,6 +309,7 @@ def test_GraphTransformerMapperBlock_forward_backward(init, mapper_block):
         _bias,
         _num_heads,
         _num_chunks,
+        _qk_norm,
     ) = init
     # Initialize GraphTransformerMapperBlock
     block = mapper_block
@@ -341,6 +357,7 @@ def test_GraphTransformerMapperBlock_chunking(init, mapper_block, monkeypatch):
         _bias,
         _num_heads,
         _num_chunks,
+        _qk_norm,
     ) = init
     # Initialize GraphTransformerMapperBlock
     block = mapper_block

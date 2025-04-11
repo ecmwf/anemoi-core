@@ -7,58 +7,11 @@
 # nor does it submit to any jurisdiction.
 #
 
-from enum import Enum
 
 from pydantic import Field
 from pydantic import NonNegativeInt
 
 from anemoi.training.schemas.utils import BaseModel
-
-
-class ActivationFunctions(str, Enum):
-    # Linear Units
-    GELU = "torch.nn.GELU"
-    SiLU = "torch.nn.SiLU"
-    ELU = "torch.nn.ELU"
-    ReLU = "torch.nn.ReLU"
-    ReLU6 = "torch.nn.ReLU6"
-    LeakyReLU = "torch.nn.LeakyReLU"
-    PReLU = "torch.nn.PReLU"
-    SELU = "torch.nn.SELU"
-    CELU = "torch.nn.CELU"
-    Mish = "torch.nn.Mish"
-    Threshold = "torch.nn.Threshold"
-
-    # Gated Linear Units
-    GLU = "anemoi.models.layers.activations.GLU"
-    SwiGLU = "anemoi.models.layers.activations.SwiGLU"
-    ReGLU = "anemoi.models.layers.activations.ReGLU"
-    GeGLU = "anemoi.models.layers.activations.GeGLU"
-
-    # Mathematic functions
-    Tanh = "torch.nn.Tanh"
-    Tanhshrink = "torch.nn.Tanhshrink"
-    Sigmoid = "torch.nn.Sigmoid"
-    LogSigmoid = "torch.nn.LogSigmoid"
-    Sine = "anemoi.models.layers.activations.Sine"
-
-    # Soft activation functions
-    Softplus = "torch.nn.Softplus"
-    Softshrink = "torch.nn.Softshrink"
-    Softsign = "torch.nn.Softsign"
-
-    # Hard activation functions
-    Hardshrink = "torch.nn.Hardshrink"
-    Hardsigmoid = "torch.nn.Hardsigmoid"
-    Hardtanh = "torch.nn.Hardtanh"
-    Hardswish = "torch.nn.Hardswish"
-
-
-class ActivationFunctionSchema(BaseModel):
-    target_: ActivationFunctions = Field(..., alias="_target_")
-    "Activation function class implementation."
-    partial_: bool = Field(..., alias="_partial_")
-    "Should always be True to avoid using the same activation function object in the different layers."
 
 
 class TransformerModelComponent(BaseModel):

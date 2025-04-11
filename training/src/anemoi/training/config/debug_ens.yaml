@@ -1,0 +1,74 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- datamodule: ens
+- diagnostics: evaluation
+- hardware: example
+- graph: encoder_decoder_only
+- model: transformer_ens
+- training: default
+- _self_
+
+config_validation: True
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# hardware:
+#   num_gpus_per_node: 1
+
+diagnostics:
+  plot:
+    callbacks: []
+hardware:
+  files:
+    truncation: ${data.resolution}-O32-linear.mat.npz
+    truncation_inv: O32-${data.resolution}-linear.mat.npz
+    graph: graph_anemoi_new_${data.resolution}.pt
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6.zarr
+  accelerator: auto
+  num_gpus_per_ensemble: 1
+  num_gpus_per_node: 1
+  num_nodes: 1
+  num_gpus_per_model: 1
+
+
+model:
+  num_channels: 128
+dataloader:
+  limit_batches:
+    training: 100
+    validation: 100
+
+data:
+  resolution: o96
+
+training:
+  model_task: anemoi.training.train.forecaster.GraphEnsForecaster
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
+    num_gpus_per_ensemble: ${hardware.num_gpus_per_ensemble}
+    num_gpus_per_model: ${hardware.num_gpus_per_model}
+  ensemble_size_per_device: 2
+  max_epochs: 1
+
+  # loss function for the model
+  training_loss:
+    # loss class to initialise, can be anything subclassing torch.nn.Module
+    _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+    # other kwargs
+    scalars: ['variable']
+    ignore_nans: False
+    alpha: 1.0
+
+  validation_metrics:
+    # loss class to initialise, can be anything subclassing torch.nn.Module
+    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+      scalars: []
+      ignore_nans: False
+      alpha: 0.95
+    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+      scalars: []
+      ignore_nans: False
+      alpha: 1.0

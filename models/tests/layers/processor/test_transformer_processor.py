@@ -50,6 +50,7 @@ def transformer_processor(transformer_processor_init):
         softcap=transformer_processor_init.softcap,
         use_alibi_slopes=transformer_processor_init.use_alibi_slopes,
         window_size=transformer_processor_init.window_size,
+        qk_norm=transformer_processor_init.qk_norm,
         cpu_offload=transformer_processor_init.cpu_offload,
         layer_kernels=transformer_processor_init.layer_kernels,
     )

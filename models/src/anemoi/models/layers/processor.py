@@ -94,7 +94,8 @@ class TransformerProcessor(BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        dropout_p: float = 0.1,
+        qk_norm=False,
+        dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: float = 0,
         use_alibi_slopes: bool = False,
@@ -116,7 +117,9 @@ class TransformerProcessor(BaseProcessor):
         num_heads: int
             Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension
+            Ratio of mlp hidden dimension to embedding dimension
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.1
         attention_implementation: str, optional
@@ -153,6 +156,7 @@ class TransformerProcessor(BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             num_heads=num_heads,
             window_size=window_size,
+            qk_norm=qk_norm,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
             softcap=softcap,
@@ -176,7 +180,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group)
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
 
         return x
 
@@ -261,6 +265,8 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         edge_attr = self.trainable(self.edge_attr, batch_size)
@@ -275,7 +281,9 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
-        x, edge_attr = self.run_layers((x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group)
+        x, edge_attr = self.run_layers(
+            (x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group, **kwargs
+        )
 
         return x
 
@@ -296,6 +304,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         dst_grid_size: int,
         sub_graph: HeteroData,
         sub_graph_edge_attributes: list[str],
+        qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -313,7 +322,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         num_heads: int
             Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension
+            Ratio of mlp hidden dimension to embedding dimension
         trainable_size : int
             Size of trainable tensor
         src_grid_size : int
@@ -324,6 +333,8 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             Graph for sub graph in GNN
         sub_graph_edge_attributes : list[str]
             Sub graph edge attributes
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -351,6 +362,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
+            qk_norm=qk_norm,
             edge_dim=self.edge_dim,
         )
 
@@ -380,6 +392,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             (shape_nodes, shape_nodes, shapes_edge_attr),
             batch_size,
             model_comm_group,
+            **kwargs,
         )
 
         return x

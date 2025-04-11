@@ -32,6 +32,7 @@ class MapperConfig:
     mlp_hidden_ratio: int = 7
     src_grid_size: int = 0
     dst_grid_size: int = 0
+    qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels = load_layer_kernels()
 
@@ -62,6 +63,7 @@ class TestGraphTransformerBaseMapper:
             dst_grid_size=mapper_init.dst_grid_size,
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
+            qk_norm=mapper_init.qk_norm,
             cpu_offload=mapper_init.cpu_offload,
             layer_kernels=mapper_init.layer_kernels,
         )
@@ -142,6 +144,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             dst_grid_size=mapper_init.dst_grid_size,
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
+            qk_norm=mapper_init.qk_norm,
             cpu_offload=mapper_init.cpu_offload,
             layer_kernels=mapper_init.layer_kernels,
         )
@@ -211,6 +214,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             dst_grid_size=mapper_init.dst_grid_size,
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
+            qk_norm=mapper_init.qk_norm,
             cpu_offload=mapper_init.cpu_offload,
             layer_kernels=mapper_init.layer_kernels,
         )

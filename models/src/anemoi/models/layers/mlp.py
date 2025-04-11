@@ -13,7 +13,6 @@ import logging
 import torch
 from torch import nn
 
-from anemoi.models.layers.utils import CheckpointWrapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -31,7 +30,6 @@ class MLP(nn.Module):
         n_extra_layers: int = 0,
         final_activation: bool = False,
         layer_norm: bool = True,
-        checkpoints: bool = False,
     ) -> nn.Module:
         """Generate a multi-layer perceptron.
 
@@ -52,8 +50,6 @@ class MLP(nn.Module):
             Whether to apply a final activation function to last layer, by default True
         layer_norm : bool, optional
             Whether to apply layer norm after activation, by default True
-        checkpoints : bool, optional
-            Whether to provide checkpoints, by default False
 
         Returns
         -------
@@ -66,19 +62,21 @@ class MLP(nn.Module):
         LayerNorm = layer_kernels.LayerNorm
         Activation = layer_kernels.Activation
 
-        mlp1 = nn.Sequential(Linear(in_features, hidden_dim), Activation())
+        self.mlp = nn.Sequential(Linear(in_features, hidden_dim), Activation())
         for _ in range(n_extra_layers + 1):
-            mlp1.append(Linear(hidden_dim, hidden_dim))
-            mlp1.append(Activation())
-        mlp1.append(Linear(hidden_dim, out_features))
+            self.mlp.append(Linear(hidden_dim, hidden_dim))
+            self.mlp.append(Activation())
+        self.mlp.append(Linear(hidden_dim, out_features))
 
         if final_activation:
-            mlp1.append(Activation())
+            self.mlp.append(Activation())
 
+        self.layer_norm = None
         if layer_norm:
-            mlp1.append(LayerNorm(normalized_shape=out_features))
+            self.layer_norm = LayerNorm(normalized_shape=out_features)
 
-        self.model = CheckpointWrapper(mlp1) if checkpoints else mlp1
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+    def forward(self, x: torch.Tensor, **layer_kwargs) -> torch.Tensor:
+        x = self.mlp(x)
+        if self.layer_norm:
+            x = self.layer_norm(x, **layer_kwargs)
+        return x

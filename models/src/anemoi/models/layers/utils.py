@@ -39,8 +39,8 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None) -> DotDict["str"
 
     Parameters
     ----------
-    kernel_config : Optional[DotDict]
-        Kernel configuration
+    kernel_config : DotDict
+        Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear", "_partial_": True}}
 
     Returns
     -------
@@ -52,6 +52,16 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None) -> DotDict["str"
         "Linear": {"_target_": "torch.nn.Linear"},
         "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
         "Activation": {"_target_": "torch.nn.GELU"},
+        "QueryNorm": {
+            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+            "_partial_": True,
+            "bias": False,
+        },
+        "KeyNorm": {
+            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+            "_partial_": True,
+            "bias": False,
+        },
     }
 
     if kernel_config is None:

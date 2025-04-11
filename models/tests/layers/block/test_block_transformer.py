@@ -35,9 +35,12 @@ class TestTransformerProcessorBlock:
         window_size=st.integers(min_value=1, max_value=512),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
         softcap=st.floats(min_value=0.0, max_value=1.0),
+        qk_norm=st.booleans(),
     )
     @settings(max_examples=10)
-    def test_init(self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p, softcap):
+    def test_init(
+        self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p, softcap, qk_norm
+    ):
         num_channels = num_heads * factor_attention_heads
         layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
         block = TransformerProcessorBlock(
@@ -49,6 +52,7 @@ class TestTransformerProcessorBlock:
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
             softcap=softcap,
+            qk_norm=qk_norm,
         )
         assert isinstance(block, TransformerProcessorBlock)
 
@@ -56,6 +60,7 @@ class TestTransformerProcessorBlock:
         assert isinstance(block.layer_norm_mlp, nn.LayerNorm)
         assert isinstance(block.mlp, nn.Sequential)
         assert isinstance(block.attention, MultiHeadSelfAttention)
+        assert block.attention.qk_norm == qk_norm
 
     @given(
         factor_attention_heads=st.integers(min_value=1, max_value=10),
@@ -67,6 +72,7 @@ class TestTransformerProcessorBlock:
         batch_size=st.integers(min_value=1, max_value=40),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
         softcap=st.floats(min_value=0.0, max_value=1.0),
+        qk_norm=st.booleans(),
     )
     @settings(max_examples=10)
     def test_forward_output(
@@ -80,6 +86,7 @@ class TestTransformerProcessorBlock:
         batch_size,
         dropout_p,
         softcap,
+        qk_norm,
     ):
         num_channels = num_heads * factor_attention_heads
         layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
@@ -92,6 +99,7 @@ class TestTransformerProcessorBlock:
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
             softcap=softcap,
+            qk_norm=qk_norm,
         )
 
         x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)

@@ -191,6 +191,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
+        qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
     ) -> None:
@@ -222,6 +223,8 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             Source grid size
         dst_grid_size : int
             Destination grid size
+        qk_norm : bool, optional
+            Whether to use query and key normalization, default False
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -252,6 +255,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             num_heads=num_heads,
             edge_dim=self.edge_dim,
             num_chunks=num_chunks,
+            qk_norm=qk_norm,
             layer_kernels=layer_kernels,
         )
 
@@ -307,8 +311,9 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
+        qk_norm: bool = False,
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
 
@@ -338,6 +343,8 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             Source grid size
         dst_grid_size : int
             Destination grid size
+        qk_norm : bool, optional
+            Whether to use query and key normalization, default False
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -351,6 +358,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
+            qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             sub_graph=sub_graph,
@@ -391,8 +399,10 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         sub_graph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
+        qk_norm: bool = False,
+        initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
 
@@ -413,7 +423,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         num_heads: int
             Number of heads in transformer
         mlp_hidden_ratio: int
-            Tatio of mlp hidden dimension to embedding dimension
+            Ratio of mlp hidden dimension to embedding dimension
         sub_graph : HeteroData
             Sub graph of the full structure
         sub_graph_edge_attributes : list[str]
@@ -422,6 +432,10 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             Source grid size
         dst_grid_size : int
             Destination grid size
+        initialise_data_extractor_zero : bool, default False:
+            Whether to initialise the data extractor to zero
+        qk_norm : bool, optional
+            Whether to use query and key normalization, default False
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -436,6 +450,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
+            qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             sub_graph=sub_graph,
@@ -448,6 +463,12 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
+        if initialise_data_extractor_zero:
+            for module in self.node_data_extractor.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.constant_(module.weight, 0.0)
+                    if module.bias is not None:
+                        nn.init.constant_(module.bias, 0.0)
 
     def pre_process(self, x, shard_shapes, model_comm_group=None):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(x, shard_shapes, model_comm_group)

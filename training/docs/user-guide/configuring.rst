@@ -1,13 +1,13 @@
-##########################
- Configuring the Training
-##########################
+##############################
+ Basic Training Configuration
+##############################
 
 Anemoi training is designed so you can adjust key parts of the models
 and training process without needing to modify the underlying code.
 
-A basic introduction to the configuration system is provided in the
-`getting started <start/hydra-intro>`_ section. This section will go
-into more detail on how to configure the training pipeline.
+A basic introduction to the configuration system is provided in
+:ref:`hydra-intro`. This section will go into more detail on how to
+configure the training pipeline.
 
 ***********************
  Default Config Groups
@@ -154,6 +154,8 @@ or combine everything together
 
    anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
 
+.. _config-validation:
+
 *******************
  Config validation
 *******************
@@ -197,7 +199,8 @@ values:
 
    (anemoi_core_venv)[] $ anemoi-training config validate --config-name=debug --mask_env_vars
    2025-02-16 17:48:38 INFO Validating configs.
-   2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has a no_validation flag.So this command will validate the config regardless of the flag.
+   2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has
+   set the config_validation flag to false.So this command will validate the config regardless of the flag.
    2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
    2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
    2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]

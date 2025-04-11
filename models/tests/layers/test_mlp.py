@@ -50,14 +50,14 @@ class TestMLP:
         """Test MLP initialization."""
         mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, n_extra_layers=0)
         assert isinstance(mlp, MLP)
-        assert isinstance(mlp.model, torch.nn.Sequential)
-        assert len(mlp.model) == 6
+        assert isinstance(mlp.mlp, torch.nn.Sequential)
+        assert len(mlp.mlp) == 5
 
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 0, False, False, False)
-        assert len(mlp.model) == 5
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 0, False, False)
+        assert len(mlp.mlp) == 5
 
-        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 1, False, False, False)
-        assert len(mlp.model) == 7
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels, 1, False, False)
+        assert len(mlp.mlp) == 7
 
     def test_forwards(self, batch_size, nlatlon, num_features, hdim, num_out_feature, layer_kernels):
         """Test MLP forward pass."""

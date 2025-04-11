@@ -28,6 +28,7 @@ class GraphTransformerProcessorConfig:
     trainable_size: int = 6
     src_grid_size: int = 0
     dst_grid_size: int = 0
+    qk_norm: bool = (True,)
     cpu_offload: bool = (False,)
     layer_kernels = load_layer_kernels()
 
@@ -64,6 +65,7 @@ class TestGraphTransformerProcessor:
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             src_grid_size=graphtransformer_init.src_grid_size,
             dst_grid_size=graphtransformer_init.dst_grid_size,
+            qk_norm=graphtransformer_init.qk_norm,
             cpu_offload=graphtransformer_init.cpu_offload,
             layer_kernels=graphtransformer_init.layer_kernels,
         )
