@@ -1,9 +1,9 @@
 # Modifications for the basic template "config.yaml"
 hardware:
   files:
-    dataset: aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+    dataset: anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
   paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
 
 
 dataloader:
