@@ -84,8 +84,9 @@ remove such edges, effectively providing a ``KNNedges`` algorithm
 applied only that part of the data mesh within a certain distance to the
 restricted set of data nodes.
 
-After the long edges are removed the edge attributes are recomputed, since the removal of a large number of
-edges can affect those, e.g. their normalisation.
+After the long edges are removed the edge attributes are recomputed,
+since the removal of a large number of edges can affect those, e.g.
+their normalisation.
 
 .. code:: yaml
 
