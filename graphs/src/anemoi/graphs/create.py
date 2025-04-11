@@ -136,7 +136,7 @@ class GraphCreator:
         Each post-processor should implement an `update_graph` method that takes and returns a HeteroData object.
         """
         for processor in self.config.get("post_processors", []):
-            graph = instantiate(processor).update_graph(graph)
+            graph = instantiate(processor).update_graph(graph, self.config)
 
         return graph
 
