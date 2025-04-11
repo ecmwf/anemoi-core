@@ -74,7 +74,19 @@ class BooleanOperationSchema(BaseModel):
     masks: Union[str, list[str], SingleAttributeSchema, list[SingleAttributeSchema]]
 
 
+class DistanceFromPointSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.DistanceFromPointAttribute",] = Field(..., alias="_target_")
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
+    "Normalisation of the weights."
+    dst_point: Union[str, tuple[float, float]] = Field(default="lam_center")
+    "Coordinates of the point to compute distance from. /"
+    "If 'lam_center' is passed, distane from lam center point will be computed"
+
+    "Implementation of distance from point from anemoi.graphs.nodes.attributes"
+
+
 NodeAttributeSchemas = Union[
     SingleAttributeSchema,
     BooleanOperationSchema,
+    DistanceFromPointSchema,
 ]
