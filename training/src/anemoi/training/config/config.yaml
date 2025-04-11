@@ -10,5 +10,5 @@ defaults:
 - _self_
 
 
-# set to true to switch off config validation
-no_validation: False
+# set to true to switch on config validation
+config_validation: True
