@@ -2,19 +2,37 @@
  Models
 ########
 
-The user can pick between three different model types, when using
+The user can pick between different model tasks and types when using
 anemoi-training:
+
+Model Tasks:
+
+#. Deterministic Forecasting (GraphForecaster)
+#. Ensemble Forecasting (GraphEnsForecaster)
+#. Time Interpolation (GraphInterpolator)
+
+The model tasks specify the training objective and are specified in the
+configuration through ``training.model_task``. They are our
+`LightningModules <https://lightning.ai/docs/pytorch/lightning.html>`_.
+
+Model Types:
 
 #. Graph Neural Network (GNN)
 #. Graph Transformer Neural Network
 #. Transformer Neural Network
 
-Currently, all models have a Encoder-Processor-Decoder structure, with
-physical data being encoded on to a latent space where the processing
-takes place.
+The model types specify the model architecture and can be chosen
+independently of the model task. Currently, all models have a
+Encoder-Processor-Decoder structure, with physical data being encoded on
+to a latent space where the processing takes place.
 
 For a more detailed read on connections in Graph Neural Networks,
 `Velickovic (2023) <https://arxiv.org/pdf/2301.08210>`_ is recommended.
+
+.. note::
+
+   Currently, the GNN model type is not supported with the Ensemble
+   Forecasting model task.
 
 ************
  Processors
@@ -80,4 +98,43 @@ coarser than the resolution of the base data.
 
 The encoder and decoder can be chosen to be a GNN or a GraphTransformer.
 This choice is independent of the processor, but currently the encoder
-and decoder must be the same model type otherwise the code will break,
+and decoder must be the same model type otherwise the code will break.
+
+******************
+ Field Truncation
+******************
+
+Field truncation is a post-processing step applied during autoregressive
+rollout. It smooths the model output before feeding it back as input for
+the next time step. This helps maintain stability during long forecast
+runs.
+
+The truncation process relies on pre-computed transformation matrices
+which can be specified in the configuration:
+
+.. code:: yaml
+
+   path:
+      truncation: /path/to/truncation/matrix
+   files:
+      truncation: truncation_matrix.pt
+      truncation_inv: truncation_matrix_inv.pt
+
+Once set, the truncation matrices are used automatically during the
+rollout.
+
+***************
+ Ensemble Size
+***************
+
+For ensemble forecasting tasks (:class:`GraphEnsForecaster`), the number
+of ensemble members used during training is specified in the
+configuration:
+
+.. code:: yaml
+
+   training:
+      ensemble_size_per_device: 4
+
+This determines how many ensemble members are generated per device
+during training.

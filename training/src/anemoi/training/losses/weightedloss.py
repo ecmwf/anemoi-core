@@ -37,8 +37,7 @@ class BaseWeightedLoss(nn.Module, ABC):
 
         Exposes:
         - self.avg_function: torch.nanmean or torch.mean
-        - self.sum_function: torch.nansum or torch.sum
-        depending on the value of `ignore_nans`
+        - self.sum_function: torch.nansum or torch.sum depending on the value of `ignore_nans`
 
         Registers:
         - self.node_weights: torch.Tensor of shape (N, )
@@ -98,6 +97,7 @@ class BaseWeightedLoss(nn.Module, ABC):
         -------
         torch.Tensor
             Scaled error tensor
+
         """
         if subset_indices is None:
             subset_indices = [Ellipsis]
@@ -199,13 +199,12 @@ class FunctionalWeightedLoss(BaseWeightedLoss):
     `calculate_difference` should calculate the difference between the prediction and target.
     All scaling and weighting is handled by the parent class.
 
-    Example:
-    --------
-    ```python
-    class MyLoss(FunctionalWeightedLoss):
-        def calculate_difference(self, pred, target):
-            return pred - target
-    ```
+    Example::
+
+        class MyLoss(FunctionalWeightedLoss):
+            def calculate_difference(self, pred, target):
+                return pred - target
+
     """
 
     def __init__(
@@ -249,6 +248,7 @@ class FunctionalWeightedLoss(BaseWeightedLoss):
         -------
         torch.Tensor
             Weighted loss
+
         """
         out = self.calculate_difference(pred, target)
 

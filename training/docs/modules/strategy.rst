@@ -12,5 +12,32 @@ level which can also run on multiple GPUs, and is a standard strategy
 within PyTorch `DDP Strategy
 <https://pytorch.org/tutorials/intermediate/ddp_tutorial.html>`__.
 
-Generally you should not need to change this module, as it is
-independent of the computer being used for training.
+.. note::
+
+   Generally you should not need to change this module, as it is
+   independent of the computer being used for training.
+
+Anemoi Training provides different sharding strategies for the
+deterministic or ensemble based model tasks.
+
+For deterministic models, the ``DDPGroupStrategy`` is used while for
+ensemble models, the ``DDPEnsGroupStrategy`` is used which in addition
+to sharding the model also distributes the ensemble members across GPUs.
+
+******************
+ DDPGroupStrategy
+******************
+
+.. autoclass:: anemoi.training.distributed.strategy.DDPGroupStrategy
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+*********************
+ DDPEnsGroupStrategy
+*********************
+
+.. autoclass:: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
+   :members:
+   :no-undoc-members:
+   :show-inheritance:

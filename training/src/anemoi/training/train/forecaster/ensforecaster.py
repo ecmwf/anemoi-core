@@ -357,17 +357,22 @@ class GraphEnsForecaster(GraphForecaster):
 
         return train_loss
 
-    def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> None:
-        """Run one validation step.
+    def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Perform a validation step.
 
-        Args:
-            batch: tuple
-                Batch data. tuple of length 1 or 2.
-                batch[0]: analysis, shape (bs, multi_step + rollout, nvar, latlon)
-                batch[1] (optional): EDA perturbations, shape (nens_per_device, multi_step, nvar, latlon)
-            batch_idx: int
-                Validation batch index
-        return (*super().validation_step(batch, batch_idx), self.ens_ic)
+        Parameters
+        ----------
+        batch: tuple
+            Batch data. tuple of length 1 or 2.
+            batch[0]: analysis, shape (bs, multi_step + rollout, nvar, latlon)
+            batch[1] (optional): EDA perturbations, shape (nens_per_device, multi_step, nvar, latlon)
+        batch_idx: int
+            Validation batch index
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            Tuple containing the validation loss, the predictions, and the ensemble initial conditions
         """
         with torch.no_grad():
             val_loss, metrics, y_preds, ens_ic = self._step(batch, batch_idx, validation_mode=True)
