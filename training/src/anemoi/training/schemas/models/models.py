@@ -65,6 +65,11 @@ class ReluBoundingSchema(BaseModel):
     "List of variables to bound using the Relu method."
 
 
+class LeakyReluBoundingSchema(ReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(..., alias="_target_")
+    "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
+
+
 class FractionBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
     "Fraction bounding object defined in anemoi.models.layers.bounding."
@@ -79,6 +84,11 @@ class FractionBoundingSchema(BaseModel):
     For example, convective precipitation should be a fraction of total precipitation."
 
 
+class LeakyFractionBoundingSchema(FractionBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(..., alias="_target_")
+    "Leaky fraction bounding object defined in anemoi.models.layers.bounding."
+
+
 class HardtanhBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(..., alias="_target_")
     "Hard tanh bounding method function from anemoi.models.layers.bounding."
@@ -88,6 +98,11 @@ class HardtanhBoundingSchema(BaseModel):
     "The minimum value for the HardTanh activation."
     max_val: float
     "The maximum value for the HardTanh activation."
+
+
+class LeakyHardtanhBoundingSchema(HardtanhBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(..., alias="_target_")
+    "Leaky hard tanh bounding method function from anemoi.models.layers.bounding."
 
 
 class NormalizedReluBoundingSchema(BaseModel):
@@ -107,8 +122,22 @@ class NormalizedReluBoundingSchema(BaseModel):
         return self
 
 
+class LeakyNormalizedReluBoundingSchema(NormalizedReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyNormalizedReluBounding"] = Field(..., alias="_target_")
+    "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
+
+
 Bounding = Annotated[
-    Union[ReluBoundingSchema, FractionBoundingSchema, HardtanhBoundingSchema, NormalizedReluBoundingSchema],
+    Union[
+        ReluBoundingSchema,
+        LeakyReluBoundingSchema,
+        FractionBoundingSchema,
+        LeakyFractionBoundingSchema,
+        HardtanhBoundingSchema,
+        LeakyHardtanhBoundingSchema,
+        NormalizedReluBoundingSchema,
+        LeakyNormalizedReluBoundingSchema,
+    ],
     Field(discriminator="target_"),
 ]
 
