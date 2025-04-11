@@ -1,4 +1,3 @@
-activation: GELU
 num_channels: 512
 cpu_offload: False
 output_mask: null
@@ -6,59 +5,54 @@ output_mask: null
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
-
-# The GNN requires the autocast layer norm, otherwise its memory usage is too high.
-# TODO: Add this to documentation.
-layer_kernels:
-  processor:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
-    Linear:
-      _target_: torch.nn.Linear
-      _partial_: True
-  encoder:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
-    Linear:
-      _target_: torch.nn.Linear
-      _partial_: True
-  decoder:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
-    Linear:
-      _target_: torch.nn.Linear
-      _partial_: True
-
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor
-  activation: ${model.activation}
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  layer_kernels:
+    LayerNorm:
+      # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: nn.torch.GELU
 
 encoder:
   _target_: anemoi.models.layers.mapper.GNNForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  layer_kernels:
+    LayerNorm:
+      # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: nn.torch.GELU
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
+  layer_kernels:
+    LayerNorm:
+      # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: nn.torch.GELU
 
 
 trainable_parameters:
