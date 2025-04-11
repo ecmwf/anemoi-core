@@ -93,6 +93,7 @@ class AnemoiModelEncProcDec(nn.Module):
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
 
         # Encoder data -> hidden
+
         self.encoder = instantiate(
             model_config.model.encoder,
             in_channels_src=self.input_dim,
