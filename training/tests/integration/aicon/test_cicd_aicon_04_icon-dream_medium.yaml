@@ -171,10 +171,8 @@ model:
     _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
   num_channels: 5 # reduced for CI/CD test. original value 512
-  activation: GELU
   processor:
     _target_: anemoi.models.layers.processor.GNNProcessor
-    activation: ${model.activation}
     trainable_size: ${model.trainable_parameters.hidden2hidden}
     sub_graph_edge_attributes: ${model.attributes.edges}
     num_layers: 2
@@ -185,7 +183,6 @@ model:
     _target_: anemoi.models.layers.mapper.GNNForwardMapper
     trainable_size: ${model.trainable_parameters.data2hidden}
     sub_graph_edge_attributes: ${model.attributes.edges}
-    activation: ${model.activation}
     num_chunks: 1
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
@@ -193,7 +190,6 @@ model:
     _target_: anemoi.models.layers.mapper.GNNBackwardMapper
     trainable_size: ${model.trainable_parameters.hidden2data}
     sub_graph_edge_attributes: ${model.attributes.edges}
-    activation: ${model.activation}
     num_chunks: 1
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
