@@ -5,40 +5,6 @@ output_mask: null
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
-
-# LayerKernels are optionally. If not specified, the default are pytorch.nn.LayerNorm and torch.nn.Linear.
-# TODO: Add to documentation: The query and key norms need to be autocast layer norms if flash attention is used.
-layer_kernels:
-  processor:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: nn.torch.GELU
-    QueryNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
-    KeyNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
-  encoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: nn.torch.GELU
-  decoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: nn.torch.GELU
-
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
   trainable_size: ${model.trainable_parameters.hidden2hidden}
@@ -49,7 +15,8 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
-
+  # LayerKernels are optional. If not specified, the default are pytorch.nn.LayerNorm and torch.nn.Linear.
+  # TODO: Add to documentation: The query and key norms need to be autocast layer norms if flash attention is used.
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper

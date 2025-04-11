@@ -27,6 +27,7 @@ from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mapper import GraphEdgeMixin
+from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
@@ -50,6 +51,8 @@ class BaseProcessor(nn.Module, ABC):
         self.num_chunks = num_chunks
         self.num_channels = num_channels
         self.chunk_size = num_layers // num_chunks
+
+        self.layer_factory = load_layer_kernels(layer_kernels)
 
         assert (
             num_layers % num_chunks == 0
@@ -152,7 +155,7 @@ class TransformerProcessor(BaseProcessor):
             TransformerProcessorChunk,
             num_channels=num_channels,
             num_layers=self.chunk_size,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             mlp_hidden_ratio=mlp_hidden_ratio,
             num_heads=num_heads,
             window_size=window_size,
@@ -248,7 +251,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
 
         kwargs = {
             "mlp_extra_layers": mlp_extra_layers,
-            "layer_kernels": layer_kernels,
+            "layer_kernels": self.layer_factory,
             "edge_dim": None,
         }
 
@@ -359,7 +362,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             GraphTransformerProcessorChunk,
             num_channels=num_channels,
             num_layers=self.chunk_size,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             qk_norm=qk_norm,

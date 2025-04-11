@@ -31,6 +31,7 @@ from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ class BaseMapper(nn.Module, ABC):
         self.in_channels_dst = in_channels_dst
         self.hidden_dim = hidden_dim
         self.out_channels_dst = out_channels_dst
-        self.activation = layer_kernels.Activation()
+        self.layer_factory = load_layer_kernels(layer_kernels)
+        self.activation = self.layer_factory.Activation()
 
         self.proc = NotImplemented
 
@@ -241,8 +243,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             layer_kernels=layer_kernels,
         )
 
-        # Linear = layer_kernels.get("Linear", torch.nn.Linear)
-        Linear = layer_kernels.Linear
+        Linear = self.layer_factory.Linear
 
         self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
 
@@ -256,7 +257,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             edge_dim=self.edge_dim,
             num_chunks=num_chunks,
             qk_norm=qk_norm,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
         )
 
         self.offload_layers(cpu_offload)
@@ -368,7 +369,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             layer_kernels=layer_kernels,
         )
 
-        self.emb_nodes_src = layer_kernels.Linear(self.in_channels_src, self.hidden_dim)
+        self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
 
     def forward(
         self,
@@ -549,7 +550,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             in_features=self.edge_dim,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
         )
 
@@ -666,7 +667,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         self.proc = GraphConvMapperBlock(
             hidden_dim,
             hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
             update_src_nodes=True,
             num_chunks=num_chunks,
@@ -678,7 +679,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             in_features=in_channels_src,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
         )
 
@@ -686,7 +687,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             in_features=in_channels_dst,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
         )
 
@@ -762,7 +763,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         self.proc = GraphConvMapperBlock(
             hidden_dim,
             hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
             update_src_nodes=False,
             num_chunks=num_chunks,
@@ -774,7 +775,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             in_features=self.hidden_dim,
             hidden_dim=self.hidden_dim,
             out_features=self.out_channels_dst,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
             layer_norm=False,
             final_activation=False,

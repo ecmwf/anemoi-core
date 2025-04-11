@@ -5,21 +5,6 @@ output_mask: null
 model:
   _target_: anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec
 
-layer_kernels:
-  processor:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      normalized_shape: ${model.num_channels}
-      condition_shape: ${model.noise_injector.noise_channels_dim}
-      w_one_bias_zero_init: True
-      autocast: false
-  encoder:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-  decoder:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-
 noise_injector:
   _target_: anemoi.models.layers.ensemble.NoiseConditioning
   _convert_: all
@@ -37,6 +22,13 @@ processor:
   num_layers: 16
   num_chunks: 2
   mlp_extra_layers: 0
+  layer_kernels:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+      normalized_shape: ${model.num_channels}
+      condition_shape: ${model.noise_injector.noise_channels_dim}
+      w_one_bias_zero_init: True
+      autocast: false
 
 encoder:
   _target_: anemoi.models.layers.mapper.GNNForwardMapper
@@ -46,6 +38,9 @@ encoder:
   activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
+  layer_kernels:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
@@ -55,6 +50,9 @@ decoder:
   activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
+  layer_kernels:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
 
 trainable_parameters:
   data: 8

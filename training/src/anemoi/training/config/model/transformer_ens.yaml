@@ -6,34 +6,6 @@ cpu_offload: False
 model:
   _target_: anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec
 
-layer_kernels:
-  processor:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      normalized_shape: ${model.num_channels}
-      condition_shape: ${model.noise_injector.noise_channels_dim}
-      w_one_bias_zero_init: True
-      autocast: false
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear
-    QueryNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
-    KeyNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
-  encoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-  decoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-
 noise_injector:
   _target_: anemoi.models.layers.ensemble.NoiseConditioning
   noise_std: 1
@@ -55,6 +27,14 @@ processor:
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
+  layer_kernels:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+      normalized_shape: ${model.num_channels}
+      condition_shape: ${model.noise_injector.noise_channels_dim}
+      w_one_bias_zero_init: True
+      autocast: false
+      #Any arguments to your chosen function go here
 
 
 encoder:

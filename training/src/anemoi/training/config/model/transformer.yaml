@@ -5,37 +5,6 @@ output_mask: null
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
-# LayerKernels are optionally. If not specified, the default are pytorch.nn.LayerNorm and torch.nn.Linear.
-layer_kernels:
-  processor:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: nn.torch.GELU
-    QueryNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
-    KeyNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      bias: False
-  encoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: nn.torch.GELU
-  decoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: nn.torch.GELU
-
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor

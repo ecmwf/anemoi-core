@@ -25,19 +25,10 @@ First, let's take the model configuration ``transformer.yaml``:
    model:
      _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
-   layer_kernels:
-       LayerNorm:
-         _target_: torch.nn.LayerNorm
-         _partial_: True
-       Linear:
-         _target_: torch.nn.Linear
-         _partial_: True
-
    num_channels: 1024
 
    processor:
      _target_: anemoi.models.layers.processor.TransformerProcessor
-     activation: GELU
      num_layers: 16
      num_chunks: 2
 
@@ -45,7 +36,6 @@ First, let's take the model configuration ``transformer.yaml``:
      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
      trainable_size: 8
      sub_graph_edge_attributes: ${model.attributes.edges}
-     activation: GELU
      num_chunks: 1
      mlp_hidden_ratio: 4
      num_heads: 16
@@ -54,7 +44,6 @@ First, let's take the model configuration ``transformer.yaml``:
      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
      trainable_size: 8
      sub_graph_edge_attributes: ${model.attributes.edges}
-     activation: GELU
      num_chunks: 1
      mlp_hidden_ratio: 4
      num_heads: 16
@@ -213,6 +202,44 @@ In this example, ``model_interface.model`` is the following:
          ...
      )
    )
+
+***********************************
+ Switching out Layers in the Model
+***********************************
+
+The model interface allows to switch out layers in the model. For
+example, if you want to use a different activation function, you can
+simply change the activation function in the model configuration. Anemoi
+will automatically train the model with the new activation function.
+
+This functionality is optional and can be used to test different layers
+and architectures. The model interface will automatically create the new
+model with the new layer. For example, if you want to use the ``Sine``
+activation function instead of the ``GELU`` activation function, you can
+simply change the activation function in a model component, like in the
+processor below:
+
+.. code:: yaml
+
+   processor:
+     _target_: anemoi.models.layers.processor.TransformerProcessor
+     num_layers: 16
+     num_chunks: 2
+     layer_kernels:
+       Activation:
+         _target_: anemoi.models.layers.activation.GLU
+
+This is entirely optional and uses sensible defaults for each layer.
+Currently, you can switch out the following layers (with a given key):
+
+-  Activation function: ``Activation`` with default ``GELU``
+-  Linear layers: ``Linear`` with default ``torch.nn.Linear``
+-  Layer Normalisation: ``LayerNorm`` with default
+   ``torch.nn.LayerNorm``
+-  Query Normalisation: ``QueryNorm`` with default
+   ``anemoi.models.layers.normalization.AutocastLayerNorm``
+-  Key Normalisation: ``KeyNorm`` with default
+   ``anemoi.models.layers.normalization.AutocastLayerNorm``
 
 .. rubric:: Footnotes
 
