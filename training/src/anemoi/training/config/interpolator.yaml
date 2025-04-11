@@ -9,7 +9,7 @@ defaults:
 - training: default
 - _self_
 
-no_validation: False
+config_validation: True
 
 data:
   frequency: 1h
