@@ -219,7 +219,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self.mask = self.compute_mask(graph)
         LOGGER.info(f"Removing {(~self.mask).sum()} edges from {self.edges_name}.")
         graph = self.removing_edges(graph)
-        graph_config = kwargs.get('graph_config',{})
+        graph_config = kwargs.get("graph_config", {})
         graph = self.recompute_attributes(graph, graph_config)
         return graph
 
