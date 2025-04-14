@@ -135,7 +135,9 @@ implementation of linear layers and layer normalization in different
 parts of the model (encoder, processor, decoder) through the
 `config.yaml`.
 
-Example configuration: .. code-block:: yaml
+Example configuration: 
+
+.. code-block:: yaml
 
    layer_kernels:
       processor:
