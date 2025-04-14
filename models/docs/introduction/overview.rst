@@ -63,11 +63,11 @@ and extension through configuration.
 The package currently includes the following model architectures:
 
 -  **AnemoiModelEncProcDec**: The base encoder-processor-decoder
-   architecture (AIFS-single)
+   architecture, e.g. AIFS-single
 -  **AnemoiModelEncProcDecHierarchical**: A hierarchical variant of the
    base architecture
--  **AnemoiEnsModelEncProcDec**: The ensemble version (AIFS-CRPS) that
-   injects noise in the processor
+-  **AnemoiEnsModelEncProcDec**: The CRPS-optimized ensemble version
+   that injects noise in the processor, e.g. AIFS-CRPS
 -  **AnemoiModelEncProcDecInterpolator**: A specialized architecture for
    time interpolation
 
