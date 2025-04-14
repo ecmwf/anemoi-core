@@ -75,6 +75,12 @@ the depth of the hierarchy, enabling efficient handling of data.
 
 A specialized architecture for time interpolation tasks.
 
+Key features:
+
+ #. Ability to select time indices for forcing and predictions
+ 
+ #. Allows for provision of t0 and t6 and predictions of t1->5
+
 .. autoclass:: anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator
    :members:
    :no-undoc-members:
