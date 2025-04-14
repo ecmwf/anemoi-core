@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 class PostProcessor(ABC):
 
     @abstractmethod
-    def update_graph(self, graph: HeteroData, graph_config: dict) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
         raise NotImplementedError(f"The {self.__class__.__name__} class does not implement the method update_graph().")
 
 
@@ -79,7 +79,7 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
 
         return graph
 
-    def update_graph(self, graph: HeteroData, graph_config: dict) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
         """Post-process the graph.
 
         Parameters
@@ -200,14 +200,14 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
             )
         return graph
 
-    def update_graph(self, graph: HeteroData, graph_config: dict) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
         """Post-process the graph.
 
         Parameters
         ----------
         graph: HeteroData
             The graph to post-process.
-        graph_config: dict
+        graph_config: dict, optional
             The configuration the graph was created from.
 
         Returns
@@ -218,6 +218,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self.mask = self.compute_mask(graph)
         LOGGER.info(f"Removing {(~self.mask).sum()} edges from {self.edges_name}.")
         graph = self.removing_edges(graph)
+        graph_config = kwargs.get('graph_config',{})
         graph = self.recompute_attributes(graph, graph_config)
         return graph
 
@@ -246,7 +247,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
     def __init__(
         self,
         source_name: str,
-        target_name: str
+        target_name: str,
         max_length_km: float,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
