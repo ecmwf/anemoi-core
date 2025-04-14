@@ -12,7 +12,7 @@ on:
 
 jobs:
   quality:
-    uses: ecmwf-actions/reusable-workflows/.github/workflows/qa-precommit-run.yml@v2
+    uses: ecmwf/reusable-workflows/.github/workflows/qa-precommit-run.yml@v2
     with:
       skip-hooks: "no-commit-to-branch"
 
@@ -118,11 +118,3 @@ jobs:
       with:
         report-title: "Test report Anemoi Models (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
         custom-pytest: pytest ./models
-
-    - name: Run integration tests
-      if: success() &&  ${{(steps.changed-packages.outputs.integration_changed == 'true' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true')}}
-      uses: pavelzw/pytest-action@v2
-      timeout-minutes: 30
-      with:
-        report-title: "Test report Anemoi Core Integration (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
-        custom-pytest: pytest tests/

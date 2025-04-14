@@ -14,8 +14,9 @@ import logging
 from typing import Literal
 from typing import Union
 
-from pydantic import BaseModel
 from pydantic import Field
+
+from anemoi.training.schemas.utils import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,11 +46,22 @@ class CutOutMaskSchema(BaseModel):
     "Implementation of the cutout mask from anemoi.graphs.nodes.attributes."
 
 
-class NonmissingZarrVariableSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.attributes.NonmissingZarrVariable"] = Field(..., alias="_target_")
-    "Implementation of a mask from the nonmissing values of a Zarr variable from anemoi.graphs.nodes.attributes."
+class NonmissingAnemoiDatasetVariableSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable"] = Field(..., alias="_target_")
+    (
+        "Implementation of a mask from the nonmissing values of a anemoi-datasets variable "
+        "from anemoi.graphs.nodes.attributes."
+    )
     variable: str
-    "The Zarr variable to use."
+    "The anemoi-datasets variable to use."
+
+
+SingleAttributeSchema = Union[
+    PlanarAreaWeightSchema,
+    SphericalAreaWeightSchema,
+    CutOutMaskSchema,
+    NonmissingAnemoiDatasetVariableSchema,
+]
 
 
 class BooleanOperationSchema(BaseModel):
@@ -59,12 +71,10 @@ class BooleanOperationSchema(BaseModel):
         "anemoi.graphs.nodes.attributes.BooleanOrMask",
     ] = Field(..., alias="_target_")
     "Implementation of boolean masks from anemoi.graphs.nodes.attributes"
+    masks: Union[str, list[str], SingleAttributeSchema, list[SingleAttributeSchema]]
 
 
 NodeAttributeSchemas = Union[
-    PlanarAreaWeightSchema,
-    SphericalAreaWeightSchema,
-    CutOutMaskSchema,
-    NonmissingZarrVariableSchema,
+    SingleAttributeSchema,
     BooleanOperationSchema,
 ]

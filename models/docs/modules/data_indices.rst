@@ -41,7 +41,7 @@ config entry:
        - "tp"
        - "cp"
 
-.. figure:: ../schemas/data_indices.png
+.. figure:: ../_static/data_indices.png
    :alt: Schematic of IndexCollection with Data Indexing on Data and Model levels.
    :align: center
 
@@ -59,7 +59,7 @@ remapper-preprocessor.
 
 There are two main Index-levels:
 
--  Data: The data at "Zarr"-level provided by Anemoi-Datasets
+-  Data: The data at "anemoi-datasets"-level provided by Anemoi-Datasets
 -  Model: The "squeezed" tensors with irrelevant parts missing.
 
 Additionally, there are two internal model levels (After preprocessor

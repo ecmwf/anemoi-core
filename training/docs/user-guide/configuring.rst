@@ -1,13 +1,13 @@
-##########################
- Configuring the Training
-##########################
+##############################
+ Basic Training Configuration
+##############################
 
 Anemoi training is designed so you can adjust key parts of the models
 and training process without needing to modify the underlying code.
 
-A basic introduction to the configuration system is provided in the
-`getting started <start/hydra-intro>`_ section. This section will go
-into more detail on how to configure the training pipeline.
+A basic introduction to the configuration system is provided in
+:ref:`hydra-intro`. This section will go into more detail on how to
+configure the training pipeline.
 
 ***********************
  Default Config Groups
@@ -154,6 +154,8 @@ or combine everything together
 
    anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
 
+.. _config-validation:
+
 *******************
  Config validation
 *******************
@@ -163,7 +165,7 @@ run using the following command:
 
 .. code:: bash
 
-   anemoi-training config validate --name debug.yaml
+   anemoi-training config validate --config-name debug.yaml
 
 This will check that the configuration is valid and that all the
 required fields are present. If your config is correctly defined then
@@ -195,9 +197,10 @@ values:
 
 .. code:: bash
 
-   (anemoi_core_venv)[] $ anemoi-training config validate --name=debug --mask_env_vars
+   (anemoi_core_venv)[] $ anemoi-training config validate --config-name=debug --mask_env_vars
    2025-02-16 17:48:38 INFO Validating configs.
-   2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has a no_validation flag.So this command will validate the config regardless of the flag.
+   2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has
+   set the config_validation flag to false.So this command will validate the config regardless of the flag.
    2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
    2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
    2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
@@ -354,7 +357,7 @@ contains a list of all the possible schemas for graph nodes attributes.
       PlanarAreaWeightSchema
       | SphericalAreaWeightSchema
       | CutOutMaskSchema
-      | NonmissingZarrVariableSchema
+      | NonmissingAnemoiDatasetVariableSchema
       | BooleanOperationSchema
    ]
 
@@ -379,10 +382,10 @@ with the following error:
    graph.nodes.data.attributes.area_weight.CutOutMaskSchema._target_
    Input should be 'anemoi.graphs.nodes.attributes.CutOutMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.data.attributes.area_weight.NonmissingZarrVariableSchema._target_
-   Input should be 'anemoi.graphs.nodes.attributes.NonmissingZarrVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+   graph.nodes.data.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.data.attributes.area_weight.NonmissingZarrVariableSchema.variable
+   graph.nodes.data.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema.variable
    Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
       For further information visit https://errors.pydantic.dev/2.10/v/missing
    graph.nodes.data.attributes.area_weight.BooleanOperationSchema._target_
@@ -397,10 +400,10 @@ with the following error:
    graph.nodes.hidden.attributes.area_weight.CutOutMaskSchema._target_
    Input should be 'anemoi.graphs.nodes.attributes.CutOutMask' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.hidden.attributes.area_weight.NonmissingZarrVariableSchema._target_
-   Input should be 'anemoi.graphs.nodes.attributes.NonmissingZarrVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
+   graph.nodes.hidden.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema._target_
+   Input should be 'anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable' [type=literal_error, input_value='anemoi.graphs.nodes.attr...es.SphericalAreaWeights', input_type=str]
       For further information visit https://errors.pydantic.dev/2.10/v/literal_error
-   graph.nodes.hidden.attributes.area_weight.NonmissingZarrVariableSchema.variable
+   graph.nodes.hidden.attributes.area_weight.NonmissingAnemoiDatasetVariableSchema.variable
    Field required [type=missing, input_value={'_target_': 'anemoi.grap...ts', 'norm': 'unit-max'}, input_type=DictConfig]
       For further information visit https://errors.pydantic.dev/2.10/v/missing
    graph.nodes.hidden.attributes.area_weight.BooleanOperationSchema._target_

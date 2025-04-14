@@ -26,6 +26,7 @@ from pydantic_core import ValidationError
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
 from .data import DataSchema  # noqa: TC001
 from .dataloader import DataLoaderSchema  # noqa: TC001
+from .datamodule import DataModuleSchema  # noqa: TC001
 from .diagnostics import DiagnosticsSchema  # noqa: TC001
 from .graphs.base_graph import BaseGraphSchema  # noqa: TC001
 from .hardware import HardwareSchema  # noqa: TC001
@@ -47,6 +48,8 @@ class BaseSchema(BaseModel):
     """Data configuration."""
     dataloader: DataLoaderSchema
     """Dataloader configuration."""
+    datamodule: DataModuleSchema
+    """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: HardwareSchema
@@ -57,7 +60,7 @@ class BaseSchema(BaseModel):
     """Model configuration."""
     training: TrainingSchema
     """Training configuration."""
-    no_validation: bool = False
+    config_validation: bool = True
     """Flag to disable validation of the configuration"""
 
     @model_validator(mode="after")
@@ -69,11 +72,15 @@ class BaseSchema(BaseModel):
     @model_validator(mode="after")
     def check_log_paths_available_for_loggers(self) -> BaseSchema:
         logger = []
-        if self.diagnostics.log.wandb.enabled and not self.hardware.paths.logs.wandb:
+        if self.diagnostics.log.wandb.enabled and (not self.hardware.paths.logs or not self.hardware.paths.logs.wandb):
             logger.append("wandb")
-        if self.diagnostics.log.mlflow.enabled and not self.hardware.paths.logs.mlflow:
+        if self.diagnostics.log.mlflow.enabled and (
+            not self.hardware.paths.logs or not self.hardware.paths.logs.mlflow
+        ):
             logger.append("mlflow")
-        if self.diagnostics.log.tensorboard.enabled and not self.hardware.paths.logs.tensorboard:
+        if self.diagnostics.log.tensorboard.enabled and (
+            not self.hardware.paths.logs or not self.hardware.paths.logs.tensorboard
+        ):
             logger.append("tensorboard")
 
         if logger:
@@ -91,6 +98,8 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Data configuration."""
     dataloader: Any
     """Dataloader configuration."""
+    datamodule: Any
+    """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: Any
@@ -101,7 +110,7 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Model configuration."""
     training: Any
     """Training configuration."""
-    no_validation: bool = False
+    config_validation: bool = False
     """Flag to disable validation of the configuration"""
 
     def model_dump(self, by_alias: bool = False) -> dict:

@@ -37,7 +37,13 @@ LOGGER = logging.getLogger(__name__)
 
 class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
+    ANEMOI_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDec"
+    ANEMOI_ENS_MODEL_ENC_PROC_DEC = "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec"
+    ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_ENC_HIERPROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
+    ANEMOI_MODEL_ENC_HIERPROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
+    ANEMOI_MODEL_INTERPENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
+    ANEMOI_MODEL_INTERPENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
 
 
 class Model(BaseModel):
@@ -61,6 +67,11 @@ class ReluBoundingSchema(BaseModel):
     "List of variables to bound using the Relu method."
 
 
+class LeakyReluBoundingSchema(ReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(..., alias="_target_")
+    "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
+
+
 class FractionBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
     "Fraction bounding object defined in anemoi.models.layers.bounding."
@@ -75,6 +86,11 @@ class FractionBoundingSchema(BaseModel):
     For example, convective precipitation should be a fraction of total precipitation."
 
 
+class LeakyFractionBoundingSchema(FractionBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(..., alias="_target_")
+    "Leaky fraction bounding object defined in anemoi.models.layers.bounding."
+
+
 class HardtanhBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(..., alias="_target_")
     "Hard tanh bounding method function from anemoi.models.layers.bounding."
@@ -86,14 +102,19 @@ class HardtanhBoundingSchema(BaseModel):
     "The maximum value for the HardTanh activation."
 
 
-class NormalizedReluBounding(BaseModel):
+class LeakyHardtanhBoundingSchema(HardtanhBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(..., alias="_target_")
+    "Leaky hard tanh bounding method function from anemoi.models.layers.bounding."
+
+
+class NormalizedReluBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(..., alias="_target_")
     variables: list[str]
     min_val: list[float]
     normalizer: list[str]
 
     @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBounding:
+    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBoundingSchema:
         error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
         match the number of variables ({len(self.variables)})"""
         assert len(self.normalizer) == len(self.variables), error_msg
@@ -103,24 +124,44 @@ class NormalizedReluBounding(BaseModel):
         return self
 
 
+class LeakyNormalizedReluBoundingSchema(NormalizedReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyNormalizedReluBounding"] = Field(..., alias="_target_")
+    "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
+
+
 Bounding = Annotated[
-    Union[ReluBoundingSchema, FractionBoundingSchema, HardtanhBoundingSchema, NormalizedReluBounding],
+    Union[
+        ReluBoundingSchema,
+        LeakyReluBoundingSchema,
+        FractionBoundingSchema,
+        LeakyFractionBoundingSchema,
+        HardtanhBoundingSchema,
+        LeakyHardtanhBoundingSchema,
+        NormalizedReluBoundingSchema,
+        LeakyNormalizedReluBoundingSchema,
+    ],
     Field(discriminator="target_"),
 ]
 
 
-class ModelSchema(PydanticBaseModel):
+class BaseModelSchema(PydanticBaseModel):
 
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     model: Model = Field(default_factory=Model)
     "Model schema."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
     bounding: list[Bounding]
     "List of bounding configuration applied in order to the specified variables."
     output_mask: Union[str, None] = Field(example=None)  # !TODO CHECK!
     "Output mask, it must be a node attribute of the output nodes"
+    latent_skip: bool = True
+    "Add skip connection in latent space before/after processor. Currently only in interpolator."
+    grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
+    "Index of grid residual connection, or use none. Currently only in interpolator."
 
     processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
         ...,
@@ -137,3 +178,24 @@ class ModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN decoder schema."
+
+
+class NoiseInjectorSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.ensemble.NoiseConditioning"] = Field(..., alias="_target_")
+    "Noise injection layer class"
+    noise_std: NonNegativeInt = Field(example=1)
+    "Standard deviation of the noise to be injected."
+    noise_channels_dim: NonNegativeInt = Field(example=4)
+    "Number of channels in the noise tensor."
+    noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
+    "Hidden dimension of the MLP used to process the noise."
+    inject_noise: bool = Field(default=True)
+    "Whether to inject noise or not."
+
+
+class EnsModelSchema(BaseModelSchema):
+    noise_injector: NoiseInjectorSchema = Field(default_factory=list)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
+
+
+ModelSchema = Union[BaseModelSchema, EnsModelSchema]

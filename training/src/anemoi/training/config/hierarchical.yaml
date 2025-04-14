@@ -1,6 +1,7 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
+- datamodule: single
 - diagnostics: evaluation
 - hardware: example
 - graph: hierarchical_3level
@@ -8,7 +9,7 @@ defaults:
 - training: default
 - _self_
 
-no_validation: False
+config_validation: True
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords
@@ -19,6 +20,6 @@ no_validation: False
 
 model:
   model:
-    _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
+    _target_: anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical
   enable_hierarchical_level_processing: True
   level_process_num_layers: 2

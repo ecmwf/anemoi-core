@@ -66,7 +66,7 @@ class ConfigGenerator(Command):
         help_msg = "Validate the Anemoi training configs."
         validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
 
-        validate.add_argument("--name", help="Name of the primary config file")
+        validate.add_argument("--config-name", help="Name of the primary config file")
         validate.add_argument("--overwrite", "-f", action="store_true")
         validate.add_argument(
             "--mask_env_vars",
@@ -106,10 +106,11 @@ class ConfigGenerator(Command):
         if args.subcommand == "validate":
             LOGGER.info("Validating configs.")
             LOGGER.warning(
-                "Note that this command is not taking into account if your config has a no_validation flag."
+                "Note that this command is not taking into account if your config has set \
+                    the config_validation flag to false."
                 "So this command will validate the config regardless of the flag.",
             )
-            self.validate_config(args.name, args.mask_env_vars)
+            self.validate_config(args.config_name, args.mask_env_vars)
             LOGGER.info("Config files validated.")
             return
 
@@ -135,7 +136,7 @@ class ConfigGenerator(Command):
         """Copies the file to the destination directory."""
         try:
             shutil.copy2(item, file_path)
-            LOGGER.info("Copied %s to %s", item.name, file_path)
+            LOGGER.debug("Copied %s to %s", item.name, file_path)
         except Exception:
             LOGGER.exception("Failed to copy %s", item.name)
 
@@ -197,10 +198,10 @@ class ConfigGenerator(Command):
 
         return OmegaConf.create(updated_cfg)
 
-    def validate_config(self, name: Path | str, mask_env_vars: bool) -> None:
+    def validate_config(self, config_name: Path | str, mask_env_vars: bool) -> None:
         """Validates the configuration files in the given directory."""
         with initialize(version_base=None, config_path=""):
-            cfg = compose(config_name=name)
+            cfg = compose(config_name=config_name)
             if mask_env_vars:
                 cfg = self._mask_slurm_env_variables(cfg)
             OmegaConf.resolve(cfg)
@@ -212,9 +213,6 @@ class ConfigGenerator(Command):
         with tempfile.TemporaryDirectory() as tmpdirname:
             tmp_dir = Path(tmpdirname)
             self.copy_files(config_path, tmp_dir)
-            if not tmp_dir.exists():
-                LOGGER.error("No files found in  %s", config_path.absolute())
-                raise FileNotFoundError
 
             # Move to config directory to be able to handle hydra
             with change_directory(tmp_dir), initialize(version_base=None, config_path="./"):

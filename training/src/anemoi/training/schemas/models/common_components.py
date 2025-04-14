@@ -69,6 +69,8 @@ class TransformerModelComponent(PydanticBaseModel):
 class GNNModelComponent(BaseModel):
     activation: ActivationFunctons = Field(example="GELU")
     "Activation function to use for the GNN model component. Default to GELU."
+    convert_: str = Field("all", alias="_convert_")
+    "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
     trainable_size: NonNegativeInt = Field(example=8)
     "Size of trainable parameters vector. Default to 8."
     num_chunks: NonNegativeInt = Field(example=1)
