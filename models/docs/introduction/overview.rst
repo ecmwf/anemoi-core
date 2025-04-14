@@ -90,19 +90,18 @@ experimentation and switching out of components.
 Mappers
 =======
 
-The layers implement `Mappers`, which can encode and decode data from
-the graph representation. The `Mappers` are used to process the input
-data and output the prediction. The `Mappers` use the `Blocks` to
-process the data, which are the building blocks of the graph neural
-network.
+The layers implement `Mappers`, which maps data between the input grid
+and the internal hidden grid. The `Mappers` are used as encoder and
+decoder. The `Mappers` use the `Blocks` to process the data, which are
+the building blocks of the graph neural network.
 
 Processors
 ==========
 
 Additionally, the layers implement `Processors` which are used to
-process the data in the graph representation. The `Processors` use a
-chunking strategy with `Chunks` that pass a subset of layers to `Blocks`
-to allow for more efficient processing of the data.
+process the data on the hidden grid. The `Processors` use a chunking
+strategy with `Chunks` that pass a subset of layers to `Blocks` to allow
+for more efficient processing of the data.
 
 **************
  Data Indices
@@ -135,43 +134,49 @@ implementation of linear layers and layer normalization in different
 parts of the model (encoder, processor, decoder) through the
 `config.yaml`.
 
-Example configuration: 
+Example configuration:
 
-.. code-block:: yaml
+.. code:: yaml
 
    layer_kernels:
       processor:
          LayerNorm:
-            _target_: torch.nn.LayerNorm _partial_: True # Any arguments
-            to your chosen function go here
+            _target_: torch.nn.LayerNorm
+            _partial_: True
+            # Any arguments to your chosen function go here
 
          Linear:
-            _target_: torch.nn.Linear _partial_: True # Any arguments to
-            your chosen function go here
+            _target_: torch.nn.Linear
+            _partial_: True
+            # Any arguments to your chosen function go here
 
          QueryNorm:
-            _target_:
-            anemoi.models.layers.normalization.AutocastLayerNorm
-            _partial_: True bias: False
+            _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+            _partial_: True
+            bias: False
 
          KeyNorm:
-            _target_:
-            anemoi.models.layers.normalization.AutocastLayerNorm
-            _partial_: True bias: False
+            _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+            _partial_: True
+            bias: False
 
       encoder:
          LayerNorm:
-            _target_: torch.nn.LayerNorm _partial_: True
+            _target_: torch.nn.LayerNorm
+            _partial_: True
 
          Linear:
-            _target_: torch.nn.Linear _partial_: True
+            _target_: torch.nn.Linear
+            _partial_: True
 
       decoder:
          LayerNorm:
-            _target_: torch.nn.LayerNorm _partial_: True
+            _target_: torch.nn.LayerNorm
+            _partial_: True
 
          Linear:
-            _target_: torch.nn.Linear _partial_: True
+            _target_: torch.nn.Linear
+            _partial_: True
 
 .. note::
 

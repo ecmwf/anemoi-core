@@ -4,7 +4,7 @@
 
 The models module provides several neural network architectures that
 work with graph input data and follow an encoder-processor-decoder
-structure.
+structure `Lang et al. (2024a) <https://arxiv.org/abs/2406.01465>`_.
 
 *********************************
  Encoder-Processor-Decoder Model
@@ -23,15 +23,13 @@ processor, and decoder components.
 ******************************************
 
 The ensemble model architecture implementing the AIFS-CRPS approach
-(reference: Lang et al. 2024).
+`Lang et al. (2024b) <https://arxiv.org/abs/2412.15832>`_.
 
 Key features:
 
 #. Based on the base encoder-processor-decoder architecture
-
 #. Injects noise in the processor for each ensemble member using
-   :ref:`ConditionalLayerNorm
-   <anemoi.models.layers.normalization.ConditionalLayerNorm>`
+   :class:`anemoi.models.layers.normalization.ConditionalLayerNorm`
 
 .. autoclass:: anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec
    :members:

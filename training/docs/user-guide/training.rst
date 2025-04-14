@@ -55,8 +55,8 @@ the training task (see :ref:`Strategy <strategy target>`):
 -  **DDPGroupStrategy**: Used for deterministic training tasks
 -  **DDPEnsGroupStrategy**: Used for ensemble training tasks
 
-These strategies are automatically selected based on the model task
-specified in the configuration.
+These strategies have to be set depending on the model task specified in
+the configuration.
 
 Step 4: Set Up Experiment Tracking (Optional)
 =============================================
@@ -160,8 +160,10 @@ tasks:
 
 -  **AnemoiDatasetDataModule**: Standard data module for deterministic
    training
+
 -  **AnemoiEnsDatasetsDataModule**: Specialized data module for ensemble
-   training using EDA (Ensemble Data Assimilation) input
+   training. It also allows for training with perturbed initial
+   conditions.
 
 The choice of data module depends on your training task and input data
 requirements.
@@ -332,10 +334,12 @@ tasks and easily allows for custom loss functions to be added.
 The choice of loss function depends on the model task and the desired
 properties of the forecast.
 
-For ensemble training, the following loss functions are available: -
-**Kernel CRPS**: Continuous Ranked Probability Score using kernel
-density estimation - **AlmostFairKernelCRPS**: A variant of Kernel CRPS
-which accounts for the number of ensemble members used.
+For ensemble training, the following loss functions are available:
+
+-  **Kernel CRPS**: Continuous Ranked Probability Score using kernel
+   density estimation
+-  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
+   the number of ensemble members used.
 
 ***********************
  Loss function scaling

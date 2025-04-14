@@ -104,10 +104,9 @@ and decoder must be the same model type otherwise the code will break.
  Field Truncation
 ******************
 
-Field truncation is a post-processing step applied during autoregressive
-rollout. It smooths the model output before feeding it back as input for
-the next time step. This helps maintain stability during long forecast
-runs.
+Field truncation is a pre-processing step applied during autoregressive
+rollout. It smooths the input data which helps maintain stability during
+rollout.
 
 The truncation process relies on pre-computed transformation matrices
 which can be specified in the configuration:

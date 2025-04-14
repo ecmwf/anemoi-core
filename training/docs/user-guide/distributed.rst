@@ -50,8 +50,7 @@ model task is deterministic or ensemble based.
 
 For deterministic models, the ``DDPGroupStrategy`` is used:
 
-  .. code::
-yaml
+.. code:: yaml
 
    strategy:
       _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
