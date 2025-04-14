@@ -780,10 +780,10 @@ class TransformerBaseMapper(BaseMapper):
         mlp_hidden_ratio: int,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
+        qk_norm: Optional[bool] = False,
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: Optional[bool] = None,
-        use_qk_norm: Optional[bool] = False,
         use_rotary_embeddings: Optional[bool] = False,
     ) -> None:
         """Initialize TransformerBaseMapper.
@@ -827,10 +827,10 @@ class TransformerBaseMapper(BaseMapper):
             window_size=window_size,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            qk_norm=qk_norm,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_qk_norm=use_qk_norm,
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
@@ -877,10 +877,10 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         mlp_hidden_ratio: int = 4,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
+        qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = None,
-        use_qk_norm: bool = False,
         use_rotary_embeddings: bool = False,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
@@ -920,10 +920,10 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
             mlp_hidden_ratio=mlp_hidden_ratio,
             window_size=window_size,
             dropout_p=dropout_p,
+            qk_norm=qk_norm,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_qk_norm=use_qk_norm,
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
@@ -957,10 +957,10 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         mlp_hidden_ratio: int = 4,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
+        qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = None,
-        use_qk_norm: bool = False,
         use_rotary_embeddings: bool = False,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
@@ -1000,10 +1000,10 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
             mlp_hidden_ratio=mlp_hidden_ratio,
             window_size=window_size,
             dropout_p=dropout_p,
+            qk_norm=qk_norm,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_qk_norm=use_qk_norm,
             use_rotary_embeddings=use_rotary_embeddings,
         )
 

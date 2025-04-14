@@ -20,7 +20,7 @@ processor:
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
-  use_qk_norm: False
+  qk_norm: False
   use_rotary_embeddings: False
 
 encoder:
@@ -36,7 +36,7 @@ encoder:
   attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
-  use_qk_norm: False
+  qk_norm: False
   use_rotary_embeddings: False
 
 
@@ -53,7 +53,7 @@ decoder:
   attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
-  use_qk_norm: False
+  qk_norm: False
   use_rotary_embeddings: False
 
 

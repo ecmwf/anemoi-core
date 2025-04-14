@@ -77,7 +77,6 @@ class TransformerProcessorBlock(BaseBlock):
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = None,
-        use_qk_norm: bool = False,
         use_rotary_embeddings: bool = False,
     ):
         super().__init__()
@@ -103,7 +102,6 @@ class TransformerProcessorBlock(BaseBlock):
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_qk_norm=use_qk_norm,
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
@@ -145,10 +143,10 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         window_size: int,
         layer_kernels: DotDict,
         dropout_p: float = 0.0,
+        qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = None,
-        use_qk_norm: bool = False,
         use_rotary_embeddings: bool = False,
     ):
         super().__init__(
@@ -159,10 +157,10 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             window_size=window_size,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            qk_norm=qk_norm,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_qk_norm=use_qk_norm,
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
@@ -170,14 +168,14 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             num_heads=num_heads,
             embed_dim=num_channels,
             window_size=window_size,
-            bias=False,
+            qkv_bias=False,
+            qk_norm=qk_norm,
             is_causal=False,
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_qk_norm=use_qk_norm,
             use_rotary_embeddings=use_rotary_embeddings,
         )
 

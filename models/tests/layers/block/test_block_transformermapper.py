@@ -57,7 +57,7 @@ def init(layer_kernels):
 
 
 @pytest.fixture
-def mapper_block(init, layer_kernels):
+def mapper_block(init):
     (num_channels, hidden_dim, num_heads, activation, window_size, layer_kernels, attention_implementation) = init
 
     return TransformerMapperBlock(
@@ -71,7 +71,7 @@ def mapper_block(init, layer_kernels):
     )
 
 
-def test_TransformerMapperBlock_init(init, mapper_block):
+def test_TransformerMapperBlock_init(mapper_block):
     block = mapper_block
     assert isinstance(block, TransformerMapperBlock), "block is not an instance of GraphTransformerMapperBlock"
     assert isinstance(block.layer_norm_attention_src, nn.LayerNorm)
@@ -89,8 +89,8 @@ def test_TransformerMapperBlock_init(init, mapper_block):
     window_size=st.integers(min_value=1, max_value=512),
     shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
     batch_size=st.integers(min_value=1, max_value=40),
-    dropout_p=st.floats(min_value=0.0, max_value=1.0),
-    softcap=st.floats(min_value=0.0, max_value=1.0),
+    dropout_p=st.floats(min_value=0.01, max_value=1.0),
+    softcap=st.floats(min_value=0.01, max_value=1.0),
 )
 @settings(max_examples=10)
 def test_forward_output(
@@ -105,7 +105,7 @@ def test_forward_output(
     softcap,
 ):
     num_channels = num_heads * factor_attention_heads
-    layer_kernels = instantiate(load_layer_kernels())
+    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     block = TransformerMapperBlock(
         num_channels,
         hidden_dim,

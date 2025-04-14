@@ -60,7 +60,7 @@ processor:
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
-  use_qk_norm: False
+  qk_norm: False
   use_rotary_embeddings: False
 
 

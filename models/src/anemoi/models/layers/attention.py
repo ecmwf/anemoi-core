@@ -50,7 +50,6 @@ class MultiHeadSelfAttention(nn.Module):
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
-        use_qk_norm: bool = False,
         use_rotary_embeddings: bool = False,
     ):
         """Initialize MultiHeadSelfAttention.
@@ -103,7 +102,6 @@ class MultiHeadSelfAttention(nn.Module):
         self.is_causal = is_causal
         self.qk_norm = qk_norm
         self.softcap = softcap
-        self.use_qk_norm = use_qk_norm
         self.use_rotary_embeddings = use_rotary_embeddings
 
         self.set_attention_function()
@@ -174,7 +172,7 @@ class MultiHeadSelfAttention(nn.Module):
         value = shard_heads(value, shapes=shapes, mgroup=model_comm_group)
         dropout_p = self.dropout_p if self.training else 0.0
 
-        if self.use_qk_norm:
+        if self.qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
 

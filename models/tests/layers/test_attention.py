@@ -125,7 +125,7 @@ def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_di
 def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels())
+    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     mhsa = MultiHeadCrossAttention(
         num_heads,
         embed_dim,
@@ -152,7 +152,7 @@ def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_di
 def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels())
+    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     mhsa = MultiHeadCrossAttention(
         num_heads,
         embed_dim,
