@@ -48,7 +48,9 @@ is a much more efficient way to parallelise the training.
 Anemoi Training provides different sharding strategies depending if the
 model task is deterministic or ensemble based.
 
-For deterministic models, the ``DDPGroupStrategy`` is used: .. code::
+For deterministic models, the ``DDPGroupStrategy`` is used:
+
+  .. code::
 yaml
 
    strategy:
