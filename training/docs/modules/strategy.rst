@@ -15,7 +15,7 @@ within PyTorch `DDP Strategy
 .. note::
 
    Generally you should not need to change this module, as it is
-   independent of the computer being used for training.
+   independent of the system being used for training.
 
 Anemoi Training provides different sharding strategies for the
 deterministic or ensemble based model tasks.
