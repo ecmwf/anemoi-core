@@ -85,7 +85,8 @@ applied only that part of the data mesh within a certain distance to the
 restricted set of data nodes.
 
 After the long edges are removed the edge attributes are recomputed,
-since the removal of a large number of edges can change their distribution.
+since the removal of a large number of edges can change their
+distribution.
 
 .. code:: yaml
 
