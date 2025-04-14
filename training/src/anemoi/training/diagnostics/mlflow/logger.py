@@ -346,6 +346,16 @@ class AnemoiMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
+
+    def _check_dry_run(self,run) -> None:
+        """Check if the run is a dry run.
+
+        A dry run is a run that is used as template base run.
+        """
+        dry_run = run.data.tags.get("dry_run", "False") == "True"
+        LOGGER.info("Dry Run: %s", dry_run)
+        self._dry_run= dry_run
+
     def _check_server2server_lineage(self, run: mlflow.entities.Run) -> bool:
         """Address lineage and metadata for server2server runs.
 
@@ -406,6 +416,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 run = mlflow_client.get_run(run_id)
                 run_name = run.info.run_name
                 self._check_server2server_lineage(run)
+                self._check_dry_run(parent_run)
                 mlflow_client.update_run(run_id=run_id, status="RUNNING")
                 tags["resumedRun"] = "True"
             # This block is used when a run is forked and an existing run ID is specified
@@ -415,6 +426,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 parent_run = mlflow_client.get_run(parent_run_id)
                 run_name = parent_run.info.run_name
                 self._check_server2server_lineage(parent_run)
+                self._check_dry_run(parent_run)
                 tags["mlflow.parentRunId"] = config_run_id  # We want to be linked to the main run ID
                 tags["resumedRun"] = "True"  # We want to be linked to the main run ID
                 tags["forkedRun"] = "True"  # This is a forked run
@@ -426,6 +438,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 tags["forkedRunId"] = parent_run_id
                 run = mlflow_client.get_run(parent_run_id)
                 self._check_server2server_lineage(run)
+                self._check_dry_run(run)
 
         if not run_name:
             import uuid

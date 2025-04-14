@@ -212,6 +212,8 @@ class MlFlow(Command):
             # Log metadata to MLflow server
             mlflow.set_tracking_uri(config.diagnostics.log.mlflow.tracking_uri)
             client.set_tag(run_id, "mlflow.user", args.owner)
+            client.set_tag(run_id, "mlflow.user", args.owner)
+            client.set_tag(run_id, "dry_run", True)
             client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
             AnemoiMLflowLogger.log_hyperparams_in_mlflow(
                 client,
