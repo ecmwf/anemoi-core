@@ -85,8 +85,7 @@ applied only that part of the data mesh within a certain distance to the
 restricted set of data nodes.
 
 After the long edges are removed the edge attributes are recomputed,
-since the removal of a large number of edges can affect those, e.g.
-their normalisation.
+since the removal of a large number of edges can change their distribution.
 
 .. code:: yaml
 
@@ -97,7 +96,7 @@ their normalisation.
    - _target_: anemoi.graphs.processors.RestrictEdgeLength
      source_name: data                #source nodes of the edges to be processed
      target_name: hidden              #target nodes of the edges to be processed
-     threshold: 20                    #edges longer than the threshold of 20 km will be removed
+     max_length_km: 20                #edges longer than the threshold of 20 km will be removed
 
 The ``RestrictEdgeLength`` post-processor also supports the
 ``source_mask_attr_name`` and ``target_mask_attr_name`` arguments. These

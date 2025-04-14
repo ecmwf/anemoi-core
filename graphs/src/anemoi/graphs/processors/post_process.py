@@ -231,6 +231,8 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         Name of the source nodes of edges to remove.
     target_name: str
         Name of the target nodes of edges to remove.
+    max_length_km: float
+        The maximal length of edges not to be removed.
     source_mask_attr_name: str , optional
          the postprocessing will be restricted to edges with source node having True in this mask_attr
     target_mask_attr_name: str, optional
@@ -238,19 +240,19 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
     Methods
     -------
     compute_mask(graph)
-        Compute the mask of the relevant edges longer than the threshold.
+        Compute the mask of the relevant edges longer than max_length_km.
     """
 
     def __init__(
         self,
         source_name: str,
-        target_name: str,
-        threshold: float,
+        target_name: str
+        max_length_km: float,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
     ) -> None:
         super().__init__(source_name, target_name)
-        self.treshold = threshold
+        self.treshold = max_length_km
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
 
@@ -259,7 +261,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         target_nodes = graph[self.target_name]
         edge_index = graph[self.edges_name].edge_index
         lengths = EARTH_RADIUS * EdgeLength()(x=(source_nodes, target_nodes), edge_index=edge_index)
-        mask = torch.where(lengths < self.treshold, True, False).squeeze()
+        mask = torch.where(lengths > self.treshold, False, True).squeeze()
         cases = [
             (self.source_mask_attr_name, source_nodes, 0),
             (self.target_mask_attr_name, target_nodes, 1),
