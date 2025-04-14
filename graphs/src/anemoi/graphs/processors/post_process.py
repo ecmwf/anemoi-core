@@ -12,11 +12,11 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import Any
 
 import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
-from typing import Any
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
