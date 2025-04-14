@@ -16,6 +16,7 @@ from abc import abstractmethod
 import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
+from typing import Any
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
@@ -27,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 class PostProcessor(ABC):
 
     @abstractmethod
-    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Dict[str, Any]) -> HeteroData:
         raise NotImplementedError(f"The {self.__class__.__name__} class does not implement the method update_graph().")
 
 
@@ -79,7 +80,7 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
 
         return graph
 
-    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Dict[str, Any]) -> HeteroData:
         """Post-process the graph.
 
         Parameters
@@ -200,7 +201,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
             )
         return graph
 
-    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Dict[str, Any]) -> HeteroData:
         """Post-process the graph.
 
         Parameters
