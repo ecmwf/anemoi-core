@@ -39,7 +39,7 @@ class RestrictEdgeLengthSchema(BaseModel):
     "Source nodes of edges to be post-processed."
     target_name: str
     "Target nodes of edges to be post-processed."
-    threshold: float
+    max_length_km: float
     "Treshold length (in km), edges longer than this length will be removed"
     source_mask_attr_name: str = Field(example=None)
     "Boolean mask attribute on sources nodes. Only edges whose source is True under this mask will be post-processed"
