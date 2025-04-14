@@ -4,14 +4,15 @@
 
 The models module provides several neural network architectures that
 work with graph input data and follow an encoder-processor-decoder
-structure `Lang et al. (2024a) <https://arxiv.org/abs/2406.01465>`_.
+structure.
 
 *********************************
  Encoder-Processor-Decoder Model
 *********************************
 
 The model defines a network architecture with configurable encoder,
-processor, and decoder components.
+processor, and decoder components (`Lang et al. (2024a)
+<https://arxiv.org/abs/2406.01465>`_).
 
 .. autoclass:: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
    :members:
