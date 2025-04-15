@@ -40,7 +40,7 @@ classifiers = [
 
 dynamic = [ "version" ]
 dependencies = [
-  "anemoi-datasets>=0.3.3",
+  "anemoi-datasets>=0.5.21",
   "anemoi-utils>=0.4.11",
   "h3>=3.7.6,<4",
   "healpy>=1.17",
@@ -48,7 +48,7 @@ dependencies = [
   "matplotlib>=3.4",
   "netcdf4>1.6",
   "networkx>=3.1",
-  "numpy>=1.24",
+  "numpy>=1.24,<2",
   "plotly>=5.19",
   "scikit-learn>=1.5",
   "torch>=2.2",
@@ -71,7 +71,7 @@ optional-dependencies.docs = [
   "tomli",
 ]
 
-optional-dependencies.tests = [ "hypothesis>=6", "pytest>=8" ]
+optional-dependencies.tests = [ "hypothesis>=6", "pytest>=8", "pytest-mock>=3" ]
 
 urls.Documentation = "https://anemoi-graphs.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-graphs/"
