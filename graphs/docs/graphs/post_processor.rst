@@ -118,7 +118,7 @@ the threshold. An example usage:
    - _target_: anemoi.graphs.processors.RestrictEdgeLength
      source_name: data                #source nodes of the edges to be processed
      target_name: hidden              #target nodes of the edges to be processed
-     threshold: 20                    #edges longer than this threshold (in km) will be removed
+     max_length_km: 20                    #edges longer than this threshold (in km) will be removed
      source_mask_attr_name: cutout    #optional
 
 With this configuration only edges whose source is in the cutout region
