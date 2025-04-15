@@ -13,6 +13,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.processors.post_process import RemoveUnconnectedNodes
+from anemoi.graphs.processors.post_process import RestrictEdgeLength
 
 
 def test_remove_unconnected_nodes(graph_with_isolated_nodes: HeteroData):
@@ -77,3 +78,48 @@ def test_remove_unconnected_nodes_parametrized(
         assert graph[nodes_name][save_mask_indices_to_attr].ndim == 2
     else:
         assert graph[nodes_name].node_attrs() == graph_with_isolated_nodes[nodes_name].node_attrs()
+
+
+def test_restrict_edge_length(graph_long_and_short_edges: HeteroData):
+    """Test removal of all long ( > 1000km) edges."""
+    graph = graph_long_and_short_edges
+    expected_nodes_x = graph["test_nodes"].x
+
+    short_mask = torch.tensor([1, 0, 0, 1], dtype=torch.bool)
+    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, short_mask]
+
+    processor = RestrictEdgeLength("test_nodes", "test_nodes", 1000)
+    restricted_graph = processor.update_graph(graph)
+
+    assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
+    assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
+
+
+def test_restrict_edge_length_source_mask(graph_long_and_short_edges: HeteroData):
+    """Test removal of all long ( > 1000km) edges with source in southern hemisphere."""
+    graph = graph_long_and_short_edges
+    expected_nodes_x = graph["test_nodes"].x
+
+    long_southern_source_mask = torch.tensor([0, 1, 0, 0], dtype=torch.bool)
+    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, ~long_southern_source_mask]
+
+    processor = RestrictEdgeLength("test_nodes", "test_nodes", 1000, source_mask_attr_name="southern_hemisphere_mask")
+    restricted_graph = processor.update_graph(graph)
+
+    assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
+    assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
+
+
+def test_restrict_edge_length_target_mask(graph_long_and_short_edges: HeteroData):
+    """Test removal of all long ( > 1000km) edges with target in southern hemisphere."""
+    graph = graph_long_and_short_edges
+    expected_nodes_x = graph["test_nodes"].x
+
+    long_southern_target_mask = torch.tensor([0, 0, 1, 0], dtype=torch.bool)
+    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, ~long_southern_target_mask]
+
+    processor = RestrictEdgeLength("test_nodes", "test_nodes", 1000, target_mask_attr_name="southern_hemisphere_mask")
+    restricted_graph = processor.update_graph(graph)
+
+    assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
+    assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
