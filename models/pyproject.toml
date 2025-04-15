@@ -64,7 +64,7 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
 ]
 
-optional-dependencies.tests = [ "hypothesis>=6", "pytest>=8" ]
+optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8" ]
 
 urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"
