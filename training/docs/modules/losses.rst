@@ -13,9 +13,9 @@ enables scalar multiplication, and graph node weighting.
    :no-undoc-members:
    :show-inheritance:
 
-************************
- Default Loss Functions
-************************
+******************************
+ Deterministic Loss Functions
+******************************
 
 By default anemoi-training trains the model using a latitude-weighted
 mean-squared-error, which is defined in the ``WeightedMSELoss`` class in
@@ -44,6 +44,27 @@ reference it in the config as follows:
    training_loss:
       # loss class to initialise
       _target_: anemoi.training.losses.mse.WeightedMSELoss
+      # loss function kwargs here
+
+******************************
+ Probabilistic Loss Functions
+******************************
+
+The following probabilistic loss functions are available by default:
+
+-  ``KernelCRPSLoss``: Kernel CRPS loss.
+-  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
+   et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+
+The config for these loss functions is the same as for the
+deterministic:
+
+.. code:: yaml
+
+   # loss function for the model
+   training_loss:
+      # loss class to initialise
+      _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
       # loss function kwargs here
 
 *********

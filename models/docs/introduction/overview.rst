@@ -25,8 +25,8 @@ anemoi-models package:
 The `AnemoiModelInterface` is designed to provide an interface between
 the training and the model itself. This code is used for making
 predictions with an underlying machine learning model. It implements the
-the interface for pre-processing input data, performing inference using
-the model, and post-processing the output.
+interface for pre-processing input data, performing inference using the
+model, and post-processing the output.
 
 These components can be extended and switched out with the config files.
 
@@ -55,48 +55,53 @@ Currently the package includes the following preprocessing steps:
  Model
 *******
 
-The `models` is the core component of the anemoi-models package,
-defining the core model architecture for the graph neural network. The
-model is designed to be flexible and modular, allowing for easy
-customization and extension. The model is built using the PyTorch
-Geometric library, which provides a wide range of tools and utilities
-for building graph neural networks.
+The `models` module is the core component of the anemoi-models package,
+defining various model architectures to work with graph data. The models
+are designed to be flexible and modular, allowing for easy customization
+and extension through configuration.
 
-The model is designed to take in a graph representation of the input
-data, process it using a series of modules, and output a prediction.
+The package currently includes the following model architectures:
 
-Currently the package includes the following models:
+-  **AnemoiModelEncProcDec**: The base encoder-processor-decoder
+   architecture, e.g. AIFS-single
+-  **AnemoiModelEncProcDecHierarchical**: A hierarchical variant of the
+   base architecture
+-  **AnemoiEnsModelEncProcDec**: The CRPS-optimized ensemble version
+   that injects noise in the processor, e.g. AIFS-CRPS
+-  **AnemoiModelEncProcDecInterpolator**: A specialized architecture for
+   time interpolation
 
--  Encoder-Processor-Decoder architecture
+All models support flexible layer kernel configuration, allowing for
+customization of linear and normalization layers in different parts of
+the model.
 
 ********
  Layers
 ********
 
-The `layers` module provides the core building blocks for the graph
-neural network in `Models`. This includes graph transformers, graph
+The `layers` module provides the core building blocks for the neural
+network in `Models`. This includes graph transformers, graph
 convolutions, and transformers, as well as, other layers that are used
 to process the input data.
 
 The layers are designed as extensible classes to allow for easy
 experimentation and switching out of components.
 
-The layers implement `Mappers`, which can encode and decode data from
-the graph representation. The `Mappers` are used to process the input
-data and output the prediction. The `Mappers` use the `Blocks` to
-process the data, which are the building blocks of the graph neural
-network.
+Mappers
+=======
+
+The layers implement `Mappers`, which maps data between the input grid
+and the internal hidden grid. The `Mappers` are used as encoder and
+decoder. The `Mappers` use the `Blocks` to process the data, which are
+the building blocks of the graph neural network.
+
+Processors
+==========
 
 Additionally, the layers implement `Processors` which are used to
-process the data in the graph representation. The `Processors` use a
-chunking strategy with `Chunks` that pass a subset of layers to `Blocks`
-to allow for more efficient processing of the data.
-
-Currently the package includes the following implementations:
-
--  Graph Convolution (Mapper, Processor)
--  Graph Transformer (Mapper, Processor)
--  Transformer (Processor)
+process the data on the hidden grid. The `Processors` use a chunking
+strategy with `Chunks` that pass a subset of layers to `Blocks` to allow
+for more efficient processing of the data.
 
 **************
  Data Indices
@@ -119,3 +124,71 @@ The `distributed` module provides utilities for distributed training of
 the model. This includes includes the splitting and gathering of the
 model and its tensors / parameters across multiple GPUs. This process is
 also known as "model shardings".
+
+***************
+ Layer Kernels
+***************
+
+Layer kernels provide a flexible mechanism to customize the
+implementation of linear layers and layer normalization in different
+parts of the model (encoder, processor, decoder) through the
+`config.yaml`.
+
+Example configuration:
+
+.. code:: yaml
+
+   layer_kernels:
+      processor:
+         LayerNorm:
+            _target_: torch.nn.LayerNorm
+            _partial_: True
+            # Any arguments to your chosen function go here
+
+         Linear:
+            _target_: torch.nn.Linear
+            _partial_: True
+            # Any arguments to your chosen function go here
+
+         QueryNorm:
+            _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+            _partial_: True
+            bias: False
+
+         KeyNorm:
+            _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+            _partial_: True
+            bias: False
+
+      encoder:
+         LayerNorm:
+            _target_: torch.nn.LayerNorm
+            _partial_: True
+
+         Linear:
+            _target_: torch.nn.Linear
+            _partial_: True
+
+      decoder:
+         LayerNorm:
+            _target_: torch.nn.LayerNorm
+            _partial_: True
+
+         Linear:
+            _target_: torch.nn.Linear
+            _partial_: True
+
+.. note::
+
+   If no layer kernels are specified in the configuration, the following
+   defaults are used:
+
+   -  ``LayerNorm``: ``torch.nn.LayerNorm``
+   -  ``Linear``: ``torch.nn.Linear``
+
+Layer kernels are particularly useful when:
+
+#. You need to use specialized implementations for efficiency
+#. You want to experiment with different normalization techniques
+#. You need to customize the behavior of specific layers in different
+   parts of the model
