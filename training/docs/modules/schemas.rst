@@ -54,17 +54,17 @@ files,
  Graph
 *******
 
-.. automodule:: anemoi.training.schemas.graphs.basegraph
+.. automodule:: anemoi.graphs.schemas.basegraph
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.schemas.graphs.node_schemas
+.. automodule:: anemoi.graphs.schemas.node_schemas
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.schemas.graphs.edge_schemas
+.. automodule:: anemoi.graphs.schemas.edge_schemas
    :members:
    :no-undoc-members:
    :show-inheritance:
@@ -73,22 +73,22 @@ files,
  Model
 *******
 
-.. automodule:: anemoi.training.schemas.models.models
+.. automodule:: anemoi.models.schemas.models
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.schemas.models.processor
+.. automodule:: anemoi.models.schemas.processor
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.schemas.models.encoder
+.. automodule:: anemoi.models.schemas.encoder
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.schemas.models.decoder
+.. automodule:: anemoi.models.schemas.decoder
    :members:
    :no-undoc-members:
    :show-inheritance:
