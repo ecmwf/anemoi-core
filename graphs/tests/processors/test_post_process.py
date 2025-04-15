@@ -80,7 +80,7 @@ def test_remove_unconnected_nodes_parametrized(
         assert graph[nodes_name].node_attrs() == graph_with_isolated_nodes[nodes_name].node_attrs()
 
 
-def test_restrict_edge_length(graph_long_and_short_eges: HeteroData):
+def test_restrict_edge_length(graph_long_and_short_edges: HeteroData):
     graph = graph_long_and_short_edges
     expected_nodes_x = graph["test_nodes"].x
 
