@@ -325,8 +325,6 @@ class BaseTrainingSchema(BaseModel):
     "Config for gradient clipping."
     strategy: StrategySchemas
     "Strategy to use."
-    model_task: TrainingSchema
-    "Forecaster to use."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
     training_loss: LossSchemas
