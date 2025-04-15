@@ -13,6 +13,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.processors.post_process import RemoveUnconnectedNodes
+from anemoi.graphs.processors.post_process import RestrictEdgeLength
 
 
 def test_remove_unconnected_nodes(graph_with_isolated_nodes: HeteroData):
