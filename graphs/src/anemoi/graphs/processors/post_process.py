@@ -87,8 +87,8 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
         ----------
         graph: HeteroData
             The graph to post-process.
-        graph_config: dict
-            The configuration the graph was created from.
+        kwargs: Any
+            Additional keyword arguments.
 
         Returns
         -------
@@ -208,8 +208,8 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         ----------
         graph: HeteroData
             The graph to post-process.
-        graph_config: dict, optional
-            The configuration the graph was created from.
+        kwargs: Any
+            Additional keyword arguments.
 
         Returns
         -------
