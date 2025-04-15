@@ -76,7 +76,7 @@ class AnemoiTrainer:
 
             LOGGER.info("Skipping config validation.")
 
-        self.start_from_checkpoint = (bool(self.config.training.run_id)) or bool(self.config.training.fork_run_id)
+        self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
         self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None
 
