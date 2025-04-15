@@ -37,6 +37,10 @@ class FilesSchema(PydanticBaseModel):
     "Path to the dataset file."
     graph: Union[Path, None] = None
     "Path to the graph file."
+    truncation: Union[Path, None] = None
+    "Path to the truncation matrix file."
+    truncation_inv: Union[Path, None] = None
+    "Path to the inverse truncation matrix file."
     checkpoint: dict[str, str]
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
     warm_start: Union[str, None] = None
@@ -56,6 +60,8 @@ class PathsSchema(BaseModel):
     "Path to the data directory."
     graph: Union[Path, None] = None
     "Path to the graph directory."
+    truncation: Union[Path, None] = None
+    "Path to the truncation matrix directory."
     output: Union[Path, None] = None
     "Path to the output directory."
     logs: Union[Logs, None] = None
@@ -80,6 +86,8 @@ class HardwareSchema(BaseModel):
     "Number of nodes."
     num_gpus_per_model: NonNegativeInt = 1
     "Number of GPUs per model."
+    num_gpus_per_ensemble: NonNegativeInt = 1
+    "Number of GPUs per ensemble."
     files: FilesSchema
     "Files schema."
     paths: PathsSchema

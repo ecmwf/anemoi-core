@@ -1,3 +1,5 @@
+.. _usage-getting-started:
+
 Welcome to the Anemoi Training user guide. Anemoi Training is a
 framework designed for training machine learning models for weather
 forecasting. This guide will walk you through the key components and

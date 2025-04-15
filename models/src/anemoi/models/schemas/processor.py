@@ -37,6 +37,8 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     "Number of layers of Graph Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
+    qk_norm: bool = Field(example=False)
+    "Normalize the query and key vectors. Default to False."
 
 
 class TransformerProcessorSchema(TransformerModelComponent):
@@ -52,6 +54,8 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Dropout probability used for multi-head self attention, default 0.0"
     attention_implementation: str = Field(example="flash_attention")
     "Attention implementation to use. Default to 'flash_attention'."
+    qk_norm: bool = Field(example=False)
+    "Normalize the query and key vectors. Default to False."
     softcap: NonNegativeFloat = Field(example=0.0)
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)

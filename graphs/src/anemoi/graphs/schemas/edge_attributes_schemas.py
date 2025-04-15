@@ -16,7 +16,11 @@ from typing import Union
 
 from pydantic import Field
 
+<<<<<<< HEAD:graphs/src/anemoi/graphs/schemas/edge_attributes_schemas.py
 from anemoi.utils.schemas import BaseModel
+=======
+from anemoi.training.schemas.utils import BaseModel
+>>>>>>> main:training/src/anemoi/training/schemas/graphs/edge_attributes_schemas.py
 
 
 class ImplementedEdgeAttributeSchema(str, Enum):
