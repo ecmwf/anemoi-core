@@ -95,8 +95,8 @@ class AnemoiTrainer:
         # Update paths to contain the run ID
         self._update_paths()
 
-        # Update dry_run_id attribute, check if checkpoint exists
-        self._get_dry_run_id()
+        # Update dry_run attribute, check if checkpoint exists
+        self._check_dry_run()
 
         # Check for dry run, i.e. run id without data
         self._log_information()
@@ -462,15 +462,23 @@ class AnemoiTrainer:
         LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
         LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
 
-    def _get_dry_run_id(self) -> None:
-        """Check if the run ID is dry, e.g. without a checkpoint."""
-        # The Path casting is needed because in some multiple-gpu use cases
-        # ranks > 0 checkpoint paths are Python strings.
-        if Path(self.config.hardware.paths.checkpoints).is_dir():
-            self.dry_run_id = False
-        else:
-            LOGGER.info("Starting from a dry run ID.")
-            self.dry_run_id = True
+    @rank_zero_only
+    def _check_dry_run(self) -> None:
+        """Check if the run ID is dry, e.g. without a checkpoint.
+
+        If the run ID is dry, the training will not be started.
+        This is used to check the run can be restarted from the checkpoint.
+        """
+        self.dry_run = False
+        if self.config.diagnostics.log.mlflow.enabled:
+            # Check if the run ID is dry - e.g. without a checkpoint
+            self.dry_run = (
+                self.mlflow_logger._parent_dry_run and not Path(self.config.hardware.paths.checkpoints).is_dir()
+            )
+            self.start_from_checkpoint = (
+                False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint
+            )
+            LOGGER.info("Dry run: %s", self.dry_run)
 
     @cached_property
     def strategy(self) -> Any:
@@ -513,7 +521,7 @@ class AnemoiTrainer:
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only or self.dry_run_id) else self.last_checkpoint,
+            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
