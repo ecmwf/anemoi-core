@@ -53,6 +53,7 @@ class TestGraphTransformerBaseMapper:
         trainable_size: int = 6
         num_heads: int = 16
         mlp_hidden_ratio: int = 7
+        qk_norm: bool = True
         return (
             in_channels_src,
             in_channels_dst,
@@ -64,6 +65,7 @@ class TestGraphTransformerBaseMapper:
             num_heads,
             mlp_hidden_ratio,
             layer_kernels,
+            qk_norm,
         )
 
     @pytest.fixture
@@ -79,6 +81,7 @@ class TestGraphTransformerBaseMapper:
             num_heads,
             mlp_hidden_ratio,
             layer_kernels,
+            qk_norm,
         ) = mapper_init
         return GraphTransformerBaseMapper(
             in_channels_src=in_channels_src,
@@ -87,6 +90,7 @@ class TestGraphTransformerBaseMapper:
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
             activation=activation,
+            qk_norm=qk_norm,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -108,6 +112,7 @@ class TestGraphTransformerBaseMapper:
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         return (
             torch.rand(self.NUM_SRC_NODES, in_channels_src),
@@ -141,6 +146,7 @@ class TestGraphTransformerBaseMapper:
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         assert isinstance(mapper, GraphTransformerBaseMapper)
         assert mapper.in_channels_src == in_channels_src
@@ -164,6 +170,7 @@ class TestGraphTransformerBaseMapper:
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
@@ -206,6 +213,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             num_heads,
             mlp_hidden_ratio,
             layer_kernels,
+            qk_norm,
         ) = mapper_init
         return GraphTransformerForwardMapper(
             in_channels_src=in_channels_src,
@@ -214,6 +222,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
             activation=activation,
+            qk_norm=qk_norm,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -235,6 +244,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
@@ -262,6 +272,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         x = pair_tensor
         batch_size = 1
@@ -309,6 +320,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             _num_heads,
             _mlp_hidden_ratio,
             layer_kernels,
+            qk_norm,
         ) = mapper_init
         return GraphTransformerBackwardMapper(
             in_channels_src=in_channels_src,
@@ -317,6 +329,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             out_channels_dst=out_channels_dst,
             cpu_offload=cpu_offload,
             activation=activation,
+            qk_norm=qk_norm,
             sub_graph=fake_graph[("src", "to", "dst")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
             trainable_size=trainable_size,
@@ -336,6 +349,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
@@ -363,6 +377,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         x_dst = torch.rand(self.NUM_DST_NODES, hidden_dim)
         shapes_dst = [list(x_dst.shape)]
@@ -384,6 +399,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
+            _qk_norm,
         ) = mapper_init
         pair_tensor
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]

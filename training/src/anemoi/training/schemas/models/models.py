@@ -36,6 +36,8 @@ LOGGER = logging.getLogger(__name__)
 class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
     ANEMOI_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDec"
+    ANEMOI_ENS_MODEL_ENC_PROC_DEC = "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec"
+    ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_ENC_HIERPROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_ENC_HIERPROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_INTERPENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
@@ -63,6 +65,11 @@ class ReluBoundingSchema(BaseModel):
     "List of variables to bound using the Relu method."
 
 
+class LeakyReluBoundingSchema(ReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(..., alias="_target_")
+    "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
+
+
 class FractionBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
     "Fraction bounding object defined in anemoi.models.layers.bounding."
@@ -77,6 +84,11 @@ class FractionBoundingSchema(BaseModel):
     For example, convective precipitation should be a fraction of total precipitation."
 
 
+class LeakyFractionBoundingSchema(FractionBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(..., alias="_target_")
+    "Leaky fraction bounding object defined in anemoi.models.layers.bounding."
+
+
 class HardtanhBoundingSchema(BaseModel):
     target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(..., alias="_target_")
     "Hard tanh bounding method function from anemoi.models.layers.bounding."
@@ -86,6 +98,11 @@ class HardtanhBoundingSchema(BaseModel):
     "The minimum value for the HardTanh activation."
     max_val: float
     "The maximum value for the HardTanh activation."
+
+
+class LeakyHardtanhBoundingSchema(HardtanhBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(..., alias="_target_")
+    "Leaky hard tanh bounding method function from anemoi.models.layers.bounding."
 
 
 class NormalizedReluBoundingSchema(BaseModel):
@@ -105,18 +122,34 @@ class NormalizedReluBoundingSchema(BaseModel):
         return self
 
 
+class LeakyNormalizedReluBoundingSchema(NormalizedReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.LeakyNormalizedReluBounding"] = Field(..., alias="_target_")
+    "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
+
+
 Bounding = Annotated[
-    Union[ReluBoundingSchema, FractionBoundingSchema, HardtanhBoundingSchema, NormalizedReluBoundingSchema],
+    Union[
+        ReluBoundingSchema,
+        LeakyReluBoundingSchema,
+        FractionBoundingSchema,
+        LeakyFractionBoundingSchema,
+        HardtanhBoundingSchema,
+        LeakyHardtanhBoundingSchema,
+        NormalizedReluBoundingSchema,
+        LeakyNormalizedReluBoundingSchema,
+    ],
     Field(discriminator="target_"),
 ]
 
 
-class ModelSchema(PydanticBaseModel):
+class BaseModelSchema(PydanticBaseModel):
 
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     model: Model = Field(default_factory=Model)
     "Model schema."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
     bounding: list[Bounding]
@@ -137,3 +170,24 @@ class ModelSchema(PydanticBaseModel):
     "GNN encoder schema."
     decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema] = Field(..., discriminator="target_")
     "GNN decoder schema."
+
+
+class NoiseInjectorSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.ensemble.NoiseConditioning"] = Field(..., alias="_target_")
+    "Noise injection layer class"
+    noise_std: NonNegativeInt = Field(example=1)
+    "Standard deviation of the noise to be injected."
+    noise_channels_dim: NonNegativeInt = Field(example=4)
+    "Number of channels in the noise tensor."
+    noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
+    "Hidden dimension of the MLP used to process the noise."
+    inject_noise: bool = Field(default=True)
+    "Whether to inject noise or not."
+
+
+class EnsModelSchema(BaseModelSchema):
+    noise_injector: NoiseInjectorSchema = Field(default_factory=list)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
+
+
+ModelSchema = Union[BaseModelSchema, EnsModelSchema]
