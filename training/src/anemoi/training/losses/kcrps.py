@@ -76,8 +76,8 @@ class KernelCRPS(BaseLoss):
         y_target: torch.Tensor,
         squash: bool = True,
         *,
-        scalar_indices: tuple[int, ...] | None = None,
-        without_scalars: list[str] | list[int] | None = None,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
 
         y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
@@ -88,7 +88,7 @@ class KernelCRPS(BaseLoss):
 
         kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs latlon v")
 
-        kcrps_ = self.scale(kcrps_, scalar_indices, without_scalars=without_scalars)
+        kcrps_ = self.scale(kcrps_.unsqueeze(1), scaler_indices, without_scalers=without_scalers)
 
         # divide by batch size
         if squash:
@@ -175,8 +175,8 @@ class AlmostFairKernelCRPS(BaseLoss):
         y_target: torch.Tensor,
         squash: bool = True,
         *,
-        scalar_indices: tuple[int, ...] | None = None,
-        without_scalars: list[str] | list[int] | None = None,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
 
         y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
@@ -191,7 +191,9 @@ class AlmostFairKernelCRPS(BaseLoss):
 
         kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs latlon v")
 
-        kcrps_ = self.scale(kcrps_, scalar_indices, without_scalars=without_scalars)
+        # TODO: The unsqueeze is a hack to get the correct shape for the loss
+        # The ensemble member dimension is of course gone in the crps but scalers require 4 dimensions
+        kcrps_ = self.scale(kcrps_.unsqueeze(1), scaler_indices, without_scalers=without_scalers)
 
         # divide by (weighted point count) * (batch size)
         if squash:

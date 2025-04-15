@@ -41,6 +41,7 @@ class GraphEnsForecaster(GraphForecaster):
         graph_data: HeteroData,
         truncation_data: dict,
         statistics: dict,
+        statistics_tendencies: dict,
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict,
@@ -63,6 +64,7 @@ class GraphEnsForecaster(GraphForecaster):
             graph_data=graph_data,
             truncation_data=truncation_data,
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
@@ -236,10 +238,6 @@ class GraphEnsForecaster(GraphForecaster):
             f", {batch[0].shape[1]} !>= {rollout + self.multi_step}"
         )
         assert batch[0].shape[1] >= rollout + self.multi_step, msg
-
-        if not self.updated_loss_mask:
-            # update loss scalar after first application and initialization of preprocessors
-            self.training_weights_for_imputed_variables(batch[0])
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
