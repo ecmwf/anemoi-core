@@ -54,7 +54,7 @@ files,
  Graph
 *******
 
-.. automodule:: anemoi.graphs.schemas.basegraph
+.. automodule:: anemoi.graphs.schemas.base_graph
    :members:
    :no-undoc-members:
    :show-inheritance:
