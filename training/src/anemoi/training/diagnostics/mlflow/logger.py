@@ -305,6 +305,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
         self._fork_run_server2server = None
         self._parent_run_server2server = None
+        self._parent_dry_run = False
 
         enabled = authentication and not offline
         self.auth = TokenAuth(tracking_uri, enabled=enabled)
@@ -346,15 +347,15 @@ class AnemoiMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
+    def _check_dry_run(self, run: mlflow.entities.Run) -> None:
+        """Check if the parent run is a dry run.
 
-    def _check_dry_run(self,run) -> None:
-        """Check if the run is a dry run.
-
-        A dry run is a run that is used as template base run.
+        A dry run is a run that is used as template base run
+        but do not contain any checkpoints.
         """
         dry_run = run.data.tags.get("dry_run", "False") == "True"
-        LOGGER.info("Dry Run: %s", dry_run)
-        self._dry_run= dry_run
+        LOGGER.info("Parent run is a Dry Run: %s", dry_run)
+        self._parent_dry_run = dry_run
 
     def _check_server2server_lineage(self, run: mlflow.entities.Run) -> bool:
         """Address lineage and metadata for server2server runs.
@@ -408,6 +409,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 parent_run = mlflow_client.get_run(parent_run_id)
                 run_name = parent_run.info.run_name
                 self._check_server2server_lineage(parent_run)
+                self._check_dry_run(parent_run)
                 tags["mlflow.parentRunId"] = parent_run_id
                 tags["resumedRun"] = "True"  # tags can't take boolean values
             # This block is used when a run ID is specified without child runs option activated
