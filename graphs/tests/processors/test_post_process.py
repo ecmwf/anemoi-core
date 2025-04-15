@@ -81,7 +81,7 @@ def test_remove_unconnected_nodes_parametrized(
 
 
 def test_restrict_edge_length(graph_long_and_short_eges: HeteroData):
-    graph = graph_long_and_short_edges()
+    graph = graph_long_and_short_edges
     expected_nodes_x = graph["test_nodes"].x
 
     # test removal of all long  ( > 1000km) edges
@@ -95,7 +95,7 @@ def test_restrict_edge_length(graph_long_and_short_eges: HeteroData):
     assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
 
     # test removal of all long edges with source in southern hemisphere
-    graph = graph_long_and_short_edges()
+    graph = graph_long_and_short_edges
     long_southern_source_mask = torch.tensor([0, 1, 0, 0], dtype=torch.bool)
     expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, ~long_southern_source_mask]
 
@@ -106,7 +106,7 @@ def test_restrict_edge_length(graph_long_and_short_eges: HeteroData):
     assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
 
     # test removal of all long edges with target in southern hemisphere
-    graph = graph_long_and_short_edges()
+    graph = graph_long_and_short_edges
     long_southern_target_mask = torch.tensor([0, 0, 1, 0], dtype=torch.bool)
     expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, ~long_southern_target_mask]
 
