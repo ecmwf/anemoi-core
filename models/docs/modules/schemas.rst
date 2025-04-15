@@ -1,13 +1,8 @@
+.. _schemas:
+
 #########
  Schemas
 #########
-
-This module defines pydantic schemas, which are used to validate the
-configuration.
-
-#######
- Model
-#######
 
 .. automodule:: anemoi.models.schemas.models
    :members:

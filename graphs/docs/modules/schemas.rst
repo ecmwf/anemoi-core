@@ -1,3 +1,5 @@
+.. _schemas:
+
 #########
  Schemas
 #########
@@ -5,11 +7,7 @@
 This module defines pydantic schemas, which are used to validate the
 configuration.
 
-#######
- Graph
-#######
-
-.. automodule:: anemoi.graphs.schema.basegraph
+.. automodule:: anemoi.graphs.schemas.base_graph
    :members:
    :no-undoc-members:
    :show-inheritance:
