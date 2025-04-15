@@ -125,7 +125,7 @@ def get_edge_attributes(config: dict, source_name: str, target_name: str) -> dic
         Dictionary of the form {attribute_name: attribute}
     """
     attrs = {}
-    for edges_config in config["edges"]:
+    for edges_config in config.get("edges",{}):
         if edges_config["source_name"] == source_name and edges_config["target_name"] == target_name:
             attrs.update(edges_config["attributes"])
     return attrs

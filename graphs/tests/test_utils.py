@@ -30,13 +30,16 @@ def test_get_edge_attributes():
             },
         ],
     }
-    edge_attrs1=get_edge_attributes(mock_config, "mock_nodes", "mock_nodes")
-    edge_attrs2=get_edge_attributes(mock_config, "mock_nodes", "other_nodes")
-    edge_attrs3=get_edge_attributes(mock_config, "other_nodes", "mock_nodes")
 
-    expected1=mock_config["edges"]["attributes"]
-
-    assert edge_attrs1 == expected1
-    assert edge_attrs2 == {}
-    assert edge_attrs3 == {}
+    # test non-empty selection
+    edge_attrs = get_edge_attributes(mock_config, "mock_nodes", "mock_nodes")
+    expected = mock_config["edges"][0]["attributes"]
+    assert edge_attrs == expected
+    
+    # test empty selection
+    edge_attrs = get_edge_attributes(mock_config, "mock_nodes", "other_nodes")
+    assert edge_attrs == {}
+    
+    edge_attrs = get_edge_attributes(mock_config, "other_nodes", "mock_nodes")
+    assert edge_attrs == {}
 
