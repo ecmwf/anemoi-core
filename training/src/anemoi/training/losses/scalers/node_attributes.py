@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     import numpy as np
     from torch_geometric.data import HeteroData
 
-    from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
