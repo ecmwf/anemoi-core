@@ -14,7 +14,6 @@ Keep it human-readable, your future self will thank you!
 ### ⚠ BREAKING CHANGES
 
 * **models,training:** temporal interpolation ([#153](https://github.com/ecmwf/anemoi-core/issues/153))
-* **training,rollout:** Rollout Schedulers ([#46](https://github.com/ecmwf/anemoi-core/issues/46))
 * **config:** Improved configuration and data structures ([#79](https://github.com/ecmwf/anemoi-core/issues/79))
 
 ### Features
@@ -30,7 +29,6 @@ Keep it human-readable, your future self will thank you!
 * **mlflow:** Make direct endpoint calls robust ([#186](https://github.com/ecmwf/anemoi-core/issues/186)) ([77bd890](https://github.com/ecmwf/anemoi-core/commit/77bd890004ea591861ec1efe6732ea1599008985))
 * **models,training:** temporal interpolation ([#153](https://github.com/ecmwf/anemoi-core/issues/153)) ([ea644ce](https://github.com/ecmwf/anemoi-core/commit/ea644ce1c9aef902333d9cbb30bcde0a3746fbcc))
 * **models:** adding leaky boundings ([#256](https://github.com/ecmwf/anemoi-core/issues/256)) ([426e860](https://github.com/ecmwf/anemoi-core/commit/426e86048d6c0a03750fb0e205890841c27c8148))
-* **training,rollout:** Rollout Schedulers ([#46](https://github.com/ecmwf/anemoi-core/issues/46)) ([08b708d](https://github.com/ecmwf/anemoi-core/commit/08b708d0c3369d7fbdaea7ecdfcd764ba3d878ab))
 * **training:** Add initial TimeLimit callback ([#115](https://github.com/ecmwf/anemoi-core/issues/115)) ([41ff583](https://github.com/ecmwf/anemoi-core/commit/41ff5830dc0ba08aaa86e052a1a0aac8c4498c7a))
 
 
