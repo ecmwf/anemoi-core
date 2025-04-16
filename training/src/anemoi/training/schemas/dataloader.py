@@ -26,8 +26,7 @@ from pydantic import RootModel
 from pydantic import computed_field
 
 from anemoi.utils.dates import frequency_to_timedelta
-
-from .utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 
 class Frequency(RootModel):
