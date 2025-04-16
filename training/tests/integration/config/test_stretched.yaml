@@ -42,10 +42,6 @@ data:
     - "sin_julian_day"
     - "sin_local_time"
 
-training:
-  node_loss_weights:
-    weight_frac_of_total: .5 # ???-value in stretched config
-
 hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples

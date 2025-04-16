@@ -32,6 +32,15 @@ class PlanarAreaWeightSchema(BaseModel):
     "Normalisation of the weights."
 
 
+class MaskedPlanarAreaWeightsSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights"] = Field(..., alias="_target_")
+    "Implementation of the area of the nodes as the weights from anemoi.graphs.nodes.attributes."
+    mask_node_attr_name: str = Field(examples="cutout_mask")
+    "Attribute name to mask the area weights."
+    norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
+    "Normalisation of the weights."
+
+
 class SphericalAreaWeightSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.SphericalAreaWeights"] = Field(..., alias="_target_")
     "Implementation of the 3D area of the nodes as the weights from anemoi.graphs.nades.attributes."
@@ -58,6 +67,7 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
 
 SingleAttributeSchema = Union[
     PlanarAreaWeightSchema,
+    MaskedPlanarAreaWeightsSchema,
     SphericalAreaWeightSchema,
     CutOutMaskSchema,
     NonmissingAnemoiDatasetVariableSchema,

@@ -6,7 +6,7 @@ defaults:
 - hardware: example
 - graph: limited_area
 - model: graphtransformer
-- training: default
+- training: lam
 - _self_
 
 config_validation: True
@@ -31,7 +31,10 @@ dataloader:
     nodes_name: data
     node_attribute_name: indices_connected_nodes
 model:
-  output_mask: cutout_mask # it must be a node attribute of the output nodes
+  output_mask:
+    _target_: anemoi.training.utils.masks.Boolean1DMask
+    nodes_name: ${graph.data}
+    attribute_name: cutout_mask
 hardware:
   files:
     dataset: ???
