@@ -20,7 +20,7 @@ from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
 
-from anemoi.training.schemas.utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 

@@ -20,7 +20,7 @@ from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import model_validator
 
-from anemoi.training.schemas.utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001

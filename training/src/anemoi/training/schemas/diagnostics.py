@@ -19,7 +19,7 @@ from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 
-from .utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 

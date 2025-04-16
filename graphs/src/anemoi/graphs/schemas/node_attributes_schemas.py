@@ -16,7 +16,7 @@ from typing import Union
 
 from pydantic import Field
 
-from anemoi.training.schemas.utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
