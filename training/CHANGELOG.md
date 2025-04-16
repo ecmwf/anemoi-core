@@ -32,13 +32,11 @@ Keep it human-readable, your future self will thank you!
 * **models:** adding leaky boundings ([#256](https://github.com/ecmwf/anemoi-core/issues/256)) ([426e860](https://github.com/ecmwf/anemoi-core/commit/426e86048d6c0a03750fb0e205890841c27c8148))
 * **training,rollout:** Rollout Schedulers ([#46](https://github.com/ecmwf/anemoi-core/issues/46)) ([08b708d](https://github.com/ecmwf/anemoi-core/commit/08b708d0c3369d7fbdaea7ecdfcd764ba3d878ab))
 * **training:** Add initial TimeLimit callback ([#115](https://github.com/ecmwf/anemoi-core/issues/115)) ([41ff583](https://github.com/ecmwf/anemoi-core/commit/41ff5830dc0ba08aaa86e052a1a0aac8c4498c7a))
-* **training:** autoencoder 🗜️ ([#172](https://github.com/ecmwf/anemoi-core/issues/172)) ([4684b1c](https://github.com/ecmwf/anemoi-core/commit/4684b1c7a60495bc3a32946b9bf780aef31e387a))
 
 
 ### Bug Fixes
 
 * --longtests not available ([#200](https://github.com/ecmwf/anemoi-core/issues/200)) ([9dfec0a](https://github.com/ecmwf/anemoi-core/commit/9dfec0a3bd2043e646cc49b5302fcc4d669e4a41))
-* bugs introduced in autoencoder PR [#172](https://github.com/ecmwf/anemoi-core/issues/172) ([#247](https://github.com/ecmwf/anemoi-core/issues/247)) ([185438a](https://github.com/ecmwf/anemoi-core/commit/185438a24288048f2483b1f1d72a1946e18a096d))
 * Checkpoint path check for multiple tasks/GPUs training ([#242](https://github.com/ecmwf/anemoi-core/issues/242)) ([449f8bd](https://github.com/ecmwf/anemoi-core/commit/449f8bd6044043fc46160b602762785b475cd1ce))
 * **configs,schemas:** hierarchical schemas ([#221](https://github.com/ecmwf/anemoi-core/issues/221)) ([2d4a54d](https://github.com/ecmwf/anemoi-core/commit/2d4a54d3c6ed2d41fd6cbf2ef3ac57b9efb2f968))
 * correct config comment regarding config_validation flag ([#245](https://github.com/ecmwf/anemoi-core/issues/245)) ([d02e0bb](https://github.com/ecmwf/anemoi-core/commit/d02e0bb2a9bf1700de90c8d862f80a510f03eceb))
