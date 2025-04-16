@@ -7,13 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from typing import Type
+
 import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.nodes.attributes import CosineLatWeightedAttribute
+from anemoi.graphs.nodes.attributes import IsolatitudeAreaWeights
 from anemoi.graphs.nodes.attributes import PlanarAreaWeights
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
+from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 
 def test_uniform_weights(graph_with_nodes: HeteroData):
@@ -63,3 +68,15 @@ def test_spherical_area_weights_wrong_fill_value(fill_value: str):
     """Test attribute builder for SphericalAreaWeights with invalid fill_value."""
     with pytest.raises(AssertionError):
         SphericalAreaWeights(fill_value=fill_value)
+
+
+@pytest.mark.parametrize("attr_class", [IsolatitudeAreaWeights, CosineLatWeightedAttribute])
+def test_latweighted(attr_class: Type[BaseNodeAttribute], graph_with_rectilinear_nodes):
+    """Test attribute builder for Lat with different fill values."""
+    node_attr_builder = attr_class(norm="l1")
+    weights = node_attr_builder.compute(graph_with_rectilinear_nodes, "test_nodes")
+
+    assert weights is not None
+    assert isinstance(weights, torch.Tensor)
+    assert weights.shape[0] == graph_with_rectilinear_nodes["test_nodes"].x.shape[0]
+    assert weights.dtype == node_attr_builder.dtype
