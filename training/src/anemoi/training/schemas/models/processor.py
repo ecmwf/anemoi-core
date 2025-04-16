@@ -7,11 +7,14 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Any
 from typing import Literal
 
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import ValidationError
+from pydantic import model_validator
 
 from .common_components import GNNModelComponent
 from .common_components import TransformerModelComponent
@@ -42,6 +45,7 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
 
 
 class TransformerProcessorSchema(TransformerModelComponent):
+
     target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(..., alias="_target_")
     "Transformer processor object from anemoi.models.layers.processor."
     num_layers: NonNegativeInt = Field(example=16)
@@ -60,3 +64,18 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)
     "Use alibi slopes for attention implementation. Default to False."
+
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # Check for valid extra fields related to MultiHeadSelfAttention and MultiHeadCrossAttention
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"use_rotary_embeddings": bool}
+        for extra_field in self.__pydantic_extra__:
+            if extra_field not in allowed_extras:
+                msg = f"Extra field {extra_field} not allowed for TransformerProcessorSchema."
+                raise ValidationError(msg)
+            if isinstance(extra_field, allowed_extras[extra_field]):
+                msg = f"Extra field {extra_field} should be of type {allowed_extras[extra_field]}."
+                raise ValidationError(msg)
+
+        return self
