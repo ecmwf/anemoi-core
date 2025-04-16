@@ -22,12 +22,10 @@ Keep it human-readable, your future self will thank you!
 * Kcrps  ([#182](https://github.com/ecmwf/anemoi-core/issues/182)) ([8bbe898](https://github.com/ecmwf/anemoi-core/commit/8bbe89839e2eff3fcbc35613eb92920d4afc3276))
 * **models,training:** temporal interpolation ([#153](https://github.com/ecmwf/anemoi-core/issues/153)) ([ea644ce](https://github.com/ecmwf/anemoi-core/commit/ea644ce1c9aef902333d9cbb30bcde0a3746fbcc))
 * **models:** adding leaky boundings ([#256](https://github.com/ecmwf/anemoi-core/issues/256)) ([426e860](https://github.com/ecmwf/anemoi-core/commit/426e86048d6c0a03750fb0e205890841c27c8148))
-* **training:** autoencoder 🗜️ ([#172](https://github.com/ecmwf/anemoi-core/issues/172)) ([4684b1c](https://github.com/ecmwf/anemoi-core/commit/4684b1c7a60495bc3a32946b9bf780aef31e387a))
 
 
 ### Bug Fixes
 
-* bugs introduced in autoencoder PR [#172](https://github.com/ecmwf/anemoi-core/issues/172) ([#247](https://github.com/ecmwf/anemoi-core/issues/247)) ([185438a](https://github.com/ecmwf/anemoi-core/commit/185438a24288048f2483b1f1d72a1946e18a096d))
 * pydantic schemas move ([#228](https://github.com/ecmwf/anemoi-core/issues/228)) ([6bca9bc](https://github.com/ecmwf/anemoi-core/commit/6bca9bc66ff54ac294d97793b8cebed1cd1bb8a4))
 
 
