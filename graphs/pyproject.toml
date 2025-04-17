@@ -50,8 +50,8 @@ dependencies = [
   "networkx>=3.1",
   "plotly>=5.19",
   "scikit-learn",
-  "torch>=2.2",
-  "torch-geometric>=2.3.1",
+  "torch>=2.6",
+  "torch-geometric>=2.6",
   "trimesh>=4.1",
   "typeguard",
 ]
