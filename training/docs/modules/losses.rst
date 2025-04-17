@@ -70,6 +70,51 @@ Scalers can be added as options for the loss functions using the
 excluded add `!scaler_name`, i.e. ``['*', '!scaler_1']``, and
 ``scaler_1`` will not be added.
 
+************************
+ Variable Level Scalers
+************************
+
+Variable level scalers allow the user to scale variables by its level,
+i.e. model or pressure levels for upper air variables. The variable
+level scalers are applied to groups that are defined under
+`scalers.variable_groups`.
+
+For a pressure level scaler applied to all pressure level variables the
+configuration would look like this:
+
+.. code:: yaml
+
+   pressure_level:
+     # Variable level scalers to be used
+     _target_: anemoi.training.losses.scaling.variable_level.ReluVariableLevelScaler
+     group: pl
+     y_intercept: 0.2
+     slope: 0.001
+     scale_dim: -1 # dimension on which scaling applied
+
+*****************
+ Variable Groups
+*****************
+
+Define a default group and a list of groups to be used in the variable
+level scalers.
+
+.. code:: yaml
+
+   # Variable groups to be used in the variable level scalers
+   variable_groups:
+      default: sfc
+      pl: [q, t, u, v, w, z]
+
+If working with upper-air variables from variable levels, the
+temperature fields start with the variable reference `t` followed by the
+level, i.e. `t_500`, `t_850`, etc. Since `t` is specified under variable
+group `pl`, all temperature fields are considered group `pl`. If the
+datasets are build from mars the variable reference is etracted from
+metadata, otherwise by splitting the variable name by `_` and taking the
+first part, see class
+`anemoi.training.utils.ExtractVariableGroupAndLevel`.
+
 ********************
  Validation Metrics
 ********************
