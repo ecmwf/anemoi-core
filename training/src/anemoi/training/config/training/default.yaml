@@ -1,12 +1,12 @@
 ---
 defaults:
-  - scalers: scalers
+  - scalers: global
 
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
-load_weights_only: null # only load model weights, do not restore optimiser states etc.
-transfer_learning: null # activate to perform transfer learning
+transfer_learning: False # activate to perform transfer learning
+load_weights_only: False # only load model weights, do not restore optimiser states etc.
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -37,27 +37,38 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# use ZeroRedundancyOptimizer ; saves memory for larger models
-zero_optimizer: False
+# Optimizer settings
+optimizer:
+  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
+  kwargs:
+    betas: [0.9, 0.95]
+
+# select model
+model_task: anemoi.training.train.forecaster.GraphForecaster
+
+# select strategy
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  read_group_size: ${dataloader.read_group_size}
 
 # loss functions
 
 # dynamic rescaling of the loss gradient
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
+loss_gradient_scaling: False
 
 # loss function for the model
 training_loss:
   # loss class to initialise
-  _target_: anemoi.training.losses.mse.WeightedMSELoss
+  _target_: anemoi.training.losses.MSELoss
   # Scalers to include in loss calculation
   # A selection of available scalers are listed in training/scalers/scalers.yaml
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
   ignore_nans: False
-
-loss_gradient_scaling: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
@@ -66,7 +77,8 @@ loss_gradient_scaling: False
 # have undergone postprocessing.
 validation_metrics:
   # loss class to initialise
-  - _target_: anemoi.training.losses.mse.WeightedMSELoss
+  mse:
+    _target_: anemoi.training.losses.MSELoss
     # Scalers to include in loss calculation
     # Cannot scale over the variable dimension due to possible remappings.
     # Available scalers include:
@@ -76,16 +88,15 @@ validation_metrics:
     # other kwargs
     ignore_nans: True
 
-# List of validation metrics to keep in normalised space, and scalers to be applied
-# Use '*' in reference all metrics, or a list of metric names.
-# Unlike above, variable scaling is possible due to these metrics being
-# calculated in the same way as the training loss, within the internal model space.
-scale_validation_metrics:
-  scalers_to_apply: ['general_variable', 'pressure_level']
-  metrics:
-    - 'all'
-    # - "*"
+variable_groups:
+  default: sfc
+  pl: [q, t, u, v, w, z]
 
+metrics:
+- z_500
+- t_850
+- u_850
+- v_850
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
@@ -100,17 +111,13 @@ max_epochs: null
 max_steps: 150000
 
 lr:
+  warmup: 1000 # number of warmup iterations
   rate: 0.625e-4 #local_lr
   iterations: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
   min: 3e-7 #Not scaled by #GPU
-  warmup_t: 1000
 
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
 # in order to keep a constant global_lr
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
 
-metrics:
-- z_500
-- t_850
-- u_850
-- v_850
+submodules_to_freeze: []

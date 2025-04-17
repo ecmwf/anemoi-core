@@ -8,9 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 import uuid
+from typing import Optional
 
 import torch
 from hydra.utils import instantiate
+from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
@@ -58,6 +60,7 @@ class AnemoiModelInterface(torch.nn.Module):
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict = None,
+        truncation_data: dict,
     ) -> None:
         super().__init__()
         self.config = config
@@ -65,6 +68,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.multi_step = self.config.training.multistep_input
         self.graph_data = graph_data
         self.statistics = statistics
+        self.truncation_data = truncation_data
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
@@ -87,14 +91,18 @@ class AnemoiModelInterface(torch.nn.Module):
             self.config.model.model,
             model_config=self.config,
             data_indices=self.data_indices,
+            statistics=self.statistics,
             graph_data=self.graph_data,
+            truncation_data=self.truncation_data,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
         # Use the forward method of the model directly
         self.forward = self.model.forward
 
-    def predict_step(self, batch: torch.Tensor) -> torch.Tensor:
+    def predict_step(
+        self, batch: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, **kwargs
+    ) -> torch.Tensor:
         """Prediction step for the model.
 
         Parameters
@@ -118,6 +126,6 @@ class AnemoiModelInterface(torch.nn.Module):
             # batch, timesteps, horizonal space, variables
             x = batch[:, 0 : self.multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
-            y_hat = self(x)
+            y_hat = self(x, model_comm_group)
 
         return self.post_processors(y_hat, in_place=False)

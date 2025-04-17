@@ -10,10 +10,12 @@
 
 import pytest
 import torch
+from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.processor import GraphTransformerProcessor
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestGraphTransformerProcessor:
@@ -45,8 +47,11 @@ class TestGraphTransformerProcessor:
         src_grid_size = 0
         dst_grid_size = 0
         trainable_size = 6
+        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+        qk_norm = True
         return (
             num_layers,
+            layer_kernels,
             num_channels,
             num_chunks,
             num_heads,
@@ -58,12 +63,14 @@ class TestGraphTransformerProcessor:
             src_grid_size,
             dst_grid_size,
             trainable_size,
+            qk_norm,
         )
 
     @pytest.fixture
     def graphtransformer_processor(self, graphtransformer_init):
         (
             num_layers,
+            layer_kernels,
             num_channels,
             num_chunks,
             num_heads,
@@ -75,14 +82,17 @@ class TestGraphTransformerProcessor:
             src_grid_size,
             dst_grid_size,
             trainable_size,
+            qk_norm,
         ) = graphtransformer_init
         return GraphTransformerProcessor(
             num_layers,
+            layer_kernels,
             num_channels=num_channels,
             num_chunks=num_chunks,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,
+            qk_norm=qk_norm,
             cpu_offload=cpu_offload,
             sub_graph=sub_graph,
             sub_graph_edge_attributes=edge_attributes,
@@ -94,6 +104,7 @@ class TestGraphTransformerProcessor:
     def test_graphtransformer_processor_init(self, graphtransformer_processor, graphtransformer_init):
         (
             num_layers,
+            _layer_kernels,
             num_channels,
             num_chunks,
             _num_heads,
@@ -105,6 +116,7 @@ class TestGraphTransformerProcessor:
             _src_grid_size,
             _dst_grid_size,
             _trainable_size,
+            _qk_norm,
         ) = graphtransformer_init
         assert graphtransformer_processor.num_chunks == num_chunks
         assert graphtransformer_processor.num_channels == num_channels
@@ -115,6 +127,7 @@ class TestGraphTransformerProcessor:
         batch_size = 1
         (
             _num_layers,
+            _layer_kernels,
             num_channels,
             _num_chunks,
             _num_heads,
@@ -126,6 +139,7 @@ class TestGraphTransformerProcessor:
             _src_grid_size,
             _dst_grid_size,
             trainable_size,
+            _qk_norm,
         ) = graphtransformer_init
         x = torch.rand((self.NUM_EDGES, num_channels))
         shard_shapes = [list(x.shape)]

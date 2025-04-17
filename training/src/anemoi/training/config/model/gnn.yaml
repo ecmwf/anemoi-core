@@ -1,36 +1,66 @@
 activation: GELU
 num_channels: 512
+cpu_offload: False
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
+
+
+# The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+# TODO: Add this to documentation.
+layer_kernels:
+  processor:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+  encoder:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+  decoder:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
 
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor
-  _convert_: all
   activation: ${model.activation}
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
   mlp_extra_layers: 0
+  cpu_offload: ${model.cpu_offload}
 
 encoder:
   _target_: anemoi.models.layers.mapper.GNNForwardMapper
-  _convert_: all
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
+  cpu_offload: ${model.cpu_offload}
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
-  _convert_: all
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
   activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
+  cpu_offload: ${model.cpu_offload}
+
 
 trainable_parameters:
   data: 8
@@ -67,3 +97,14 @@ bounding: #These are applied in order
   #   min_val: 0
   #   max_val: 1
   #   total_var: tp
+
+  # [OPTIONAL] NormalizedReluBounding
+  # This is an extension of the Relu bounding in case the thrshold to be used
+  # is not 0. For example, in case of the sea surface temperature we don't use
+  # [0, infinity), buth rather [-2C, infinity). We do not want the water
+  # temperature to be below the freezing temperature.
+
+  # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
+  #   variables: [sst]
+  #   min_val: [-2]
+  #   normalizer: ['mean-std']

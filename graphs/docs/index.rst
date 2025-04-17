@@ -2,13 +2,21 @@
 
 .. _index-page:
 
-###########################################
- Welcome to `anemoi-graphs` documentation!
-###########################################
+###############################################
+ Welcome to the `anemoi-graphs` documentation!
+###############################################
 
 .. warning::
 
    This documentation is work in progress.
+
+The *anemoi-graphs* package is a collection of tools enabling you to
+design custom graphs for training data-driven weather models. It is one
+of the packages within the :ref:`anemoi framework <anemoi-docs:index>`.
+
+**************
+ About Anemoi
+**************
 
 *Anemoi* is a framework for developing machine learning weather
 forecasting models. It comprises of components or packages for preparing
@@ -19,124 +27,67 @@ framework it seeks to handle many of the complexities that
 meteorological organisations will share, allowing them to easily train
 models from existing recipes but with their own data.
 
-The `anemoi-graphs` package allows you to design custom graphs for
-training data-driven weather models. The graphs are built using a
-`recipe`, which is a YAML file that specifies the nodes and edges of the
-graph.
+****************
+ Quick overview
+****************
 
--  :doc:`overview`
+The *anemoi-graphs* package contains a suite of tools for creating
+graphs for use in data-driven weather forecasting models, typically
+those based on deep learning approaches.
 
-.. toctree::
-   :maxdepth: 1
-   :hidden:
+*anemoi-graphs* provides a simple high-level interface based on a YAML
+recipe file, which can be used to build graphs for the input, hidden and
+output layers. For each layer, the package allows you to:
 
-   overview
+-  :ref:`Define graph nodes <graphs-node_coordinates>` based on
+   coordinates defined in a dataset (anemoi dataset and NPZ) or via
+   algorithmic approaches such as the triangular refined icosahedron.
 
-*****************
- Building graphs
-*****************
+-  :ref:`Define edges <graphs-edges>` (connections between nodes) based
+   on methods such as the cut-off radius or K nearest-neighbours.
 
--  :doc:`graphs/introduction`
--  :doc:`graphs/node_coordinates`
--  :doc:`graphs/node_attributes`
--  :doc:`graphs/edges`
--  :doc:`graphs/edge_attributes`
+-  :ref:`Define attributes <graphs-node_attributes>` of nodes and edges,
+   such as weights, lengths and directions.
 
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-   :caption: Building graphs
+The node definition also allows to combine two input datasets, enabling
+limited-area models and stretched grid models.
 
-   graphs/introduction
-   graphs/node_coordinates
-   graphs/node_attributes
-   graphs/edges
-   graphs/edge_attributes
+The specification of each layer is defined using a YAML file, which is
+run via the :ref:`command-line tool <cli-introduction>`. The
+command-line tool allows you to quickly create graphs, as well as
+describe and inspect existing graphs, from command line prompts. For
+example, to create a graph based on an existing YAML file
+``recipe.yaml`` and output to ``graph.pt``:
 
-*********
- Modules
-*********
+.. code:: console
 
--  :doc:`modules/node_builder`
--  :doc:`modules/edge_builder`
--  :doc:`modules/node_attributes`
--  :doc:`modules/edge_attributes`
--  :doc:`modules/graph_creator`
--  :doc:`modules/graph_inspector`
--  :doc:`modules/post_processor`
+   $ anemoi-graphs create recipe.yaml graph.pt
 
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-   :caption: Modules
+In the rest of this documentation, the commands and syntax for defining
+the YAML files will be explained. A full example of a YAML file for a
+global weather model is found in the :ref:`usage-getting-started`
+section.
 
-   modules/node_builder
-   modules/edge_builder
-   modules/node_attributes
-   modules/edge_attributes
-   modules/graph_creator
-   modules/graph_inspector
-   modules/post_processor
+************
+ Installing
+************
 
-*******************
- Command line tool
-*******************
+To install the package, you can use the following command:
 
--  :doc:`cli/introduction`
--  :doc:`cli/create`
--  :doc:`cli/describe`
--  :doc:`cli/inspect`
+.. code:: bash
 
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-   :caption: Command line tool
+   pip install anemoi-graphs
 
-   cli/introduction
-   cli/create
-   cli/describe
-   cli/inspect
+Get more information in the :ref:`installing-graphs` section.
 
-**************************
- Developing Anemoi Graphs
-**************************
-
--  :doc:`dev/contributing`
--  :doc:`dev/code_structure`
--  :doc:`dev/testing`
-
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-   :caption: Developing Anemoi Graphs
-
-   dev/contributing
-   dev/code_structure
-   dev/testing
-
-***********
- Tutorials
-***********
-
--  :doc:`usage/getting_started`
-
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-   :caption: Usage
-
-   usage/getting_started
-   usage/limited_area
-
-*****************
- Anemoi packages
-*****************
+***********************
+ Other Anemoi packages
+***********************
 
 -  :ref:`anemoi-utils <anemoi-utils:index-page>`
 -  :ref:`anemoi-transform <anemoi-transform:index-page>`
 -  :ref:`anemoi-datasets <anemoi-datasets:index-page>`
 -  :ref:`anemoi-models <anemoi-models:index-page>`
--  :ref:`anemoi-graphs <anemoi-graphs:index-page>`
 -  :ref:`anemoi-training <anemoi-training:index-page>`
 -  :ref:`anemoi-inference <anemoi-inference:index-page>`
 -  :ref:`anemoi-registry <anemoi-registry:index-page>`
@@ -148,3 +99,58 @@ graph.
 *Anemoi* is available under the open source `Apache License`__.
 
 .. __: http://www.apache.org/licenses/LICENSE-2.0.html
+
+..
+   ..................................................................................
+
+..
+   From here defines the TOC in the sidebar, but is not rendered directly on the page.
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+   :caption: Introduction
+
+   overview
+   cli/introduction
+   installing
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+   :caption: Recipe Examples
+
+   usage/getting_started
+   usage/limited_area
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+   :caption: User Guide
+
+   graphs/introduction
+   graphs/node_coordinates
+   graphs/node_attributes
+   graphs/edges
+   graphs/edge_attributes
+   graphs/post_processor
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+   :caption: API Reference
+
+   modules/node_builder
+   modules/edge_builder
+   modules/node_attributes
+   modules/edge_attributes
+   modules/graph_creator
+   modules/graph_inspector
+   modules/post_processor
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+   :caption: Contributing
+
+   contributing

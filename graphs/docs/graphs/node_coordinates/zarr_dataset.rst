@@ -1,13 +1,15 @@
-###################
- From Zarr dataset
-###################
+.. _zarr-file:
 
-This class builds a set of nodes from a Zarr dataset. The nodes are
+#####################
+ From anemoi dataset
+#####################
+
+This class builds a set of nodes from a anemoi dataset. The nodes are
 defined by the coordinates of the dataset. The ZarrDataset class
 supports operations compatible with :ref:`anemoi-datasets
 <anemoi-datasets:index-page>`.
 
-To define the `node coordinates` based on a Zarr dataset, you can use
+To define the `node coordinates` based on a anemoi dataset, you can use
 the following YAML configuration:
 
 .. code:: yaml
@@ -19,20 +21,22 @@ the following YAML configuration:
          dataset: /path/to/dataset.zarr
        attributes: ...
 
-where `dataset` is the path to the Zarr dataset.
+where `dataset` is the path to the anemoi dataset.
 
-The ``CutOutZarrDatasetNodes`` class supports 2 input datasets, one for
-the LAM model and one for the boundary forcing. To define the `node
-coordinates` combining multiple Zarr datasets, you can use the following
-YAML configuration:
+The ``ZarrDatasetNodes`` class supports operations over multiple
+datasets. For example, the `cutout` operation supports combining a
+regional dataset and a global dataset to enable both limited area and
+stretched grids. To define the `node coordinates` that combine multiple
+anemoi datasets, you can use the following YAML configuration:
 
 .. code:: yaml
 
    nodes:
      data:  # name of the nodes
        node_builder:
-         _target_: anemoi.graphs.nodes.CutOutZarrDatasetNodes
-         lam_dataset: /path/to/lam_dataset.zarr
-         forcing_dataset: /path/to/boundary_forcing.zarr
-         thinning: 25 # sample every n-th point (only for lam_dataset)
+         _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+         cutout:
+         - dataset: /path/to/lam_dataset.zarr
+           thinning: 25 # sample every n-th point (only for lam_dataset), optional
+         - dataset: /path/to/boundary_forcing.zarr
        attributes: ...

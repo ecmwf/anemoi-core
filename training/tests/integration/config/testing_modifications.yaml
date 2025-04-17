@@ -1,0 +1,44 @@
+# Modifications for testing training cycles
+dataloader:
+  num_workers:
+    training: 2
+    validation: 2
+  batch_size:
+    training: 2
+    validation: 2
+  limit_batches:
+      training: 2
+      validation: 2
+
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    wandb:
+      enabled: False
+      entity: null # override '???'
+    tensorboard:
+      enabled: False
+    mlflow:
+      enabled: False
+      tracking_uri: null # override '???'
+
+hardware:
+  accelerator: auto
+  num_gpus_per_node: 1
+  num_nodes: 1
+  num_gpus_per_model: 1
+
+  paths:
+    # We overwrite this in the test to use pytest tmp_path but need a value for hydra
+    output: ${oc.env:PWD}/tmp_output/
+    truncation: null
+
+graph:
+  overwrite: True
+
+model:
+  num_channels: 16
+
+training:
+  max_epochs: 2

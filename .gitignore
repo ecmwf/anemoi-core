@@ -1,0 +1,137 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+__pypackages__/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing and coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Documentation
+docs/_build/
+docs/_api/
+/site
+*.mo
+*.pot
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.idea/
+.spyderproject
+.spyproject
+.ropeproject
+.vscode/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Data files
+*.grib
+*.grib1
+*.grib2
+*.onnx
+*.ckpt
+*.npy
+*.npz
+*.zarr/
+*.nc
+*.h5
+*.hdf5
+*.pkl
+*.parquet
+*.csv
+*.xlsx
+*.xls
+
+# ML artifacts
+wandb/
+mlruns/
+lightning_logs/
+*.ckpt
+*.pt
+*.pth
+runs/
+checkpoints/
+
+# Temporary and system files
+*.swp
+*.download
+*.out
+*.sync
+*.dot
+*.tmp
+*.log
+*.log.*
+.DS_Store
+~*
+tmp/
+temp/
+logs/
+_dev/
+outputs
+*tmp_data/
+
+# Project specific
+?
+?.*
+foo
+bar
+~$images.pptx
+test.py
+test.ipynb
+_version.py
+*.to_upload
+tempCodeRunnerFile.python
+Untitled-*.py

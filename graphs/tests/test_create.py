@@ -35,12 +35,12 @@ class TestGraphCreator:
         for nodes in graph.node_stores:
             for node_attr in nodes.node_attrs():
                 assert isinstance(nodes[node_attr], torch.Tensor)
-                assert nodes[node_attr].dtype in [torch.int32, torch.float32]
+                assert nodes[node_attr].dtype in [torch.int32, torch.float32], f"{node_attr} is not int32/float32."
 
         for edges in graph.edge_stores:
             for edge_attr in edges.edge_attrs():
                 assert isinstance(edges[edge_attr], torch.Tensor)
-                assert edges[edge_attr].dtype in [torch.int32, torch.float32]
+                assert edges[edge_attr].dtype in [torch.int32, torch.float32], f"{node_attr} is not int32/float32."
 
         for nodes in graph.node_stores:
             for node_attr in nodes.node_attrs():
@@ -51,6 +51,6 @@ class TestGraphCreator:
 
         if graph_path is not None:
             assert graph_path.exists()
-            graph_saved = torch.load(graph_path)
+            graph_saved = torch.load(graph_path, weights_only=False)
             assert graph.node_types == graph_saved.node_types
             assert graph.edge_types == graph_saved.edge_types

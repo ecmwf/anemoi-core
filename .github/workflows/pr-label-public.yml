@@ -1,0 +1,10 @@
+# Manage labels of pull requests that originate from forks
+name: "[Pull Request] Label PRs from public forks"
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+jobs:
+  label:
+    uses: ecmwf/reusable-workflows/.github/workflows/label-pr.yml@v2

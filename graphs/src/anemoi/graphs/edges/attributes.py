@@ -9,103 +9,84 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 
-import numpy as np
 import torch
-from torch_geometric.data import HeteroData
+from torch_geometric.data.storage import NodeStorage
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.typing import Adj
+from torch_geometric.typing import PairTensor
+from torch_geometric.typing import Size
 
-from anemoi.graphs.edges.directional import directional_edge_features
+from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import haversine_distance
 
+LOGGER = logging.getLogger(__name__)
 
-class BaseEdgeAttribute(ABC, NormaliserMixin):
-    """Base class for edge attributes."""
 
-    def __init__(self, norm: str | None = None) -> None:
+class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
+    """Base class for edge attribute builders."""
+
+    node_attr_name: str = None
+
+    def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
+        super().__init__()
         self.norm = norm
+        self.dtype = dtype
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if self.node_attr_name is None:
+            error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
+            raise TypeError(error_msg)
+
+    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+        return source_nodes[self.node_attr_name].to(self.device), target_nodes[self.node_attr_name].to(self.device)
+
+    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
+        x = self.subset_node_information(*x)
+        return self.propagate(edge_index, x=x, size=size)
 
     @abstractmethod
-    def get_raw_values(self, graph: HeteroData, source_name: str, target_name: str, *args, **kwargs) -> np.ndarray: ...
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
 
-    def post_process(self, values: np.ndarray) -> torch.Tensor:
-        """Post-process the values."""
-        if values.ndim == 1:
-            values = values[:, np.newaxis]
+    def message(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        edge_features = self.compute(x_i, x_j)
 
-        normed_values = self.normalise(values)
+        if edge_features.ndim == 1:
+            edge_features = edge_features.unsqueeze(-1)
 
-        return torch.tensor(normed_values, dtype=torch.float32)
+        return edge_features
 
-    def compute(self, graph: HeteroData, edges_name: tuple[str, str, str], *args, **kwargs) -> torch.Tensor:
-        """Compute the edge attributes."""
-        source_name, _, target_name = edges_name
-        assert (
-            source_name in graph.node_types
-        ), f"Node \"{source_name}\" not found in graph. Optional nodes are {', '.join(graph.node_types)}."
-        assert (
-            target_name in graph.node_types
-        ), f"Node \"{target_name}\" not found in graph. Optional nodes are {', '.join(graph.node_types)}."
-
-        values = self.get_raw_values(graph, source_name, target_name, *args, **kwargs)
-        return self.post_process(values)
+    def aggregate(self, edge_features: torch.Tensor) -> torch.Tensor:
+        return self.normalise(edge_features)
 
 
-class EdgeDirection(BaseEdgeAttribute):
-    """Edge direction feature.
+class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
+    node_attr_name: str = "x"
+    _idx_lat: int = 0
+    _idx_lon: int = 1
 
-    This class calculates the direction of an edge using either:
-    1. Rotated features: The target nodes are rotated to the north pole to compute the edge direction.
-    2. Non-rotated features: The direction is computed as the difference in latitude and longitude between the source
-    and target nodes.
 
-    The resulting direction is represented as a unit vector starting at (0, 0), with X and Y components.
+class EdgeLength(BasePositionalBuilder):
+    """Computes edge length for bipartite graphs."""
 
-    Attributes
-    ----------
-    norm : Optional[str]
-        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
-    luse_rotated_features : bool
-        Whether to use rotated features.
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        edge_length = haversine_distance(x_i, x_j)
+        return edge_length
 
-    Methods
-    -------
-    compute(graph, source_name, target_name)
-        Compute direction of all edges.
-    """
 
-    def __init__(self, norm: str | None = None, luse_rotated_features: bool = True) -> None:
-        super().__init__(norm)
-        self.luse_rotated_features = luse_rotated_features
+class EdgeDirection(BasePositionalBuilder):
+    """Computes edge direction for bipartite graphs."""
 
-    def get_raw_values(self, graph: HeteroData, source_name: str, target_name: str) -> np.ndarray:
-        """Compute directional features for edges.
-
-        Parameters
-        ----------
-        graph : HeteroData
-            The graph.
-        source_name : str
-            The name of the source nodes.
-        target_name : str
-            The name of the target nodes.
-
-        Returns
-        -------
-        np.ndarray
-            The directional features.
-        """
-        edge_index = graph[(source_name, "to", target_name)].edge_index
-        source_coords = graph[source_name].x.numpy()[edge_index[0]].T
-        target_coords = graph[target_name].x.numpy()[edge_index[1]].T
-        edge_dirs = directional_edge_features(source_coords, target_coords, self.luse_rotated_features).T
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        edge_dirs = compute_directions(x_i, x_j)
         return edge_dirs
 
 
-class EdgeLength(BaseEdgeAttribute):
-    """Edge length feature.
+class Azimuth(BasePositionalBuilder):
+    """Compute the azimuth of the edge.
 
     Attributes
     ----------
@@ -116,42 +97,74 @@ class EdgeLength(BaseEdgeAttribute):
 
     Methods
     -------
-    compute(graph, source_name, target_name)
+    compute(x_i, x_j)
         Compute edge lengths attributes.
+
+    References
+    ----------
+    - https://www.movable-type.co.uk/scripts/latlong.html
     """
 
-    def __init__(self, norm: str | None = None, invert: bool = False) -> None:
-        super().__init__(norm)
-        self.invert = invert
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        # Forward bearing. x_i, x_j must be radians.
+        a11 = torch.cos(x_i[:, self._idx_lat]) * torch.sin(x_j[:, self._idx_lat])
+        a12 = (
+            torch.sin(x_i[:, self._idx_lat])
+            * torch.cos(x_j[:, self._idx_lat])
+            * torch.cos(x_j[..., self._idx_lon] - x_i[..., self._idx_lon])
+        )
+        a1 = a11 - a12
+        a2 = torch.sin(x_j[..., self._idx_lon] - x_i[..., self._idx_lon]) * torch.cos(x_j[:, self._idx_lat])
+        edge_dirs = torch.atan2(a2, a1)
 
-    def get_raw_values(self, graph: HeteroData, source_name: str, target_name: str) -> np.ndarray:
-        """Compute haversine distance (in kilometers) between nodes connected by edges.
+        return edge_dirs
 
-        Parameters
-        ----------
-        graph : HeteroData
-            The graph.
-        source_name : str
-            The name of the source nodes.
-        target_name : str
-            The name of the target nodes.
 
-        Returns
-        -------
-        np.ndarray
-            The edge lengths.
-        """
-        edge_index = graph[(source_name, "to", target_name)].edge_index
-        source_coords = graph[source_name].x.numpy()[edge_index[0]]
-        target_coords = graph[target_name].x.numpy()[edge_index[1]]
-        edge_lengths = haversine_distance(source_coords, target_coords)
-        return edge_lengths
+class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
+    """Base class for boolean edge attributes."""
 
-    def post_process(self, values: np.ndarray) -> torch.Tensor:
-        """Post-process edge lengths."""
-        values = super().post_process(values)
+    def __init__(self) -> None:
+        super().__init__(norm=None, dtype="bool")
 
-        if self.invert:
-            values = 1 - values
 
-        return values
+class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
+    """Base class for propagating an attribute from the nodes to the edges."""
+
+    node_idx: int = None
+
+    def __init__(self, node_attr_name: str) -> None:
+        self.node_attr_name = node_attr_name
+        super().__init__()
+        if self.node_idx is None:
+            raise AttributeError(f"{self.__class__.__name__} class must set 'node_idx' attribute.")
+
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        return (x_j, x_i)[self.node_idx]
+
+
+class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
+    """
+    Copy an attribute of the source node to the edge.
+    Used for example to identify if an encoder edge originates from a LAM or global node.
+
+    Attributes
+    ----------
+    node_attr_name : str
+        Name of the node attribute to propagate.
+    """
+
+    node_idx: int = 0
+
+
+class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
+    """Copy an attribute of the target node to the edge.
+
+    Used for example to identify if an encoder edge ends at a LAM or global node.
+
+    Attributes
+    ----------
+    node_attr_name : str
+        Name of the node attribute to propagate.
+    """
+
+    node_idx: int = 1

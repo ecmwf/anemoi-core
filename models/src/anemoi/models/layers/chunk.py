@@ -24,6 +24,7 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLP
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +60,12 @@ class BaseProcessorChunk(nn.Module, ABC):
 
     @abstractmethod
     def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
     ) -> Tensor: ...
 
 
@@ -70,11 +76,16 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         self,
         num_channels: int,
         num_layers: int,
+        layer_kernels: DotDict,
         window_size: int,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
+        qk_norm: bool = False,
         dropout_p: float = 0.0,
+        attention_implementation: str = "flash_attention",
+        softcap: float = None,
+        use_alibi_slopes: bool = None,
     ) -> None:
         """Initialize TransformerProcessor.
 
@@ -84,14 +95,28 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             Number of channels
         num_layers : int
             Number of layers
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        window_size: int,
+            1/2 size of shifted window for attention computation
         num_heads: int
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
         activation : str, optional
             Activation function, by default "GELU"
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         dropout_p: float
             Dropout probability used for multi-head self attention, default 0.0
+        attention_implementation: str, optional
+            A predefined string which selects which underlying attention
+            implementation, by default "flash_attention"
+        softcap : float, optional
+            Anything > 0 activates softcapping flash attention, by default None
+        use_alibi_slopes : bool, optional
+            Use aLiBI option, only used for flash attention, by default None
         """
         super().__init__(num_channels=num_channels, num_layers=num_layers)
 
@@ -101,15 +126,25 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             hidden_dim=(mlp_hidden_ratio * num_channels),
             num_heads=num_heads,
             activation=activation,
+            qk_norm=qk_norm,
             window_size=window_size,
+            layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
         )
 
     def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
     ) -> Tensor:
         for i in range(self.num_layers):
-            x = self.blocks[i](x, shapes, batch_size, model_comm_group=model_comm_group)
+            x = self.blocks[i](x, shapes, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return (x,)  # return tuple for consistency with other processors
 
@@ -121,6 +156,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
         self,
         num_channels: int,
         num_layers: int,
+        layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
         activation: str = "SiLU",
         edge_dim: Optional[int] = None,
@@ -133,6 +169,9 @@ class GNNProcessorChunk(BaseProcessorChunk):
             Channels of the message passing blocks.
         num_layers : int
             Number of message passing blocks.
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         mlp_extra_layers : int, optional
             Extra num_layers in MLP, by default 0
         activation : str, optional
@@ -148,6 +187,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
                 in_features=edge_dim,
                 hidden_dim=num_channels,
                 out_features=num_channels,
+                layer_kernels=layer_kernels,
                 n_extra_layers=mlp_extra_layers,
                 activation=activation,
             )
@@ -158,6 +198,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
             GraphConvProcessorBlock,
             num_channels,
             num_channels,
+            layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             activation=activation,
         )
@@ -170,13 +211,16 @@ class GNNProcessorChunk(BaseProcessorChunk):
         shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **kwargs,
     ) -> OptPairTensor:
         x_out = x * 1.0  # required for pytorch >= 2.1
         if self.emb_edges:
             edge_attr = self.emb_edges(edge_attr)
 
         for i in range(self.num_layers):
-            x_out, edge_attr = self.blocks[i](x_out, edge_attr, edge_index, shapes, model_comm_group, size=size)
+            x_out, edge_attr = self.blocks[i](
+                x_out, edge_attr, edge_index, shapes, model_comm_group=model_comm_group, size=size, **kwargs
+            )
 
         return x_out, edge_attr
 
@@ -188,9 +232,11 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         self,
         num_channels: int,
         num_layers: int,
+        layer_kernels: DotDict,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
+        qk_norm: bool = False,
         edge_dim: Optional[int] = None,
     ) -> None:
         """Initialize GraphTransformerProcessorChunk.
@@ -201,12 +247,17 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             Number of channels.
         num_layers : int
             Number of layers.
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         num_heads: int
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
         activation : str, optional
             Activation function, by default "GELU"
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         edge_dim: int, by default None
             Embed edges with input dimension edge_dim
         """
@@ -217,9 +268,11 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             in_channels=num_channels,
             hidden_dim=mlp_hidden_ratio * num_channels,
             out_channels=num_channels,
-            num_heads=num_heads,
             edge_dim=edge_dim,
+            num_heads=num_heads,
+            layer_kernels=layer_kernels,
             activation=activation,
+            qk_norm=qk_norm,
         )
 
     def forward(
@@ -231,8 +284,11 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        **kwargs,
     ) -> OptPairTensor:
         for i in range(self.num_layers):
-            x, edge_attr = self.blocks[i](x, edge_attr, edge_index, shapes, batch_size, model_comm_group, size=size)
+            x, edge_attr = self.blocks[i](
+                x, edge_attr, edge_index, shapes, batch_size, model_comm_group=model_comm_group, size=size, **kwargs
+            )
 
         return x, edge_attr

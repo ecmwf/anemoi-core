@@ -8,7 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.4.4...graphs-0.5.0) (2025-03-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** Improved configuration and data structures ([#79](https://github.com/ecmwf/anemoi-core/issues/79))
+
+### Features
+
+* **config:** Improved configuration and data structures ([#79](https://github.com/ecmwf/anemoi-core/issues/79)) ([1f7812b](https://github.com/ecmwf/anemoi-core/commit/1f7812b559b51d842852df29ace7dda6d0f66ef2))
+* **graphs:** migrate edge builders to torch-cluster ([#56](https://github.com/ecmwf/anemoi-core/issues/56)) ([f67da66](https://github.com/ecmwf/anemoi-core/commit/f67da664c18762e4c8a8cf0af9d4e97ec7315454))
+
+
+### Bug Fixes
+
+* **graphs:** make exception agnostic of zarr version ([#152](https://github.com/ecmwf/anemoi-core/issues/152)) ([f26adc9](https://github.com/ecmwf/anemoi-core/commit/f26adc969a0683711bc6a92a37e04e72d62ab57a))
+* **graphs:** support torch v2.6 ([#122](https://github.com/ecmwf/anemoi-core/issues/122)) ([dfef377](https://github.com/ecmwf/anemoi-core/commit/dfef377a48ff093ec193ce77c2f3333b87131920))
+
+
+### Documentation
+
+* Add subheadings to schema doc page ([#149](https://github.com/ecmwf/anemoi-core/issues/149)) ([d3c7de9](https://github.com/ecmwf/anemoi-core/commit/d3c7de905bced2dc9e75a92de4e9abf848936e62))
+* fix documentation to refer to anemoi datasets instead of zarr datasets ([#154](https://github.com/ecmwf/anemoi-core/issues/154)) ([ad062b2](https://github.com/ecmwf/anemoi-core/commit/ad062b22cdd05354bc010eabbf8ffa806def081c))
+* use new logo ([#140](https://github.com/ecmwf/anemoi-core/issues/140)) ([c269cea](https://github.com/ecmwf/anemoi-core/commit/c269cea3c84f2e35ef0a318e0cd1b769d285177c))
+
+## 0.4.4 (2025-02-04)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+Version fix.
+
+
+**Full Changelog**: https://github.com/ecmwf/anemoi-core/compare/anemoi-graphs-0.4.3...anemoi-graphs-0.4.4
+
+## 0.4.2.post546 (2025-02-04)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Graphs
+* feat(graphs,plots): expand support for multi-dimensional node attributes by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/48
+* feat(graphs): New Edge Attribute: AttributeFromNode by @icedoom888 in https://github.com/ecmwf/anemoi-core/pull/62
+* feat: support ReducedGaussianGridNodes by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/54
+### Other Changes
+* pre-commits-for-models-graphs-dev by @sahahner in https://github.com/ecmwf/anemoi-core/pull/45
+* ci(docs): bring ReadTheDocs CI pipeline by @JPXKQX in https://github.com/ecmwf/anemoi-core/pull/73
+* ci: Reinstantiate CI files by @JesperDramsch in https://github.com/ecmwf/anemoi-core/pull/75
+* ci: Propose release-please implementation by @JesperDramsch in https://github.com/ecmwf/anemoi-core/pull/100
+
+## New Contributors
+* @anaprietonem made their first contribution in https://github.com/ecmwf/anemoi-core/pull/59
+* @cathalobrien made their first contribution in https://github.com/ecmwf/anemoi-core/pull/77
+* @lzampier made their first contribution in https://github.com/ecmwf/anemoi-core/pull/64
+* @japols made their first contribution in https://github.com/ecmwf/anemoi-core/pull/82
+* @JesperDramsch made their first contribution in https://github.com/ecmwf/anemoi-core/pull/75
+* @jakob-schloer made their first contribution in https://github.com/ecmwf/anemoi-core/pull/47
+* @icedoom888 made their first contribution in https://github.com/ecmwf/anemoi-core/pull/61
+* @theissenhelen made their first contribution in https://github.com/ecmwf/anemoi-core/pull/60
+* @DeployDuck made their first contribution in https://github.com/ecmwf/anemoi-core/pull/84
+
+**Full Changelog**: https://github.com/ecmwf/anemoi-core/compare/anemoi-graphs-0.4.2...anemoi-graphs-0.4.3
+
 ## [Unreleased](https://github.com/ecmwf/anemoi-graphs/compare/0.4.2...HEAD)
+
+### Added
+
+- feat: Support for multi-dimensional node attributes in plots (#48)
 
 ## [0.4.2 - Optimisations and lat-lon](https://github.com/ecmwf/anemoi-graphs/compare/0.4.1...0.4.2) - 2024-12-19
 
@@ -21,7 +86,14 @@ Keep it human-readable, your future self will thank you!
 
 ### Changed
 
+### Changed
+
+- docs: Documentation structure (#84)
 - fix: faster edge builder for tri icosahedron. (#92)
+
+### Added
+
+- feat: Support for multi-dimensional node attributes in plots (#86)
 
 ## [0.4.1 - ICON graphs, multiple edge builders and post processors](https://github.com/ecmwf/anemoi-graphs/compare/0.4.0...0.4.1) - 2024-11-26
 
@@ -33,7 +105,7 @@ Keep it human-readable, your future self will thank you!
 - feat: Define node sets and edges based on an ICON icosahedral mesh (#53)
 - feat: Support for multiple edge builders between two sets of nodes (#70)
 
-# Changed
+### Changed
 
 - fix: bug when computing area weights with scipy.Voronoi. (#79)
 

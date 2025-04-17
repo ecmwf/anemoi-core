@@ -14,6 +14,7 @@ import logging
 from typing import TYPE_CHECKING
 
 import datashader as dsh
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
@@ -22,7 +23,7 @@ from datashader.mpl_ext import dsshow
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import Colormap
 from matplotlib.colors import Normalize
 from matplotlib.colors import TwoSlopeNorm
 from pyshtools.expand import SHGLQ
@@ -31,6 +32,7 @@ from scipy.interpolate import griddata
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -56,6 +58,38 @@ def equirectangular_projection(latlons: np.array) -> np.array:
     lat, lon = latlons[:, 0], latlons[:, 1]
     pc_lon, pc_lat = pc(lon, lat)
     return pc_lat, pc_lon
+
+
+def argsort_variablename_variablelevel(data: list[str], metadata_variables: dict | None = None) -> list[int]:
+    """Custom sort key to process the strings.
+
+    Sort parameter names by alpha part, then by numeric part at last
+    position (variable level) if available, then by the original string.
+
+    Parameters
+    ----------
+    data : list[str]
+        List of strings to sort.
+
+    Returns
+    -------
+    list[int]
+        Sorted indices of the input list.
+    """
+    extract_variable_group_and_level = ExtractVariableGroupAndLevel(
+        {"default": ""},
+        metadata_variables,
+    )
+
+    def custom_sort_key(index: int) -> tuple:
+        s = data[index]  # Access the element by index
+        _, alpha_part, numeric_part = extract_variable_group_and_level.get_group_and_level(s)
+        if numeric_part is None:
+            numeric_part = float("inf")
+        return (alpha_part, numeric_part, s)
+
+    # Generate argsort indices
+    return sorted(range(len(data)), key=custom_sort_key)
 
 
 def init_plot_settings() -> None:
@@ -116,6 +150,7 @@ def plot_loss(
     """
     # create plot
     # more space for legend
+    # TODO(who?): make figsize more flexible depending on the number of bars
     figsize = (8, 3) if legend_patches else (4, 3)
     fig, ax = plt.subplots(1, 1, figsize=figsize, layout=LAYOUT)
     # histogram plot
@@ -356,12 +391,12 @@ def plot_predicted_multilevel_flat_sample(
     n_plots_per_sample: int,
     latlons: np.ndarray,
     clevels: float,
-    cmap_precip: str,
     x: np.ndarray,
     y_true: np.ndarray,
     y_pred: np.ndarray,
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
+    colormaps: dict[str, Colormap] | None = None,
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -378,8 +413,6 @@ def plot_predicted_multilevel_flat_sample(
         lat/lon coordinates array, shape (lat*lon, 2)
     clevels : float
         Accumulation levels used for precipitation related plots
-    cmap_precip: str
-        Colors used for each accumulation level
     x : np.ndarray
         Input data of shape (lat*lon, nvar*level)
     y_true : np.ndarray
@@ -390,6 +423,8 @@ def plot_predicted_multilevel_flat_sample(
         Scatter plot, by default False
     precip_and_related_fields : list, optional
         List of precipitation-like variables, by default []
+    colormaps : dict[str, Colormap], optional
+        Dictionary of colormaps, by default None
 
     Returns
     -------
@@ -403,11 +438,21 @@ def plot_predicted_multilevel_flat_sample(
     fig, ax = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, layout=LAYOUT)
 
     pc_lat, pc_lon = equirectangular_projection(latlons)
+    if colormaps is None:
+        colormaps = {}
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
         xt = x[..., variable_idx].squeeze() * int(output_only)
         yt = y_true[..., variable_idx].squeeze()
         yp = y_pred[..., variable_idx].squeeze()
+
+        # get the colormap for the variable as defined in config file
+        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
+        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+        for key in colormaps:
+            if key not in ["default", "error"] and variable_name in colormaps[key].variables:
+                cmap = colormaps[key].get_cmap()
+                continue
         if n_plots_x > 1:
             plot_flat_sample(
                 fig,
@@ -419,9 +464,10 @@ def plot_predicted_multilevel_flat_sample(
                 yp,
                 variable_name,
                 clevels,
-                cmap_precip,
                 datashader,
                 precip_and_related_fields,
+                cmap=cmap,
+                error_cmap=error_cmap,
             )
         else:
             plot_flat_sample(
@@ -434,9 +480,10 @@ def plot_predicted_multilevel_flat_sample(
                 yp,
                 variable_name,
                 clevels,
-                cmap_precip,
                 datashader,
                 precip_and_related_fields,
+                cmap=cmap,
+                error_cmap=error_cmap,
             )
 
     return fig
@@ -452,9 +499,10 @@ def plot_flat_sample(
     pred: np.ndarray,
     vname: str,
     clevels: float,
-    cmap_precip: str,
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
+    cmap: Colormap | None = None,
+    error_cmap: Colormap | None = None,
 ) -> None:
     """Plot a "flat" 1D sample.
 
@@ -480,12 +528,14 @@ def plot_flat_sample(
         Variable name
     clevels : float
         Accumulation levels used for precipitation related plots
-    cmap_precip: str
-        Colors used for each accumulation level
     datashader: bool, optional
         Datashader plott, by default True
     precip_and_related_fields : list, optional
         List of precipitation-like variables, by default []
+    cmap : Colormap, optional
+        Colormap for the plot
+    error_cmap : Colormap, optional
+        Colormap for the error plot
 
     Returns
     -------
@@ -493,52 +543,38 @@ def plot_flat_sample(
     """
     precip_and_related_fields = precip_and_related_fields or []
     if vname in precip_and_related_fields:
-        # Create a custom colormap for precipitation
-        nws_precip_colors = cmap_precip
-        precip_colormap = ListedColormap(nws_precip_colors)
+        # converting to mm from m
+        truth *= 1000.0
+        pred *= 1000.0
+        if sum(input_) != 0:
+            input_ *= 1000.0
+    data = [None for _ in range(6)]
+    # truth, prediction and prediction error always plotted
+    data[1:4] = [truth, pred, truth - pred]
+    # default titles for 6 plots
+    titles = [
+        f"{vname} input",
+        f"{vname} target",
+        f"{vname} pred",
+        f"{vname} pred err",
+        f"{vname} increment [pred - input]",
+        f"{vname} persist err",
+    ]
+    # colormaps
+    cmaps = [cmap] * 3 + [error_cmap] * 3
+    # normalizations for significant colormaps
+    norms = [None for _ in range(6)]
+    norms[3:6] = [TwoSlopeNorm(vcenter=0.0)] * 3  # center the error colormaps at 0
 
+    if vname in precip_and_related_fields:
         # Defining the actual precipitation accumulation levels in mm
         cummulation_lvls = clevels
         norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
 
-        # converting to mm from m
-        truth *= 1000.0
-        pred *= 1000.0
-        single_plot(
-            fig,
-            ax[1],
-            lon,
-            lat,
-            truth,
-            cmap=precip_colormap,
-            norm=norm,
-            title=f"{vname} target",
-            datashader=datashader,
-        )
-        single_plot(
-            fig,
-            ax[2],
-            lon,
-            lat,
-            pred,
-            cmap=precip_colormap,
-            norm=norm,
-            title=f"{vname} pred",
-            datashader=datashader,
-        )
-        single_plot(
-            fig,
-            ax[3],
-            lon,
-            lat,
-            truth - pred,
-            cmap="bwr",
-            norm=TwoSlopeNorm(vcenter=0.0),
-            title=f"{vname} pred err",
-            datashader=datashader,
-        )
+        norms[1] = norm
+        norms[2] = norm
+
     elif vname == "mwd":
-        cyclic_colormap = "twilight"
 
         def error_plot_in_degrees(array1: np.ndarray, array2: np.ndarray) -> np.ndarray:
             """Calculate error between two arrays in degrees in range [-180, 180]."""
@@ -547,166 +583,58 @@ def plot_flat_sample(
 
         sample_shape = truth.shape
         pred = np.maximum(np.zeros(sample_shape), np.minimum(360 * np.ones(sample_shape), (pred)))
-        single_plot(
-            fig,
-            ax[1],
-            lon=lon,
-            lat=lat,
-            data=truth,
-            cmap=cyclic_colormap,
-            title=f"{vname} target",
-            datashader=datashader,
-        )
-        single_plot(
-            fig,
-            ax[2],
-            lon=lon,
-            lat=lat,
-            data=pred,
-            cmap=cyclic_colormap,
-            title=f"capped {vname} pred",
-            datashader=datashader,
-        )
-        err_plot = error_plot_in_degrees(truth, pred)
-        single_plot(
-            fig,
-            ax[3],
-            lon=lon,
-            lat=lat,
-            data=err_plot,
-            cmap="bwr",
-            norm=TwoSlopeNorm(vcenter=0.0),
-            title=f"{vname} pred err: {np.nanmean(np.abs(err_plot)):.{4}f} deg.",
-            datashader=datashader,
-        )
+
+        data[3] = error_plot_in_degrees(truth, pred)
+
+        titles[2] = f"capped {vname} pred"
+        titles[3] = f"{vname} pred err: {np.nanmean(np.abs(data[3])):.{4}f} deg."
+
     else:
         combined_data = np.concatenate((input_, truth, pred))
         # For 'errors', only persistence and increments need identical colorbar-limits
         combined_error = np.concatenate(((pred - input_), (truth - input_)))
         norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
-        single_plot(fig, ax[1], lon, lat, truth, norm=norm, title=f"{vname} target", datashader=datashader)
-        single_plot(fig, ax[2], lon, lat, pred, norm=norm, title=f"{vname} pred", datashader=datashader)
-        single_plot(
-            fig,
-            ax[3],
-            lon,
-            lat,
-            truth - pred,
-            cmap="bwr",
-            norm=TwoSlopeNorm(vcenter=0.0),
-            title=f"{vname} pred err",
-            datashader=datashader,
-        )
+
+        norms[1] = norm
+        norms[2] = norm
 
     if sum(input_) != 0:
+        # prognostic fields: plot input and increment as well
+        data[0] = input_
+        data[4] = pred - input_
+        data[5] = truth - input_
         if vname == "mwd":
-            single_plot(
-                fig,
-                ax[0],
-                lon=lon,
-                lat=lat,
-                data=input_,
-                cmap=cyclic_colormap,
-                title=f"{vname} input",
-                datashader=datashader,
-            )
-            err_plot = error_plot_in_degrees(pred, input_)
-            single_plot(
-                fig,
-                ax[4],
-                lon=lon,
-                lat=lat,
-                data=err_plot,
-                cmap="bwr",
-                norm=TwoSlopeNorm(vcenter=0.0),
-                title=f"{vname} increment [pred - input] % 360",
-                datashader=datashader,
-            )
-            err_plot = error_plot_in_degrees(truth, input_)
-            single_plot(
-                fig,
-                ax[5],
-                lon=lon,
-                lat=lat,
-                data=err_plot,
-                cmap="bwr",
-                norm=TwoSlopeNorm(vcenter=0.0),
-                title=f"{vname} persist err: {np.nanmean(np.abs(err_plot)):.{4}f} deg.",
-                datashader=datashader,
-            )
-        elif vname in precip_and_related_fields:
-            # Create a custom colormap for precipitation
-            nws_precip_colors = cmap_precip
-            precip_colormap = ListedColormap(nws_precip_colors)
+            data[4] = error_plot_in_degrees(pred, input_)
+            data[5] = error_plot_in_degrees(truth, input_)
 
-            # Defining the actual precipitation accumulation levels in mm
-            cummulation_lvls = clevels
-            norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
+            titles[4] = f"{vname} increment [pred - input] % 360"
+            titles[5] = f"{vname} persist err: {np.nanmean(np.abs(data[5])):.{4}f} deg."
 
-            # converting to mm from m
-            input_ *= 1000.0
-            truth *= 1000.0
-            pred *= 1000.0
-            single_plot(
-                fig,
-                ax[0],
-                lon=lon,
-                lat=lat,
-                data=input_,
-                cmap=precip_colormap,
-                title=f"{vname} input",
-                datashader=datashader,
-            )
-            single_plot(
-                fig,
-                ax[4],
-                lon=lon,
-                lat=lat,
-                data=pred - input_,
-                cmap="bwr",
-                norm=TwoSlopeNorm(vcenter=0.0),
-                title=f"{vname} increment [pred - input]",
-                datashader=datashader,
-            )
-            single_plot(
-                fig,
-                ax[5],
-                lon=lon,
-                lat=lat,
-                data=truth - input_,
-                cmap="bwr",
-                norm=TwoSlopeNorm(vcenter=0.0),
-                title=f"{vname} persist err",
-                datashader=datashader,
-            )
         else:
-            single_plot(fig, ax[0], lon, lat, input_, norm=norm, title=f"{vname} input", datashader=datashader)
-            single_plot(
-                fig,
-                ax[4],
-                lon,
-                lat,
-                pred - input_,
-                cmap="bwr",
-                norm=TwoSlopeNorm(vmin=combined_error.min(), vcenter=0.0, vmax=combined_error.max()),
-                title=f"{vname} increment [pred - input]",
-                datashader=datashader,
-            )
-            single_plot(
-                fig,
-                ax[5],
-                lon,
-                lat,
-                truth - input_,
-                cmap="bwr",
-                norm=TwoSlopeNorm(vmin=combined_error.min(), vcenter=0.0, vmax=combined_error.max()),
-                title=f"{vname} persist err",
-                datashader=datashader,
-            )
+            norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=0.0, vmax=np.nanmax(combined_error))
+            norms[0] = norm
+            norms[4] = norm_error
+            norms[5] = norm_error
+
     else:
+        # diagnostic fields: omit input and increment plots
         ax[0].axis("off")
         ax[4].axis("off")
         ax[5].axis("off")
+
+    for ii in range(6):
+        if data[ii] is not None:
+            single_plot(
+                fig,
+                ax[ii],
+                lon,
+                lat,
+                data[ii],
+                cmap=cmaps[ii],
+                norm=norms[ii],
+                title=titles[ii],
+                datashader=datashader,
+            )
 
 
 def single_plot(
@@ -715,7 +643,7 @@ def single_plot(
     lon: np.array,
     lat: np.array,
     data: np.array,
-    cmap: str = "viridis",
+    cmap: Colormap | None = None,
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
@@ -737,8 +665,8 @@ def single_plot(
         latitude coordinates array, shape (lat,)
     data : np.ndarray
         Data to plot
-    cmap : str, optional
-        Colormap string from matplotlib, by default "viridis"
+    cmap : Colormap, optional
+        Colormap, if None use "viridis"
     norm : str, optional
         Normalization string from matplotlib, by default None
     title : str, optional
@@ -750,6 +678,8 @@ def single_plot(
     -------
     None
     """
+    if cmap is None:
+        cmap = "viridis"
     if not datashader:
         psc = ax.scatter(
             lon,

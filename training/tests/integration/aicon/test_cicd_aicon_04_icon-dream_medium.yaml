@@ -1,0 +1,420 @@
+# (C) Copyright 2025 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# ---------------------------------------------------------------
+# Anemoi settings for execution in a CI/CD pipeline.
+#
+# This script is not part of a productive ML workflow, but is
+# used for CI/CD!
+#
+# 11/2024, DWD
+# ---------------------------------------------------------------
+
+# set to true to switch on config validation
+config_validation: True
+
+hardware:
+  paths:
+    graph: none
+    output: output_training/${data.resolution}/
+    logs:
+      base: ${hardware.paths.output}logs/
+      wandb: ${hardware.paths.logs.base}
+      mlflow: ${hardware.paths.logs.base}mlflow/
+      tensorboard: ${hardware.paths.logs.base}tensorboard/
+    checkpoints: ${hardware.paths.output}checkpoint/
+    plots: ${hardware.paths.output}plots/
+    profiler: ${hardware.paths.output}profiler/
+    data: "placeholder-for-config-validation"
+  files:
+    graph: none
+    dataset: dataset_20220101_20230101_6H.zarr/3.zarr
+    warm_start: null
+    checkpoint:
+      every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+      every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+      every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+  # number of GPUs per node and number of nodes (for DDP)
+  accelerator: auto
+  num_gpus_per_node: 1
+  num_nodes: 1
+  num_gpus_per_model: 1
+
+graph:
+  overwrite: True
+  data: "data"
+  hidden: "hidden"
+  nodes:
+    # ICON mesh
+    icon_mesh:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ICONNodes
+        name: "icon_grid_0026_R03B07_G"
+        grid_filename: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
+        max_level_multimesh: 3
+        max_level_dataset: 3
+    # Data nodes
+    data:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ICONCellGridNodes
+        icon_mesh: "icon_mesh"
+      attributes: ${graph.attributes.nodes}  # options: l1, l2, unit-max, unit-sum, unit-std
+    # Hidden nodes
+    hidden:
+      node_builder:
+        _target_: anemoi.graphs.nodes.ICONMultimeshNodes
+        icon_mesh: "icon_mesh"
+  edges:
+    # Processor configuration
+    - source_name: ${graph.hidden}
+      target_name: ${graph.hidden}
+      edge_builders:
+        - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
+          icon_mesh: "icon_mesh"
+      attributes: ${graph.attributes.edges}
+    # Encoder configuration
+    - source_name: ${graph.data}
+      target_name: ${graph.hidden}
+      edge_builders:
+        - _target_: anemoi.graphs.edges.ICONTopologicalEncoderEdges
+          icon_mesh: "icon_mesh"
+      attributes: ${graph.attributes.edges}
+    # Decoder configuration
+    - source_name: ${graph.hidden}
+      target_name: ${graph.data}
+      edge_builders:
+        - _target_: anemoi.graphs.edges.ICONTopologicalDecoderEdges
+          icon_mesh: "icon_mesh"
+      attributes: ${graph.attributes.edges}
+  attributes:
+    nodes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
+        norm: unit-max  # options: l1, l2, unit-max, unit-sum, unit-std
+        fill_value: 0
+    edges:
+      edge_length:
+        _target_: anemoi.graphs.edges.attributes.EdgeLength
+        norm: unit-std
+      edge_dirs:
+        _target_: anemoi.graphs.edges.attributes.EdgeDirection
+        norm: unit-std
+
+datamodule:
+  _target_: anemoi.training.data.datamodule.AnemoiDatasetsDataModule
+
+
+data:
+  resolution: mrl${data.refinement}
+  refinement: 3
+  frequency: 6h
+  timestep: 6h
+  forcing:
+  - "HSURF"
+  - "FR_LAND"
+  - "Z0"
+  - "FR_LAKE"
+  - "EMIS_RAD"
+  - "SSO_STDH"
+  - "SSO_THETA"
+  - "SSO_GAMMA"
+  - "SSO_SIGMA"
+  - "cos_latitude"
+  - "sin_latitude"
+  - "cos_longitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "sin_julian_day"
+  - "cos_local_time"
+  - "sin_local_time"
+  normalizer:
+    default: mean-std # none
+    min-max: null
+    max:
+    - "SSO_STDH"
+    - "SSO_THETA"
+    - "SSO_GAMMA"
+    - "SSO_SIGMA"
+    none:
+    - EMIS_RAD
+    - cos_latitude
+    - cos_longitude
+    - sin_latitude
+    - sin_longitude
+    - "cos_local_time"
+    - "sin_local_time"
+    std: []
+  imputer:
+    default: none
+  processors:
+    normalizer:
+      _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+      config: ${data.normalizer}
+  num_features: null
+  format: zarr
+  diagnostic: []
+  remapped:
+  remapper:
+    default: "none"
+
+model:
+  output_mask: null
+  cpu_offload: False
+
+  model:
+    _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+
+  num_channels: 5 # reduced for CI/CD test. original value 512
+  activation: GELU
+  processor:
+    _target_: anemoi.models.layers.processor.GNNProcessor
+    activation: ${model.activation}
+    trainable_size: ${model.trainable_parameters.hidden2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    num_layers: 2
+    num_chunks: 2
+    mlp_extra_layers: 0
+    cpu_offload: ${model.cpu_offload}
+  encoder:
+    _target_: anemoi.models.layers.mapper.GNNForwardMapper
+    trainable_size: ${model.trainable_parameters.data2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    activation: ${model.activation}
+    num_chunks: 1
+    mlp_extra_layers: 0
+    cpu_offload: ${model.cpu_offload}
+  decoder:
+    _target_: anemoi.models.layers.mapper.GNNBackwardMapper
+    trainable_size: ${model.trainable_parameters.hidden2data}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    activation: ${model.activation}
+    num_chunks: 1
+    mlp_extra_layers: 0
+    cpu_offload: ${model.cpu_offload}
+  attributes:
+    edges:
+    - edge_length
+    - edge_dirs
+    nodes: []
+  trainable_parameters:
+    data: 8
+    hidden: 8
+    data2hidden: 8
+    hidden2data: 8
+    hidden2hidden: 8
+  bounding:
+    - _target_: anemoi.models.layers.bounding.ReluBounding
+      variables: []
+
+training:
+  run_id: null
+  fork_run_id: null
+  transfer_learning: False # activate to perform transfer learning
+  model_task: anemoi.training.train.forecaster.GraphForecaster
+  submodules_to_freeze: []
+  num_sanity_val_steps: 2
+  load_weights_only: false
+  deterministic: false
+  precision: 16-mixed
+  multistep_input: 2
+  accum_grad_batches: 1
+  gradient_clip:
+    val: 32.0
+    algorithm: value
+  swa:
+    enabled: false
+    lr: 0.0001
+  optimizer:
+    zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
+    kwargs:
+      betas: [0.9, 0.95]
+  # select strategy
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    num_gpus_per_model: ${hardware.num_gpus_per_model}
+    read_group_size: ${dataloader.read_group_size}
+  loss_gradient_scaling: false
+  rollout:
+    start: 1
+    epoch_increment: 1
+    max: 1
+  max_epochs: 1
+  lr:
+    rate: 6.25e-05
+    iterations: 300000
+    min: 3.0e-07
+    warmup: 1000
+  variable_loss_scaling:
+    default: 1
+    pl:
+      P: 1
+    sfc: {}
+  metrics: []
+  training_loss:
+    _target_: anemoi.training.losses.mse.WeightedMSELoss
+    scalars: ['variable', 'loss_weights_mask']
+  node_loss_weights:
+    _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
+    target_nodes: ${graph.data}
+    node_attribute: area_weight
+  validation_metrics:
+    - _target_: anemoi.training.losses.mse.WeightedMSELoss
+      scalars: []
+      ignore_nans: False
+
+  scale_validation_metrics:
+    scalars_to_apply: ['variable']
+    metrics:
+      - 'all'
+  pressure_level_scaler:
+    _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
+    minimum: 0.2
+    slope: 0.001
+
+diagnostics:
+  plot:
+    asynchronous: True # Whether to plot asynchronously
+    datashader: True # Choose which technique to use for plotting
+    frequency: # Frequency of the plotting
+      batch: 750
+      epoch: 5
+
+    # Parameters to plot
+    parameters:
+    - PS
+    - P_49
+    - P_101
+    - T_96
+    - T_101
+    - U_101
+    - V_101
+
+    # Sample index
+    sample_idx: 0
+
+    # Precipitation and related fields
+    precip_and_related_fields: [tp, cp]
+
+    callbacks: []
+
+  debug:
+    anomaly_detection: false
+  profiler: false
+  checkpoint:
+    every_n_minutes:
+      save_frequency: 30
+      num_models_saved: 3
+    every_n_epochs:
+      save_frequency: 1
+      num_models_saved: -1
+    every_n_train_steps:
+      save_frequency: null
+      num_models_saved: 0
+  log:
+    wandb:
+      enabled: False
+      offline: False
+      log_model: False
+      project: 'Anemoi'
+      entity: null
+      # logger options (these probably come with some overhead)
+      gradients: False
+      parameters: False
+    tensorboard:
+      enabled: false
+    mlflow:
+      enabled: False
+      offline: True
+      authentication: False
+      log_model: False
+      tracking_uri: null
+      experiment_name: 'cicd_test'
+      project_name: 'AICON'
+      system: False
+      terminal: False
+      run_name: null # If set to null, the run name will be the a random UUID
+      on_resume_create_child: True
+      expand_hyperparams: # Which keys in hyperparams to expand
+        - config
+      http_max_retries: 35
+    interval: 100
+  enable_checkpointing: False
+  enable_progress_bar: true
+  print_memory_summary: false
+  benchmark_profiler:
+    # Use anemoi-profile to profile the training process
+    memory:
+      enabled: True
+      steps: 5 # wait warmup steps and then do steps (too many steps would lead to a big file)
+      warmup: 2
+      extra_plots: False
+      trace_rank0_only: False #set to true and it will profile rank 0 only. Reads SLURM_PROC_ID so won't work when not running via Slurm
+    time:
+      enabled: True
+      verbose: False #If true, output every action the profiler caputres, otherwise output a subset defined in PROFILER_ACTIONS at the top of aifs/diagnostics/profiler.py
+    speed:
+      enabled: True
+    system:
+      enabled: True
+    model_summary:
+      enabled: True
+    snapshot:
+      enabled: True
+      steps: 4 # wait warmup steps and then do steps
+      warmup: 0
+
+
+dataloader:
+  prefetch_factor: 1
+  pin_memory: True
+  read_group_size: ${hardware.num_gpus_per_model}
+  #dataset: ${hardware.paths.data}/${hardware.files.dataset}
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  limit_batches:
+    training: null
+    validation: null
+    test: 20
+  training:
+    dataset:
+      join:
+      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/dataset_20220101_20230101_6H.zarr
+      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/forcings_20220101_20230101_6H.zarr
+      #- ../dataset_20220101_20230101_6H.zarr
+      #- ../forcings_20220101_20230101_6H.zarr
+    start: "2022-01-01T00:00:00"
+    end: "2022-01-04T00:00:00"
+    frequency: ${data.frequency}
+    drop: []
+  validation:
+    dataset:
+      join:
+      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/dataset_20220101_20230101_6H.zarr
+      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/forcings_20220101_20230101_6H.zarr
+      #- ../dataset_20220101_20230101_6H.zarr
+      #- ../forcings_20220101_20230101_6H.zarr
+    start: "2022-01-04T06:00:00"
+    end: "2022-01-06T06:00:00"
+    frequency: ${data.frequency}
+    drop: []
+  test:
+    dataset: {}
+    start: 2022
+    end: null
+    frequency: ${data.frequency}
+  num_workers:
+    training: 2
+    validation: 2
+    test: 1
+  grid_indices:
+    _target_: anemoi.training.data.grid_indices.FullGrid
+    nodes_name: ${graph.data}
+  validation_rollout: 1

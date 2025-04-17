@@ -42,6 +42,7 @@ classifiers = [
 
 dynamic = [ "version" ]
 dependencies = [
+  # Fix certain dependencies during development
   "anemoi-utils>=0.1.9",
   "einops>=0.6.1",
   "hydra-core>=1.3",
@@ -58,7 +59,7 @@ optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
   "rstfmt",
-  "sphinx",
+  "sphinx<8.2",          # Fixed until nbsphinx updates
   "sphinx-argparse<0.5",
   "sphinx-rtd-theme",
 ]

@@ -27,6 +27,7 @@ from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mapper import GraphEdgeMixin
+from anemoi.utils.config import DotDict
 
 
 class BaseProcessor(nn.Module, ABC):
@@ -88,6 +89,7 @@ class TransformerProcessor(BaseProcessor):
     def __init__(
         self,
         num_layers: int,
+        layer_kernels: DotDict,
         *args,
         window_size: Optional[int] = None,
         num_channels: int = 128,
@@ -96,7 +98,11 @@ class TransformerProcessor(BaseProcessor):
         cpu_offload: bool = False,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
-        dropout_p: float = 0.1,
+        qk_norm=False,
+        dropout_p: float = 0.0,
+        attention_implementation: str = "flash_attention",
+        softcap: float = 0.0,
+        use_alibi_slopes: bool = False,
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -105,6 +111,9 @@ class TransformerProcessor(BaseProcessor):
         ----------
         num_layers : int
             Number of num_layers
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         window_size: int,
             1/2 size of shifted window for attention computation
         num_channels : int
@@ -113,14 +122,23 @@ class TransformerProcessor(BaseProcessor):
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         activation : str, optional
             Activation function, by default "GELU"
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.0
+        attention_implementation: str, optional
+            A predefined string which selects which underlying attention
+            implementation, by default "flash_attention"
+        softcap : float, optional
+            Anything > 0 activates softcapping flash attention, by default None
+        use_alibi_slopes : bool, optional
+            Use aLiBI option, only used for flash attention, by default None
         """
         super().__init__(
-            num_channels=num_channels,
             num_layers=num_layers,
+            num_channels=num_channels,
             window_size=window_size,
             num_chunks=num_chunks,
             activation=activation,
@@ -132,12 +150,17 @@ class TransformerProcessor(BaseProcessor):
         self.build_layers(
             TransformerProcessorChunk,
             num_channels=num_channels,
+            num_layers=self.chunk_size,
+            layer_kernels=layer_kernels,
             mlp_hidden_ratio=mlp_hidden_ratio,
             num_heads=num_heads,
-            num_layers=self.chunk_size,
             window_size=window_size,
             activation=activation,
+            qk_norm=qk_norm,
             dropout_p=dropout_p,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
         )
 
         self.offload_layers(cpu_offload)
@@ -157,7 +180,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group)
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
 
         return x
 
@@ -168,6 +191,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
     def __init__(
         self,
         num_layers: int,
+        layer_kernels: DotDict,
         *args,
         trainable_size: int = 8,
         num_channels: int = 128,
@@ -212,16 +236,15 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
         kwargs = {
-            "num_layers": self.chunk_size,
             "mlp_extra_layers": mlp_extra_layers,
             "activation": activation,
             "edge_dim": None,
         }
 
-        self.build_layers(GNNProcessorChunk, num_channels, **kwargs)
+        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, layer_kernels, **kwargs)
 
         kwargs["edge_dim"] = self.edge_dim  # Edge dim for first layer
-        self.proc[0] = GNNProcessorChunk(num_channels, **kwargs)
+        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, layer_kernels, **kwargs)
 
         self.offload_layers(cpu_offload)
 
@@ -231,6 +254,8 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         edge_attr = self.trainable(self.edge_attr, batch_size)
@@ -245,7 +270,9 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
-        x, edge_attr = self.run_layers((x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group)
+        x, edge_attr = self.run_layers(
+            (x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group, **kwargs
+        )
 
         return x
 
@@ -256,12 +283,14 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
     def __init__(
         self,
         num_layers: int,
+        layer_kernels: DotDict,
         trainable_size: int = 8,
         num_channels: int = 128,
         num_chunks: int = 2,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
+        qk_norm: bool = False,
         cpu_offload: bool = False,
         sub_graph: Optional[HeteroData] = None,
         sub_graph_edge_attributes: Optional[list[str]] = None,
@@ -285,12 +314,14 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             ratio of mlp hidden dimension to embedding dimension, default 4
         activation : str, optional
             Activation function, by default "GELU"
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         """
         super().__init__(
-            num_layers=num_layers,
             num_channels=num_channels,
+            num_layers=num_layers,
             num_chunks=num_chunks,
             activation=activation,
             cpu_offload=cpu_offload,
@@ -306,9 +337,11 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             GraphTransformerProcessorChunk,
             num_channels=num_channels,
             num_layers=self.chunk_size,
+            layer_kernels=layer_kernels,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,
+            qk_norm=qk_norm,
             edge_dim=self.edge_dim,
         )
 
@@ -338,6 +371,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             (shape_nodes, shape_nodes, shapes_edge_attr),
             batch_size,
             model_comm_group,
+            **kwargs,
         )
 
         return x

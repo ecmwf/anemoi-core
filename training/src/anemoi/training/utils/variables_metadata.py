@@ -41,23 +41,25 @@ class ExtractVariableGroupAndLevel:
         self.default_group = self.variable_groups["default"]
         self.metadata_variables = metadata_variables
 
+    def get_group_variables(self, group_name: str) -> list[str]:
+        return self.variable_groups[group_name]
+
     def get_group_and_level(self, variable_name: str) -> tuple[str, str, int]:
         """Get the group and level of a variable.
 
         Parameters
         ----------
         variable_name : str
-        Name of the variable.
+            Name of the variable.
 
         Returns
         -------
-        str
+        group : str
             Group of the variable given in the training-config file.
-        str
+        variable_name : str
             Variable reference which corresponds to the variable name without the variable level
-        str
+        variable_level : str
             Variable level, i.e. pressure level or model level
-
         """
         variable_level = None
         mars_metadata_available = (
@@ -77,4 +79,5 @@ class ExtractVariableGroupAndLevel:
                 variable_name = variable_name[: -len(split[-1]) - 1]
         if variable_name in self.group_variables:
             return self.group_variables[variable_name], variable_name, variable_level
+
         return self.default_group, variable_name, variable_level

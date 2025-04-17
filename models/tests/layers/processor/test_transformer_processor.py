@@ -10,8 +10,10 @@
 
 import pytest
 import torch
+from hydra.utils import instantiate
 
 from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 @pytest.fixture
@@ -25,8 +27,14 @@ def transformer_processor_init():
     num_heads = 16
     mlp_hidden_ratio = 4
     dropout_p = 0.1
+    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+    softcap = 0.5
+    attention_implementation = "scaled_dot_product_attention"
+    qk_norm = True
+
     return (
         num_layers,
+        layer_kernels,
         window_size,
         num_channels,
         num_chunks,
@@ -35,6 +43,9 @@ def transformer_processor_init():
         num_heads,
         mlp_hidden_ratio,
         dropout_p,
+        softcap,
+        attention_implementation,
+        qk_norm,
     )
 
 
@@ -42,6 +53,7 @@ def transformer_processor_init():
 def transformer_processor(transformer_processor_init):
     (
         num_layers,
+        layer_kernels,
         window_size,
         num_channels,
         num_chunks,
@@ -50,9 +62,13 @@ def transformer_processor(transformer_processor_init):
         num_heads,
         mlp_hidden_ratio,
         dropout_p,
+        softcap,
+        attention_implementation,
+        qk_norm,
     ) = transformer_processor_init
     return TransformerProcessor(
         num_layers=num_layers,
+        layer_kernels=layer_kernels,
         window_size=window_size,
         num_channels=num_channels,
         num_chunks=num_chunks,
@@ -61,12 +77,16 @@ def transformer_processor(transformer_processor_init):
         num_heads=num_heads,
         mlp_hidden_ratio=mlp_hidden_ratio,
         dropout_p=dropout_p,
+        attention_implementation=attention_implementation,
+        softcap=softcap,
+        qk_norm=qk_norm,
     )
 
 
 def test_transformer_processor_init(transformer_processor, transformer_processor_init):
     (
         num_layers,
+        _layer_kernels,
         _window_size,
         num_channels,
         num_chunks,
@@ -75,6 +95,9 @@ def test_transformer_processor_init(transformer_processor, transformer_processor
         _num_heads,
         _mlp_hidden_ratio,
         _dropout_p,
+        _attention_implementation,
+        _softcap,
+        _qk_norm,
     ) = transformer_processor_init
     assert isinstance(transformer_processor, TransformerProcessor)
     assert transformer_processor.num_chunks == num_chunks
@@ -85,6 +108,7 @@ def test_transformer_processor_init(transformer_processor, transformer_processor
 def test_transformer_processor_forward(transformer_processor, transformer_processor_init):
     (
         _num_layers,
+        _layer_kernels,
         _window_size,
         num_channels,
         _num_chunks,
@@ -93,6 +117,9 @@ def test_transformer_processor_forward(transformer_processor, transformer_proces
         _num_heads,
         _mlp_hidden_ratio,
         _dropout_p,
+        _attention_implementation,
+        _softcap,
+        _qk_norm,
     ) = transformer_processor_init
     gridsize = 100
     batch_size = 1
