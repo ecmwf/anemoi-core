@@ -22,8 +22,7 @@ hardware:
 
 # Changes in datamodule
 datamodule:
-  _target_: anemoi.training.data.datamodule.AnemoiDatasetsDataModule
-  # _target_: anemoi.training.data.datamodule.AnemoiEnsDatasetsDataModule
+  _target_: anemoi.training.data.datamodule.AnemoiEnsDatasetsDataModule
 
 data:
   resolution: o96
@@ -32,7 +31,7 @@ data:
 training:
   model_task: anemoi.training.train.forecaster.GraphEnsForecaster
   ensemble_size_per_device: 4
-  max_steps: 100
+  max_epochs: 20
 
   # Changes in strategy
   strategy:
