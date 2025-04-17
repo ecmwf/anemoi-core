@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.4.1](https://github.com/ecmwf/anemoi-core/compare/training-0.4.0...training-0.4.1) (2025-04-17)
+
+
+### Documentation
+
+* Fix minor mistakes in CRPS user guide. ([#264](https://github.com/ecmwf/anemoi-core/issues/264)) ([52d9a2e](https://github.com/ecmwf/anemoi-core/commit/52d9a2e5e0cef82b65b604ed2dc55016a48aeaa2))
+
 ## [0.4.0](https://github.com/ecmwf/anemoi-core/compare/training-0.3.3...training-0.4.0) (2025-04-16)
 
 
