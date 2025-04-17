@@ -346,17 +346,20 @@ For ensemble training, the following loss functions are available:
 ***********************
 
 It is possible to change the weighting given to each of the variables in
-the loss function by changing
-``config.training.variable_loss_scaling.pl.<pressure level variable>``
-and ``config.training.variable_loss_scaling.sfc.<surface variable>``.
+the loss function by changing the default `pressure_level` and
+`general_variable` scalers. They are by default applied to the fields
+before applying the training loss function and defined in the
+configuration `training.scalers`.
 
-It is also possible to change the scaling given to the pressure levels
-using ``config.training.pressure_level_scaler``. For almost all
+While in the `general_variable` scaler each variable is given a
+weighting, the `pressure_level` scaler is applied to the pressure levels
+variables with respect to the pressure level. For almost all
 applications, upper atmosphere pressure levels should be given lower
 weighting than the lower atmosphere pressure levels (i.e. pressure
 levels nearer to the surface). By default anemoi-training uses a ReLU
 Pressure Level scaler with a minimum weighting of 0.2 (i.e. no pressure
-level has a weighting less than 0.2).
+level has a weighting less than 0.2), defined in class
+`anemoi.training.losses.scalers.ReluVariableLevelScaler`.
 
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
