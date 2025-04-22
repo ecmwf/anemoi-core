@@ -95,11 +95,11 @@ Tendency Scalers
 ================
 
 Tendency scalers allow the scaling of prognostic losses by the standard
-deviation or variance of the variable tendencies (e.g. the 6-hourly differences in
-the data). To floating point precision, this loss scaling is equivalent to training on 
-tendencies rather than the forecasts themselves. 
-This approach is particularly useful when training models that
-include both slow-evolving variables (e.g., Land/Ocean) and
+deviation or variance of the variable tendencies (e.g. the 6-hourly
+differences in the data). To floating point precision, this loss scaling
+is equivalent to training on tendencies rather than the forecasts
+themselves. This approach is particularly useful when training models
+that include both slow-evolving variables (e.g., Land/Ocean) and
 fast-evolving variables (e.g., Atmosphere), ensuring balanced
 contributions to the loss function. When using this option, it is
 recommended to set the `general_variable` scaling values close to 1.0
