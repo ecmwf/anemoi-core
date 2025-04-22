@@ -392,11 +392,11 @@ class GraphForecaster(pl.LightningModule):
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():
-                metric_step_name = f"{metric_name}/{mkey}/{rollout_step + 1}"
+                metric_step_name = f"{metric_name}_metric/{mkey}/{rollout_step + 1}"
                 if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE)):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
@@ -478,7 +478,7 @@ class GraphForecaster(pl.LightningModule):
 
         for mname, mvalue in metrics.items():
             self.log(
-                "val_" + mname + "_metric",
+                "val_" + mname,
                 mvalue,
                 on_epoch=True,
                 on_step=False,
