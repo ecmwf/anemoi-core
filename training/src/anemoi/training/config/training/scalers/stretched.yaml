@@ -46,7 +46,7 @@ node_weights:
   nodes_name: ${graph.data}
   nodes_attribute_name: area_weight
   scaling_mask_attribute_name: cutout_mask
-  weight_frac_of_total: 0.25
+  weight_frac_of_total: ???
   norm: "unit-sum"
 
 lam_node_weights:

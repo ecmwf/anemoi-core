@@ -27,12 +27,9 @@ dataloader:
     adjust: all
     min_distance_km: 0
 training:
-  node_loss_weights:
-    _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
-    target_nodes: ${graph.data}
-    node_attribute: area_weight
-    scaled_attribute: cutout_mask
-    weight_frac_of_total: ???
+  scalers:
+    node_weights:
+      weight_frac_of_total: ???
 hardware:
   files:
     dataset: ???

@@ -57,19 +57,18 @@ strategy:
 # dynamic rescaling of the loss gradient
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
+loss_gradient_scaling: False
 
 # loss function for the model
 training_loss:
   # loss class to initialise
-  _target_: anemoi.training.losses.mse.MSELoss
+  _target_: anemoi.training.losses.MSELoss
   # Scalers to include in loss calculation
   # A selection of available scalers are listed in training/scalers/scalers.yaml
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
   scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
   ignore_nans: False
-
-loss_gradient_scaling: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
@@ -94,11 +93,11 @@ validation_metrics:
     ignore_nans: True
   mse_outside_lam_contribution:
     _target_: anemoi.training.losses.MSELoss
-    scalars: ['outside_lam_mask', 'node_weights']
+    scalers: ['outside_lam_mask', 'node_weights']
     ignore_nans: True
   mse_inside_lam:
     _target_: anemoi.training.losses.MSELoss
-    scalars: ['limited_area_mask', 'lam_node_weights']
+    scalers: ['limited_area_mask', 'lam_node_weights']
     ignore_nans: True
 
 variable_groups:
@@ -132,3 +131,5 @@ lr:
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
 # in order to keep a constant global_lr
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
+
+submodules_to_freeze: []
