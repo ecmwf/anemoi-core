@@ -95,8 +95,10 @@ Tendency Scalers
 ================
 
 Tendency scalers allow the scaling of prognostic losses by the standard
-deviation of variable tendencies, such as the 6-hourly differences in
-the data. This approach is particularly useful when training models that
+deviation or variance of the variable tendencies (e.g. the 6-hourly differences in
+the data). To floating point precision, this loss scaling is equivalent to training on 
+tendencies rather than the forecasts themselves. 
+This approach is particularly useful when training models that
 include both slow-evolving variables (e.g., Land/Ocean) and
 fast-evolving variables (e.g., Atmosphere), ensuring balanced
 contributions to the loss function. When using this option, it is
@@ -108,6 +110,8 @@ unintended bias in the training process.
 
    stdev_tendency:
       _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+   var_tendency:
+     _target_: anemoi.training.losses.scalers.VarTendencyScaler
 
 Variable Level Scalers
 ======================
