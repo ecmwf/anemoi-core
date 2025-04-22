@@ -258,6 +258,9 @@ training:
         default: 1
         P: 1
   metrics: []
+  variable_groups:
+    default: sfc
+    pl: [q, t, u, v, w, z]
   training_loss:
     _target_: anemoi.training.losses.MSELoss
     scalers: ['pressure_level', 'general_variable', 'node_weights']
