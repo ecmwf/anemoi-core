@@ -55,6 +55,10 @@ attributes:
     # Attributes for data nodes
     cutout_mask:
       _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    boundary_mask:
+      _target_: anemoi.graphs.nodes.attributes.BooleanNot
+      masks:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
     area_weight:
       _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
       norm: unit-max

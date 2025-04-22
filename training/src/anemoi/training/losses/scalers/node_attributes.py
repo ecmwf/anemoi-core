@@ -12,14 +12,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
+import numpy as np
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 
 if TYPE_CHECKING:
-    import numpy as np
     from torch_geometric.data import HeteroData
 
     from anemoi.training.utils.masks import BaseMask
@@ -84,7 +83,7 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
         nodes_attribute_name: str,
         scaling_mask_attribute_name: str,
         weight_frac_of_total: float,
-        apply_output_mask: bool = False,
+        output_mask: type[BaseMask] | None = None,
         inverse: bool = False,
         norm: str | None = None,
         **kwargs,
@@ -95,7 +94,7 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
             graph_data=graph_data,
             nodes_name=nodes_name,
             nodes_attribute_name=nodes_attribute_name,
-            apply_output_mask=apply_output_mask,
+            output_mask=output_mask,
             inverse=inverse,
             norm=norm,
             **kwargs,
@@ -105,8 +104,8 @@ class ReweightedGraphNodeAttributeScaler(GraphNodeAttributeScaler):
             raise KeyError(error_msg)
 
     def reweight_attribute_values(self, values: np.ndarray) -> np.ndarray:
-        scaling_mask = self.nodes[self.scaling_mask_attribute_name]
-        unmasked_sum = torch.sum(values[~scaling_mask])
+        scaling_mask = self.nodes[self.scaling_mask_attribute_name].squeeze()
+        unmasked_sum = np.sum(values[~scaling_mask])
         weight_per_masked_node = (
             self.weight_frac_of_total / (1 - self.weight_frac_of_total) * unmasked_sum / sum(scaling_mask)
         )
