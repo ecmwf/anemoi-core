@@ -56,3 +56,8 @@ graph:
         # use coarser resolution for testing
         lam_resolution: 5
         global_resolution: 3
+
+training:
+  scalers:
+    node_weights:
+      weight_frac_of_total: 0.25
