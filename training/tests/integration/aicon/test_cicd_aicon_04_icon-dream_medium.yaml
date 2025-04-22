@@ -253,6 +253,7 @@ training:
     warmup: 1000
   scalers:
     general_variable:
+      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
       weights:
         default: 1
         P: 1
