@@ -59,8 +59,10 @@ limited_area_mask:
   _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
   nodes_name: ${graph.data}
   nodes_attribute_name: cutout_mask
+  norm: null
 
 outside_lam_mask:
   _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
   nodes_name: ${graph.data}
   nodes_attribute_name: boundary_mask
+  norm: null

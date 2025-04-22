@@ -169,7 +169,7 @@ class GraphNodeAttributeScalerSchema(BaseModel):
     "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
-    norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")
+    norm: Union[Literal["unit-max", "unit-sum"], None] = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
 
@@ -187,7 +187,7 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     weight_frac_of_total: float = Field(example=0.5)
     "Fraction of total weight to assign to nodes within the scaling mask. The remaining weight is distributed among "
     "nodes outside the mask."
-    norm: Literal["unit-max", "unit-sum"] = Field(example="unit-sum")
+    norm: Union[Literal["unit-max", "unit-sum"], None] = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
 
