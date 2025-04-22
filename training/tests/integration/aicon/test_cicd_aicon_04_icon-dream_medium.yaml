@@ -164,7 +164,7 @@ data:
     default: "none"
 
 model:
-  output_mask: 
+  output_mask:
     _target_: anemoi.training.utils.masks.NoOutputMask
   cpu_offload: False
 
