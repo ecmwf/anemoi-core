@@ -41,8 +41,8 @@ dynamic = [ "version" ]
 
 dependencies = [
   "anemoi-datasets>=0.5.13",
-  "anemoi-graphs>=0.4.1",
-  "anemoi-models>=0.4.1",
+  "anemoi-graphs>=0.5.1",
+  "anemoi-models>=0.5",
   "anemoi-utils[provenance]>=0.4.22",
   "datashader>=0.16.3",
   "einops>=0.6.1",
@@ -50,7 +50,6 @@ dependencies = [
   "matplotlib>=3.7.1",
   "mlflow>=2.11.1",
   "numpy<2",                          # Pinned until we can confirm it works with anemoi graphs
-  "pydantic>=2.9",
   "pynvml>=11.5",
   "pyshtools>=4.10.4",
   "pytorch-lightning>=2.1",
