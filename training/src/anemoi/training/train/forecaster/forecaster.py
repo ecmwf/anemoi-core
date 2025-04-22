@@ -118,7 +118,11 @@ class GraphForecaster(pl.LightningModule):
             metadata["dataset"].get("variables_metadata"),
         )
 
-        self.loss = get_loss_function(config.model_dump(by_alias=True).training.training_loss, scalers=self.scalers, data_indices=self.data_indices)
+        self.loss = get_loss_function(
+            config.model_dump(by_alias=True).training.training_loss,
+            scalers=self.scalers,
+            data_indices=self.data_indices,
+        )
         print_variable_scaling(self.loss, data_indices)
 
         self.metrics = torch.nn.ModuleDict(
