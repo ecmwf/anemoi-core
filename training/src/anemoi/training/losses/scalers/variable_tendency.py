@@ -67,8 +67,6 @@ class BaseTendencyScaler(BaseScaler):
     def get_scaling_values(self, **_kwargs) -> np.ndarray:
         variable_level_scaling = np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32)
 
-        LOGGER.info("Variable Level Scaling: Applying %s scaling to prognostic variables", self.__class__.__name__)
-
         for key, idx in self.data_indices.internal_model.output.name_to_index.items():
             if (
                 idx in self.data_indices.internal_model.output.prognostic
@@ -80,7 +78,6 @@ class BaseTendencyScaler(BaseScaler):
                     self.statistics_tendencies["stdev"][prog_idx] if self.statistics_tendencies else 1
                 )
                 scaling = self.get_level_scaling(variable_stdev, variable_tendency_stdev)
-                LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", key, scaling)
                 variable_level_scaling[idx] *= scaling
 
         return variable_level_scaling
