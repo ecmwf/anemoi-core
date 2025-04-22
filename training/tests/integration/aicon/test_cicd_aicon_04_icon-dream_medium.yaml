@@ -253,10 +253,11 @@ training:
     warmup: 1000
   scalers:
     general_variable:
-      default: 1
-      pl:
-        P: 1
-      sfc: {}
+      weights:
+        default: 1
+        pl:
+          P: 1
+        sfc: {}
   metrics: []
   training_loss:
     _target_: anemoi.training.losses.MSELoss
