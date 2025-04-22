@@ -106,12 +106,11 @@ configuration would look like this:
 .. code:: yaml
 
    pressure_level:
-     # Variable level scalers to be used
-     _target_: anemoi.training.losses.scaling.variable_level.ReluVariableLevelScaler
-     group: pl
-     y_intercept: 0.2
-     slope: 0.001
-     scale_dim: -1 # dimension on which scaling applied
+      # Variable level scaler to be used
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: pl
+      y_intercept: 0.2
+      slope: 0.001
 
 *****************
  Variable Groups
