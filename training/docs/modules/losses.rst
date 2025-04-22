@@ -104,6 +104,11 @@ recommended to set the `general_variable` scaling values close to 1.0
 for all prognostic variables to maintain consistency and avoid
 unintended bias in the training process.
 
+.. code:: yaml
+
+   stdev_tendency:
+      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+
 Variable Level Scalers
 ======================
 
