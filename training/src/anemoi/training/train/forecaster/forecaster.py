@@ -397,7 +397,7 @@ class GraphForecaster(pl.LightningModule):
 
             for mkey, indices in self.val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{mkey}/{rollout_step + 1}"
-                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE)):
+                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
                         " in the post processed space."
