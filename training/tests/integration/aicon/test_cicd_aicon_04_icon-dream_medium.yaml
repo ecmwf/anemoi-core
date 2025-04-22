@@ -255,9 +255,7 @@ training:
     general_variable:
       weights:
         default: 1
-        pl:
-          P: 1
-        sfc: {}
+        P: 1
   metrics: []
   training_loss:
     _target_: anemoi.training.losses.MSELoss
