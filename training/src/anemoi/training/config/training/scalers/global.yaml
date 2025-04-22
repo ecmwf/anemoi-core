@@ -1,9 +1,6 @@
 # Several scalers can be added here. In order to be applied their names must be included in the loss.
 # scaler name must be included in `scalers` in the losses for this to be applied.
 general_variable:
-  # Variable groups definition for scaling by variable level.
-  # The variable level scaling methods are defined under additional_scalers
-  # A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
   _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
   weights:
     default: 1

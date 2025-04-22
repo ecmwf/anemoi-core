@@ -91,9 +91,21 @@ Scalers can be added as options for the loss functions using the
 excluded add `!scaler_name`, i.e. ``['*', '!scaler_1']``, and
 ``scaler_1`` will not be added.
 
-************************
- Variable Level Scalers
-************************
+Tendency Scalers
+================
+
+Tendency scalers allow the scaling of prognostic losses by the standard
+deviation of variable tendencies, such as the 6-hourly differences in
+the data. This approach is particularly useful when training models that
+include both slow-evolving variables (e.g., Land/Ocean) and
+fast-evolving variables (e.g., Atmosphere), ensuring balanced
+contributions to the loss function. When using this option, it is
+recommended to set the `general_variable` scaling values close to 1.0
+for all prognostic variables to maintain consistency and avoid
+unintended bias in the training process.
+
+Variable Level Scalers
+======================
 
 Variable level scalers allow the user to scale variables by its level,
 i.e. model or pressure levels for upper air variables. The variable
@@ -112,9 +124,11 @@ configuration would look like this:
       y_intercept: 0.2
       slope: 0.001
 
-*****************
- Variable Groups
-*****************
+This will scale all variables in the `pl` group by max(0.2, 0.001 *
+level), where `level` is the pressure level of the variable.
+
+Variable Groups
+===============
 
 Define a default group and a list of groups to be used in the variable
 level scalers.

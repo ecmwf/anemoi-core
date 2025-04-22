@@ -361,6 +361,29 @@ Pressure Level scaler with a minimum weighting of 0.2 (i.e. no pressure
 level has a weighting less than 0.2), defined in class
 `anemoi.training.losses.scalers.ReluVariableLevelScaler`.
 
+.. code:: yaml
+
+   general_variable:
+      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+      weights:
+         default: 1
+         t: 6
+         z: 12
+         10u: 0.1
+         10v: 0.1
+         2d: 0.5
+         tp: 0.025
+         cp: 0.0025
+
+.. code:: yaml
+
+   pressure_level:
+      # Variable level scaler to be used
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: pl
+      y_intercept: 0.2
+      slope: 0.001
+
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. The configuration option

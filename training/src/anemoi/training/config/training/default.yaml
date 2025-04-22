@@ -64,7 +64,7 @@ training_loss:
   # loss class to initialise
   _target_: anemoi.training.losses.MSELoss
   # Scalers to include in loss calculation
-  # A selection of available scalers are listed in training/scalers/scalers.yaml
+  # A selection of available scalers are listed in training/scalers.
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
   scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
@@ -88,6 +88,9 @@ validation_metrics:
     # other kwargs
     ignore_nans: True
 
+# Variable groups definition for scaling by variable level.
+# The variable level scaling methods are defined under training/scalers
+# A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
 variable_groups:
   default: sfc
   pl: [q, t, u, v, w, z]
