@@ -28,7 +28,7 @@ build the `data` nodes, combining nodes from the LAM dataset and the
 global dataset (as boundary forcings). The class ``AnemoiDatasetNodes``
 allows this functionality:
 
-.. literalinclude:: yaml/cutout_zarr.yaml
+.. literalinclude:: yaml/cutout_dataset.yaml
    :language: yaml
 
 The ``AnemoiDatasetNodes`` supports an optional ``thinning`` argument

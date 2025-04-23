@@ -1,12 +1,12 @@
-.. _zarr-file:
+.. _anemoi-file:
 
 #####################
  From anemoi dataset
 #####################
 
 This class builds a set of nodes from a anemoi dataset. The nodes are
-defined by the coordinates of the dataset. The ZarrDataset class
-supports operations compatible with :ref:`anemoi-datasets
+defined by the coordinates of the dataset. The `AnemoiDatasetNodes`
+class supports operations compatible with :ref:`anemoi-datasets
 <anemoi-datasets:index-page>`.
 
 To define the `node coordinates` based on a anemoi dataset, you can use
