@@ -25,13 +25,13 @@ region of interest using any of the ``LimitedArea_____Nodes`` classes.
 In this case, the user may want to include boundary forcings to the
 region of interest. AnemoI Graphs allows the user to use two datasets to
 build the `data` nodes, combining nodes from the LAM dataset and the
-global dataset (as boundary forcings). The class ``ZarrDatasetNodes``
+global dataset (as boundary forcings). The class ``AnemoiDatasetNodes``
 allows this functionality:
 
 .. literalinclude:: yaml/cutout_zarr.yaml
    :language: yaml
 
-The ``ZarrDatasetNodes`` supports an optional ``thinning`` argument
+The ``AnemoiDatasetNodes`` supports an optional ``thinning`` argument
 which can be used to sampling points from the regional dataset to reduce
 computation during development stage.
 
@@ -45,7 +45,7 @@ datasets.
    HeteroData(
       data={
          x=[40320, 2],
-         node_type='ZarrDatasetNodes',
+         node_type='AnemoiDatasetNodes',
          area_weight=[40320, 1],
          cutout_mask=[40320, 1],
       }
@@ -68,7 +68,7 @@ defined by the `data` nodes masked by the ``cutout`` attribute.
    HeteroData(
       data={
          x=[40320, 2],
-         node_type='ZarrDatasetNodes',
+         node_type='AnemoiDatasetNodes',
          area_weight=[40320, 1],
          cutout_mask=[40320, 1],
       },

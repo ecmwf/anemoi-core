@@ -43,8 +43,8 @@ class NonmissingAnemoiDatasetVariable(BooleanBaseNodeAttribute):
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert (
-            nodes["node_type"] == "ZarrDatasetNodes"
-        ), f"{self.__class__.__name__} can only be used with ZarrDatasetNodes."
+            nodes["node_type"] in ["ZarrDatasetNodes", "AnemoiDatasetNodes"]
+        ), f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
         ds = open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
         return torch.from_numpy(~np.isnan(ds))
 

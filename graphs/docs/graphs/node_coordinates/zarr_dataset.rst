@@ -17,13 +17,13 @@ the following YAML configuration:
    nodes:
      data: # name of the nodes
        node_builder:
-         _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+         _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
          dataset: /path/to/dataset.zarr
        attributes: ...
 
 where `dataset` is the path to the anemoi dataset.
 
-The ``ZarrDatasetNodes`` class supports operations over multiple
+The ``AnemoiDatasetNodes`` class supports operations over multiple
 datasets. For example, the `cutout` operation supports combining a
 regional dataset and a global dataset to enable both limited area and
 stretched grids. To define the `node coordinates` that combine multiple
@@ -34,7 +34,7 @@ anemoi datasets, you can use the following YAML configuration:
    nodes:
      data:  # name of the nodes
        node_builder:
-         _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+         _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
          cutout:
          - dataset: /path/to/lam_dataset.zarr
            thinning: 25 # sample every n-th point (only for lam_dataset), optional

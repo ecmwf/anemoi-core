@@ -11,6 +11,7 @@ from .builders.from_file import LimitedAreaNPZFileNodes
 from .builders.from_file import NPZFileNodes
 from .builders.from_file import TextNodes
 from .builders.from_file import ZarrDatasetNodes
+from .builders.from_file import AnemoiDatasetNodes
 from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_icon import ICONCellGridNodes
@@ -25,6 +26,7 @@ from .builders.from_refined_icosahedron import TriNodes
 from .builders.from_vectors import LatLonNodes
 
 __all__ = [
+    "AnemoiDatasetNodes",
     "ZarrDatasetNodes",
     "NPZFileNodes",
     "TriNodes",
