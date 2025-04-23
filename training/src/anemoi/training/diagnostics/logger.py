@@ -56,7 +56,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
 
     if (resumed or forked) and (offline):  # when resuming or forking offline -
         # tracking_uri = ${hardware.paths.logs.mlflow}
-        tracking_uri = save_dir
+        tracking_uri = str(save_dir)
     # create directory if it does not exist
     Path(config.hardware.paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
 

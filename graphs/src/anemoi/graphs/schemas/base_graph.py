@@ -16,7 +16,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import model_validator
 
-from anemoi.training.schemas.utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 from .edge_attributes_schemas import EdgeAttributeSchema  # noqa: TC001
 from .edge_schemas import EdgeBuilderSchemas  # noqa: TC001
