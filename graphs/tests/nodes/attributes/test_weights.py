@@ -68,6 +68,6 @@ def test_spherical_area_weights_wrong_fill_value(fill_value: str):
 
 def test_masked_area_weights_fail(graph_with_nodes: HeteroData):
     """Test attribute builder for AreaWeights with invalid radius."""
-    with pytest.raises(KeyError):
+    with pytest.raises(AssertionError):
         node_attr_builder = MaskedPlanarAreaWeights(mask_node_attr_name="nonexisting")
         node_attr_builder.compute(graph_with_nodes, "test_nodes")

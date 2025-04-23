@@ -212,6 +212,7 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
         self.mask_node_attr_name = mask_node_attr_name
 
     def get_points(self, nodes: NodeStorage) -> torch.Tensor:
+        assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
         points = super().get_latlon_coordinates(nodes)
         mask = nodes[self.mask_node_attr_name].squeeze()
         return points * mask
