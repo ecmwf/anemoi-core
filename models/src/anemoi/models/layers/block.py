@@ -421,10 +421,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         value = self.lin_value(x_src)
         edges = self.lin_edge(edge_attr)
 
-        if self.qk_norm:
-            query = self.q_norm(query)
-            key = self.k_norm(key)
-
         return query, key, value, edges
 
     def shard_qkve_heads(
@@ -630,6 +626,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
 
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
         num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
 
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
@@ -741,6 +741,10 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
 
         num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
