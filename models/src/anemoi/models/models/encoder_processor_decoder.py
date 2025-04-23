@@ -170,7 +170,7 @@ class AnemoiModelEncProcDec(nn.Module):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_slice is not None:
             node_attributes_data = node_attributes_data[grid_shard_slice, :]
-        
+
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
