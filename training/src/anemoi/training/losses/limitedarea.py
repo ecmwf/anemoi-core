@@ -11,10 +11,14 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,6 +77,8 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
         target: torch.Tensor,
         squash: bool = True,
         scalar_indices: torch.Tensor | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup = None,
     ) -> torch.Tensor:
         """Calculates the lat-weighted MSE loss.
 
@@ -86,6 +92,10 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
             Average last dimension, by default True
         scalar_indices:
             feature indices (relative to full model output) of the features passed in pred and target
+        grid_shard_slice: slice, optional
+            Slice of this gpus grid shard if sharded, by default None
+        group: ProcessGroup, optional
+            Distributed group, by default None
 
         Returns
         -------
@@ -106,4 +116,4 @@ class WeightedMSELossLimitedArea(BaseWeightedLoss):
 
         out = self.scale(out, scalar_indices, without_scalars=["limited_area_mask"])
 
-        return self.scale_by_node_weights(out, squash)
+        return self.scale_by_node_weights(out, squash, grid_shard_slice, group)

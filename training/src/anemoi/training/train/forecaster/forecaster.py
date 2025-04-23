@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 from __future__ import annotations
 
 import logging
@@ -25,6 +24,9 @@ from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
@@ -159,6 +161,9 @@ class GraphForecaster(pl.LightningModule):
         if not isinstance(self.metrics, torch.nn.ModuleList):
             self.metrics = torch.nn.ModuleList([self.metrics])
 
+        # set flag if loss and metrics support sharding
+        self.metrics_support_sharding = all(isinstance(metric, BaseWeightedLoss) for metric in self.metrics)
+
         if config.training.loss_gradient_scaling:
             self.loss.register_full_backward_hook(grad_scaler, prepend=False)
 
@@ -181,6 +186,28 @@ class GraphForecaster(pl.LightningModule):
         self.model_comm_group = None
         self.reader_groups = None
 
+        reader_group_size = self.config.dataloader.read_group_size
+        self.grid_indices = instantiate(
+            self.config.model_dump(by_alias=True).dataloader.grid_indices,
+            reader_group_size=reader_group_size,
+        )
+        self.grid_indices.setup(graph_data)
+        self.grid_dim = -2
+
+        self.keep_batch_sharded = self.config.model.keep_batch_sharded
+        read_group_supports_sharding = reader_group_size == self.config.hardware.num_gpus_per_model
+        assert read_group_supports_sharding or not self.keep_batch_sharded, (
+            f"Reader group size {reader_group_size} does not match the number of GPUs per model "
+            f"{self.config.hardware.num_gpus_per_model}, but `model.keep_batch_sharded=True` was set. ",
+            "Please set `model.keep_batch_sharded=False` or set `dataloader.read_group_size` ="
+            "`hardware.num_gpus_per_model`.",
+        )
+        model_supports_sharding = getattr(self.model.model, "supports_sharded_input", False)
+        assert model_supports_sharding or not self.keep_batch_sharded, (
+            f"Model {self.model.model} does not support sharded inputs, but `model.keep_batch_sharded=True` was set. ",
+            "Please set `model.keep_batch_sharded=False` or ensure that the model supports sharded inputs.",
+        )
+
         LOGGER.debug("Rollout window length: %d", self.rollout)
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
@@ -194,8 +221,13 @@ class GraphForecaster(pl.LightningModule):
         self.reader_group_id = 0
         self.reader_group_rank = 0
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x, self.model_comm_group)
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        grid_shard_shapes: list | None = None,
+    ) -> torch.Tensor:
+        return self.model(x, self.model_comm_group, grid_shard_slice, grid_shard_shapes)
 
     # Future import breaks other type hints TODO Harrison Cook
     @staticmethod
@@ -428,12 +460,51 @@ class GraphForecaster(pl.LightningModule):
         ]
         return x
 
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int,
+        validation_mode: bool = False,
+        grid_shard_slice: slice | None = None,
+        grid_shard_shapes: list | None = None,
+    ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
+        sharding_supported = self.metrics_support_sharding or not validation_mode  # loss always supports sharding
+        if is_sharded and not sharding_supported:  # gather tensors if loss and metrics do not support sharding
+            shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, grid_shard_shapes)
+            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
+            y_full = gather_tensor(torch.clone(y), self.grid_dim, shard_shapes, self.model_comm_group)
+            grid_shard_slice, grid_shard_shapes = None, None
+        else:
+            y_pred_full, y_full = y_pred, y
+
+        loss = self.loss(
+            y_pred_full,
+            y_full,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
+        )
+
+        metrics_next = {}
+        if validation_mode:
+            metrics_next = self.calculate_val_metrics(
+                y_pred_full,
+                y_full,
+                rollout_step,
+                grid_shard_slice=grid_shard_slice,
+            )
+
+        return loss, metrics_next
+
     def rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
         training_mode: bool = True,
         validation_mode: bool = False,
+        grid_shard_slice: slice | None = None,
+        grid_shard_shapes: list | None = None,
     ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
         """Rollout step for the forecaster.
 
@@ -481,21 +552,27 @@ class GraphForecaster(pl.LightningModule):
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-            y_pred = self(x)
+            y_pred = self(x, grid_shard_slice, grid_shard_shapes)
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
-
-            x = self.advance_input(x, y_pred, batch, rollout_step)
-
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
+            loss, metrics_next = (
+                checkpoint(
+                    self.compute_loss_metrics,
                     y_pred,
                     y,
                     rollout_step,
+                    validation_mode,
+                    grid_shard_slice,
+                    grid_shard_shapes,
+                    use_reentrant=False,
                 )
+                if training_mode
+                else None
+            )
+
+            x = self.advance_input(x, y_pred, batch, rollout_step)
+
             yield loss, metrics_next, y_pred
 
     def _step(
@@ -505,7 +582,12 @@ class GraphForecaster(pl.LightningModule):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         del batch_idx
-        batch = self.allgather_batch(batch)
+        if self.keep_batch_sharded:
+            grid_shard_shapes = self.grid_indices.shard_shapes
+            grid_shard_slice = self.grid_indices.get_shard_indices(self.reader_group_rank)
+        else:
+            batch = self.allgather_batch(batch)
+            grid_shard_shapes, grid_shard_slice = None, None
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -516,6 +598,8 @@ class GraphForecaster(pl.LightningModule):
             rollout=self.rollout,
             training_mode=True,
             validation_mode=validation_mode,
+            grid_shard_slice=grid_shard_slice,
+            grid_shard_shapes=grid_shard_shapes,
         ):
             loss += loss_next
             metrics.update(metrics_next)
@@ -537,22 +621,14 @@ class GraphForecaster(pl.LightningModule):
         torch.Tensor
             Allgathered (full) batch
         """
-        grid_size = len(self.latlons_data)  # number of points
+        grid_shard_shapes = self.grid_indices.shard_shapes
+        grid_size = self.grid_indices.grid_size
 
-        if grid_size == batch.shape[-2]:
+        if grid_size == batch.shape[self.grid_dim]:
             return batch  # already have the full grid
 
-        grid_shard_size = grid_size // self.reader_group_size
-        last_grid_shard_size = grid_size - (grid_shard_size * (self.reader_group_size - 1))
-
-        # prepare tensor list with correct shapes for all_gather
-        shard_shape = list(batch.shape)
-        shard_shape[-2] = grid_shard_size
-        last_shard_shape = list(batch.shape)
-        last_shard_shape[-2] = last_grid_shard_size
-
-        tensor_list = [torch.empty(tuple(shard_shape), device=self.device) for _ in range(self.reader_group_size - 1)]
-        tensor_list.append(torch.empty(last_shard_shape, device=self.device))
+        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
+        tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
 
         torch.distributed.all_gather(
             tensor_list,
@@ -560,13 +636,14 @@ class GraphForecaster(pl.LightningModule):
             group=self.reader_groups[self.reader_group_id],
         )
 
-        return torch.cat(tensor_list, dim=-2)
+        return torch.cat(tensor_list, dim=self.grid_dim)
 
     def calculate_val_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         rollout_step: int,
+        grid_shard_slice: slice | None = None,
     ) -> tuple[dict, list[torch.Tensor]]:
         """Calculate metrics on the validation output.
 
@@ -615,6 +692,8 @@ class GraphForecaster(pl.LightningModule):
                             y_pred,
                             y,
                             scalar_indices=[..., internal_model_indices],
+                            grid_shard_slice=grid_shard_slice,
+                            group=self.model_comm_group,
                         )
                 else:
                     if -1 in metric.scalar:
@@ -629,6 +708,8 @@ class GraphForecaster(pl.LightningModule):
                         y_pred_postprocessed,
                         y_postprocessed,
                         scalar_indices=[..., indices],
+                        grid_shard_slice=grid_shard_slice,
+                        group=self.model_comm_group,
                     )
 
         return metrics

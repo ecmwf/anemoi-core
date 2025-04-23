@@ -3,6 +3,8 @@ num_channels: 1024
 cpu_offload: False
 output_mask: null
 
+keep_batch_sharded: True
+
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
