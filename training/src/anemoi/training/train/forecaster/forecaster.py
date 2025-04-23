@@ -25,7 +25,6 @@ from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
@@ -58,6 +57,7 @@ class GraphForecaster(pl.LightningModule):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
+        truncation_data: dict,
         statistics: dict,
         data_indices: IndexCollection,
         metadata: dict,
@@ -96,6 +96,7 @@ class GraphForecaster(pl.LightningModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
             graph_data=graph_data,
+            truncation_data=truncation_data,
             config=convert_to_omegaconf(config),
         )
         self.config = config
@@ -168,15 +169,14 @@ class GraphForecaster(pl.LightningModule):
             * config.training.lr.rate
             / config.hardware.num_gpus_per_model
         )
-
-        self.warmup_t = config.training.lr.warmup_t
         self.lr_iterations = config.training.lr.iterations
+        self.lr_warmup = config.training.lr.warmup
         self.lr_min = config.training.lr.min
         self.rollout = config.training.rollout.start
         self.rollout_epoch_increment = config.training.rollout.epoch_increment
         self.rollout_max = config.training.rollout.max
 
-        self.use_zero_optimizer = config.training.zero_optimizer
+        self.optimizer_settings = config.training.optimizer
 
         self.model_comm_group = None
         self.reader_groups = None
@@ -212,26 +212,26 @@ class GraphForecaster(pl.LightningModule):
         ----------
         config : DictConfig
             Loss function configuration, should include `scalars` if scalars are to be added to the loss function.
-        scalars : dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]] | None,
-            Scalars which can be added to the loss function. Defaults to None.,
-            If a scalar is to be added to the loss, ensure it is in `scalars` in the loss config
-            E.g.
-                If `scalars: ['variable']` is set in the config, and `variable` in `scalars`
-                `variable` will be added to the scalar of the loss function.
+        scalars : dict[str, tuple[Union[int, tuple[int, ...], torch.Tensor]]] | None
+            Scalars which can be added to the loss function. Defaults to None.
+            If a 'scalar' is to be added to the loss, ensure it is in 'scalars' in the loss config.
+            For instance, if 'scalars: ['variable']' is set in the config, and 'variable' in 'scalars'
+            'variable' will be added to the scalar of the loss function.
         kwargs : Any
             Additional arguments to pass to the loss function
 
         Returns
         -------
-        Union[BaseWeightedLoss, torch.nn.ModuleList]
-            Loss function, or list of metrics
+        BaseWeightedLoss | torch.nn.ModuleList
+            The loss function to use for training
 
         Raises
         ------
         TypeError
-            If not a subclass of `BaseWeightedLoss`
+            If not a subclass of 'BaseWeightedLoss'
         ValueError
             If scalar is not found in valid scalars
+
         """
         scalars = scalars or {}
 
@@ -458,10 +458,6 @@ class GraphForecaster(pl.LightningModule):
         Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
             Loss value, metrics, and predictions (per step)
 
-        Returns
-        -------
-        None
-            None
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
@@ -576,17 +572,17 @@ class GraphForecaster(pl.LightningModule):
 
         Parameters
         ----------
-            y_pred: torch.Tensor
-                Predicted ensemble
-            y: torch.Tensor
-                Ground truth (target).
-            rollout_step: int
-                Rollout step
+        y_pred: torch.Tensor
+            Predicted ensemble
+        y: torch.Tensor
+            Ground truth (target).
+        rollout_step: int
+            Rollout step
 
         Returns
         -------
-            val_metrics, preds:
-                validation metrics and predictions
+        val_metrics, preds:
+            validation metrics and predictions
         """
         metrics = {}
         y_postprocessed = self.model.post_processors(y, in_place=False)
@@ -690,9 +686,6 @@ class GraphForecaster(pl.LightningModule):
         batch_idx : int
             Batch inces
 
-        Returns
-        -------
-        None
         """
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
@@ -723,24 +716,33 @@ class GraphForecaster(pl.LightningModule):
         return val_loss, y_preds
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
-        if self.use_zero_optimizer:
+        """Configure the optimizers and learning rate scheduler.
+
+        Returns
+        -------
+        tuple[list[torch.optim.Optimizer], list[dict]]
+            List of optimizers and list of dictionaries containing the
+            learning rate scheduler
+        """
+        if self.optimizer_settings.zero:
             optimizer = ZeroRedundancyOptimizer(
                 self.trainer.model.parameters(),
-                optimizer_class=torch.optim.AdamW,
-                betas=(0.9, 0.95),
                 lr=self.lr,
+                optimizer_class=torch.optim.AdamW,
+                **self.optimizer_settings.kwargs,
             )
         else:
             optimizer = torch.optim.AdamW(
                 self.trainer.model.parameters(),
-                betas=(0.9, 0.95),
                 lr=self.lr,
-            )  # , fused=True)
+                **self.optimizer_settings.kwargs,
+            )
 
         scheduler = CosineLRScheduler(
             optimizer,
             lr_min=self.lr_min,
             t_initial=self.lr_iterations,
-            warmup_t=self.warmup_t,
+            warmup_t=self.lr_warmup,
         )
+
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]

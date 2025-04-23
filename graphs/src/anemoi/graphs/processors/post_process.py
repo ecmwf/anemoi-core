@@ -12,11 +12,16 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import Any
 
 import torch
+from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs import EARTH_RADIUS
+from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.utils import NodesAxis
+from anemoi.graphs.utils import get_edge_attributes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -24,12 +29,12 @@ LOGGER = logging.getLogger(__name__)
 class PostProcessor(ABC):
 
     @abstractmethod
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
         raise NotImplementedError(f"The {self.__class__.__name__} class does not implement the method update_graph().")
 
 
-class BaseMaskingProcessor(PostProcessor, ABC):
-    """Base class for mask based processor."""
+class BaseNodeMaskingProcessor(PostProcessor, ABC):
+    """Base class for mask based node processor."""
 
     def __init__(
         self,
@@ -76,13 +81,15 @@ class BaseMaskingProcessor(PostProcessor, ABC):
 
         return graph
 
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
         """Post-process the graph.
 
         Parameters
         ----------
         graph: HeteroData
             The graph to post-process.
+        kwargs: Any
+            Additional keyword arguments.
 
         Returns
         -------
@@ -97,7 +104,7 @@ class BaseMaskingProcessor(PostProcessor, ABC):
         return graph
 
 
-class RemoveUnconnectedNodes(BaseMaskingProcessor):
+class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
     """Remove unconnected nodes in the graph.
 
     Attributes
@@ -201,3 +208,122 @@ class SortEdgeIndexBySourceNodes(BaseSortEdgeIndex):
 
 class SortEdgeIndexByTargetNodes(BaseSortEdgeIndex):
     nodes_axis = NodesAxis.TARGET
+
+
+class BaseEdgeMaskingProcessor(PostProcessor, ABC):
+    """Base class for mask based edge processor.
+
+    Attributes
+    ----------
+    source_name: str
+        Name of the source nodes of edges to remove.
+    target_name: str
+        Name of the target nodes of edges to remove.
+    """
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+    ) -> None:
+        self.source_name = source_name
+        self.target_name = target_name
+        self.edges_name = (self.source_name, "to", self.target_name)
+        self.mask: torch.Tensor = None
+
+    def removing_edges(self, graph: HeteroData) -> HeteroData:
+        """Remove edges based on the mask passed."""
+        for attr_name in graph[self.edges_name].edge_attrs():
+            if attr_name == "edge_index":
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask]
+            else:
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask, :]
+
+        return graph
+
+    @abstractmethod
+    def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
+
+    def recompute_attributes(self, graph: HeteroData, graph_config: dict) -> HeteroData:
+        """Recompute attributes"""
+        edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
+        for attr_name, edge_attr_builder in edge_attributes.items():
+            LOGGER.info(f"Recomputing edge attribute {attr_name}.")
+            graph[self.edges_name][attr_name] = instantiate(edge_attr_builder)(
+                x=(graph[self.source_name], graph[self.target_name]), edge_index=graph[self.edges_name].edge_index
+            )
+        return graph
+
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
+        """Post-process the graph.
+
+        Parameters
+        ----------
+        graph: HeteroData
+            The graph to post-process.
+        kwargs: Any
+            Additional keyword arguments.
+
+        Returns
+        -------
+        HeteroData
+            The post-processed graph.
+        """
+        self.mask = self.compute_mask(graph)
+        LOGGER.info(f"Removing {(~self.mask).sum()} edges from {self.edges_name}.")
+        graph = self.removing_edges(graph)
+        graph_config = kwargs.get("graph_config", {})
+        graph = self.recompute_attributes(graph, graph_config)
+        return graph
+
+
+class RestrictEdgeLength(BaseEdgeMaskingProcessor):
+    """Remove edges longer than a given treshold from the graph.
+
+    Attributes
+    ----------
+    source_name: str
+        Name of the source nodes of edges to remove.
+    target_name: str
+        Name of the target nodes of edges to remove.
+    max_length_km: float
+        The maximal length of edges not to be removed.
+    source_mask_attr_name: str , optional
+         the postprocessing will be restricted to edges with source node having True in this mask_attr
+    target_mask_attr_name: str, optional
+        the postprocessing will be restricted to edges with target node having True in this mask_attr
+    Methods
+    -------
+    compute_mask(graph)
+        Compute the mask of the relevant edges longer than max_length_km.
+    """
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+        max_length_km: float,
+        source_mask_attr_name: str | None = None,
+        target_mask_attr_name: str | None = None,
+    ) -> None:
+        super().__init__(source_name, target_name)
+        self.treshold = max_length_km
+        self.source_mask_attr_name = source_mask_attr_name
+        self.target_mask_attr_name = target_mask_attr_name
+
+    def compute_mask(self, graph: HeteroData) -> torch.Tensor:
+        source_nodes = graph[self.source_name]
+        target_nodes = graph[self.target_name]
+        edge_index = graph[self.edges_name].edge_index
+        lengths = EARTH_RADIUS * EdgeLength()(x=(source_nodes, target_nodes), edge_index=edge_index)
+        mask = torch.where(lengths > self.treshold, False, True).squeeze()
+        cases = [
+            (self.source_mask_attr_name, source_nodes, 0),
+            (self.target_mask_attr_name, target_nodes, 1),
+        ]
+        for mask_attr_name, nodes, i in cases:
+            if mask_attr_name:
+                attr_mask = nodes[mask_attr_name].squeeze()
+                edge_mask = attr_mask[edge_index[i]]
+                mask = torch.logical_or(mask, ~edge_mask)
+        return mask

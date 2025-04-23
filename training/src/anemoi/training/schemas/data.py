@@ -18,7 +18,7 @@ from pydantic import Field
 from pydantic import ValidationError
 from pydantic import model_validator
 
-from .utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 
 class NormalizerSchema(BaseModel):

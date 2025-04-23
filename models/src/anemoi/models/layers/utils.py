@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
@@ -32,12 +31,12 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
-def load_layer_kernels(kernel_config: Optional[DotDict] = {}) -> DotDict:
+def load_layer_kernels(kernel_config: DotDict) -> DotDict:
     """Load layer kernels from the config.
 
     Args:
-        kernel_config : Optional[DotDict]
-            Kernel configuration
+        kernel_config : DotDict
+            Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear", "_partial_": True}}
 
     Returns:
         DotDict: hydra partial instantiation of the layer kernels
@@ -46,6 +45,16 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = {}) -> DotDict:
     default_kernels = {
         "Linear": {"_target_": "torch.nn.Linear", "_partial_": True},
         "LayerNorm": {"_target_": "torch.nn.LayerNorm", "_partial_": True},
+        "QueryNorm": {
+            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+            "_partial_": True,
+            "bias": False,
+        },
+        "KeyNorm": {
+            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+            "_partial_": True,
+            "bias": False,
+        },
     }
     layer_kernels = {**default_kernels, **kernel_config}
 
