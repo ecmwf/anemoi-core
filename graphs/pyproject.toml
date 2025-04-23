@@ -51,7 +51,7 @@ dependencies = [
   "plotly>=5.19",
   "scikit-learn",
   "torch>=2.2",
-  "torch-geometric>=2.3.1,<2.5",
+  "torch-geometric>=2.3.1",
   "trimesh>=4.1",
   "typeguard",
 ]
@@ -63,7 +63,7 @@ optional-dependencies.docs = [
   "nbsphinx",
   "pandoc",
   "requests",
-  "sphinx",
+  "sphinx<8.2",       # Fixed until nbsphinx updates
   "sphinx-argparse",
   "sphinx-rtd-theme",
   "termcolor",

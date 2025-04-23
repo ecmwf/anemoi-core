@@ -71,8 +71,7 @@ processors:
   #   config: ${data.imputer}
   normalizer:
     _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-    _convert_: all
     config: ${data.normalizer}
 
-  # Values set in the code
+# Values set in the code
 num_features: null # number of features in the forecast state

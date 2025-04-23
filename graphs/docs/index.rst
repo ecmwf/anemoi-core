@@ -12,8 +12,7 @@
 
 The *anemoi-graphs* package is a collection of tools enabling you to
 design custom graphs for training data-driven weather models. It is one
-of the packages within the `anemoi framework
-<https://anemoi-docs.readthedocs.io/en/latest/>`_.
+of the packages within the :ref:`anemoi framework <anemoi-docs:index>`.
 
 **************
  About Anemoi
@@ -41,8 +40,8 @@ recipe file, which can be used to build graphs for the input, hidden and
 output layers. For each layer, the package allows you to:
 
 -  :ref:`Define graph nodes <graphs-node_coordinates>` based on
-   coordinates defined in a dataset (Zarr and NPZ) or via algorithmic
-   approaches such as the triangular refined icosahedron.
+   coordinates defined in a dataset (anemoi dataset and NPZ) or via
+   algorithmic approaches such as the triangular refined icosahedron.
 
 -  :ref:`Define edges <graphs-edges>` (connections between nodes) based
    on methods such as the cut-off radius or K nearest-neighbours.
@@ -79,24 +78,7 @@ To install the package, you can use the following command:
 
    pip install anemoi-graphs
 
-Get more information in the :ref:`installing <installing>` section.
-
-**************
- Contributing
-**************
-
-.. code:: bash
-
-   git clone ...
-   cd anemoi-graphs
-   pip install .[dev]
-   pip install -r docs/requirements.txt
-
-You may also have to install pandoc on MacOS:
-
-.. code:: bash
-
-   brew install pandoc
+Get more information in the :ref:`installing-graphs` section.
 
 ***********************
  Other Anemoi packages
@@ -136,7 +118,7 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Recipe examples
+   :caption: Recipe Examples
 
    usage/getting_started
    usage/limited_area
@@ -144,7 +126,7 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Building graphs
+   :caption: User Guide
 
    graphs/introduction
    graphs/node_coordinates
@@ -156,8 +138,9 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Modules
+   :caption: API Reference
 
+   modules/schemas
    modules/node_builder
    modules/edge_builder
    modules/node_attributes
@@ -169,8 +152,6 @@ You may also have to install pandoc on MacOS:
 .. toctree::
    :maxdepth: 1
    :hidden:
-   :caption: Developing Anemoi Graphs
+   :caption: Contributing
 
-   dev/contributing
-   dev/code_structure
-   dev/testing
+   contributing

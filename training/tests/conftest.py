@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,25 +9,27 @@
 
 
 import pytest
-from _pytest.fixtures import SubRequest
-from hydra import compose
-from hydra import initialize
-from omegaconf import DictConfig
-
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 
-@pytest.fixture
-def config(request: SubRequest) -> DictConfig:
-    overrides = request.param
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
-        # config is relative to a module
-        return compose(config_name="debug", overrides=overrides)
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--longtests",
+        action="store_true",
+        dest="longtests",
+        default=False,
+        help="enable tests marked as longtests",
+    )
 
 
-@pytest.fixture
-def datamodule() -> AnemoiDatasetsDataModule:
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
-        # config is relative to a module
-        cfg = compose(config_name="config")
-    return AnemoiDatasetsDataModule(cfg)
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the 'longtests' marker to avoid warnings."""
+    config.addinivalue_line("markers", "longtests: mark tests as long-running")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Automatically skip @pytest.mark.longtests tests unless --longtests is used."""
+    if not config.getoption("--longtests"):
+        skip_marker = pytest.mark.skip(reason="Skipping long test, use --longtests to enable")
+        for item in items:
+            if item.get_closest_marker("longtests"):
+                item.add_marker(skip_marker)

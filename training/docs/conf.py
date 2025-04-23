@@ -70,6 +70,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinxarg.ext",
     "sphinx.ext.autosectionlabel",
+    # "sphinxcontrib.autodoc_pydantic",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -82,13 +83,17 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "'**.ipynb_checkpoints'"
 
 intersphinx_mapping = {
     "python": ("https://python.readthedocs.io/en/latest", None),
+    "anemoi-docs": (
+        "https://anemoi.readthedocs.io/en/latest/",
+        ("../../../anemoi-docs/docs/_build/html/objects.inv", None),
+    ),
     "anemoi-utils": (
         "https://anemoi-utils.readthedocs.io/en/latest/",
-        ("../../anemoi-utils/docs/_build/html/objects.inv", None),
+        ("../../../anemoi-utils/docs/_build/html/objects.inv", None),
     ),
     "anemoi-datasets": (
         "https://anemoi-datasets.readthedocs.io/en/latest/",
-        ("../../anemoi-datasets/docs/_build/html/objects.inv", None),
+        ("../../../anemoi-datasets/docs/_build/html/objects.inv", None),
     ),
     "anemoi-models": (
         "https://anemoi-models.readthedocs.io/en/latest/",
@@ -100,7 +105,7 @@ intersphinx_mapping = {
     ),
     "anemoi-inference": (
         "https://anemoi-inference.readthedocs.io/en/latest/",
-        ("../../anemoi-inference/docs/_build/html/objects.inv", None),
+        ("../../../anemoi-inference/docs/_build/html/objects.inv", None),
     ),
     "anemoi-graphs": (
         "https://anemoi-graphs.readthedocs.io/en/latest/",
@@ -108,11 +113,11 @@ intersphinx_mapping = {
     ),
     "anemoi-registry": (
         "https://anemoi-registry.readthedocs.io/en/latest/",
-        ("../../anemoi-registry/docs/_build/html/objects.inv", None),
+        ("../../../anemoi-registry/docs/_build/html/objects.inv", None),
     ),
     "anemoi-transform": (
         "https://anemoi-transform.readthedocs.io/en/latest/",
-        ("../../anemoi-transform/docs/_build/html/objects.inv", None),
+        ("../../../anemoi-transform/docs/_build/html/objects.inv", None),
     ),
 }
 
@@ -133,3 +138,10 @@ html_css_files = ["style.css"]
 todo_include_todos = not read_the_docs_build
 
 autodoc_member_order = "bysource"  # Keep file order
+
+
+# https://autodoc-pydantic.readthedocs.io/en/stable/users/configuration.html
+
+autodoc_pydantic_model_show_json = True
+autodoc_pydantic_model_show_field_summary = False
+autodoc_pydantic_model_member_order = "bysource"

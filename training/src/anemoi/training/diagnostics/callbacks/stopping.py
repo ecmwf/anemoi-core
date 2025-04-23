@@ -21,7 +21,7 @@ from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
 if TYPE_CHECKING:
-    from omegaconf import OmegaConf
+    from omegaconf import DictConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ LOGGER = logging.getLogger(__name__)
 class TimeLimit(pl.callbacks.Callback):
     """Callback to stop the training process after a given time limit."""
 
-    def __init__(self, config: OmegaConf, limit: int | str, record_file: str | None = None) -> None:
+    def __init__(self, config: DictConfig, limit: int | str, record_file: str | None = None) -> None:
         """Initialise the TimeLimit callback.
 
         Parameters
@@ -80,7 +80,7 @@ class TimeLimit(pl.callbacks.Callback):
         if timedelta(seconds=time.time() - self._start_time) < self.limit:
             return
 
-        LOGGER.info("Time limit of %s seconds reached. Stopping training.", frequency_to_string(self.limit))
+        LOGGER.info("Time limit of %s reached. Stopping training.", frequency_to_string(self.limit))
         trainer.should_stop = True
         self._log_to_file(trainer)
 
@@ -101,3 +101,24 @@ class TimeLimit(pl.callbacks.Callback):
                 self._record_file.unlink()
 
             Path(self._record_file).write_text(str(last_checkpoint))
+
+
+class EarlyStopping(pl.callbacks.EarlyStopping):
+    """Thin wrapper around Pytorch Lightning's EarlyStopping callback."""
+
+    def __init__(self, config: DictConfig, **kwargs) -> None:
+        """
+        Early stopping callback.
+
+        Set `monitor` to metric to check.
+        Common names within `Anemoi` are:
+            - `val_{loss_name}_epoch`
+            - `train_{loss_name}_epoch`
+            - `val_{metric_name}/{param}_{level}/{rollout}` i.e. `val_wmse/v_850/1`
+            - `val_{metric_name}/sfc_{param}/{rollout}` i.e. `val_wmse/sfc_2t/1`
+
+        See Pytorch Lightning documentation for more information.
+        https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.EarlyStopping.html
+        """
+        super().__init__(**kwargs)
+        self.config = config
