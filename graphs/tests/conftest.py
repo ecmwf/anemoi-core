@@ -39,7 +39,7 @@ def mock_zarr_dataset() -> MockZarrDataset:
 def mock_zarr_dataset_cutout() -> MockZarrDataset:
     """Mock zarr dataset with nodes."""
     coords = 2 * torch.pi * np.array([[lat, lon] for lat in lats for lon in lons])
-    grids = int(0.3 * len(coords)), int(0.7 * len(coords))
+    grids = int(0.3 * len(coords)), len(coords) - int(0.3 * len(coords))
     return MockZarrDataset(latitudes=coords[:, 0], longitudes=coords[:, 1], grids=grids)
 
 
@@ -59,7 +59,9 @@ def graph_with_nodes() -> HeteroData:
     coords = np.array([[lat, lon] for lat in lats for lon in lons])
     graph = HeteroData()
     graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
-    graph["test_nodes"].mask = torch.tensor([True] * len(coords))
+    graph["test_nodes"].mask = torch.tensor([True] * len(coords)).unsqueeze(-1)
+    graph["test_nodes"].mask2 = torch.tensor([True] * (len(coords) - 2) + [False] * 2).unsqueeze(-1)
+    graph["test_nodes"]["_grid_reference_distance"] = 0.75
     return graph
 
 
@@ -78,8 +80,18 @@ def graph_nodes_and_edges() -> HeteroData:
     coords = np.array([[lat, lon] for lat in lats for lon in lons])
     graph = HeteroData()
     graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
-    graph["test_nodes"].mask = torch.tensor([True] * len(coords))
-    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor([[0, 1], [1, 2], [2, 3], [3, 0]])
+    graph["test_nodes"].mask = torch.tensor([True] * len(coords)).unsqueeze(-1)
+    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
+    return graph
+
+
+@pytest.fixture
+def graph_long_and_short_edges() -> HeteroData:
+    """Graph with a pair of short (800km) and a pair of long (20000km) edges."""
+    graph = HeteroData()
+    graph["test_nodes"].x = 2 * torch.pi * torch.tensor([[-0.01, 0], [0.01, 0], [-0.01, 0.5], [0.01, 0.5]])
+    graph["test_nodes"]["southern_hemisphere_mask"] = torch.tensor([[1], [0], [1], [0]], dtype=torch.bool)
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[0, 0, 1, 3], [1, 3, 2, 2]])
     return graph
 
 

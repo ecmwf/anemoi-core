@@ -98,7 +98,8 @@ class TransformerProcessor(BaseProcessor):
         cpu_offload: bool = False,
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
-        dropout_p: float = 0.1,
+        qk_norm=False,
+        dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: float = 0.0,
         use_alibi_slopes: bool = False,
@@ -121,6 +122,8 @@ class TransformerProcessor(BaseProcessor):
             Number of heads to use, default 16
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         activation : str, optional
             Activation function, by default "GELU"
         dropout_p: float, optional
@@ -153,6 +156,7 @@ class TransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             window_size=window_size,
             activation=activation,
+            qk_norm=qk_norm,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
             softcap=softcap,
@@ -176,7 +180,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group)
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
 
         return x
 
@@ -250,6 +254,8 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         edge_attr = self.trainable(self.edge_attr, batch_size)
@@ -264,7 +270,9 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         edge_index = shard_tensor(edge_index, 1, shapes_edge_idx, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
-        x, edge_attr = self.run_layers((x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group)
+        x, edge_attr = self.run_layers(
+            (x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group, **kwargs
+        )
 
         return x
 
@@ -282,6 +290,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         activation: str = "GELU",
+        qk_norm: bool = False,
         cpu_offload: bool = False,
         sub_graph: Optional[HeteroData] = None,
         sub_graph_edge_attributes: Optional[list[str]] = None,
@@ -305,6 +314,8 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             ratio of mlp hidden dimension to embedding dimension, default 4
         activation : str, optional
             Activation function, by default "GELU"
+        qk_norm: bool, optional
+            Normalize query and key, by default False
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         """
@@ -330,6 +341,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             activation=activation,
+            qk_norm=qk_norm,
             edge_dim=self.edge_dim,
         )
 
@@ -361,6 +373,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            **kwargs,
         )
 
         return x

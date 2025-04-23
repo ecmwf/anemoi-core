@@ -30,6 +30,7 @@ from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.training.diagnostics.mlflow.utils import health_check
 
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from argparse import Namespace
 
     import mlflow
+    from mlflow.tracking import MlflowClient
 
 LOGGER = logging.getLogger(__name__)
 
@@ -206,7 +208,7 @@ class LogsMonitor:
         # split lines and keep \n at the end of each line
         lines = [e + b"\n" for e in data.split(b"\n") if e]
 
-        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")  # noqa: RUF039
+        ansi_csi_re = re.compile(b"\001?\033\\[((?:\\d|;)*)([a-dA-D])\002?")
 
         def _handle_csi(line: bytes) -> bytes:
             # removes the cursor up and down symbols from the line
@@ -303,6 +305,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
         self._fork_run_server2server = None
         self._parent_run_server2server = None
+        self._parent_dry_run = False
 
         enabled = authentication and not offline
         self.auth = TokenAuth(tracking_uri, enabled=enabled)
@@ -344,6 +347,16 @@ class AnemoiMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
+    def _check_dry_run(self, run: mlflow.entities.Run) -> None:
+        """Check if the parent run is a dry run.
+
+        A dry run is a run that is used as template base run
+        but do not contain any checkpoints.
+        """
+        dry_run = run.data.tags.get("dry_run", "False") == "True"
+        LOGGER.info("Parent run is a Dry Run: %s", dry_run)
+        self._parent_dry_run = dry_run
+
     def _check_server2server_lineage(self, run: mlflow.entities.Run) -> bool:
         """Address lineage and metadata for server2server runs.
 
@@ -372,7 +385,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
         tracking_uri: str,
         on_resume_create_child: bool,
     ) -> tuple[str | None, str, dict[str, Any]]:
-
         run_id = None
         tags = {"projectName": project_name}
 
@@ -391,26 +403,44 @@ class AnemoiMLflowLogger(MLFlowLogger):
             self.auth.authenticate()
             mlflow_client = mlflow.MlflowClient(tracking_uri)
 
-            if config_run_id and on_resume_create_child:
+            # This block is used when a run ID is specified with child runs option activated
+            if config_run_id and on_resume_create_child and not fork_run_id:
                 parent_run_id = config_run_id  # parent_run_id
                 parent_run = mlflow_client.get_run(parent_run_id)
                 run_name = parent_run.info.run_name
                 self._check_server2server_lineage(parent_run)
+                self._check_dry_run(parent_run)
                 tags["mlflow.parentRunId"] = parent_run_id
                 tags["resumedRun"] = "True"  # tags can't take boolean values
-            elif config_run_id and not on_resume_create_child:
+            # This block is used when a run ID is specified without child runs option activated
+            elif config_run_id and not on_resume_create_child and not fork_run_id:
                 run_id = config_run_id
                 run = mlflow_client.get_run(run_id)
                 run_name = run.info.run_name
                 self._check_server2server_lineage(run)
+                self._check_dry_run(parent_run)
                 mlflow_client.update_run(run_id=run_id, status="RUNNING")
                 tags["resumedRun"] = "True"
+            # This block is used when a run is forked and an existing run ID is specified
+            # Child run option is activated
+            elif config_run_id and fork_run_id:
+                parent_run_id = config_run_id  # parent_run_id which is the main run ID
+                parent_run = mlflow_client.get_run(parent_run_id)
+                run_name = parent_run.info.run_name
+                self._check_server2server_lineage(parent_run)
+                self._check_dry_run(parent_run)
+                tags["mlflow.parentRunId"] = config_run_id  # We want to be linked to the main run ID
+                tags["resumedRun"] = "True"  # We want to be linked to the main run ID
+                tags["forkedRun"] = "True"  # This is a forked run
+                tags["forkedRunId"] = fork_run_id  # This is a forked run
+            # This block is used when a run is forked without no child runs
             else:
                 parent_run_id = fork_run_id
                 tags["forkedRun"] = "True"
                 tags["forkedRunId"] = parent_run_id
                 run = mlflow_client.get_run(parent_run_id)
                 self._check_server2server_lineage(run)
+                self._check_dry_run(run)
 
         if not run_name:
             import uuid
@@ -483,56 +513,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self.run_id_to_log_monitor[self.run_id] = log_monitor
         log_monitor.start()
 
-    @staticmethod
-    def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
-        """Clean up params to avoid issues with mlflow.
-
-        Too many logged params will make the server take longer to render the
-        experiment.
-
-        Parameters
-        ----------
-        params : dict[str, Any]
-            Parameters to clean up.
-
-        Returns
-        -------
-        dict[str, Any]
-            Cleaned up params ready for MlFlow.
-        """
-        prefixes_to_remove = [
-            "hardware",
-            "data",
-            "dataloader",
-            "model",
-            "training",
-            "diagnostics",
-            "metadata.config",
-            "metadata.dataset.variables_metadata",
-            "metadata.dataset.specific.forward.forward.attrs.variables_metadata",
-        ]
-        keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
-        for key in keys_to_remove:
-            del params[key]
-        return params
-
-    @rank_zero_only
-    def log_hyperparams_as_artifact(self, params: dict[str, Any] | Namespace) -> None:
-        """Log hyperparameters as an artifact."""
-        import json
-        import tempfile
-        from json import JSONEncoder
-
-        class StrEncoder(JSONEncoder):
-            def default(self, o: Any) -> str:
-                return str(o)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            path = Path(tmp_dir) / "config.json"
-            with Path.open(path, "w") as f:
-                json.dump(params, f, cls=StrEncoder)
-            self.experiment.log_artifact(run_id=self.run_id, local_path=path)
-
     @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:
         """Overwrite the log_hyperparams method.
@@ -550,7 +530,59 @@ class AnemoiMLflowLogger(MLFlowLogger):
             have lists converted according to `expand_iterables`,
             by default None.
         """
-        if self._flag_log_hparams:
+        AnemoiMLflowLogger.log_hyperparams_in_mlflow(
+            self.experiment,
+            self.run_id,
+            params,
+            expand_keys=expand_keys,
+            log_hyperparams=self._flag_log_hparams,
+        )
+
+    @rank_zero_only
+    def finalize(self, status: str = "success") -> None:
+        # save the last obtained refresh token to disk
+        self.auth.save()
+
+        # finalize logging and system metrics monitor
+        if getattr(self, "run_id_to_system_metrics_monitor", None):
+            self.run_id_to_system_metrics_monitor[self.run_id].finish()
+        if getattr(self, "run_id_to_log_monitor", None):
+            self.run_id_to_log_monitor[self.run_id].finish(status)
+
+        super().finalize(status)
+
+    @staticmethod
+    def log_hyperparams_in_mlflow(
+        client: MlflowClient,
+        run_id: str,
+        params: dict[str, Any] | Namespace,
+        *,
+        expand_keys: list[str] | None = None,
+        log_hyperparams: bool | None = True,
+        clean_params: bool = True,
+    ) -> None:
+        """Log hyperparameters to MLflow server.
+
+        - flatten config params using '.'.
+        - expand keys within params to avoid truncation.
+        - log hyperparameters as an artifact.
+
+        Parameters
+        ----------
+        client : MlflowClient
+            MLflow client.
+        run_id : str
+            Run ID.
+        params : dict[str, Any] | Namespace
+            params to log.
+        expand_keys : list[str] | None, optional
+            keys to expand within params. Any key being expanded will
+            have lists converted according to `expand_iterables`,
+            by default None.
+        log_hyperparams : bool | None, optional
+            Whether to log hyperparameters, by default True.
+        """
+        if log_hyperparams:
             params = _convert_params(params)
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
@@ -565,7 +597,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             if Version(mlflow.VERSION) >= Version("1.28.0"):
                 truncation_length = 500
 
-            self.log_hyperparams_as_artifact(params)
+            AnemoiMLflowLogger.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
 
             expanded_params = {}
             params = params.copy()
@@ -581,23 +613,31 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 expanded_params,
                 delimiter=".",
             )  # Flatten dict with '.' to not break API queries
-            expanded_params = self._clean_params(expanded_params)
+            if clean_params:
+                expanded_params = clean_config_params(expanded_params)
 
             # Truncate parameter values.
             params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
-
             for idx in range(0, len(params_list), 100):
-                self.experiment.log_batch(run_id=self.run_id, params=params_list[idx : idx + 100])
+                client.log_batch(run_id=run_id, params=params_list[idx : idx + 100])
 
-    @rank_zero_only
-    def finalize(self, status: str = "success") -> None:
-        # save the last obtained refresh token to disk
-        self.auth.save()
+    @staticmethod
+    def log_hyperparams_as_mlflow_artifact(
+        client: MlflowClient,
+        run_id: str,
+        params: dict[str, Any] | Namespace,
+    ) -> None:
+        """Log hyperparameters as an artifact."""
+        import json
+        import tempfile
+        from json import JSONEncoder
 
-        # finalize logging and system metrics monitor
-        if getattr(self, "run_id_to_system_metrics_monitor", None):
-            self.run_id_to_system_metrics_monitor[self.run_id].finish()
-        if getattr(self, "run_id_to_log_monitor", None):
-            self.run_id_to_log_monitor[self.run_id].finish(status)
+        class StrEncoder(JSONEncoder):
+            def default(self, o: Any) -> str:
+                return str(o)
 
-        super().finalize(status)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            with Path.open(path, "w") as f:
+                json.dump(params, f, cls=StrEncoder)
+            client.log_artifact(run_id=run_id, local_path=path)
