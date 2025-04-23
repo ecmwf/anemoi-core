@@ -124,3 +124,41 @@ the threshold. An example usage:
 With this configuration only edges whose source is in the cutout region
 will be post-processed, i.e. those edges with source node outside the
 cutout region will be preserved regardless of their length.
+
+************************************
+ Edge Index Sorting Post-processors
+************************************
+
+The anemoi-graphs package provides two post-processors for sorting edge
+indices: ``SortEdgeIndexBySourceNodes`` and
+``SortEdgeIndexByTargetNodes``. These processors help organize the edge
+indices in a consistent order, which can be useful for deterministic
+behavior and improved performance in certain operations.
+
+SortEdgeIndexBySourceNodes
+==========================
+
+This post-processor sorts all edge indices based on the source nodes. It
+can be configured to sort in either ascending or descending order:
+
+.. code:: yaml
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.SortEdgeIndexBySourceNodes
+      descending: True  # optional, defaults to true
+
+SortEdgeIndexByTargetNodes
+==========================
+
+Similar to the source node sorter, this post-processor sorts edge
+indices based on the target nodes:
+
+.. code:: yaml
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.SortEdgeIndexByTargetNodes
+      descending: True  # optional, defaults to true
+
+Both processors maintain the consistency of all edge attributes while
+sorting, ensuring that the relationship between edge indices and their
+corresponding attributes remains intact.

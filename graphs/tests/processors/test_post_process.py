@@ -80,6 +80,45 @@ def test_remove_unconnected_nodes_parametrized(
         assert graph[nodes_name].node_attrs() == graph_with_isolated_nodes[nodes_name].node_attrs()
 
 
+def test_sort_edge_index_by_source_nodes(graph_nodes_and_edges: HeteroData):
+    from anemoi.graphs.processors.post_process import SortEdgeIndexBySourceNodes
+
+    processor = SortEdgeIndexBySourceNodes(descending=True)
+    sorted_graph = processor.update_graph(graph_nodes_and_edges)
+
+    expected_edge_index = torch.tensor([[3, 2, 1, 0], [2, 1, 0, 3]])
+
+    sorted_edges = sorted_graph[("test_nodes", "to", "test_nodes")]
+    assert torch.equal(sorted_edges.edge_index, expected_edge_index)
+    assert torch.equal(sorted_edges.edge_attr, 10 * expected_edge_index[0][:, None])
+
+
+def test_sort_edge_index_by_target_nodes(graph_nodes_and_edges: HeteroData):
+    from anemoi.graphs.processors.post_process import SortEdgeIndexByTargetNodes
+
+    processor = SortEdgeIndexByTargetNodes(descending=True)
+    sorted_graph = processor.update_graph(graph_nodes_and_edges)
+
+    expected_edge_index = torch.tensor([[0, 3, 2, 1], [3, 2, 1, 0]])
+
+    sorted_edges = sorted_graph[("test_nodes", "to", "test_nodes")]
+    assert torch.equal(sorted_edges.edge_index, expected_edge_index)
+    assert torch.equal(sorted_edges.edge_attr, 10 * expected_edge_index[0][:, None])
+
+
+def test_sort_edge_index_ascending_order(graph_nodes_and_edges: HeteroData):
+    from anemoi.graphs.processors.post_process import SortEdgeIndexBySourceNodes
+
+    processor = SortEdgeIndexBySourceNodes(descending=False)
+    sorted_graph = processor.update_graph(graph_nodes_and_edges)
+
+    expected_edge_index = torch.tensor([[0, 1, 2, 3], [3, 0, 1, 2]])
+
+    sorted_edges = sorted_graph[("test_nodes", "to", "test_nodes")]
+    assert torch.equal(sorted_edges.edge_index, expected_edge_index)
+    assert torch.equal(sorted_edges.edge_attr, 10 * expected_edge_index[0][:, None])
+
+
 def test_restrict_edge_length(graph_long_and_short_edges: HeteroData):
     """Test removal of all long ( > 1000km) edges."""
     graph = graph_long_and_short_edges
