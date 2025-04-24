@@ -78,13 +78,20 @@ def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, fl
 
 @typechecked
 def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None:
-    """Test presence of metadata required for inference."""
-    try:
-        for keys in metadata_keys:
+    """Assert the presence of all `metadata_keys` in `metadata`.
+
+    A metadata key is a tuple that describes a path within the `metadata` dict of dicts.
+    E.g., if `metadata_keys[0] = ("a", "b", "c")`, this test will verify the existence of `metadata["a"]["b"]["c"]`.
+    """
+    errors = []
+    for keys in metadata_keys:
+        try:
             reduce(getitem, keys, metadata)
-    except KeyError:
-        keys = "".join(f"[{k!r}]" for k in keys)
-        raise KeyError("missing metadata" + keys) from None
+        except KeyError:  # noqa: PERF203
+            keys = "".join(f"[{k!r}]" for k in keys)
+            errors.append("missing metadata" + keys)
+    if errors:
+        raise KeyError("\n".join(errors))
 
 
 @typechecked
@@ -94,9 +101,13 @@ def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
 
 @pytest.mark.longtests
 @typechecked
-def test_aicon_training(trained_aicon: tuple) -> None:
-    trainer, initial_sum, final_sum = trained_aicon
-    assert initial_sum != final_sum
+def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
+    """Test for presence of metadata required for inference.
+
+    The objective of this test is to monitor changes to the metadata structure and ensure compatibility.
+    Please update the path to each datum accordingly whenever a revision to the metadata structure is implemented.
+    """
+    trainer = AnemoiTrainer(aicon_config_with_grid)
 
     assert_metadatakeys(
         trainer.metadata,
@@ -114,3 +125,10 @@ def test_aicon_training(trained_aicon: tuple) -> None:
     )
 
     assert torch.is_tensor(trainer.graph_data["data"].x), "data coordinates not present"
+
+
+@pytest.mark.longtests
+@typechecked
+def test_aicon_training(trained_aicon: tuple) -> None:
+    trainer, initial_sum, final_sum = trained_aicon
+    assert initial_sum != final_sum
