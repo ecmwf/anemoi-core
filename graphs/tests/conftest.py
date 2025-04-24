@@ -81,7 +81,20 @@ def graph_nodes_and_edges() -> HeteroData:
     graph = HeteroData()
     graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
     graph["test_nodes"].mask = torch.tensor([True] * len(coords)).unsqueeze(-1)
-    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
+    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor([[3, 1, 2, 0], [2, 0, 1, 3]])
+    graph[("test_nodes", "to", "test_nodes")].edge_attr = (
+        10 * graph[("test_nodes", "to", "test_nodes")].edge_index[0][:, None]
+    )
+    return graph
+
+
+@pytest.fixture
+def graph_long_and_short_edges() -> HeteroData:
+    """Graph with a pair of short (800km) and a pair of long (20000km) edges."""
+    graph = HeteroData()
+    graph["test_nodes"].x = 2 * torch.pi * torch.tensor([[-0.01, 0], [0.01, 0], [-0.01, 0.5], [0.01, 0.5]])
+    graph["test_nodes"]["southern_hemisphere_mask"] = torch.tensor([[1], [0], [1], [0]], dtype=torch.bool)
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[0, 0, 1, 3], [1, 3, 2, 2]])
     return graph
 
 

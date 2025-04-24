@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import logging
 from pathlib import Path
 
@@ -123,7 +124,7 @@ class MlFlow(Command):
         )
         prepare.add_argument(
             "--output",
-            default="./mlflow_run_id.yaml",
+            default="./mlflow_metadata.json",
             type=Path,
             help="Output file path.",
         )
@@ -212,6 +213,7 @@ class MlFlow(Command):
             # Log metadata to MLflow server
             mlflow.set_tracking_uri(config.diagnostics.log.mlflow.tracking_uri)
             client.set_tag(run_id, "mlflow.user", args.owner)
+            client.set_tag(run_id, "dry_run", True)
             client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
             AnemoiMLflowLogger.log_hyperparams_in_mlflow(
                 client,
@@ -224,8 +226,14 @@ class MlFlow(Command):
 
             # Dump run ID in output file
             LOGGER.info("Saving run id in file in %s.", args.output)
-            with args.output.open("w") as f:
-                f.write(run_id)
+            mlflow_metadata = {
+                "run_id": run_id,
+                "experiment_id": experiment_id,
+                "experiment_name": config.diagnostics.log.mlflow.experiment_name,
+                "tracking_uri": config.diagnostics.log.mlflow.tracking_uri,
+            }
+            with Path.open(args.output, "w") as fp:
+                json.dump(mlflow_metadata, fp)
 
             return
         return

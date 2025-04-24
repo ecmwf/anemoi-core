@@ -310,21 +310,24 @@ class LongRolloutPlots(BasePlotCallback):
     This function allows evaluating the performance of the model over an extended number
     of rollout steps to observe long-term behavior.
     Add the callback to the configuration file as follows:
-    ```
-      - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
-        rollout:
+
+    Example::
+
+        - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
+            rollout:
             - ${dataloader.validation_rollout}
-        video_rollout: ${dataloader.validation_rollout}
-        every_n_epochs: 1
-        sample_idx: ${diagnostics.plot.sample_idx}
-        parameters: ${diagnostics.plot.parameters}
-    ```
+            video_rollout: ${dataloader.validation_rollout}
+            every_n_epochs: 1
+            sample_idx: ${diagnostics.plot.sample_idx}
+            parameters: ${diagnostics.plot.parameters}
+
     The selected rollout steps for plots and video need to be lower or equal to dataloader.validation_rollout.
     Increasing dataloader.validation_rollout has no effect on the rollout steps during training.
     It ensures, that enough time steps are available for the plots and video in the validation batches.
 
     The runtime of creating one animation of one variable for 56 rollout steps is about 1 minute.
     Recommended use for video generation: Fork the run using fork_run_id for 1 additional epochs and enabled videos.
+
     """
 
     def __init__(
