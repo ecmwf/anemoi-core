@@ -88,8 +88,8 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
 
 
 @typechecked
-def test_config_validation_aicon(aicon_config_with_grid: DictConfig) -> None:
-    BaseSchema(**aicon_config_with_grid)
+def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
+    BaseSchema(**aicon_config_with_tmp_dir)
 
 
 @pytest.mark.longtests
