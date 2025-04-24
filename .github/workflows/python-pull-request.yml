@@ -65,10 +65,9 @@ jobs:
         echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
         echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
         echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-        echo "integration_changed=$(echo "$CHANGED_FILES" | grep -q '^tests/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
     - name: Install packages
-      if: ${{matrix.install-mode == 'all' || steps.changed-packages.outputs.integration_changed == 'true' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true' }}
+      if: ${{matrix.install-mode == 'all' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true' }}
       run: |
         PACKAGES=""
 
