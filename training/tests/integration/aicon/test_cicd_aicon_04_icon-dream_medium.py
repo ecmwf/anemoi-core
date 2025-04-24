@@ -126,6 +126,13 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 
     assert torch.is_tensor(trainer.graph_data["data"].x), "data coordinates not present"
 
+    # Assert heterogeneity of num_chunks setting.
+    assert aicon_config_with_grid.model.encoder.num_chunks != aicon_config_with_grid.model.decoder.num_chunks
+
+    # Monitor path and setting of num_chunks
+    assert trainer.model.model.model.encoder.proc.num_chunks == aicon_config_with_grid.model.encoder.num_chunks
+    assert trainer.model.model.model.decoder.proc.num_chunks == aicon_config_with_grid.model.decoder.num_chunks
+
 
 @pytest.mark.longtests
 @typechecked
