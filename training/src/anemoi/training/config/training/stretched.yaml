@@ -97,7 +97,7 @@ validation_metrics:
     ignore_nans: True
   mse_inside_lam:
     _target_: anemoi.training.losses.MSELoss
-    scalers: ['limited_area_mask', 'lam_node_weights']
+    scalers: ['lam_node_weights']
     ignore_nans: True
 
 variable_groups:
