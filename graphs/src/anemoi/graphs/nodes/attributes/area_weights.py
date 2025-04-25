@@ -211,11 +211,11 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
         ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
         self.mask_node_attr_name = mask_node_attr_name
 
-    def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
-        points = super().get_latlon_coordinates(nodes)
+        attr_values = super().get_raw_values(nodes, **kwargs)
         mask = nodes[self.mask_node_attr_name].squeeze()
-        return points * mask
+        return attr_values * mask
 
 
 class SphericalAreaWeights(BaseNodeAttribute):
