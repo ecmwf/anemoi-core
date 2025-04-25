@@ -207,7 +207,7 @@ specify the difference calculation.
 
    from anemoi.training.losses.weightedloss import BaseLoss
 
-   class MyLossFunction(BaseLoss):
+   class MyLossFunction(FunctionalLoss):
       def calculate_difference(self, pred, target):
          return (pred - target) ** 2
 
