@@ -96,8 +96,8 @@ class PlanarAreaWeights(BaseNodeAttribute):
         Compute the area attributes for each node.
     """
 
-    def get_latlon_coordinates(self, nodes: NodeStorage) -> tuple[torch.Tensor, torch.Tensor]:
-        return nodes.x.cpu().numpy()
+    def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
+        return nodes.x
 
     def _compute_mean_nearest_distance(self, points: np.ndarray) -> float:
         """Compute mean distance to nearest neighbor for each point.
@@ -160,7 +160,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
         return np.concatenate([expanded_hull, np.vstack(boundary_points)])
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        points = self.get_latlon_coordinates(nodes)
+        points = self.get_latlon_coordinates(nodes).cpu().numpy()
         resolution = self._compute_mean_nearest_distance(points)
         boundary_points = self._get_boundary_ring(points, resolution)
 
