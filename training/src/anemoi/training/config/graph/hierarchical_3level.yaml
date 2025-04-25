@@ -12,7 +12,7 @@ nodes:
   # Data nodes
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
       dataset: ${dataloader.dataset}
     attributes: ${graph.attributes.nodes}
   hidden_1:

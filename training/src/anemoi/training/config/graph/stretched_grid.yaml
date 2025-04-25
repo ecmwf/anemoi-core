@@ -9,7 +9,7 @@ hidden: "hidden"
 nodes:
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
       dataset: ${dataloader.training.dataset}
     attributes: ${graph.attributes.nodes}
   hidden:
