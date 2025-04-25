@@ -39,7 +39,6 @@ def test_planar_area_weights(graph_with_nodes: HeteroData):
     assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
     assert weights.dtype == node_attr_builder.dtype
 
-
 @pytest.mark.parametrize("fill_value", [0.0, -1.0, float("nan")])
 def test_spherical_area_weights(graph_with_nodes: HeteroData, fill_value: float):
     """Test attribute builder for SphericalAreaWeights with different fill values."""
@@ -65,8 +64,18 @@ def test_spherical_area_weights_wrong_fill_value(fill_value: str):
     with pytest.raises(AssertionError):
         SphericalAreaWeights(fill_value=fill_value)
 
+def test_masked_planar_area_weights(graph_with_nodes: HeteroData):
+    """Test attribute builder for PlanarAreaWeights."""
+    node_attr_builder = MaskedPlanarAreaWeights(mask_node_attr_name="interior_mask")
+    weights = node_attr_builder.compute(graph_with_nodes, "test_nodes")
 
-def test_masked_area_weights_fail(graph_with_nodes: HeteroData):
+    assert weights is not None
+    assert isinstance(weights, torch.Tensor)
+    assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+    assert weights.dtype == node_attr_builder.dtype
+
+
+def test_masked_planar_area_weights_fail(graph_with_nodes: HeteroData):
     """Test attribute builder for AreaWeights with invalid radius."""
     with pytest.raises(AssertionError):
         node_attr_builder = MaskedPlanarAreaWeights(mask_node_attr_name="nonexisting")
