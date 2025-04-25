@@ -8,13 +8,13 @@ nodes:
   # Data nodes
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
       dataset: ${dataloader.training.dataset}
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
+      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
       resolution: 6 # grid resolution for npz (o32, o48, ...)
       reference_node_name: ${graph.data}
       mask_attr_name: cutout_mask
