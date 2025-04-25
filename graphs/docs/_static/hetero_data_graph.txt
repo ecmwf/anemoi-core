@@ -1,7 +1,7 @@
 HeteroData(
   data={
     x=[40320, 2],  # coordinates in radians (lat in [-pi/2, pi/2], lon in [0, 2pi])
-    node_type='ZarrDatasetNodes',
+    node_type='AnemoiDatasetNodes',
     area_weight=[40320, 1],
   },
   hidden={

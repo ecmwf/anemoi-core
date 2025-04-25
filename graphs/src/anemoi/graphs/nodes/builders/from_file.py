@@ -25,7 +25,7 @@ from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 LOGGER = logging.getLogger(__name__)
 
 
-class ZarrDatasetNodes(BaseNodeBuilder):
+class AnemoiDatasetNodes(BaseNodeBuilder):
     """Nodes from an anemoi dataset.
 
     Attributes
@@ -61,6 +61,12 @@ class ZarrDatasetNodes(BaseNodeBuilder):
         """
         dataset = open_dataset(self.dataset)
         return self.reshape_coords(dataset.latitudes, dataset.longitudes)
+
+
+class ZarrDatasetNodes(AnemoiDatasetNodes):
+    def __init__(self, dataset: DictConfig, name: str) -> None:
+        super().__init__(dataset, name)
+        LOGGER.warning(f"{self.__class__.__name__} is now deprecated in favour of AnemoiDatasetNodes.")
 
 
 class TextNodes(BaseNodeBuilder):

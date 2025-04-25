@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .builders.from_file import AnemoiDatasetNodes
 from .builders.from_file import LimitedAreaNPZFileNodes
 from .builders.from_file import NPZFileNodes
 from .builders.from_file import TextNodes
@@ -25,6 +26,7 @@ from .builders.from_refined_icosahedron import TriNodes
 from .builders.from_vectors import LatLonNodes
 
 __all__ = [
+    "AnemoiDatasetNodes",
     "ZarrDatasetNodes",
     "NPZFileNodes",
     "TriNodes",
