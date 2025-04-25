@@ -75,7 +75,7 @@ def test_masked_planar_area_weights(graph_with_nodes: HeteroData):
     assert isinstance(weights, torch.Tensor)
     assert weights.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
     assert weights.dtype == node_attr_builder.dtype
-    
+
     mask = graph_with_nodes["test_nodes"]["interior_mask"]
     assert torch.all(weights[~mask] == 0)
 
