@@ -199,7 +199,7 @@ By default, only `all` is kept in the normalised space and scaled.
 
 Additionally, you can define your own loss function by subclassing
 ``BaseLoss`` and implementing the ``forward`` method, or by subclassing
-``BaseLoss`` and implementing the ``calculate_difference`` function. The
+``FunctionalLoss`` and implementing the ``calculate_difference`` function. The
 latter abstracts the scaling, and node weighting, and allows you to just
 specify the difference calculation.
 
