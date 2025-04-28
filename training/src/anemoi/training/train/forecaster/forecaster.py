@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import ListConfig
@@ -26,6 +25,7 @@ from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -90,8 +90,7 @@ class GraphForecaster(pl.LightningModule):
         else:
             self.output_mask = NoOutputMask()
 
-        model_interface = get_class(config.model.interface)
-        self.model = model_interface(
+        self.model = AnemoiModelInterface(
             statistics=statistics,
             data_indices=data_indices,
             metadata=metadata,

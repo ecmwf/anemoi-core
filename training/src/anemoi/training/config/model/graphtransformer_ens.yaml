@@ -3,7 +3,6 @@ num_channels: 1024
 output_mask: null
 cpu_offload: False
 
-interface: anemoi.models.interface.AnemoiEnsModelInterface
 model:
   _target_: anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec
 

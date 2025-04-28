@@ -2,7 +2,6 @@ activation: GELU
 num_channels: 512
 output_mask: null
 
-interface: anemoi.models.interface.AnemoiEnsModelInterface
 model:
   _target_: anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec
 
