@@ -104,7 +104,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_out = bounding(x_out)
         return x_out
 
-    def forward(self, x: torch.Tensor, fcstep: int, model_comm_group: Optional[ProcessGroup] = None) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, *, fcstep: int, model_comm_group: Optional[ProcessGroup] = None, **kwargs
+    ) -> torch.Tensor:
         """Forward operator.
 
         Args:

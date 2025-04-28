@@ -139,4 +139,4 @@ class GraphInterpolator(GraphForecaster):
         return loss, metrics, y_preds
 
     def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
-        return self.model(x, target_forcing, self.model_comm_group)
+        return self.model(x, target_forcing=target_forcing, model_comm_group=self.model_comm_group)
