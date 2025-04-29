@@ -22,7 +22,7 @@ jobs:
       matrix:
         platform: ["ubuntu-latest", "macos-latest"]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
-        install-mode: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(join(',', github.event.pull_request.labels.*.name), 'skip-ci-release-tests')) && fromJSON('["all"]') || fromJSON('["local-changes", "all"]')) }} # This selects the install mode based on the event type and the labels of the PR
+        install-mode: ${{github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(toJson(github.event.pull_request.labels), 'skip-ci-release-tests')) && fromJSON('["all"]') || fromJSON('["local-changes", "all"]') }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
 
