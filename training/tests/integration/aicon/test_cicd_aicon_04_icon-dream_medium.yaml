@@ -259,7 +259,7 @@ training:
         P: 1
     pressure_level:
       _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-      group: pl
+      group: ml
       y_intercept: 0.2
       slope: 0.001
     node_weights:
@@ -270,7 +270,7 @@ training:
   metrics: []
   variable_groups:
     default: sfc
-    pl: [q, t, u, v, w, z]
+    ml: [P, T, U, V]
   training_loss:
     _target_: anemoi.training.losses.MSELoss
     scalers: ['pressure_level', 'general_variable', 'node_weights']
