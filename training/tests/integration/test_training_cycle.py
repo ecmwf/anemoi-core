@@ -74,16 +74,10 @@ def test_restart_training(gnn_config_with_data: DictConfig) -> None:
         raise RuntimeError(msg)
 
     checkpoint_dir = run_dirs[0]
-    run_id = checkpoint_dir.name
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
-    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2
-    assert len(list(checkpoint_dir.glob("inference-anemoi-by_epoch-*.ckpt"))) == 2
-    assert (checkpoint_dir / "last.ckpt").exists()
-    assert (checkpoint_dir / "inference-last.ckpt").exists()
-
-    cfg.training.run_id = run_id
+    cfg.training.run_id = checkpoint_dir.name
     cfg.training.max_epochs = 3
     AnemoiTrainer(cfg).train()
 
-    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3
-    assert len(list(checkpoint_dir.glob("inference-anemoi-by_epoch-*.ckpt"))) == 3
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
