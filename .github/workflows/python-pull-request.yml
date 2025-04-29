@@ -62,7 +62,9 @@ jobs:
         echo "$CHANGED_FILES"
 
         echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
         echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
         echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
     - name: Install packages
