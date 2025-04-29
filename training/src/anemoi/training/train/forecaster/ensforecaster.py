@@ -106,7 +106,7 @@ class GraphEnsForecaster(GraphForecaster):
         self.ensemble_ic_generator = EnsembleInitialConditions(config=config, data_indices=data_indices)
 
     def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
-        return self.model(x, fcstep, self.model_comm_group)
+        return self.model(x, fcstep=fcstep, model_comm_group=self.model_comm_group)
 
     def set_ens_comm_group(
         self,

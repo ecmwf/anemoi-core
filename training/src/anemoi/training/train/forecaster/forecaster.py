@@ -171,7 +171,7 @@ class GraphForecaster(pl.LightningModule):
         self.reader_group_rank = 0
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x, self.model_comm_group)
+        return self.model(x, model_comm_group=self.model_comm_group)
 
     def define_delayed_scalers(self) -> None:
         """Update delayed scalers such as the loss weights mask for imputed variables."""
