@@ -4,6 +4,7 @@ from anemoi.graphs.edges.directional import direction_vec
 
 tol = 1e-3
 
+
 def test_direction_vec():
     points = torch.tensor(
         [
