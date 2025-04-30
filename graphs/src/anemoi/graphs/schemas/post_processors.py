@@ -15,8 +15,9 @@ from typing import Annotated
 from typing import Literal
 from typing import Union
 
-from pydantic import BaseModel
 from pydantic import Field
+
+from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,10 +50,21 @@ class RestrictEdgeLengthSchema(BaseModel):
     "Configuration of edge attributes to be (re)computed."
 
 
+class SortEdgeIndexSchema(BaseModel):
+    target_: Literal[
+        "anemoi.graphs.processors.SortEdgeIndexBySourceNodes",
+        "anemoi.graphs.processors.SortEdgeIndexByTargetNodes",
+    ] = Field(..., alias="_target_")
+    "Post processor to sort edge indices based on either source or target nodes."
+    descending: bool = Field(default=True, example=True)
+    "Flag to sort edge indices in descending order."
+
+
 ProcessorSchemas = Annotated[
     Union[
         RemoveUnconnectedNodesSchema,
         RestrictEdgeLengthSchema,
+        SortEdgeIndexSchema,
     ],
     Field(discriminator="target_"),
 ]

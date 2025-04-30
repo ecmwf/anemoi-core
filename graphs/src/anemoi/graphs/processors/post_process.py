@@ -20,6 +20,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
 
 LOGGER = logging.getLogger(__name__)
@@ -155,6 +156,58 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
                 connected_mask[edges.edge_index[1]] = True
 
         return connected_mask
+
+
+class BaseSortEdgeIndex(PostProcessor, ABC):
+    """Base class for sort edge indices processor."""
+
+    nodes_axis: NodesAxis | None = None
+
+    def __init__(self, descending: bool = True) -> None:
+        assert self.nodes_axis is not None, f"{self.__class__.__name__} must define the nodes_axis class attribute."
+        self.descending = descending
+
+    def get_sorting_mask(self, edges: dict) -> torch.Tensor:
+        sort_indices = torch.sort(edges["edge_index"], descending=self.descending, dim=1)
+        return sort_indices.indices[self.nodes_axis.value]
+
+    @staticmethod
+    def get_edge_dim(edge_attr: str) -> int:
+        # edge_index has shape (2, n_edges) and other edge attributes have (n_edges, attr_dim)
+        return int(edge_attr == "edge_index")
+
+    @staticmethod
+    def sort_by_indices(x: torch.Tensor, indices: torch.Tensor, dim: int = 1) -> torch.Tensor:
+        return x.index_select(dim=dim, index=indices)
+
+    def update_graph(self, graph: HeteroData) -> HeteroData:
+        """Sort all edge indices in the graph.
+
+        Parameters
+        ----------
+        graph: HeteroData
+            The graph to post-process.
+
+        Returns
+        -------
+        HeteroData
+            The post-processed graph.
+        """
+        for (src, to, dst), edges in graph.edge_items():
+            sort_indices = self.get_sorting_mask(edges)
+            for edge_attr_name in edges.edge_attrs():
+                dim = BaseSortEdgeIndex.get_edge_dim(edge_attr_name)
+                edge_attr = BaseSortEdgeIndex.sort_by_indices(edges[edge_attr_name], sort_indices, dim=dim)
+                graph[(src, to, dst)][edge_attr_name] = edge_attr
+        return graph
+
+
+class SortEdgeIndexBySourceNodes(BaseSortEdgeIndex):
+    nodes_axis = NodesAxis.SOURCE
+
+
+class SortEdgeIndexByTargetNodes(BaseSortEdgeIndex):
+    nodes_axis = NodesAxis.TARGET
 
 
 class BaseEdgeMaskingProcessor(PostProcessor, ABC):
