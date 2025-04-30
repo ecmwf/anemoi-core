@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.1](https://github.com/ecmwf/anemoi-core/compare/models-0.5.0...models-0.5.1) (2025-04-30)
+
+
+### Bug Fixes
+
+* Adapt predict_step in model interface to pass on arguments for model classes ([#281](https://github.com/ecmwf/anemoi-core/issues/281)) ([a5b2643](https://github.com/ecmwf/anemoi-core/commit/a5b26432bc7b78577cd1febd5091b059cc82805c))
+
 ## [0.5.0](https://github.com/ecmwf/anemoi-core/compare/models-0.4.2...models-0.5.0) (2025-04-16)
 
 
