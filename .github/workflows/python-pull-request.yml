@@ -6,6 +6,9 @@ on:
     # The Test PR workflow is not run on release PRs, since the release PRs are already tested in the "Test Release" workflow
     paths-ignore:
       - ".release-please-manifest.json"
+      - "training/CHANGELOG.md"
+      - "graphs/CHANGELOG.md"
+      - "models/CHANGELOG.md"
 
   push:
     branches:
