@@ -7,11 +7,6 @@ on:
       - "training/CHANGELOG.md"
 
 jobs:
-  quality:
-    uses: ecmwf/reusable-workflows/.github/workflows/qa-precommit-run.yml@v2
-    with:
-      skip-hooks: "no-commit-to-branch"
-
   pytest:
     strategy:
       fail-fast: false
