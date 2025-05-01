@@ -574,7 +574,7 @@ class LongRolloutPlots(BasePlotCallback):
             frames = []
             # Prepare the figure
             fig, ax = plt.subplots(figsize=(10, 6), dpi=72)
-            cmap = "twilight" if variable_name == "mwd" else "viridis"
+            cmap = "viridis"
 
             # Create initial data and colorbar
             ax, scatter_frame = get_scatter_frame(
