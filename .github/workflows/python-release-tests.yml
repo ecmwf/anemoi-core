@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize, reopened]
     # filter for PRs that change the manifest to only run the tests on release PRs. (Other PRs should not change the manifest)
     paths:
-      - "release-please-manifest.json"
+      - ".release-please-manifest.json"
 
 jobs:
   pytest:
