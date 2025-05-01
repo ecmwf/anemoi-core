@@ -3,6 +3,7 @@ name: Test anemoi-training for Release
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # filter for PRs that change the changelog to only run the tests on release PRs. (Other PRs should not change the changelog)
     paths:
       - "training/CHANGELOG.md"
 
