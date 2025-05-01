@@ -1,4 +1,4 @@
-name: Test Anemoi Packages for Release
+name: Test anemoi-training for Release
 
 on:
   pull_request:
@@ -38,6 +38,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest pytest-md pytest-emoji
         pip install -e ./training[all,tests]
+
+# We only test anemoi-training in this workflow since graphs and models are dependencies of anemoi-training but don't have dependencies in anemoi-core
+# Thus the analogue workflow would result in the same tests as those run in the "Test PR" workflow
+# The case that is not tested is if anemoi-models or anemoi-graphs are released, whether the current version of anemoi-training is compatible with the new version of anemoi-models or anemoi-graphs
+# To check if training needs to be released as well (when releasing models/graphs), please look at the changelog of the release PRs for models/graphs
 
     - name: Run pytest for training package
       uses: pavelzw/pytest-action@v2
