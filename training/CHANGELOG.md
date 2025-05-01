@@ -11,7 +11,6 @@ Keep it human-readable, your future self will thank you!
 ## [0.4.0](https://github.com/ecmwf/anemoi-core/compare/training-0.3.3...training-0.4.0) (2025-04-16)
 
 
-
 ### ⚠ BREAKING CHANGES
 
 * **models,training:** temporal interpolation ([#153](https://github.com/ecmwf/anemoi-core/issues/153))
