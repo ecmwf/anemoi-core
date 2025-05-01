@@ -66,7 +66,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         )
 
     def forward(
-        self, x: Tensor, target_forcing: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None
+        self, x: Tensor, *, target_forcing: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, **kwargs
     ) -> Tensor:
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]

@@ -8,13 +8,13 @@ nodes:
   # Data nodes
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
       dataset: ${dataloader.training.dataset}
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
+      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
       resolution: 6 # grid resolution for npz (o32, o48, ...)
       reference_node_name: ${graph.data}
       mask_attr_name: cutout_mask
@@ -40,6 +40,7 @@ edges:
   edge_builders:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
+    scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
