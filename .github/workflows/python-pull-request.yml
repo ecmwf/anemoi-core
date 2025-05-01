@@ -22,8 +22,7 @@ jobs:
       matrix:
         platform: ["ubuntu-latest", "macos-latest"]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
-        install-mode: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'skip-ci-release-tests')) && fromJSON('["all"]') || fromJSON('["local-changes", "all"]')) }} # This selects the install mode based on the event type and the labels of the PR
-
+        install-mode: ${{((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(toJson(github.event.pull_request.labels), 'skip-ci-release-tests'))) && fromJSON('["all"]')) || fromJSON('["local-changes", "all"]')}}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
 
@@ -63,12 +62,13 @@ jobs:
         echo "$CHANGED_FILES"
 
         echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
         echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
         echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-        echo "integration_changed=$(echo "$CHANGED_FILES" | grep -q '^tests/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
     - name: Install packages
-      if: ${{matrix.install-mode == 'all' || steps.changed-packages.outputs.integration_changed == 'true' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true' }}
+      if: ${{matrix.install-mode == 'all' || steps.changed-packages.outputs.training_changed == 'true' || steps.changed-packages.outputs.graphs_changed == 'true' || steps.changed-packages.outputs.models_changed == 'true' }}
       run: |
         PACKAGES=""
 
