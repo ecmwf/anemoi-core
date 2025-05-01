@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+MAX_PARAMS_LENGTH = 2000
+
 
 class LogsMonitor:
     """Class for logging terminal output.
@@ -615,6 +617,11 @@ class AnemoiMLflowLogger(MLFlowLogger):
             )  # Flatten dict with '.' to not break API queries
             if clean_params:
                 expanded_params = clean_config_params(expanded_params)
+
+            LOGGER.info("Logging %s parameters", len(expanded_params))
+
+            if len(expanded_params) > MAX_PARAMS_LENGTH:
+                LOGGER.warning("Logging a large number of parameters to %s", len(expanded_params))
 
             # Truncate parameter values.
             params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
