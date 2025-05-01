@@ -3,6 +3,8 @@ name: Test Anemoi Packages for Release
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - "release-please-manifest.json"
 
 jobs:
   quality:
@@ -10,8 +12,7 @@ jobs:
     with:
       skip-hooks: "no-commit-to-branch"
 
-  checks:
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'DeployDuck'}}
+  pytest:
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +58,7 @@ jobs:
     - name: Install packages
       if: ${{steps.release-package.outputs.training_release == 'true' || steps.release-package.outputs.graphs_release == 'true' || steps.release-package.outputs.models_release == 'true' }}
       run: |
-        if [[ ${{ steps.release-package.outputs.training_changed }} == 'true' ]]; then
+        if [[ ${{ steps.release-package.outputs.training_release }} == 'true' ]]; then
           pip install -e ./training[all,tests]
         elif [[ ${{ steps.release-package.outputs.graphs_release }} == 'true' ]]; then
           pip install -e ./graphs[all,tests]
@@ -69,19 +70,19 @@ jobs:
       if: ${{steps.release-package.outputs.training_release == 'true' }}
       uses: pavelzw/pytest-action@v2
       with:
-        report-title: "Test report Anemoi Training (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
+        report-title: "Test report Anemoi Training (python ${{ matrix.python-version }} on ${{ matrix.platform }})"
         custom-pytest: pytest ./training
 
     - name: Run pytest for graphs package
       if: ${{steps.release-package.outputs.graphs_release == 'true' }}
       uses: pavelzw/pytest-action@v2
       with:
-        report-title: "Test report Anemoi Graphs (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
+        report-title: "Test report Anemoi Graphs (python ${{ matrix.python-version }} on ${{ matrix.platform }})"
         custom-pytest: pytest ./graphs
 
     - name: Run pytest for models package
       if: ${{steps.release-package.outputs.models_release == 'true' }}
       uses: pavelzw/pytest-action@v2
       with:
-        report-title: "Test report Anemoi Models (python ${{ matrix.python-version }} on ${{ matrix.platform }}, ${{ matrix.install-mode }} mode)"
+        report-title: "Test report Anemoi Models (python ${{ matrix.python-version }} on ${{ matrix.platform }})"
         custom-pytest: pytest ./models

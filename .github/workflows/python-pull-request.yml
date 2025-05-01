@@ -16,7 +16,7 @@ jobs:
     with:
       skip-hooks: "no-commit-to-branch"
 
-  checks:
+  pytest:
     strategy:
       fail-fast: false
       matrix:
