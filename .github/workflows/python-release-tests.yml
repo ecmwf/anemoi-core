@@ -1,11 +1,11 @@
-name: Test anemoi-training for Release
+name: Test Release
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # filter for PRs that change the changelog to only run the tests on release PRs. (Other PRs should not change the changelog)
+    # filter for PRs that change the manifest to only run the tests on release PRs. (Other PRs should not change the manifest)
     paths:
-      - "training/CHANGELOG.md"
+      - "release-please-manifest.json"
 
 jobs:
   pytest:
@@ -29,19 +29,51 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
 
-    - name: Install test and anemoi-training dependencies
+    - name: Install test dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pytest pytest-md pytest-emoji
-        pip install -e ./training[all,tests]
 
-# We only test anemoi-training in this workflow since graphs and models are dependencies of anemoi-training but don't have dependencies in anemoi-core
-# Thus the analogue workflow would result in the same tests as those run in the "Test PR" workflow
-# The case that is not tested is if anemoi-models or anemoi-graphs are released, whether the current version of anemoi-training is compatible with the new version of anemoi-models or anemoi-graphs
-# To check if training needs to be released as well (when releasing models/graphs), please look at the changelog of the release PRs for models/graphs
+    - name: Detect package to be released
+      id: release-package
+      run: |
+        # Compare with the PR base to detect which changelog file has changed
+        MERGE_BASE=$(git merge-base origin/${{ github.event.pull_request.base.ref }} ${{ github.event.pull_request.head.sha }})
+        CHANGED_FILES=$(git diff --name-only $MERGE_BASE...${{ github.event.pull_request.head.sha }})
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
+        echo "training_release=$(echo "$CHANGED_FILES" | grep -q '^training/CHANGELOG' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        echo "graphs_release=$(echo "$CHANGED_FILES" | grep -q '^graphs/CHANGELOG' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        echo "models_release=$(echo "$CHANGED_FILES" | grep -q '^models/CHANGELOG' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+    - name: Install packages
+      if: ${{steps.release-package.outputs.training_release == 'true' || steps.release-package.outputs.graphs_release == 'true' || steps.release-package.outputs.models_release == 'true' }}
+      run: |
+        if [[ ${{ steps.release-package.outputs.training_release }} == 'true' ]]; then
+          pip install -e ./training[all,tests]
+        elif [[ ${{ steps.release-package.outputs.graphs_release }} == 'true' ]]; then
+          pip install -e ./graphs[all,tests]
+        elif [[ ${{ steps.release-package.outputs.models_release }} == 'true' ]]; then
+          pip install -e ./models[all,tests]
+        fi
 
     - name: Run pytest for training package
+      if: ${{steps.release-package.outputs.training_release == 'true' }}
       uses: pavelzw/pytest-action@v2
       with:
         report-title: "Test report Anemoi Training (python ${{ matrix.python-version }} on ${{ matrix.platform }})"
         custom-pytest: pytest ./training
+
+    - name: Run pytest for graphs package
+      if: ${{steps.release-package.outputs.graphs_release == 'true' }}
+      uses: pavelzw/pytest-action@v2
+      with:
+        report-title: "Test report Anemoi Graphs (python ${{ matrix.python-version }} on ${{ matrix.platform }})"
+        custom-pytest: pytest ./graphs
+
+    - name: Run pytest for models package
+      if: ${{steps.release-package.outputs.models_release == 'true' }}
+      uses: pavelzw/pytest-action@v2
+      with:
+        report-title: "Test report Anemoi Models (python ${{ matrix.python-version }} on ${{ matrix.platform }})"
+        custom-pytest: pytest ./models
