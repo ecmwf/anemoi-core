@@ -15,7 +15,6 @@ from typing import Optional
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
 from anemoi.models.preprocessing.monomapper import Monomapper
-from anemoi.models.preprocessing.multimapper import Multimapper
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,17 +30,7 @@ class Remapper(BasePreprocessor, ABC):
     ) -> None:
         _, _, method_config = cls._process_config(config)
         monomappings = Monomapper.supported_methods
-        multimappings = Multimapper.supported_methods
         if all(method in monomappings for method in method_config):
             return Monomapper(config, data_indices, statistics)
-        elif all(method in multimappings for method in method_config):
-            return Multimapper(config, data_indices, statistics)
-        elif not (
-            any(method in monomappings for method in method_config)
-            or any(method in multimappings for method in method_config)
-        ):
-            raise ValueError("No valid remapping method found.")
         else:
-            raise NotImplementedError(
-                f"Not implemented: method_config contains a mix of monomapper and multimapper methods: {list(method_config.keys())}"
-            )
+            raise ValueError("No valid remapping method found.")

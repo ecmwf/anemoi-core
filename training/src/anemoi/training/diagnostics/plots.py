@@ -540,21 +540,6 @@ def plot_flat_sample(
         norms[1] = norm
         norms[2] = norm
 
-    elif vname == "mwd":
-
-        def error_plot_in_degrees(array1: np.ndarray, array2: np.ndarray) -> np.ndarray:
-            """Calculate error between two arrays in degrees in range [-180, 180]."""
-            tmp = (array1 - array2) % 360
-            return np.where(tmp > 180, tmp - 360, tmp)
-
-        sample_shape = truth.shape
-        pred = np.maximum(np.zeros(sample_shape), np.minimum(360 * np.ones(sample_shape), (pred)))
-
-        data[3] = error_plot_in_degrees(truth, pred)
-
-        titles[2] = f"capped {vname} pred"
-        titles[3] = f"{vname} pred err: {np.nanmean(np.abs(data[3])):.{4}f} deg."
-
     else:
         combined_data = np.concatenate((input_, truth, pred))
         # For 'errors', only persistence and increments need identical colorbar-limits
@@ -569,18 +554,10 @@ def plot_flat_sample(
         data[0] = input_
         data[4] = pred - input_
         data[5] = truth - input_
-        if vname == "mwd":
-            data[4] = error_plot_in_degrees(pred, input_)
-            data[5] = error_plot_in_degrees(truth, input_)
-
-            titles[4] = f"{vname} increment [pred - input] % 360"
-            titles[5] = f"{vname} persist err: {np.nanmean(np.abs(data[5])):.{4}f} deg."
-
-        else:
-            norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=0.0, vmax=np.nanmax(combined_error))
-            norms[0] = norm
-            norms[4] = norm_error
-            norms[5] = norm_error
+        norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=0.0, vmax=np.nanmax(combined_error))
+        norms[0] = norm
+        norms[4] = norm_error
+        norms[5] = norm_error
 
     else:
         # diagnostic fields: omit input and increment plots

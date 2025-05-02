@@ -116,7 +116,7 @@ class GraphForecaster(pl.LightningModule):
             data_indices,
         )
 
-        self.internal_metric_ranges, self.val_metric_ranges = self.get_val_metric_ranges(config.training, data_indices)
+        self.val_metric_ranges = self.get_val_metric_ranges(config.training, data_indices)
 
         # Check if the model is a stretched grid
         if graph_data["hidden"].node_type == "StretchedTriNodes":
@@ -293,9 +293,8 @@ class GraphForecaster(pl.LightningModule):
     def get_val_metric_ranges(config: TrainingSchema, data_indices: IndexCollection) -> tuple[dict, dict]:
 
         metric_ranges = defaultdict(list)
-        metric_ranges_validation = defaultdict(list)
 
-        for key, idx in data_indices.internal_model.output.name_to_index.items():
+        for key, idx in data_indices.model.output.name_to_index.items():
             split = key.split("_")
             if len(split) > 1 and split[-1].isdigit():
                 # Group metrics for pressure levels (e.g., Q, T, U, V, etc.)
@@ -308,25 +307,9 @@ class GraphForecaster(pl.LightningModule):
                 metric_ranges[key] = [idx]
 
         # Add the full list of output indices
-        metric_ranges["all"] = data_indices.internal_model.output.full.tolist()
+        metric_ranges["all"] = data_indices.model.output.full.tolist()
 
-        # metric for validation, after postprocessing
-        for key, idx in data_indices.model.output.name_to_index.items():
-            # Split pressure levels on "_" separator
-            split = key.split("_")
-            if len(split) > 1 and split[1].isdigit():
-                # Create grouped metrics for pressure levels (e.g. Q, T, U, V, etc.) for logger
-                metric_ranges_validation[f"pl_{split[0]}"].append(idx)
-            else:
-                metric_ranges_validation[f"sfc_{key}"].append(idx)
-            # Create specific metrics from hydra to log in logger
-            if key in config.metrics:
-                metric_ranges_validation[key] = [idx]
-
-        # Add the full list of output indices
-        metric_ranges_validation["all"] = data_indices.model.output.full.tolist()
-
-        return metric_ranges, metric_ranges_validation
+        return metric_ranges
 
     @staticmethod
     def get_variable_scaling(
@@ -335,8 +318,7 @@ class GraphForecaster(pl.LightningModule):
         data_indices: IndexCollection,
     ) -> torch.Tensor:
         variable_loss_scaling = (
-            np.ones((len(data_indices.internal_data.output.full),), dtype=np.float32)
-            * variable_loss_scaling_config.default
+            np.ones((len(data_indices.data.output.full),), dtype=np.float32) * variable_loss_scaling_config.default
         )
         pressure_level = instantiate(pressure_level_scaling_config)
 
@@ -347,7 +329,7 @@ class GraphForecaster(pl.LightningModule):
             pressure_level.minimum,
         )
 
-        for key, idx in data_indices.internal_model.output.name_to_index.items():
+        for key, idx in data_indices.model.output.name_to_index.items():
             split = key.split("_")
             if len(split) > 1 and split[-1].isdigit():
                 # Apply pressure level scaling
@@ -407,9 +389,9 @@ class GraphForecaster(pl.LightningModule):
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.internal_model.input.prognostic] = y_pred[
+        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
             ...,
-            self.data_indices.internal_model.output.prognostic,
+            self.data_indices.model.output.prognostic,
         ]
 
         x[:, -1] = self.output_mask.rollout_boundary(
@@ -419,12 +401,12 @@ class GraphForecaster(pl.LightningModule):
         )
 
         # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices.internal_model.input.forcing] = batch[
+        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
             :,
             self.multi_step + rollout_step,
             :,
             :,
-            self.data_indices.internal_data.input.forcing,
+            self.data_indices.data.input.forcing,
         ]
         return x
 
@@ -459,8 +441,7 @@ class GraphForecaster(pl.LightningModule):
             Loss value, metrics, and predictions (per step)
 
         """
-        # for validation not normalized in-place because remappers cannot be applied in-place
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
+        batch = self.model.pre_processors(batch)  # normalized in-place
 
         if not self.updated_loss_mask:
             # update loss scalar after first application and initialization of preprocessors
@@ -471,7 +452,7 @@ class GraphForecaster(pl.LightningModule):
             :,
             0 : self.multi_step,
             ...,
-            self.data_indices.internal_data.input.full,
+            self.data_indices.data.input.full,
         ]  # (bs, multi_step, latlon, nvar)
         msg = (
             "Batch length not sufficient for requested multi_step length!"
@@ -483,7 +464,7 @@ class GraphForecaster(pl.LightningModule):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
+            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
@@ -608,13 +589,13 @@ class GraphForecaster(pl.LightningModule):
                         for key in self.config.training.scale_validation_metrics.scalars_to_apply:
                             metric.add_scalar(*self.scalars[key], name=key)
 
-                        # Use internal model space indices
-                        internal_model_indices = self.internal_metric_ranges[mkey]
+                        # Use model space indices
+                        model_indices = self.val_metric_ranges[mkey]
 
                         metrics[f"{metric_name}/{mkey}/{rollout_step + 1}"] = metric(
                             y_pred,
                             y,
-                            scalar_indices=[..., internal_model_indices],
+                            scalar_indices=[..., model_indices],
                         )
                 else:
                     if -1 in metric.scalar:

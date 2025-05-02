@@ -25,7 +25,6 @@ forcing:
 diagnostic:
 - tp
 - cp
-remapped:
 
 normalizer:
   default: "mean-std"
@@ -63,8 +62,6 @@ normalizer:
 
 imputer:
   default: "none"
-remapper:
-  default: "none"
 
 # processors including imputers and normalizers are applied in order of definition
 processors:
@@ -75,10 +72,6 @@ processors:
   normalizer:
     _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
     config: ${data.normalizer}
-  # remapper:
-  #   _target_: anemoi.models.preprocessing.remapper.Remapper
-  #   _convert_: all
-  #   config: ${data.remapper}
 
 # Values set in the code
 num_features: null # number of features in the forecast state
