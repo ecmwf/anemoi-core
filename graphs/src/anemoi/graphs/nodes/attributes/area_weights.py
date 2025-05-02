@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+from abc import ABC
+from abc import abstractmethod
 
 import numpy as np
 import torch
@@ -18,6 +20,7 @@ from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
@@ -253,3 +256,89 @@ class SphericalAreaWeights(BaseNodeAttribute):
             result.sum(),
         )
         return torch.from_numpy(result)
+
+
+class BaseLatWeightedAttribute(BaseNodeAttribute, ABC):
+
+    @abstractmethod
+    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray: ...
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        lats_rad = nodes.x[:, 0].cpu().numpy()
+        weights = self.compute_latitude_weight(lats_rad)
+        return torch.from_numpy(weights)
+
+
+class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
+    """Latitude-weighting of the node attributes as a function of a polynomial.
+
+    Attributes
+    ----------
+    min_value : float
+        Minimum value of the weights when the latitude is -pi/2 or pi/2 radians.
+    max_value : float
+        Maximum value of the weights when the latitude is 0 radians.
+    norm : str
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def __init__(
+        self,
+        min_value: float = 1e-3,
+        max_value: float = 1,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm, dtype)
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
+        return (self.max_value - self.min_value) * np.cos(latitudes) + self.min_value
+
+
+class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
+    """Latitude-weighted area weights for rectilinear grids.
+
+    Attributes
+    ----------
+    norm : str
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+
+    Notes
+    ------
+    The area of a latitude band is
+    .. math::
+        A = 2\pi R(\sin(lat_2) - \sin(lat_1))
+    where R is the earth radius and lat_1, lat_2 are in radians.
+    """
+
+    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
+        # Get the latitudes defining the bands
+        unique_lats = np.sort(np.unique(latitudes))
+        divisory_lats = (unique_lats[1:] + unique_lats[:-1]) / 2
+        divisory_lats = np.concatenate([[-np.pi / 2], divisory_lats, [np.pi / 2]])
+
+        # Compute the latitude band area
+        lat_1 = divisory_lats[1:]
+        lat_2 = divisory_lats[:-1]
+        ring_area_km = 2 * np.pi * EARTH_RADIUS * (np.sin(lat_2) - np.sin(lat_1))
+
+        # Compute the number of points/nodes at each latitude band
+        lat_to_ring = {lat: idx for idx, lat in enumerate(unique_lats)}
+        lat_rings = np.array([lat_to_ring[lat] for lat in latitudes])
+        lat_counts = np.bincount(lat_rings, minlength=len(unique_lats))
+
+        # Compute the area of each node
+        area_km = dict(zip(unique_lats, ring_area_km / lat_counts))
+        return np.array([area_km[lat] for lat in latitudes])
