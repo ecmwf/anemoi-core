@@ -38,6 +38,7 @@ class AnemoiEnsDatasetsDataModule(AnemoiDatasetsDataModule):
         return EnsNativeGridDataset(
             data_reader=data_reader,
             relative_date_indices=self.relative_date_indices(val_rollout),
+            timestep=self.config.data.timestep,
             shuffle=shuffle,
             grid_indices=self.grid_indices,
             label=label,

@@ -81,7 +81,9 @@ class AreaWeights(BaseNodeAttribute):
 
 
 class PlanarAreaWeights(BaseNodeAttribute):
-    """Implements the 2D area of the nodes as the weights.
+    """Planar area weights
+
+    It computes the area in a 2D plane asociated to each node.
 
     Attributes
     ----------
@@ -93,6 +95,9 @@ class PlanarAreaWeights(BaseNodeAttribute):
     compute(self, graph, nodes_name)
         Compute the area attributes for each node.
     """
+
+    def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
+        return nodes.x
 
     def _compute_mean_nearest_distance(self, points: np.ndarray) -> float:
         """Compute mean distance to nearest neighbor for each point.
@@ -155,7 +160,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
         return np.concatenate([expanded_hull, np.vstack(boundary_points)])
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        points = nodes.x.cpu().numpy()
+        points = self.get_latlon_coordinates(nodes).cpu().numpy()
         resolution = self._compute_mean_nearest_distance(points)
         boundary_points = self._get_boundary_ring(points, resolution)
 
@@ -175,8 +180,48 @@ class PlanarAreaWeights(BaseNodeAttribute):
         return torch.from_numpy(np.array(areas))
 
 
+class MaskedPlanarAreaWeights(PlanarAreaWeights):
+    """Masked planar area weights
+
+    It computes the area in a 2D plane asociated to each node.
+
+    Attributes
+    ----------
+    mask_node_attr_name : str
+        Name of a node attribute to use as a mask for the computing the area weights.
+        It sets to 0 values outside this masked region.
+    norm : str, optional
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def __init__(
+        self,
+        mask_node_attr_name: str,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm, dtype)
+        assert isinstance(
+            mask_node_attr_name, str
+        ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
+        self.mask_node_attr_name = mask_node_attr_name
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
+        attr_values = super().get_raw_values(nodes, **kwargs)
+        mask = nodes[self.mask_node_attr_name].squeeze()
+        return attr_values * mask
+
+
 class SphericalAreaWeights(BaseNodeAttribute):
-    """Implements the 3D area of the nodes as the weights.
+    """Spherical area weights
+
+    It computes the area of a unit radius sphere asociated to each node.
 
     Attributes
     ----------

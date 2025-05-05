@@ -1,0 +1,54 @@
+# Several scalers can be added here. In order to be applied their names must be included in the loss.
+# scaler name must be included in `scalers` in the losses for this to be applied.
+general_variable:
+  # Variable groups definition for scaling by variable level.
+  # The variable level scaling methods are defined under additional_scalers
+  # A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
+  _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+  weights:
+    default: 1
+    q: 0.6 #1
+    t: 6   #1
+    u: 0.8 #0.5
+    v: 0.5 #0.33
+    w: 0.001
+    z: 12  #1
+    sp: 10
+    10u: 0.1
+    10v: 0.1
+    2d: 0.5
+    tp: 0.025
+    cp: 0.0025
+
+pressure_level:
+  _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+  group: pl
+  y_intercept: 0.2
+  slope: 0.001
+
+# mask NaNs with zeros in the loss function
+nan_mask_weights:
+  _target_: anemoi.training.losses.scalers.NaNMaskScaler
+
+# tendency scalers
+# scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
+# useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)
+# if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
+stdev_tendency:
+  _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+
+var_tendency:
+  _target_: anemoi.training.losses.scalers.VarTendencyScaler
+
+# Scalers from node attributes
+node_weights:
+  _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+  nodes_name: ${graph.data}
+  nodes_attribute_name: area_weight
+  norm: "unit-sum"
+
+limited_area_mask:
+  _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+  nodes_name: ${graph.data}
+  nodes_attribute_name: cutout_mask
+  norm: null
