@@ -1,10 +1,11 @@
 activation: GELU
 num_channels: 1024
-output_mask: null
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 cpu_offload: False
 
 model:
-  _target_: anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec
+  _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
 
 layer_kernels:
   processor:

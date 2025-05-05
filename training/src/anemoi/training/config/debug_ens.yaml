@@ -56,7 +56,7 @@ training:
   # loss function for the model
   training_loss:
     # loss class to initialise, can be anything subclassing torch.nn.Module
-    _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+    _target_: anemoi.training.losses.AlmostFairKernelCRPS
     # other kwargs
     scalars: ['variable']
     ignore_nans: False
@@ -64,11 +64,11 @@ training:
 
   validation_metrics:
     # loss class to initialise, can be anything subclassing torch.nn.Module
-    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+    - _target_: anemoi.training.losses.AlmostFairKernelCRPS
       scalars: []
       ignore_nans: False
       alpha: 0.95
-    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+    - _target_: anemoi.training.losses.AlmostFairKernelCRPS
       scalars: []
       ignore_nans: False
       alpha: 1.0

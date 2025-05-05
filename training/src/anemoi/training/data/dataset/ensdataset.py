@@ -37,6 +37,7 @@ class EnsNativeGridDataset(NativeGridDataset):
         data_reader: Callable,
         grid_indices: type[BaseGridIndices],
         relative_date_indices: list,
+        timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
         ens_members_per_device: int = 1,
@@ -53,6 +54,8 @@ class EnsNativeGridDataset(NativeGridDataset):
             list of time indices to load from the data relative to the current sample i in __iter__
         ens_members_per_device: int, optional
             number of ensemble members input for each GPU device, by default 1
+        timestep: str, optional
+            timestep of the data, by default "6h"
         shuffle : bool, optional
             Shuffle batches, by default True
         ens_members_per_device : int, optional
@@ -70,6 +73,7 @@ class EnsNativeGridDataset(NativeGridDataset):
         super().__init__(
             data_reader=data_reader,
             relative_date_indices=relative_date_indices,
+            timestep=timestep,
             shuffle=shuffle,
             grid_indices=grid_indices,
             label=label,
