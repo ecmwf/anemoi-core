@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "0 22 * * *"  # every day at 22pm on default(main) branch
   workflow_dispatch:
+  push:
+    branches:
+      - test/hpc-gpu-integration-test
 
 
 jobs:
