@@ -34,7 +34,7 @@ jobs:
         with:
           template: |
             set -eux
-            module load python3
+            module load python3/3.12.9-01
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR
@@ -51,5 +51,4 @@ jobs:
             #SBATCH --job-name=anemoi_core_pytest
             #SBATCH --time=01:00:00
             #SBATCH --qos=ng
-            #SBATCH --gres=ssdtmp:40G
           troika_user: ${{ secrets.HPC_CI_SSH_USER }}
