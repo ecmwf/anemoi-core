@@ -23,7 +23,7 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - name: Add or update failure comment
+      - name: Add failure comment
         uses: peter-evans/create-or-update-comment@v3
         with:
           issue-number: 294
