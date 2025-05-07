@@ -356,6 +356,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         *args,
         **kwargs,
     ) -> Tensor:
+        size = sum(x[0] for x in shard_shapes)
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         edge_attr = self.trainable(self.edge_attr, batch_size)
@@ -366,11 +367,12 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
 
         x, edge_attr = self.run_layers(
-            (x, edge_attr),
-            edge_index,
-            (shape_nodes, shape_nodes, shapes_edge_attr),
-            batch_size,
-            model_comm_group,
+            data=(x, edge_attr),
+            edge_index=edge_index,
+            shapes=(shape_nodes, shape_nodes, shapes_edge_attr),
+            batch_size=batch_size,
+            size=size,
+            model_comm_group=model_comm_group,
             **kwargs,
         )
 
