@@ -59,4 +59,48 @@ downloaded.
  Content of the dataset
 ************************
 
-To do.
+.. list-table:: Single level variables
+   :header-rows: 1
+
+   -  -  Variable
+      -  Description
+      -  Units
+
+   -  -  2t
+      -  Temperature at 2 metres above the surface
+      -  K
+
+   -  -  tp
+      -  Total precipitation accumulated over the time step
+      -  m
+
+   -  -  sp
+      -  Atmospheric pressure at the surface
+      -  Pa
+
+.. list-table:: Pressure level variables
+   :header-rows: 1
+
+   -  -  Variable
+      -  Description
+      -  Units
+
+   -  -  q
+      -  Specific humidity
+      -  kg/kg
+
+   -  -  u
+      -  U-component of wind
+      -  m/s
+
+   -  -  v
+      -  V-component of wind
+      -  m/s
+
+   -  -  t
+      -  Temperature
+      -  K
+
+   -  -  z
+      -  Geopotential
+      -  m²/s²
