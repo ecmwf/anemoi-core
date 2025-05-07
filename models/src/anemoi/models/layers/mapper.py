@@ -139,7 +139,12 @@ class GraphEdgeMixin:
         assert sub_graph, f"{self.__class__.__name__} needs a valid sub_graph to register edges."
         assert edge_attributes is not None, "Edge attributes must be provided"
 
-        edge_attr_tensor = torch.cat([sub_graph[attr] for attr in edge_attributes], axis=1)
+        # explicit cast is needed here to stay in fp16 precision. default_dtype is set in models/encoder_processor_decoder.py
+        edge_attr_tensor = (
+            torch.cat([sub_graph[attr] for attr in edge_attributes], axis=1)
+            .type(torch.float16)
+            .to(torch.get_default_dtype())
+        )
 
         self.edge_dim = edge_attr_tensor.shape[1] + trainable_size
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
