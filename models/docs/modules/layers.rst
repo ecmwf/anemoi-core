@@ -10,11 +10,24 @@
 ===============================
 
 This environment variable controls the number of chunks used in the
-`Mapper` during inference. Setting this variable allows the model to
-split large computations into a specified number of smaller chunks,
-reducing memory overhead. If not set, it falls back to the default value
-of, 1 i.e. no chunking. See pull request `#46
-<https://github.com/ecmwf/anemoi-models/pull/46>`_.
+`Mapper` and `Processor` during inference. Setting this variable allows
+the model to split large computations into a specified number of smaller
+chunks, reducing memory overhead. If not set, it falls back to the
+default value of, 1 i.e. no chunking. See pull request `#46
+<https://github.com/ecmwf/anemoi-models/pull/46>`_. For finer control,
+set the following environment variables:
+
+``ANEMOI_INFERENCE_MAPPER_NUM_CHUNKS``
+======================================
+
+This environment variable controls the number of chunks used in the
+`Mapper` during inference.
+
+``ANEMOI_INFERENCE_PROCESSOR_NUM_CHUNKS``
+=========================================
+
+This environment variable controls the number of chunks used in the
+`Processor` during inference.
 
 *********
  Mappers
