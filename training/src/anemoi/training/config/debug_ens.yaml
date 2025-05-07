@@ -6,7 +6,7 @@ defaults:
 - hardware: example
 - graph: encoder_decoder_only
 - model: transformer_ens
-- training: default
+- training: ensemble
 - _self_
 
 config_validation: True
@@ -23,8 +23,8 @@ diagnostics:
     callbacks: []
 hardware:
   files:
-    truncation: ${data.resolution}-O32-linear.mat.npz
-    truncation_inv: O32-${data.resolution}-linear.mat.npz
+    truncation: ${data.resolution}-o32-linear.mat.npz
+    truncation_inv: o32-${data.resolution}-linear.mat.npz
     graph: graph_anemoi_new_${data.resolution}.pt
     dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6.zarr
   accelerator: auto
@@ -45,30 +45,5 @@ data:
   resolution: o96
 
 training:
-  model_task: anemoi.training.train.forecaster.GraphEnsForecaster
-  strategy:
-    _target_: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
-    num_gpus_per_ensemble: ${hardware.num_gpus_per_ensemble}
-    num_gpus_per_model: ${hardware.num_gpus_per_model}
   ensemble_size_per_device: 2
   max_epochs: 1
-
-  # loss function for the model
-  training_loss:
-    # loss class to initialise, can be anything subclassing torch.nn.Module
-    _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-    # other kwargs
-    scalars: ['variable']
-    ignore_nans: False
-    alpha: 1.0
-
-  validation_metrics:
-    # loss class to initialise, can be anything subclassing torch.nn.Module
-    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-      scalars: []
-      ignore_nans: False
-      alpha: 0.95
-    - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-      scalars: []
-      ignore_nans: False
-      alpha: 1.0
