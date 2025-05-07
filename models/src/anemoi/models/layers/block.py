@@ -472,15 +472,16 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         size: Union[int, tuple[int, int]],
         num_chunks: int,
     ) -> Tensor:
-        conv_size = size if isinstance(size, tuple) else None
+        # self.conv requires size to be a tuple
+        conv_size = (size, size) if isinstance(size, int) else size
 
         if num_chunks > 1:
-            # split 1-hop edges into chunks, compute self.conv chunk-wise and aggregate
+            # split 1-hop edges into chunks, compute self.conv chunk-wise
             edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
                 num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
             )
             # shape: (num_nodes, num_heads, out_channels_conv)
-            out = torch.zeros((*query.shape[:2], self.out_channels_conv), device=query.device)
+            out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
             for i in range(num_chunks):
                 out += self.conv(
                     query=query,
