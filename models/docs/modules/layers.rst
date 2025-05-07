@@ -17,13 +17,13 @@ default value of, 1 i.e. no chunking. See pull request `#46
 <https://github.com/ecmwf/anemoi-models/pull/46>`_. For finer control,
 set the following environment variables:
 
-``ANEMOI_INFERENCE_MAPPER_NUM_CHUNKS``
+``ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER``
 ======================================
 
 This environment variable controls the number of chunks used in the
 `Mapper` during inference.
 
-``ANEMOI_INFERENCE_PROCESSOR_NUM_CHUNKS``
+``ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR``
 =========================================
 
 This environment variable controls the number of chunks used in the
