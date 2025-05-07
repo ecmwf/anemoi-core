@@ -9,7 +9,7 @@ hidden: "hidden"
 nodes:
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
       dataset: ${dataloader.training.dataset}
     attributes: ${graph.attributes.nodes}
   hidden:
@@ -54,12 +54,21 @@ edges:
 attributes:
   nodes:
     # Attributes for data nodes
+    cutout_mask:
+      _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    boundary_mask:
+      _target_: anemoi.graphs.nodes.attributes.BooleanNot
+      masks:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
     area_weight:
       _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
       norm: unit-max
       fill_value: 0
-    cutout_mask:
-      _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    lam_area_weight:
+      _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights
+      mask_node_attr_name: cutout_mask
+      norm: unit-max
+
   edges:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength

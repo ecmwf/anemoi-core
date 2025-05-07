@@ -12,9 +12,14 @@ import pytest
 import torch
 from _pytest.fixtures import SubRequest
 from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.loss import get_metric_ranges
+from anemoi.training.losses.scalers import create_scalers
+from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.masks import NoOutputMask
 
 
 @pytest.fixture
@@ -29,43 +34,85 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
                 },
             },
             "training": {
-                "variable_loss_scaling": {
-                    "default": 1,
-                    "sfc": {
-                        "z": 0.1,
-                        "other": 100,
+                "training_loss": {
+                    "_target_": "anemoi.training.losses.MSELoss",
+                    "scalers": ["general_variable", "additional_scaler"],
+                },
+                "variable_groups": {
+                    "default": "sfc",
+                    "pl": ["y"],
+                },
+                "scalers": {
+                    "builders": {
+                        "additional_scaler": request.param,
+                        "general_variable": {
+                            "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
+                            "weights": {
+                                "default": 1,
+                                "z": 0.1,
+                                "other": 100,
+                                "y": 0.5,
+                            },
+                        },
                     },
-                    "pl": {"y": 0.5},
                 },
                 "metrics": ["other", "y_850"],
-                "pressure_level_scaler": request.param,
             },
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
-    return config, data_indices
+    statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
+    statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
+    return config, data_indices, statistics, statistics_tendencies
 
 
 linear_scaler = {
-    "_target_": "anemoi.training.data.scaling.LinearPressureLevelScaler",
-    "minimum": 0.0,
+    "_target_": "anemoi.training.losses.scalers.LinearVariableLevelScaler",
+    "group": "pl",
+    "y_intercept": 0.0,
     "slope": 0.001,
 }
+
 relu_scaler = {
-    "_target_": "anemoi.training.data.scaling.ReluPressureLevelScaler",
-    "minimum": 0.2,
+    "_target_": "anemoi.training.losses.scalers.ReluVariableLevelScaler",
+    "group": "pl",
+    "y_intercept": 0.2,
     "slope": 0.001,
 }
+
 constant_scaler = {
-    "_target_": "anemoi.training.data.scaling.NoPressureLevelScaler",
-    "minimum": 1.0,
-    "slope": 0.0,
+    "_target_": "anemoi.training.losses.scalers.NoVariableLevelScaler",
+    "group": "pl",
 }
 polynomial_scaler = {
-    "_target_": "anemoi.training.data.scaling.PolynomialPressureLevelScaler",
-    "minimum": 0.2,
+    "_target_": "anemoi.training.losses.scalers.PolynomialVariableLevelScaler",
+    "group": "pl",
+    "y_intercept": 0.2,
     "slope": 0.001,
+}
+
+
+std_dev_scaler = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler"}
+
+var_scaler = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler"}
+
+no_tend_scaler = {"_target_": "anemoi.training.losses.scalers.NoTendencyScaler"}
+
+graph_node_scaler = {
+    "_target_": "anemoi.training.losses.scalers.GraphNodeAttributeScaler",
+    "nodes_name": "test_nodes",
+    "nodes_attribute_name": "test_attr",
+    "norm": "unit-sum",
+}
+
+reweighted_graph_node_scaler = {
+    "_target_": "anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler",
+    "nodes_name": "test_nodes",
+    "nodes_attribute_name": "test_attr",
+    "scaling_mask_attribute_name": "mask",
+    "weight_frac_of_total": 0.4,
+    "norm": "unit-sum",
 }
 
 expected_linear_scaling = torch.Tensor(
@@ -117,6 +164,45 @@ expected_polynomial_scaling = torch.Tensor(
     ],
 )
 
+expected_no_tendency_scaling = torch.Tensor(
+    [
+        1 * 0.5,  # y_50
+        1 * 0.5,  # y_500
+        1 * 0.5,  # y_850
+        1 * 1,  # q
+        1 * 0.1,  # z
+        1 * 100,  # other
+        1 * 1,  # cos_d
+        1 * 1,  # sin_d
+    ],
+)
+
+expected_stdev_tendency_scaling = torch.Tensor(
+    [
+        (10.0 / 5.0) * 0.5,  # y_50
+        (10.0 / 5.0) * 0.5,  # y_500
+        (10.0 / 5.0) * 0.5,  # y_850
+        1 * 1,  # q (diagnostic)
+        1 * 0.1,  # z (diagnostic)
+        (1 / 8.6) * 100,  # other
+        1 * 1,  # cos_d (remapped)
+        1 * 1,  # sin_d (remapped)
+    ],
+)
+
+expected_var_tendency_scaling = torch.Tensor(
+    [
+        (10.0**2) / (5.0**2) * 0.5,  # y_50
+        (10.0**2) / (5.0**2) * 0.5,  # y_500
+        (10.0**2) / (5.0**2) * 0.5,  # y_850
+        1,  # q (diagnostic)
+        0.1,  # z (diagnostic)
+        (1**2) / (8.6**2) * 100,  # other
+        1 * 1,  # cos_d (remapped)
+        1 * 1,  # sin_d (remapped)
+    ],
+)
+
 
 @pytest.mark.parametrize(
     ("fake_data", "expected_scaling"),
@@ -125,28 +211,41 @@ expected_polynomial_scaling = torch.Tensor(
         (relu_scaler, expected_relu_scaling),
         (constant_scaler, expected_constant_scaling),
         (polynomial_scaler, expected_polynomial_scaling),
+        (no_tend_scaler, expected_no_tendency_scaling),
+        (std_dev_scaler, expected_stdev_tendency_scaling),
+        (var_scaler, expected_var_tendency_scaling),
     ],
     indirect=["fake_data"],
 )
 def test_variable_loss_scaling_vals(
-    fake_data: tuple[DictConfig, IndexCollection],
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
     expected_scaling: torch.Tensor,
+    graph_with_nodes: HeteroData,
 ) -> None:
-    config, data_indices = fake_data
+    config, data_indices, statistics, statistics_tendencies = fake_data
 
-    variable_loss_scaling = GraphForecaster.get_variable_scaling(
-        config.training.variable_loss_scaling,
-        config.training.pressure_level_scaler,
-        data_indices,
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        group_config=config.training.variable_groups,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        output_mask=NoOutputMask(),
     )
 
-    assert torch.allclose(variable_loss_scaling, expected_scaling)
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+
+    final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
+
+    assert torch.allclose(torch.tensor(final_variable_scaling), expected_scaling)
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
-    config, data_indices = fake_data
-    metric_range, metric_ranges_validation = GraphForecaster.get_val_metric_ranges(config.training, data_indices)
+    config, data_indices, _, _ = fake_data
+
+    metric_range, metric_ranges_validation = get_metric_ranges(config, data_indices)
 
     del metric_range["all"]
     del metric_ranges_validation["all"]
