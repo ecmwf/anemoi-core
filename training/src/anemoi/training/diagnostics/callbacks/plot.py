@@ -859,7 +859,6 @@ class PlotLoss(BasePerBatchPlotCallback):
             metadata_variables=self.metadata_variables,
         )
         self.parameter_names = [self.parameter_names[i] for i in argsort_indices]
-
         if not isinstance(pl_module.loss, BaseLoss):
             LOGGER.warning(
                 "Loss function must be a subclass of BaseLoss, or provide `squash`.",

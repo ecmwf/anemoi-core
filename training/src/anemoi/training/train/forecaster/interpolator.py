@@ -133,7 +133,7 @@ class GraphInterpolator(GraphForecaster):
                     interp_step - 1,
                 )  # expects rollout but can be repurposed here.
             metrics.update(metrics_next)
-            y_preds.extend(y_pred)
+            y_preds.append(y_pred)
 
         loss *= 1.0 / len(self.interp_times)
         return loss, metrics, y_preds

@@ -313,7 +313,7 @@ class GraphEnsForecaster(GraphForecaster):
         ):
             loss += loss_next
             metrics.update(metrics_next)
-            y_preds.extend(y_preds_next)
+            y_preds.append(y_preds_next)
 
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic
