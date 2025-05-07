@@ -491,7 +491,7 @@ class GraphForecaster(pl.LightningModule):
                 batch_size=batch.shape[0],
                 sync_dist=True,
             )
-            
+
         return val_loss, y_preds
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
