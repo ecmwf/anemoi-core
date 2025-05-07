@@ -11,7 +11,9 @@
 ECMWF provides a dataset of ERA5 reanalysis data on a O96 `octahedral
 reduced Gaussian grid
 <https://confluence.ecmwf.int/display/FCST/Introducing+the+octahedral+reduced+Gaussian+grid>`__,
-which has a resolution of approximately 1°.
+which has a resolution of approximately 1°. The dataset provides
+6-hourly data for the period from 1979 to 2023. The list of variable is
+provided below.
 
 The dataset contains data from the `Copernicus Climate Data Store
 <https://cds.climate.copernicus.eu>`__ and is available under the
@@ -25,10 +27,9 @@ https://data.ecmwf.int/anemoi-datasets/era5-o96-1979-2023-6h-v8.zarr.
  Downloading the dataset
 *************************
 
-To download the dataset, you can use the ``anemoi-dataset copy`` command
-line tool available from the :ref:`anemoi-datasets
-<anemoi-datasets:index-page>` package. You will need verion ``0.5.22``
-or above.
+To download the dataset, you can use the `anemoi-datasets` :ref:`copy
+<anemoi-datasets:copy_command>` command. You will need version
+``0.5.22`` of the package or above.
 
 .. code::
 
@@ -59,25 +60,6 @@ downloaded.
  Content of the dataset
 ************************
 
-.. list-table:: Single level variables
-   :header-rows: 1
-
-   -  -  Variable
-      -  Description
-      -  Units
-
-   -  -  2t
-      -  Temperature at 2 metres above the surface
-      -  K
-
-   -  -  tp
-      -  Total precipitation accumulated over the time step
-      -  m
-
-   -  -  sp
-      -  Atmospheric pressure at the surface
-      -  Pa
-
 .. list-table:: Pressure level variables
    :header-rows: 1
 
@@ -89,6 +71,10 @@ downloaded.
       -  Specific humidity
       -  kg/kg
 
+   -  -  t
+      -  Temperature
+      -  K
+
    -  -  u
       -  U-component of wind
       -  m/s
@@ -97,10 +83,124 @@ downloaded.
       -  V-component of wind
       -  m/s
 
-   -  -  t
-      -  Temperature
-      -  K
+   -  -  w
+      -  Vertical velocity
+      -  Pa/s
 
    -  -  z
       -  Geopotential
       -  m²/s²
+
+Each of the variables above are named in the dataset as
+``<variable>_<level>``. For example, the Geopotential at 1000hPa is name
+``z_1000``. The pressure levels are: 1000, 925, 850, 700, 600, 500, 400,
+300, 250, 200, 150, 100 and 50 hPa.
+
+.. list-table:: Single level variables
+   :header-rows: 1
+
+   -  -  Variable
+      -  Description
+      -  Units
+
+   -  -  10u
+      -  U-component of wind at 10m
+      -  m/s
+
+   -  -  10v
+      -  V-component of wind at 10m
+      -  m/s
+
+   -  -  2d
+      -  Dew point temperature at 2m
+      -  K
+
+   -  -  2t
+      -  Air temperature at 2m
+      -  K
+
+   -  -  cp
+      -  Convection precipitation (6h accumulation)
+      -  m
+
+   -  -  lsm
+      -  Land-sea mask
+      -  0-1
+
+   -  -  msl
+      -  Mean sea level pressure
+      -  Pa
+
+   -  -  sdor
+      -  Standard deviation of sub-gridscale orography
+      -  m
+
+   -  -  skt
+      -  Skin temperature
+      -  K
+
+   -  -  slor
+      -  Slope of sub-gridscale orography
+      -  .
+
+   -  -  sp
+      -  Surface pressure
+      -  Pa
+
+   -  -  tcw
+      -  Total column water
+      -  m
+
+   -  -  tp
+      -  Total precipitation (6h accumulation)
+      -  m
+
+   -  -  z
+      -  Orography
+      -  m²/s²
+
+.. list-table:: Forcing variables
+   :header-rows: 1
+
+   -  -  Variable
+      -  Description
+      -  Units
+
+   -  -  cos_latitude
+      -  Cosine of latitude
+      -  .
+
+   -  -  cos_longitude
+      -  Cosine of longitude
+      -  .
+
+   -  -  sin_latitude
+      -  Sine of latitude
+      -  .
+
+   -  -  sin_longitude
+      -  Sine of longitude
+      -  .
+
+   -  -  cos_julian_day
+      -  Cosine of Julian day
+      -  .
+
+   -  -  cos_local_time
+      -  Cosine of local time
+      -  .
+
+   -  -  sin_julian_day
+      -  Sine of Julian day
+      -  .
+
+   -  -  sin_local_time
+      -  Sine of local time
+      -  .
+
+   -  -  insolation
+      -  Insolation
+      -  .
+
+For more information on the forcing variables, see the :ref:`forcings
+<anemoi-datasets:forcing_variables>` in the `anemoi-datasets` package.
