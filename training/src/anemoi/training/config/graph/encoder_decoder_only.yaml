@@ -8,13 +8,13 @@ nodes:
   # Data nodes
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.ZarrDatasetNodes # options: ZarrDatasetNodes, NPZFileNodes
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
       dataset: ${dataloader.dataset}
     attributes: ${graph.attributes.nodes} # options: l1, l2, unit-max, unit-sum, unit-std
   # Hidden nodes
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes # options: ZarrDatasetNodes, NPZFileNodes
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes # options: AnemoiDatasetNodes, NPZFileNodes
       grid: o48 # o32, o48, ...
 
 

@@ -11,7 +11,7 @@ nodes:
   # Data nodes
   data:
     node_builder:
-      _target_: anemoi.graphs.nodes.ZarrDatasetNodes
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
       dataset: ${dataloader.dataset}
     attributes: ${graph.attributes.nodes}
   hidden_1:
@@ -78,6 +78,7 @@ edge_builders:
   process:
   - _target_: anemoi.graphs.edges.MultiScaleEdges
     x_hops: 1
+    scale_resolutions: null
     source_mask_attr_name: null
     target_mask_attr_name: null
   upscale:
