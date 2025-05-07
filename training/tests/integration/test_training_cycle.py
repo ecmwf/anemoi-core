@@ -63,15 +63,12 @@ def test_restart_training(gnn_config_with_data: DictConfig) -> None:
     cfg = gnn_config_with_data
     output_dir = Path(cfg.hardware.paths.output + "checkpoint")
 
-    if not output_dir.exists():
-        msg = f"Checkpoint directory not found at: {output_dir}"
-        raise FileNotFoundError(msg)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
 
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    if len(run_dirs) != 1:
-        found_dirs = [d.name for d in run_dirs]
-        msg = f"Expected exactly one run_id directory, found {len(run_dirs)}: {found_dirs}"
-        raise RuntimeError(msg)
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
 
     checkpoint_dir = run_dirs[0]
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
