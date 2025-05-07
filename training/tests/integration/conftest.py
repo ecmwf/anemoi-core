@@ -158,3 +158,21 @@ def _download_datasets(config: OmegaConf, list_datasets: list[str]) -> tuple[str
     tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
     rel_paths = [Path(path).name + "/" + name for (name, path) in zip(dataset_names, tmp_paths)]
     return tmp_dir, rel_paths
+
+
+@pytest.fixture
+def gnn_config_with_data(
+    testing_modifications_with_temp_dir: OmegaConf,
+) -> OmegaConf:
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+        template = compose(config_name="config")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    tmp_dir, rel_paths = _download_datasets(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg

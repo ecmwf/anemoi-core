@@ -9,6 +9,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
@@ -51,3 +52,29 @@ def test_training_cycle_lam(lam_config_with_data: DictConfig) -> None:
 
 def test_config_validation_lam(lam_config: DictConfig) -> None:
     BaseSchema(**lam_config)
+
+
+@skip_if_offline
+@pytest.mark.longtests
+def test_restart_training(gnn_config_with_data: DictConfig) -> None:
+
+    AnemoiTrainer(gnn_config_with_data).train()
+
+    cfg = gnn_config_with_data
+    output_dir = Path(cfg.hardware.paths.output + "checkpoint")
+
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+
+    checkpoint_dir = run_dirs[0]
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.max_epochs = 3
+    AnemoiTrainer(cfg).train()
+
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
