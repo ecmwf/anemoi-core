@@ -610,7 +610,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
-        size: tuple[int, int],
+        size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
     ):
@@ -730,7 +730,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
-        size: int,
+        size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
     ):
