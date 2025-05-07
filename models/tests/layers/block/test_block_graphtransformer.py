@@ -179,9 +179,10 @@ def test_GraphTransformerProcessorBlock_forward_backward(init, block):
     edge_index = torch.randint(1, 10, (2, 10))
     shapes = (10, 10, 10)
     batch_size = 1
+    size = 10
 
     # Forward pass
-    output, _ = block(x, edge_attr, edge_index, shapes, batch_size)
+    output, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
 
     # Check output shape
     assert output.shape == (10, out_channels)
@@ -202,6 +203,46 @@ def test_GraphTransformerProcessorBlock_forward_backward(init, block):
         assert (
             param.grad.shape == param.shape
         ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+
+@pytest.fixture
+def test_GraphTransformerProcessorBlock_chunking(init, block, monkeypatch):
+    (
+        in_channels,
+        _hidden_dim,
+        _out_channels,
+        edge_dim,
+        _bias,
+        _activation,
+        _num_heads,
+        _num_chunks,
+    ) = init
+    # Initialize GraphTransformerProcessorBlock
+    block = block
+
+    # Generate random input tensor
+    x = torch.randn((10, in_channels))
+    edge_attr = torch.randn((10, edge_dim))
+    edge_index = torch.randint(1, 10, (2, 10))
+    shapes = (10, 10, 10)
+    batch_size = 1
+    size = 10
+    num_chunks = torch.randint(2, 10, (1,)).item()
+
+    # manually set to non-training mode
+    block.eval()
+
+    # result with chunks
+    monkeypatch.setenv("ANEMOI_INFERENCE_NUM_CHUNKS", str(num_chunks))
+    importlib.reload(anemoi.models.layers.block)
+    out_chunked, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
+    # result without chunks, reload block for new env variable
+    monkeypatch.setenv("ANEMOI_INFERENCE_NUM_CHUNKS", "1")
+    importlib.reload(anemoi.models.layers.block)
+    out, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
+
+    assert out.shape == out_chunked.shape, f"out.shape ({out.shape}) != out_chunked.shape ({out_chunked.shape})"
+    assert torch.allclose(out, out_chunked, atol=1e-4), "out != out_chunked"
 
 
 @pytest.fixture
@@ -338,7 +379,7 @@ def test_GraphTransformerMapperBlock_forward_backward(init, mapper_block):
     size = (10, 10)
 
     # Forward pass
-    output, _ = block(x, edge_attr, edge_index, shapes, batch_size, size=size)
+    output, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
 
     # Check output shape
     assert output[0].shape == (10, out_channels)
