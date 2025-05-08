@@ -19,8 +19,7 @@ provided below.
 
 The dataset contains data from the `Copernicus Climate Data Store
 <https://cds.climate.copernicus.eu>`__ and is available under the
-`Licence to use Copernicus Products
-<https://object-store.os-api.cci2.ecmwf.int/cci2-prod-catalogue/licences/licence-to-use-copernicus-products/licence-to-use-copernicus-products_b4b9451f54cffa16ecef5c912c9cebd6979925a956e3fa677976e0cf198c2c18.pdf>`__.
+`CC-BY-4.0 license <https://creativecommons.org/licenses/by/4.0/>`__.
 
 The dataset can be download from
 https://data.ecmwf.int/anemoi-datasets/era5-o96-1979-2023-6h-v8.zarr.
