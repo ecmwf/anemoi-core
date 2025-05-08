@@ -2,18 +2,19 @@
 
 <!-- Provide a brief summary of the changes introduced in this pull request. -->
 
+## Intent and Issue Number
+
+<!-- Explain the motivation behind the changes and the context in which they are being made.
+This may summarize and link to an Issue number this change addresses, ideally in one of the "magic format" such as Closes #XYZ -->
+
+<!-- End of merge commit message -->
+
 ## Type of Change
 
 -   [ ] Bug fix (non-breaking change which fixes an issue)
 -   [ ] New feature (non-breaking change which adds functionality)
 -   [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 -   [ ] Documentation update
-
-## Issue Number
-
-<!-- Link the Issue number this change addresses, ideally in one of the "magic format" such as Closes #XYZ -->
-
-<!-- Alternatively, explain the motivation behind the changes and the context in which they are being made. -->
 
 ## Code Compatibility
 
@@ -47,6 +48,9 @@
 
 <!-- Describe any major updates to the documentation -->
 
-## Additional Notes
+## Additional Review Notes
 
 <!-- Include any additional information, caveats, or considerations that the reviewer should be aware of. -->
+
+## Review Process
+- [ ] Upon merging this PR, please review the commit message and remove any PR checklists. The commit message should provide a clear explanation of the purpose and intent behind the changes introduced in the commit.
