@@ -22,13 +22,31 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseImputer(BasePreprocessor, ABC):
-    """Base class for Imputers."""
+    """Base class for Imputers.
+
+    If not stated otherwise, the imputers assume that in the training dataset the NaN locations
+    for each variables are fixed.
+    The intended behaviour is the following:
+
+    In training and validation (self.inference_mode = False):
+
+    - NaN locations must be fixed. In the first forward pass the NaN locations are retrieved from the batch
+    - transform (preprocessor): NaN locations do not need to be recalculated as their position is fixed
+    - inverse_transform (postprocessor): at the fixed NaN locations the NaNs are put back into place
+
+    In inference (self.inference_mode = True):
+
+    - We cannot ensure that NaN locations are fixed. Missing only one NaN in the input data could cause the model prediction to fail which should be avoided. Therefore, the NaN locations are recalculated in every forward pass.
+    - transform (preprocessor): We recalculate the NaN locations in every forward pass. The cached NaN locations must not be overwritten!
+    - inverse_transform (postprocessor): Same behavious as in training/validation. Cached NaN locations from training are used to put NaNs into place.
+    """
 
     def __init__(
         self,
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        inference_mode: Optional[bool] = False,
     ) -> None:
         """Initialize the imputer.
 
@@ -40,8 +58,10 @@ class BaseImputer(BasePreprocessor, ABC):
             Data indices for input and output variables
         statistics : dict
             Data statistics dictionary
+        inference_mode : bool
+            If True, the processor is in inference mode. Default is False.
         """
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config, data_indices, statistics, inference_mode)
 
         self.nan_locations = None
         # weight imputed values with zero in loss calculation
@@ -103,9 +123,9 @@ class BaseImputer(BasePreprocessor, ABC):
 
             LOGGER.debug(f"Imputer: replacing NaNs in {name} with value {self.replacement[-1]}")
 
-    def _expand_subset_mask(self, x: torch.Tensor, idx_src: int) -> torch.Tensor:
+    def _expand_subset_mask(self, x: torch.Tensor, idx_src: int, nan_locations: torch.Tensor) -> torch.Tensor:
         """Expand the subset of the mask to the correct shape."""
-        return self.nan_locations[:, idx_src].expand(*x.shape[:-2], -1)
+        return nan_locations[:, idx_src].expand(*x.shape[:-2], -1)
 
     def get_nans(self, x: torch.Tensor) -> torch.Tensor:
         """get NaN mask from data"""
@@ -113,10 +133,10 @@ class BaseImputer(BasePreprocessor, ABC):
         idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
         return torch.isnan(x[idx].squeeze())
 
-    def fill_with_value(self, x, index):
+    def fill_with_value(self, x, index, nan_locations: torch.Tensor):
         for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
             if idx_dst is not None:
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = value
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src, nan_locations)] = value
         return x
 
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
@@ -124,24 +144,35 @@ class BaseImputer(BasePreprocessor, ABC):
         if not in_place:
             x = x.clone()
 
-        # Reset NaN locations outside of training for validation and inference.
-        if not self.training:
-            self.nan_locations = None
-
-        # Initialise mask if not cached.
+        # Cache NaN locations for training and postprocessing and set loss mask in first forward pass
         if self.nan_locations is None:
-
-            # Get NaN locations
             self.nan_locations = self.get_nans(x)
 
             # Initialize training loss mask to weigh imputed values with zeroes once
             self.loss_mask_training = torch.ones(
                 (x.shape[-2], len(self.data_indices.model.output.name_to_index)), device=x.device
             )  # shape (grid, n_outputs)
-            # for all variables that are imputed and part of the model output, set the loss weight to zero
+            # for all variables that are imputed and part of the model output, set the loss weight to zero at NaN location
             for idx_src, idx_dst in zip(self.index_training_input, self.index_inference_output):
                 if idx_dst is not None:
                     self.loss_mask_training[:, idx_dst] = (~self.nan_locations[:, idx_src]).int()
+
+        # work with reference to cached nan_nanlocations
+        nan_locations = self.nan_locations
+
+        # Ensure the user is running inference from a version of anemoi-inference that sets the inference_mode attribute
+        assert hasattr(
+            self, "inference_mode"
+        ), "Inference mode is not available. This could mean you are using an outdated anemoi-inference."
+
+        # Reset the NaN locations for preprocesor in inference mode.
+        if self.inference_mode:
+            LOGGER.debug("Imputer: resetting copy of NaN locations for inference mode.")
+            # work with copy of cached nan_nanlocations to avoid modifying the cached one
+            # 1. remove reference to cached one
+            nan_locations = None
+            # 2. get current NaN locations
+            nan_locations = self.get_nans(x)
 
         # Choose correct index based on number of variables
         if x.shape[-1] == self.num_training_input_vars:
@@ -155,10 +186,10 @@ class BaseImputer(BasePreprocessor, ABC):
             )
 
         # Replace values
-        return self.fill_with_value(x, index)
+        return self.fill_with_value(x, index, nan_locations)
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
+        """Impute missing values in the input tensor using the cached nan_locations."""
         if not in_place:
             x = x.clone()
 
@@ -176,7 +207,7 @@ class BaseImputer(BasePreprocessor, ABC):
         # Replace values
         for idx_src, idx_dst in zip(self.index_training_input, index):
             if idx_dst is not None:
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = torch.nan
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = torch.nan
         return x
 
 
@@ -201,8 +232,9 @@ class InputImputer(BaseImputer):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        inference_mode: Optional[bool] = False,
     ) -> None:
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config, data_indices, statistics, inference_mode)
 
         self._create_imputation_indices(statistics)
 
@@ -230,8 +262,9 @@ class ConstantImputer(BaseImputer):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        inference_mode: Optional[bool] = False,
     ) -> None:
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config, data_indices, statistics, inference_mode)
 
         self._create_imputation_indices()
 
@@ -253,8 +286,9 @@ class CopyImputer(BaseImputer):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        inference_mode: Optional[bool] = False,
     ) -> None:
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config, data_indices, statistics, inference_mode)
 
         self._create_imputation_indices()
 
@@ -299,16 +333,18 @@ class CopyImputer(BaseImputer):
 
             LOGGER.debug(f"Imputer: replacing NaNs in {name} with value coming from variable :{self.replacement[-1]}")
 
-    def fill_with_value(self, x, index):
+    def fill_with_value(self, x, index, nan_locations: torch.Tensor):
         # Replace values
         for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
             if idx_dst is not None:
                 assert not torch.isnan(
-                    x[..., self.data_indices.data.input.name_to_index[value]][self._expand_subset_mask(x, idx_src)]
+                    x[..., self.data_indices.data.input.name_to_index[value]][
+                        self._expand_subset_mask(x, idx_src, nan_locations)
+                    ]
                 ).any(), f"NaNs found in {value}."
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = x[
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src, nan_locations)] = x[
                     ..., self.data_indices.data.input.name_to_index[value]
-                ][self._expand_subset_mask(x, idx_src)]
+                ][self._expand_subset_mask(x, idx_src, nan_locations)]
         return x
 
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
@@ -316,20 +352,35 @@ class CopyImputer(BaseImputer):
         if not in_place:
             x = x.clone()
 
-        # Initialize nan mask once
+        # Cache NaN locations for training and postprocessing and set loss mask in first forward pass
         if self.nan_locations is None:
-
-            # Get NaN locations
             self.nan_locations = self.get_nans(x)
 
             # Initialize training loss mask to weigh imputed values with zeroes once
             self.loss_mask_training = torch.ones(
                 (x.shape[-2], len(self.data_indices.model.output.name_to_index)), device=x.device
             )  # shape (grid, n_outputs)
-            # for all variables that are imputed and part of the model output, set the loss weight to zero
+            # for all variables that are imputed and part of the model output, set the loss weight to zero at NaN location
             for idx_src, idx_dst in zip(self.index_training_input, self.index_inference_output):
                 if idx_dst is not None:
                     self.loss_mask_training[:, idx_dst] = (~self.nan_locations[:, idx_src]).int()
+
+        # work with reference to cached nan_nanlocations
+        nan_locations = self.nan_locations
+
+        # Ensure the user is running inference from a version of anemoi-inference that sets the inference_mode attribute
+        assert hasattr(
+            self, "inference_mode"
+        ), "Inference mode is not available. This could mean you are using an outdated anemoi-inference."
+
+        # Reset the NaN locations for preprocesor in inference mode.
+        if self.inference_mode:
+            LOGGER.debug("Imputer: resetting copy of NaN locations for inference mode.")
+            # work with copy of cached nan_nanlocations to avoid modifying the cached one
+            # 1. remove reference to cached one
+            nan_locations = None
+            # 2. get current NaN locations
+            nan_locations = self.get_nans(x)
 
         # Choose correct index based on number of variables
         if x.shape[-1] == self.num_training_input_vars:
@@ -342,7 +393,7 @@ class CopyImputer(BaseImputer):
                 f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
             )
 
-        return self.fill_with_value(x, index)
+        return self.fill_with_value(x, index, nan_locations)
 
 
 class DynamicMixin:
@@ -400,8 +451,9 @@ class DynamicInputImputer(DynamicMixin, InputImputer):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        inference_mode: Optional[bool] = False,
     ) -> None:
-        InputImputer.__init__(self, config, data_indices, statistics)
+        InputImputer.__init__(self, config, data_indices, statistics, inference_mode)
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
@@ -416,8 +468,9 @@ class DynamicConstantImputer(DynamicMixin, ConstantImputer):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        inference_mode: Optional[bool] = False,
     ) -> None:
-        ConstantImputer.__init__(self, config, data_indices, statistics)
+        ConstantImputer.__init__(self, config, data_indices, statistics, inference_mode)
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
@@ -432,8 +485,9 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        inference_mode: Optional[bool] = False,
     ) -> None:
-        CopyImputer.__init__(self, config, data_indices, statistics)
+        CopyImputer.__init__(self, config, data_indices, statistics, inference_mode)
         warnings.warn(
             "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
                       The model will be trained to predict imputed values. This might deteriorate performances."
