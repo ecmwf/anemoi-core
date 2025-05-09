@@ -883,3 +883,429 @@ def plot_graph_edge_features(
             )
 
     return fig
+
+def plot_rank_histograms(
+    parameters: dict[int, str],
+    rh: np.ndarray,
+) -> Figure:
+    """Plots one rank histogram per target variable.
+
+    Parameters
+    ----------
+    parameters : Dict[int, str]
+        Dictionary of target variables
+    rh : np.ndarray
+        Rank histogram data of shape (nens, nvar)
+
+    Returns
+    -------
+    Figure
+        The figure object handle.
+    """
+    fig, ax = plt.subplots(1, len(parameters), figsize=(len(parameters) * 4.5, 4))
+    n_ens = rh.shape[0] - 1
+    rh = rh.astype(float)
+
+    # Ensure ax is iterable
+    if not isinstance(ax, np.ndarray):
+        ax = np.array([ax])
+
+    for plot_idx, (_variable_idx, variable_name) in enumerate(parameters.items()):
+        rh_ = rh[:, plot_idx]
+        ax[plot_idx].bar(np.arange(0, n_ens + 1), rh_ / rh_.sum(), linewidth=1, color="blue", width=0.7)
+        ax[plot_idx].hlines(rh_.mean() / rh_.sum(), xmin=-0.5, xmax=n_ens + 0.5, linestyles="--", colors="red")
+        ax[plot_idx].set_title(f"{variable_name[0]} ranks")
+        _hide_axes_ticks(ax[plot_idx])
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_predicted_ensemble(
+    parameters: dict[int, str],
+    n_plots_per_sample: int,
+    latlons: np.ndarray,
+    clevels: float,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    datashader: Optional[bool] = True,
+    initial_condition: Optional[bool] = False,
+) -> Figure:
+    """Plots data for one ensemble member.
+
+    Args:
+        parameters : Dict[int, str]
+            Dictionary of target variables
+        n_plots_per_sample : int
+            Number of plots per sample
+        latlons : np.ndarray
+            Latitudes and longitudes
+        clevels : float
+            Accumulation levels used for precipitation related plots
+        cmap_precip: str
+            Colours used for each precipitation accumulation level
+        y_true : np.ndarray
+            True values
+        y_pred : np.ndarray
+            Predicted values
+        datashader : bool, optional
+            Datashader plot, by default True
+        initial_condition : bool, optional
+            Plotting initial condition, by default False
+
+    Returns
+    -------
+        fig:
+            The figure object handle.
+    """
+    n_plots_per_sample = 1 if initial_condition else 4
+
+    nens = y_pred.shape[0] if len(y_pred.shape) == 3 else 1
+
+    n_plots_x, n_plots_y = len(parameters), nens + n_plots_per_sample
+    LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
+
+    figsize = (n_plots_y * 4, n_plots_x * 3)
+    fig, ax = plt.subplots(n_plots_x, n_plots_y, figsize=figsize)
+
+    lat, lon = latlons[:, 0], latlons[:, 1]
+    projection = EquirectangularProjection()
+
+    pc_lon, pc_lat = projection(lon, lat)
+
+    for plot_idx, (variable_idx, variable_name) in enumerate(parameters.items()):
+        yp = y_pred[..., variable_idx].squeeze()
+        if initial_condition:
+            ax_ = ax[plot_idx, :] if n_plots_x > 1 else ax
+            plot_ensemble_sample(
+                fig,
+                ax_,
+                pc_lon,
+                pc_lat,
+                yp,
+                yp,
+                variable_name,
+                clevels,
+                datashader=datashader,
+                initial_condition=True,
+            )
+        else:
+            yt = y_true[..., variable_idx].squeeze()
+            ax_ = ax[plot_idx, :] if n_plots_x > 1 else ax
+            plot_ensemble_sample(fig, ax_, pc_lon, pc_lat, yt, yp, variable_name, clevels, datashader=datashader)
+
+    return fig
+
+
+def plot_ensemble_sample(
+    fig,
+    ax,
+    pc_lon: np.ndarray,
+    pc_lat: np.ndarray,
+    truth: np.ndarray,
+    ens_arr: np.ndarray,
+    vname: np.ndarray,
+    clevels: float,
+    ens_dim: int = 0,
+    datashader: Optional[bool] = True,
+    precip_and_related_fields: list | None = None,
+    cmap: Colormap | None = None,
+    error_cmap: Colormap | None = None,    
+    initial_condition: Optional[bool] = False,
+) -> None:
+    """Use this when plotting ensembles.
+
+    Each member is defined on "flat" (reduced Gaussian) grids.
+
+    Parameters
+    ----------
+    fig: figure
+        Figure object handle
+    ax: matplotlib.axes
+        Axis object handle
+    pc_lon : np.ndarray
+        Projected Longitude coordinates array
+    pc_lat : np.ndarray
+        Projected Latitude coordinates array
+    truth : np.ndarray
+        True values
+    ens_arr : np.ndarray
+        Ensemble array
+    vname : np.ndarray
+        Variable name
+    clevels : float
+        Accumulation levels used for precipitation related plots
+    ens_dim : int, optional
+        Ensemble dimension, by default
+    datashader : bool, optional
+        Datashader plot, by default True
+    initial_condition : bool, optional
+        Plotting initial condition, by default False
+
+    Returns
+    -------
+        None
+    """
+    precip_and_related_fields = precip_and_related_fields or []
+    if vname in precip_and_related_fields:
+        # converting to mm from m
+        truth = truth * 1000.0
+        ens_arr = ens_arr * 1000.0
+
+    else:
+        cmap_plt = "viridis"
+        norm = None
+
+    if len(ens_arr.shape) == 2:
+        nens = ens_arr.shape[ens_dim]
+        ens_mean, ens_sd = ens_arr.mean(axis=ens_dim), ens_arr.std(axis=ens_dim)
+    else:
+        nens = 1
+        ens_mean = ens_arr
+        ens_sd = np.zeros(ens_arr.shape)
+
+    if initial_condition:
+        plot_index = 1
+
+        # ensemble initial condition mean
+        single_plot(
+            fig,
+            ax[0],
+            pc_lon,
+            pc_lat,
+            ens_mean.squeeze(),
+            norm=norm,
+            cmap=cmap_plt,
+            title=f"{vname[0]}_mean",
+            datashader=datashader,
+        )
+    else:
+        plot_index = 4
+
+        # ensemble mean
+        single_plot(fig, ax[0], pc_lon, pc_lat, truth, cmap=cmap_plt, norm=norm, title=f"{vname[0]} target", datashader=datashader)
+        # ensemble mean
+        single_plot(
+            fig,
+            ax[1],
+            pc_lon,
+            pc_lat,
+            ens_mean,
+            cmap=cmap_plt,
+            norm=norm,
+            title=f"{vname[0]} pred mean",
+            datashader=datashader,
+        )
+        # ensemble spread
+        single_plot(
+            fig,
+            ax[2],
+            pc_lon,
+            pc_lat,
+            ens_mean - truth,
+            cmap="bwr",
+            norm=TwoSlopeNorm(vcenter=0.0),
+            title=f"{vname[0]} ens mean err",
+            datashader=datashader,
+        )
+        # ensemble mean error
+        single_plot(fig, ax[3], pc_lon, pc_lat, ens_sd, title=f"{vname[0]} ens sd", datashader=datashader)
+
+    # ensemble members (difference from mean)
+    for i_ens in range(nens):
+        single_plot(
+            fig,
+            ax[i_ens + plot_index],
+            pc_lon,
+            pc_lat,
+            np.take(ens_arr, i_ens, axis=ens_dim) - ens_mean,
+            cmap="bwr",
+            norm=TwoSlopeNorm(vcenter=0.0),
+            title=f"{vname[0]}_{i_ens + 1} - mean",
+            datashader=datashader,
+        )
+
+
+def plot_spread_skill(
+    parameters: dict[int, str],
+    ss_metric: tuple[np.ndarray, np.ndarray],
+    time_step: int,
+) -> Figure:
+    """Plot the spread-skill metric.
+
+    Parameters
+    ----------
+    parameters : Dict[int, str]
+        Dictionary of target variables
+    ss_metric : tuple[np.ndarray, np.ndarray]
+        Spread-skill metric data
+    time_step : int
+        Time step
+
+    Returns
+    -------
+    Figure
+        Figure object handle
+    """
+    nplots = len(parameters)
+    figsize = (nplots * 5, 4)
+    fig, ax = plt.subplots(1, nplots, figsize=figsize)
+
+    assert isinstance(ss_metric, tuple), f"Expected a tuple and got {type(ss_metric)}!"
+    assert len(ss_metric) == 2, f"Expected a 2-tuple and got a {len(ss_metric)}-tuple!"
+    assert (
+        ss_metric[0].shape[1] == nplots
+    ), f"Shape mismatch in the RMSE metric: expected (..., {nplots}) and got {ss_metric[0].shape}!"
+    assert (
+        ss_metric[0].shape == ss_metric[1].shape
+    ), f"RMSE and spread metric shapes do not match! {ss_metric[0].shape} and {ss_metric[1].shape}"
+
+    rmse, spread = ss_metric[0], ss_metric[1]
+    rollout = rmse.shape[0]
+    x = np.arange(1, rollout + 1) * time_step
+
+    for i, (_, pname) in enumerate(parameters.items()):
+        ax_ = ax[i] if nplots > 1 else ax
+        ax_.plot(x, rmse[:, i], "-o", color="red", label="mean RMSE")
+        ax_.plot(x, spread[:, i], "-o", color="blue", label="spread")
+        ax_.legend()
+        ax_.set_title(f"{pname[0]} spread-skill")
+        ax_.set_xticks(x)
+        ax_.set_xlabel("Lead time [hrs]")
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_spread_skill_bins(
+    parameters: dict[int, str],
+    ss_metric: tuple[np.ndarray, np.ndarray],
+    time_step: int,
+) -> Figure:
+    """Plot the spread-skill metric in bins.
+
+    Parameters
+    ----------
+    parameters : Dict[int, str]
+        Dictionary of target variables
+    ss_metric : tuple[np.ndarray, np.ndarray]
+        Spread-skill metric data
+    time_step : int
+        Time step
+
+    Returns
+    -------
+    Figure
+        Figure object handle
+    """
+    nplots = len(parameters)
+    figsize = (nplots * 5, 4)
+    fig, ax = plt.subplots(1, nplots, figsize=figsize)
+
+    assert isinstance(ss_metric, tuple), f"Expected a tuple and got {type(ss_metric)}!"
+    assert len(ss_metric) == 2, f"Expected a 2-tuple and got a {len(ss_metric)}-tuple!"
+    assert (
+        ss_metric[0].shape[1] == nplots
+    ), f"Shape mismatch in the RMSE metric: expected (..., {nplots}) and got {ss_metric[0].shape}!"
+    assert (
+        ss_metric[0].shape == ss_metric[1].shape
+    ), f"RMSE and spread metric shapes do not match! {ss_metric[0].shape} and {ss_metric[1].shape}"
+
+    bins_rmse, bins_spread = ss_metric[0], ss_metric[1]
+    rollout = bins_rmse.shape[0]
+
+    for i, (_, pname) in enumerate(parameters.items()):
+        ax_ = ax[i] if nplots > 1 else ax
+        for j in range(rollout):
+            ax_.plot(bins_spread[j, i, :], bins_rmse[j, i, :], "-", label=str((j + 1) * time_step) + " hr")
+            ax_.plot(bins_rmse[j, i, :], bins_rmse[j, i, :], "--", color="black", label="__nolabel__")
+        bins_max = max(np.nanmax(bins_rmse[:, i, :]), np.nanmax(bins_spread[:, i, :]))
+
+        ax_.set_xlim([0, bins_max])
+        ax_.set_ylim([0, bins_max])
+        ax_.legend()
+        ax_.set_title(f"{pname[0]} spread-skill binned")
+        ax_.set_xlabel("Spread")
+        ax_.set_ylabel("Skill")
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_ens_histogram(
+    parameters: dict[str, int],
+    x: np.ndarray,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    precip_and_related_fields: list | None = None,
+) -> Figure:
+    """Plots histogram.
+
+    NB: this can be very slow for large data arrays
+    call it as infrequently as possible!
+
+    Parameters
+    ----------
+    parameters : dict[str, int]
+        Dictionary of variable names and indices
+    x : np.ndarray
+        Input data of shape (lat*lon, nvar*level)
+    y_true : np.ndarray
+        Expected data of shape (lat*lon, nvar*level)
+    y_pred : np.ndarray
+        Predicted data of shape (lat*lon, nvar*level)
+    precip_and_related_fields : list, optional
+        List of precipitation-like variables, by default []
+
+    Returns
+    -------
+    Figure
+        The figure object handle.
+    """
+    precip_and_related_fields = precip_and_related_fields or []
+
+    n_plots_x, n_plots_y = len(parameters), 1
+
+    figsize = (n_plots_y * 4, n_plots_x * 3)
+    fig, ax = plt.subplots(n_plots_x, n_plots_y, figsize=figsize)
+
+    for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
+        yt = y_true[..., variable_idx].squeeze()
+        yp = y_pred[..., variable_idx].squeeze()
+
+        yp_ens_shape = yp.shape[0] if len(yp.shape) > 1 else 1
+
+        # Calculate the histogram
+        for i in range(yp_ens_shape):
+            if output_only:
+                xt = x[..., variable_idx].squeeze() * int(output_only)
+                hist_yt, bins_yt = np.histogram((yt - xt), bins=100)
+                hist_yp, bins_yp = np.histogram((yp[i, :] - xt), bins=100)
+            else:
+                hist_yt, bins_yt = np.histogram(yt, bins=100)
+                hist_yp, bins_yp = np.histogram(yp[i, :], bins=100)
+
+            # Visualization trick for tp
+            if variable_name == "tp" or variable_name == "cp":
+                hist_yt = hist_yt * bins_yt[:-1]
+                hist_yp = hist_yp * bins_yp[:-1]
+            # Plot the modified histogram
+            ax[plot_idx].bar(
+                bins_yp[:-1],
+                hist_yp,
+                width=np.diff(bins_yp),
+                edgecolor="red",
+                fill=False,
+                alpha=0.7,
+                label="member_" + str(i),
+            )
+
+        ax[plot_idx].bar(bins_yt[:-1], hist_yt, width=np.diff(bins_yt), color="blue", alpha=0.7, label="Truth")
+        ax[plot_idx].set_title(variable_name)
+        ax[plot_idx].set_xlabel(variable_name)
+        ax[plot_idx].set_ylabel("Density")
+        ax[plot_idx].legend()
+        ax[plot_idx].set_aspect("auto", adjustable=None)
+
+    fig.tight_layout()
+    return fig
