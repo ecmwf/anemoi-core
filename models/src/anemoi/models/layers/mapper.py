@@ -272,13 +272,13 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
 
         (x_src, x_dst), edge_attr = self.proc(
-            (x_src, x_dst),
-            edge_attr,
-            edge_index,
-            (shapes_src, shapes_dst, shapes_edge_attr),
-            batch_size,
-            model_comm_group,
+            x=(x_src, x_dst),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            shapes=(shapes_src, shapes_dst, shapes_edge_attr),
+            batch_size=batch_size,
             size=size,
+            model_comm_group=model_comm_group,
         )
 
         x_dst = self.post_process(x_dst, shapes_dst, model_comm_group)

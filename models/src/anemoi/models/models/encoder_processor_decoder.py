@@ -277,7 +277,7 @@ class AnemoiModelEncProcDec(nn.Module):
             use_reentrant=use_reentrant,
         )
 
-    def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
+    def forward(self, x: Tensor, *, model_comm_group: Optional[ProcessGroup] = None, **kwargs) -> Tensor:
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
 
