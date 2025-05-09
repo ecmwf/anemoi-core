@@ -19,15 +19,20 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
-from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_power_spectrum
-from anemoi.training.diagnostics.plots import plot_predicted_ensemble
+from anemoi.training.losses.base import BaseLoss
+from omegaconf import DictConfig
 
-# from aifs.diagnostics.metrics.ranks import RankHistogram
-# from aifs.diagnostics.metrics.spread import SpreadSkill
+from anemoi.training.diagnostics.plots import plot_histogram
+from anemoi.training.diagnostics.plots import plot_loss
+from anemoi.training.diagnostics.plots import plot_predicted_ensemble
+from anemoi.training.diagnostics.plots import plot_rank_histograms
+from anemoi.training.diagnostics.plots import plot_spread_skill
+from anemoi.training.diagnostics.plots import plot_spread_skill_bins
+#from aifs.diagnostics.metrics.ranks import RankHistogram
+#from aifs.diagnostics.metrics.spread import SpreadSkill
 
 LOGGER = logging.getLogger(__name__)
-
 
 class BasePerBatchEnsPlotCallback(BasePerBatchPlotCallback):
     """Base Callback for plotting at the end of each batch."""
@@ -60,7 +65,6 @@ class BasePerBatchEnsPlotCallback(BasePerBatchPlotCallback):
                 epoch=trainer.current_epoch,
                 **kwargs,
             )
-
 
 class RolloutEvalEns(RolloutEval):
     """Evaluates the model performance over a (longer) rollout window."""
@@ -360,6 +364,48 @@ class RolloutEvalEns(RolloutEval):
 class PlotEnsLoss(PlotLoss):
     """Plots the unsqueezed loss over rollouts."""
 
+    # def _plot(
+    #     self,
+    #     trainer: pl.Trainer,
+    #     pl_module: pl.LightningModule,
+    #     outputs: list[torch.Tensor],
+    #     batch: torch.Tensor,
+    #     batch_idx: int,
+    #     epoch: int,
+    # ) -> None:
+    #     logger = trainer.logger
+    #     _ = batch_idx
+
+    #     parameter_names = list(pl_module.data_indices.internal_model.output.name_to_index.keys())
+    #     parameter_positions = list(pl_module.data_indices.internal_model.output.name_to_index.values())
+    #     # reorder parameter_names by position
+    #     self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
+    #     if not isinstance(pl_module.loss, BaseLoss):
+    #         logging.warning(
+    #             "Loss function must be a subclass of BaseWeightedLoss, or provide `squash`.",
+    #             RuntimeWarning,
+    #         )
+
+    #     for rollout_step in range(pl_module.rollout):
+    #         y_hat = outputs[1][rollout_step]
+    #         y_true = batch[
+    #             :,
+    #             pl_module.multi_step + rollout_step,
+    #             ...,
+    #             pl_module.data_indices.internal_data.output.full,
+    #         ]
+    #         loss = pl_module.loss(y_hat, y_true, squash=False).cpu().numpy()
+    #         sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
+    #         fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
+
+    #         self._output_figure(
+    #             logger,
+    #             fig,
+    #             epoch=epoch,
+    #             tag=f"loss_rstep_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+    #             exp_log_tag=f"loss_sample_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+    #         )
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -479,36 +525,10 @@ class PlotEnsembleInitialConditions(BasePerBatchEnsPlotCallback):
             self.plot(trainer.logger, pl_module, group_ens_ic, batch_idx, epoch=trainer.current_epoch)
 
 
-class PlotEnsSample(PlotSample, BasePerBatchEnsPlotCallback):
+class PlotEnsSample(PlotSample):
 
-    def __init__(
-        self,
-        config: DictConfig,
-        sample_idx: int,
-        parameters: list[str],
-        accumulation_levels_plot: list[float],
-        precip_and_related_fields: list[str] | None = None,
-        colormaps: dict[str] | None = None,
-        per_sample: int = 6,
-        every_n_batches: int | None = None,
-        **kwargs: Any,
-    ) -> None:
-        PlotSample.__init__(
-            self,
-            config,
-            sample_idx,
-            parameters,
-            accumulation_levels_plot,
-            precip_and_related_fields,
-            colormaps,
-            per_sample,
-            every_n_batches,
-            **kwargs,
-        )
-        BasePerBatchEnsPlotCallback.__init__(self, config, every_n_batches)
-
-    @rank_zero_only
     def _plot(
+        # batch_idx: int, rollout_step: int, x: torch.Tensor, y_true: torch.Tensor, y_pred: torch.Tensor,
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
@@ -542,15 +562,12 @@ class PlotEnsSample(PlotSample, BasePerBatchEnsPlotCallback):
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-        data = self.post_processors(input_tensor)
+        data = self.post_processors(input_tensor, in_place=False).numpy()
 
         output_tensor = self.post_processors(
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
-        )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
+        ).numpy()
 
         for rollout_step in range(pl_module.rollout):
             fig = plot_predicted_ensemble(
@@ -572,25 +589,26 @@ class PlotEnsSample(PlotSample, BasePerBatchEnsPlotCallback):
                 exp_log_tag=f"val_pred_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
             )
 
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: Any,
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
+        # plotting happens only on ens_comm_group_rank == 0 (one device per group)
+        # ens_comm_group_rank == 0 has gathered all ensemble members generated by its group
+        if batch_idx % self.every_n_batches == 0 and pl_module.ens_comm_group_rank == 0:
+            self.plot(trainer, pl_module, outputs, batch[0], batch_idx, epoch=trainer.current_epoch)
 
-class PlotEnsHistogram(PlotHistogram, BasePerBatchEnsPlotCallback):
+
+class PlotEnsHistogram(PlotHistogram):
     """Plots histograms comparing target and prediction.
 
     The actual increment (output - input) is plot for prognostic variables while the output is plot for diagnostic ones.
     """
 
-    def __init__(
-        self,
-        config: DictConfig,
-        sample_idx: int,
-        parameters: list[str],
-        precip_and_related_fields: list[str],
-        every_n_batches: int | None = None,
-    ) -> None:
-        PlotHistogram.__init__(self, config, sample_idx, parameters, precip_and_related_fields, every_n_batches)
-        BasePerBatchEnsPlotCallback.__init__(self, config, every_n_batches)
-
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -603,9 +621,30 @@ class PlotEnsHistogram(PlotHistogram, BasePerBatchEnsPlotCallback):
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch)
+        # data, output_tensor = self.process(pl_module, outputs, batch[0])
 
+        # When running in Async mode, it might happen that in the last epoch these tensors
+        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
+        # but internal ones would be on the cpu), The lines below allow to address this problem
+        if self.pre_processors is None:
+            # Copy to be used across all the training cycle
+            self.pre_processors = copy.deepcopy(pl_module.model.pre_processors).cpu()
+        if self.post_processors is None:
+            # Copy to be used across all the training cycle
+            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
+        if self.latlons is None:
+            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+        local_rank = pl_module.local_rank
+        input_tensor = batch[
+            self.sample_idx,
+            pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+            ...,
+            pl_module.data_indices.data.output.full,
+        ].cpu()
+        data = input_tensor.numpy()
+        output_tensor = (torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1]))).numpy()
         for rollout_step in range(pl_module.rollout):
+
             # Build dictionary of indices and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
 
@@ -621,7 +660,7 @@ class PlotEnsHistogram(PlotHistogram, BasePerBatchEnsPlotCallback):
                 plot_parameters_dict_histogram,
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
-                output_tensor[rollout_step, 0, ...],  # Member zero only
+                output_tensor[rollout_step, 0, ...],
                 self.precip_and_related_fields,
             )
 
@@ -633,6 +672,34 @@ class PlotEnsHistogram(PlotHistogram, BasePerBatchEnsPlotCallback):
                 exp_log_tag=f"val_pred_histo_rstep_{rollout_step:02d}_rank{local_rank:01d}",
             )
 
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        output: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+        **kwargs,
+    ) -> None:
+        if (
+            self.config.diagnostics.plot.asynchronous
+            and self.config.dataloader.read_group_size > 1
+            and pl_module.local_rank == 0
+        ):
+            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
+
+        if batch_idx % self.every_n_batches == 0:
+            batch = pl_module.allgather_batch(batch[0])
+
+            self.plot(
+                trainer,
+                pl_module,
+                output,
+                batch,
+                batch_idx,
+                epoch=trainer.current_epoch,
+                **kwargs,
+            )
 
 class LongEnsRolloutPlots(LongRolloutPlots):
     """Evaluates the model performance over a (longer) rollout window.
@@ -823,37 +890,7 @@ class LongEnsRolloutPlots(LongRolloutPlots):
                 self._plot(trainer, pl_module, outputs, batch[0], batch_idx, trainer.current_epoch)
 
 
-class PlotEnsSpectrum(PlotSpectrum, BasePerBatchEnsPlotCallback):
-    """Plots Spectrum of first ensemble member."""
-
-    def __init__(
-        self,
-        config: DictConfig,
-        sample_idx: int,
-        parameters: list[str],
-        min_delta: float | None = None,
-        every_n_batches: int | None = None,
-    ) -> None:
-        """Initialise the PlotEnsSpectrum callback.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Config object
-        sample_idx : int
-            Sample to plot
-        parameters : list[str]
-            Parameters to plot
-        min_delta : float | None, optional
-            Minimum delta for plotting, by default None
-        every_n_batches : int | None, optional
-            Override for batch frequency, by default None
-        """
-        # Call both parent class initializers
-        PlotSpectrum.__init__(self, config, sample_idx, parameters, min_delta, every_n_batches)
-        BasePerBatchEnsPlotCallback.__init__(self, config, every_n_batches)
-
-    @rank_zero_only
+class PlotEnsSpectrum(PlotSpectrum):
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -865,8 +902,29 @@ class PlotEnsSpectrum(PlotSpectrum, BasePerBatchEnsPlotCallback):
     ) -> None:
         logger = trainer.logger
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch)
-
+        # When running in Async mode, it might happen that in the last epoch these tensors
+        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
+        # but internal ones would be on the cpu), The lines below allow to address this problem
+        if self.pre_processors is None:
+            # Copy to be used across all the training cycle
+            self.pre_processors = copy.deepcopy(pl_module.model.pre_processors).cpu()
+        if self.post_processors is None:
+            # Copy to be used across all the training cycle
+            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
+        if self.latlons is None:
+            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+        local_rank = pl_module.local_rank
+        input_tensor = batch[
+            self.sample_idx,
+            pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+            ...,
+            pl_module.data_indices.data.output.full,
+        ].cpu()
+        data = self.post_processors(input_tensor).numpy()
+        output_tensor = self.post_processors(
+            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
+            in_place=False,
+        ).numpy()
         for rollout_step in range(pl_module.rollout):
             # Build dictionary of inidicies and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
@@ -890,4 +948,33 @@ class PlotEnsSpectrum(PlotSpectrum, BasePerBatchEnsPlotCallback):
                 epoch=epoch,
                 tag=f"gnn_pred_val_spec_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank0",
                 exp_log_tag=f"val_pred_spec_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+            )
+
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        output: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+        **kwargs,
+    ) -> None:
+        if (
+            self.config.diagnostics.plot.asynchronous
+            and self.config.dataloader.read_group_size > 1
+            and pl_module.local_rank == 0
+        ):
+            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
+
+        if batch_idx % self.every_n_batches == 0:
+            batch = pl_module.allgather_batch(batch[0])
+
+            self.plot(
+                trainer,
+                pl_module,
+                output,
+                batch,
+                batch_idx,
+                epoch=trainer.current_epoch,
+                **kwargs,
             )
