@@ -37,12 +37,24 @@ def test_manual_init(loss_cls: type[BaseLoss]) -> None:
 
 
 @pytest.fixture
-def simple_functionalloss() -> FunctionalLoss:
+def functionalloss() -> type[FunctionalLoss]:
     class ReturnDifference(FunctionalLoss):
         def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
             return pred - target
 
-    return ReturnDifference()
+    return ReturnDifference
+
+
+@pytest.fixture
+def simple_functionalloss(functionalloss: type[FunctionalLoss]) -> FunctionalLoss:
+    return functionalloss()
+
+
+@pytest.fixture
+def functionalloss_with_scaler(simple_functionalloss: FunctionalLoss) -> FunctionalLoss:
+    loss = simple_functionalloss
+    loss.add_scaler(TensorDim.GRID, torch.rand([TensorDim.GRID]), name="test")
+    return loss
 
 
 def test_simple_functionalloss(simple_functionalloss: FunctionalLoss) -> None:
@@ -71,6 +83,26 @@ def test_batch_invariance(simple_functionalloss: FunctionalLoss) -> None:
 
     loss_batch_size_1 = simple_functionalloss(pred_batch_size_1, target_batch_size_1)
     loss_batch_size_2 = simple_functionalloss(pred_batch_size_2, target_batch_size_2)
+
+    assert isinstance(loss_batch_size_1, torch.Tensor)
+    assert isinstance(loss_batch_size_2, torch.Tensor)
+    assert torch.allclose(loss_batch_size_1, loss_batch_size_2)
+
+
+def test_batch_invariance_with_scalar(functionalloss_with_scaler: FunctionalLoss) -> None:
+    """Test for batch invariance."""
+    tensor_shape = list(iter(TensorDim))
+
+    tensor_shape[0] = 1
+    pred_batch_size_1 = torch.ones(tensor_shape)
+    target_batch_size_1 = torch.zeros(tensor_shape)
+
+    tensor_shape[0] = 2
+    pred_batch_size_2 = torch.ones(tensor_shape)
+    target_batch_size_2 = torch.zeros(tensor_shape)
+
+    loss_batch_size_1 = functionalloss_with_scaler(pred_batch_size_1, target_batch_size_1)
+    loss_batch_size_2 = functionalloss_with_scaler(pred_batch_size_2, target_batch_size_2)
 
     assert isinstance(loss_batch_size_1, torch.Tensor)
     assert isinstance(loss_batch_size_2, torch.Tensor)
