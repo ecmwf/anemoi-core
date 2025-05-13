@@ -115,7 +115,7 @@ class BaseLoss(nn.Module, ABC):
         """Reduce the out of the loss.
 
         If `squash` is True, the last dimension is averaged.
-        Then averaged over the batch size, and finally summed over the batch size, ensemble and grid dimensions.
+        Then normalised over the batch dimension, and finally summed over the batch, ensemble and grid dimensions.
         """
         if squash:
             out = self.avg_function(out, dim=TensorDim.VARIABLE)
