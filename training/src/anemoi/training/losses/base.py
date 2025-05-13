@@ -19,6 +19,7 @@ import torch
 from torch import nn
 
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -111,10 +112,18 @@ class BaseLoss(nn.Module, ABC):
         return x[subset_indices] * scaler[subset_indices]
 
     def reduce(self, out: torch.Tensor, squash: bool = True) -> torch.Tensor:
-        if squash:
-            out = self.avg_function(out, dim=-1)
+        """Reduce the out of the loss.
 
-        return self.sum_function(out, dim=(0, 1, 2))
+        If `squash` is True, the last dimension is averaged.
+        Then averaged over the batch size, and finally summed over the batch size, ensemble and grid dimensions.
+        """
+        if squash:
+            out = self.avg_function(out, dim=TensorDim.VARIABLE)
+
+        bs = out.shape[TensorDim.BATCH_SIZE]
+        out = out / bs
+
+        return self.sum_function(out, dim=(TensorDim.BATCH_SIZE, TensorDim.ENSEMBLE_DIM, TensorDim.GRID))
 
     @property
     def name(self) -> str:

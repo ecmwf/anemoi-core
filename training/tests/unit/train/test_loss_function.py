@@ -23,6 +23,8 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.utils.enums import TensorDim
 
 
 @pytest.mark.parametrize(
@@ -30,8 +32,49 @@ from anemoi.training.losses.base import BaseLoss
     [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
 )
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
-    loss = loss_cls(torch.ones(1))
+    loss = loss_cls()
     assert isinstance(loss, BaseLoss)
+
+
+@pytest.fixture
+def simple_functionalloss() -> FunctionalLoss:
+    class ReturnDifference(FunctionalLoss):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return pred - target
+
+    return ReturnDifference()
+
+
+def test_simple_functionalloss(simple_functionalloss: FunctionalLoss) -> None:
+    """Test a functional loss."""
+    tensor_shape = tuple(range(len(TensorDim)))
+
+    pred = torch.ones(tensor_shape)
+    target = torch.zeros(tensor_shape)
+    loss = simple_functionalloss(pred, target)
+
+    assert isinstance(loss, torch.Tensor)
+    assert torch.allclose(loss, torch.sum(torch.mean(pred, -1)))
+
+
+def test_batch_invariance(simple_functionalloss: FunctionalLoss) -> None:
+    """Test for batch invariance."""
+    tensor_shape = list(range(len(TensorDim)))
+
+    tensor_shape[0] = 1
+    pred_batch_size_1 = torch.ones(tensor_shape)
+    target_batch_size_1 = torch.zeros(tensor_shape)
+
+    tensor_shape[0] = 2
+    pred_batch_size_2 = torch.ones(tensor_shape)
+    target_batch_size_2 = torch.zeros(tensor_shape)
+
+    loss_batch_size_1 = simple_functionalloss(pred_batch_size_1, target_batch_size_1)
+    loss_batch_size_2 = simple_functionalloss(pred_batch_size_2, target_batch_size_2)
+
+    assert isinstance(loss_batch_size_1, torch.Tensor)
+    assert isinstance(loss_batch_size_2, torch.Tensor)
+    assert torch.allclose(loss_batch_size_1, loss_batch_size_2)
 
 
 @pytest.mark.parametrize(
