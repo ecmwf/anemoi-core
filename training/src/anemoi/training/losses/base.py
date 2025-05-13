@@ -96,6 +96,8 @@ class BaseLoss(nn.Module, ABC):
         if len(self.scaler) == 0:
             return x[subset_indices]
 
+        self.scaler.to(x.device)
+
         scale_tensor = self.scaler
         if without_scalers is not None and len(without_scalers) > 0:
             if isinstance(without_scalers[0], str):
@@ -103,9 +105,9 @@ class BaseLoss(nn.Module, ABC):
             else:
                 scale_tensor = self.scaler.without_by_dim(without_scalers)
 
-        scaler = scale_tensor.get_scaler(x.ndim).to(x)
-
+        scaler = scale_tensor.get_scaler(x.ndim)
         scaler = scaler.expand_as(x)
+
         return x[subset_indices] * scaler[subset_indices]
 
     def reduce(self, out: torch.Tensor, squash: bool = True) -> torch.Tensor:
