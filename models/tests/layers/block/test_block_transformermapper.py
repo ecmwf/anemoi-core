@@ -44,6 +44,8 @@ def init(layer_kernels):
     num_heads: int = 4
     activation: str = "SiLU"
     window_size: int = None
+    dropout_p: float = (0.0,)
+    qk_norm: bool = (False,)
     attention_implementation: str = "scaled_dot_product_attention"
     return (
         num_channels,
@@ -52,13 +54,25 @@ def init(layer_kernels):
         activation,
         window_size,
         layer_kernels,
+        dropout_p,
+        qk_norm,
         attention_implementation,
     )
 
 
 @pytest.fixture
 def mapper_block(init):
-    (num_channels, hidden_dim, num_heads, activation, window_size, layer_kernels, attention_implementation) = init
+    (
+        num_channels,
+        hidden_dim,
+        num_heads,
+        activation,
+        window_size,
+        layer_kernels,
+        dropout_p,
+        qk_norm,
+        attention_implementation,
+    ) = init
 
     return TransformerMapperBlock(
         num_channels,
@@ -67,6 +81,8 @@ def mapper_block(init):
         activation,
         window_size,
         layer_kernels,
+        dropout_p,
+        qk_norm,
         attention_implementation,
     )
 
