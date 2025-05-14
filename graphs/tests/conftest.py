@@ -61,6 +61,9 @@ def graph_with_nodes() -> HeteroData:
     graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
     graph["test_nodes"].mask = torch.tensor([True] * len(coords)).unsqueeze(-1)
     graph["test_nodes"].mask2 = torch.tensor([True] * (len(coords) - 2) + [False] * 2).unsqueeze(-1)
+    graph["test_nodes"].interior_mask = torch.tensor(
+        [False, False, False, False, False, True, True, False, False, False, False, False]
+    ).unsqueeze(-1)
     graph["test_nodes"]["_grid_reference_distance"] = 0.75
     return graph
 

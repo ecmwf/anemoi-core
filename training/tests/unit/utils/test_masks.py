@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+from torch_geometric.data import HeteroData
 
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
@@ -18,7 +19,9 @@ def test_boolean1d_apply() -> None:
     x = torch.reshape(torch.arange(1, num_points + 1), (1, 1, num_points, 1))
     y = -x.clone()
     mask = torch.arange(num_points) % 2 == 0
-    bool_1d = Boolean1DMask(mask)
+    graph = HeteroData()
+    graph["nodes"]["attr"] = mask
+    bool_1d = Boolean1DMask(graph, "nodes", "attr")
 
     x_1 = bool_1d.apply(x, dim=2, fill_value=y)
 
