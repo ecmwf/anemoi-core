@@ -90,6 +90,9 @@ class GraphCreator:
 
             graph = edge_builder.register_attributes(graph, edges_cfg.get("attributes", {}))
 
+        if graph.num_nodes == 0:
+            LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration file.")
+
         return graph
 
     def clean(self, graph: HeteroData) -> HeteroData:
@@ -187,3 +190,7 @@ class GraphCreator:
             self.save(graph, save_path, overwrite)
 
         return graph
+
+
+if __name__ == "__main__":
+    GraphCreator("/home/ecm1924/GitRepos/anemoi/anemoi-core/recipes/a.yaml").create()
