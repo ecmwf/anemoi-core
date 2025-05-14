@@ -190,7 +190,3 @@ class GraphCreator:
             self.save(graph, save_path, overwrite)
 
         return graph
-
-
-if __name__ == "__main__":
-    GraphCreator("/home/ecm1924/GitRepos/anemoi/anemoi-core/recipes/a.yaml").create()
