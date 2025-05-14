@@ -38,7 +38,7 @@ jobs:
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR
-            git clone --depth 1 -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
+            git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
