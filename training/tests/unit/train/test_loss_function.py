@@ -57,56 +57,114 @@ def functionalloss_with_scaler(simple_functionalloss: FunctionalLoss) -> Functio
     return loss
 
 
-def test_simple_functionalloss(simple_functionalloss: FunctionalLoss) -> None:
-    """Test a functional loss."""
-    tensor_shape = tuple(range(len(TensorDim)))
+@pytest.fixture
+def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fixture for loss inputs."""
+    tensor_shape = list(range(len(TensorDim)))
+    tensor_shape[0] = 1
 
     pred = torch.ones(tensor_shape)
     target = torch.zeros(tensor_shape)
+
+    loss_result = torch.mean(pred - target)
+    return pred, target, loss_result
+
+
+def test_simple_functionalloss(
+    simple_functionalloss: FunctionalLoss,
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
+    """Test a functional loss."""
+    pred, target, loss_result = loss_inputs
+
     loss = simple_functionalloss(pred, target)
 
     assert isinstance(loss, torch.Tensor)
-    assert torch.allclose(loss, torch.sum(torch.mean(pred, -1)))
+    assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
 
 
-def test_batch_invariance(simple_functionalloss: FunctionalLoss) -> None:
+def test_batch_invariance(
+    simple_functionalloss: FunctionalLoss,
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
     """Test for batch invariance."""
-    tensor_shape = list(range(len(TensorDim)))
+    pred, target, loss_result = loss_inputs
 
-    tensor_shape[0] = 1
-    pred_batch_size_1 = torch.ones(tensor_shape)
-    target_batch_size_1 = torch.zeros(tensor_shape)
+    pred_batch_size_1 = pred
+    target_batch_size_1 = target
 
-    tensor_shape[0] = 2
-    pred_batch_size_2 = torch.ones(tensor_shape)
-    target_batch_size_2 = torch.zeros(tensor_shape)
+    new_shape = list(pred.shape)
+    new_shape[0] = 2
+
+    pred_batch_size_2 = pred.expand(new_shape)
+    target_batch_size_2 = target.expand(new_shape)
+
+    assert pred_batch_size_1.shape != pred_batch_size_2.shape, "Batch size should be different"
 
     loss_batch_size_1 = simple_functionalloss(pred_batch_size_1, target_batch_size_1)
     loss_batch_size_2 = simple_functionalloss(pred_batch_size_2, target_batch_size_2)
 
     assert isinstance(loss_batch_size_1, torch.Tensor)
+    assert torch.allclose(loss_batch_size_1, loss_result), "Loss should be equal to the expected result"
+
     assert isinstance(loss_batch_size_2, torch.Tensor)
-    assert torch.allclose(loss_batch_size_1, loss_batch_size_2)
+    assert torch.allclose(loss_batch_size_2, loss_result), "Loss should be equal to the expected result"
+
+    assert torch.allclose(loss_batch_size_1, loss_batch_size_2), "Losses should be equal between batch sizes"
 
 
-def test_batch_invariance_with_scalar(functionalloss_with_scaler: FunctionalLoss) -> None:
+def test_batch_invariance_without_squash(
+    simple_functionalloss: FunctionalLoss,
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
     """Test for batch invariance."""
-    tensor_shape = list(iter(TensorDim))
+    pred, target, _ = loss_inputs
 
-    tensor_shape[0] = 1
-    pred_batch_size_1 = torch.ones(tensor_shape)
-    target_batch_size_1 = torch.zeros(tensor_shape)
+    pred_batch_size_1 = pred
+    target_batch_size_1 = target
 
-    tensor_shape[0] = 2
-    pred_batch_size_2 = torch.ones(tensor_shape)
-    target_batch_size_2 = torch.zeros(tensor_shape)
+    new_shape = list(pred.shape)
+    new_shape[0] = 2
+
+    pred_batch_size_2 = pred.expand(new_shape)
+    target_batch_size_2 = target.expand(new_shape)
+
+    assert pred_batch_size_1.shape != pred_batch_size_2.shape, "Batch size should be different"
+
+    loss_batch_size_1 = simple_functionalloss(pred_batch_size_1, target_batch_size_1, squash=False)
+    loss_batch_size_2 = simple_functionalloss(pred_batch_size_2, target_batch_size_2, squash=False)
+
+    assert isinstance(loss_batch_size_1, torch.Tensor)
+    assert isinstance(loss_batch_size_2, torch.Tensor)
+
+    assert torch.allclose(loss_batch_size_1, loss_batch_size_2), "Losses should be equal between batch sizes"
+
+
+def test_batch_invariance_with_scalar(
+    functionalloss_with_scaler: FunctionalLoss,
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
+    """Test for batch invariance."""
+    pred, target, _ = loss_inputs
+
+    pred_batch_size_1 = pred
+    target_batch_size_1 = target
+
+    new_shape = list(pred.shape)
+    new_shape[0] = 2
+
+    pred_batch_size_2 = pred.expand(new_shape)
+    target_batch_size_2 = target.expand(new_shape)
+
+    assert pred_batch_size_1.shape != pred_batch_size_2.shape
 
     loss_batch_size_1 = functionalloss_with_scaler(pred_batch_size_1, target_batch_size_1)
     loss_batch_size_2 = functionalloss_with_scaler(pred_batch_size_2, target_batch_size_2)
 
     assert isinstance(loss_batch_size_1, torch.Tensor)
     assert isinstance(loss_batch_size_2, torch.Tensor)
-    assert torch.allclose(loss_batch_size_1, loss_batch_size_2)
+
+    assert torch.allclose(loss_batch_size_1, loss_batch_size_2), "Losses should be equal between batch sizes"
 
 
 @pytest.mark.parametrize(

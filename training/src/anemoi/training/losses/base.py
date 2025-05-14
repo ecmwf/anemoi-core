@@ -14,6 +14,7 @@ import functools
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import Literal
 
 import torch
 from torch import nn
@@ -59,11 +60,11 @@ class BaseLoss(nn.Module, ABC):
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
 
-    @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
+    @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
         self.scaler.add_scaler(dimension=dimension, scaler=scaler, name=name)
 
-    @functools.wraps(ScaleTensor.update_scaler, assigned=("__doc__", "__annotations__"))
+    @functools.wraps(ScaleTensor.update_scaler)
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
 
@@ -111,19 +112,43 @@ class BaseLoss(nn.Module, ABC):
 
         return x[subset_indices] * scaler[subset_indices]
 
-    def reduce(self, out: torch.Tensor, squash: bool = True) -> torch.Tensor:
-        """Reduce the out of the loss.
+    def reduce(
+        self,
+        out: torch.Tensor,
+        squash: bool = True,
+        reduction_function: Literal["sum", "avg"] = "avg",
+    ) -> torch.Tensor:
+        """
+        Reduce the out of the loss.
 
         If `squash` is True, the last dimension is averaged.
-        Then normalised over the batch dimension, and finally summed over the batch, ensemble and grid dimensions.
+
+        Irrespective of `squash`, the output is reduced over the
+        batch, ensemble and grid dimensions according to the
+        `reduction_function` parameter.
+
+        Parameters
+        ----------
+        out : torch.Tensor
+            Difference tensor, of shape TensorDim
+        squash : bool, optional
+            Whether to squash the variable dimension, by default True
+        reduction_function : Literal['sum', 'avg']
+            Reduction function to use on all dims but variable, by default 'avg'
+            - 'sum': sum over the batch, ensemble and grid dimensions
+            - 'avg': average over the batch, ensemble and grid dimensions
+
+        Returns
+        -------
+        torch.Tensor
+            Reduced output tensor
         """
         if squash:
             out = self.avg_function(out, dim=TensorDim.VARIABLE)
 
-        bs = out.shape[TensorDim.BATCH_SIZE]
-        out = out / bs
+        reduce_func = self.sum_function if reduction_function == "sum" else self.avg_function
 
-        return self.sum_function(out, dim=(TensorDim.BATCH_SIZE, TensorDim.ENSEMBLE_DIM, TensorDim.GRID))
+        return reduce_func(out, dim=(TensorDim.BATCH_SIZE, TensorDim.ENSEMBLE_DIM, TensorDim.GRID))
 
     @property
     def name(self) -> str:
@@ -139,6 +164,7 @@ class BaseLoss(nn.Module, ABC):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        reduction_function: Literal["sum", "avg"] = "avg",
     ) -> torch.Tensor:
         """Calculates the lat-weighted scaled loss.
 
@@ -155,6 +181,10 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None, optional
             list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
+        reduction_function : Literal['sum', 'avg'], optional
+            Reduction function to use on all dims but variable, by default 'avg'
+            - 'sum': sum over the batch, ensemble and grid dimensions
+            - 'avg': average over the batch, ensemble and grid dimensions
 
         Returns
         -------
@@ -190,6 +220,7 @@ class FunctionalLoss(BaseLoss):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        reduction_function: Literal["sum", "avg"] = "avg",
     ) -> torch.Tensor:
         """Calculates the lat-weighted scaled loss.
 
@@ -206,6 +237,10 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None, optional
             list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
+        reduction_function : Literal['sum', 'avg'], optional
+            Reduction function to use on all dims but variable, by default 'avg'
+            - 'sum': sum over the batch, ensemble and grid dimensions
+            - 'avg': average over the batch, ensemble and grid dimensions
 
         Returns
         -------
@@ -214,4 +249,5 @@ class FunctionalLoss(BaseLoss):
         """
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers)
-        return self.reduce(out, squash)
+
+        return self.reduce(out, squash, reduction_function=reduction_function)
