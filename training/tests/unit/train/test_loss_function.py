@@ -46,28 +46,44 @@ def functionalloss() -> type[FunctionalLoss]:
 
 
 @pytest.fixture
+def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fixture for loss inputs."""
+    tensor_shape = [1, 1, 4, 2]
+
+    pred = torch.zeros(tensor_shape)
+    pred[0, 0, 0] = torch.tensor([1.0, 1.0])
+    target = torch.zeros(tensor_shape)
+
+    # With only one "grid point" differing by 1 in all
+    # variables, the loss should be 1.0
+
+    loss_result = torch.tensor([1.0])
+    return pred, target, loss_result
+
+
+def test_assert_of_grid_dim(functionalloss: type[FunctionalLoss]) -> None:
+    """Test that the grid dimension is set correctly."""
+    loss = functionalloss()
+    loss.add_scaler(TensorDim.VARIABLE, 1.0, name="variable_test")
+
+    assert TensorDim.GRID not in loss.scaler, "Grid dimension should not be set"
+
+    with pytest.raises(RuntimeError):
+        loss.scale(torch.ones((4, 2)))
+
+
+@pytest.fixture
 def simple_functionalloss(functionalloss: type[FunctionalLoss]) -> FunctionalLoss:
-    return functionalloss()
+    loss = functionalloss()
+    loss.add_scaler(TensorDim.GRID, torch.ones((4,)), name="unit_scaler")
+    return loss
 
 
 @pytest.fixture
 def functionalloss_with_scaler(simple_functionalloss: FunctionalLoss) -> FunctionalLoss:
     loss = simple_functionalloss
-    loss.add_scaler(TensorDim.GRID, torch.rand([TensorDim.GRID]), name="test")
+    loss.add_scaler(TensorDim.GRID, torch.rand((4,)), name="test")
     return loss
-
-
-@pytest.fixture
-def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Fixture for loss inputs."""
-    tensor_shape = list(range(len(TensorDim)))
-    tensor_shape[0] = 1
-
-    pred = torch.ones(tensor_shape)
-    target = torch.zeros(tensor_shape)
-
-    loss_result = torch.mean(pred - target)
-    return pred, target, loss_result
 
 
 def test_simple_functionalloss(
