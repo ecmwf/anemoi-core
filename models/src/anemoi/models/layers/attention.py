@@ -113,7 +113,6 @@ class MultiHeadSelfAttention(nn.Module):
             self.alibi_slopes = None
 
         linear = layer_kernels["Linear"]
-        # self.lin_qkv = linear(embed_dim, 3 * embed_dim, bias=bias)
         self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
         self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
         self.lin_v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
@@ -306,7 +305,7 @@ class FlashAttentionWrapper(nn.Module):
 
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
 
-        if self.use_rotary_embeddings:  # can this be done in a better way?
+        if self.use_rotary_embeddings:
             key = key.unsqueeze(-3)
             value = value.unsqueeze(-3)
             keyvalue = torch.cat((key, value), dim=-3)

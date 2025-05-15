@@ -193,7 +193,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
-        # Need to be out of place for gradient propagation
         x_src = self.layer_norm_attention_src(x[0])
         x_dst = self.layer_norm_attention_dst(x[1])
         x_dst = x_dst + self.attention((x_src, x_dst), shapes, batch_size, model_comm_group=model_comm_group)
@@ -284,7 +283,6 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         **kwargs,
     ):
         super().__init__(
-            self,  # is this correct?
             in_channels=in_channels,
             out_channels=out_channels,
             layer_kernels=layer_kernels,
