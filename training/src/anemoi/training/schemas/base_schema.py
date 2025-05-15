@@ -22,19 +22,20 @@ from pydantic._internal import _model_construction
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
+from anemoi.graphs.schemas.base_graph import BaseGraphSchema  # noqa: TC001
+from anemoi.models.schemas.models import ModelSchema  # noqa: TC001
+from anemoi.utils.schemas import BaseModel
+from anemoi.utils.schemas.errors import CUSTOM_MESSAGES
+from anemoi.utils.schemas.errors import convert_errors
+
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
 from .data import DataSchema  # noqa: TC001
 from .dataloader import DataLoaderSchema  # noqa: TC001
 from .datamodule import DataModuleSchema  # noqa: TC001
 from .diagnostics import DiagnosticsSchema  # noqa: TC001
-from .graphs.base_graph import BaseGraphSchema  # noqa: TC001
 from .hardware import HardwareSchema  # noqa: TC001
-from .models.models import ModelSchema  # noqa: TC001
 from .training import TrainingSchema  # noqa: TC001
-from .utils import CUSTOM_MESSAGES
-from .utils import BaseModel
-from .utils import convert_errors
 
 _object_setattr = _model_construction.object_setattr
 

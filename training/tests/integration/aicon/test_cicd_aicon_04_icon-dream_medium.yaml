@@ -164,7 +164,8 @@ data:
     default: "none"
 
 model:
-  output_mask: null
+  output_mask:
+    _target_: anemoi.training.utils.masks.NoOutputMask
   cpu_offload: False
 
   model:
@@ -190,7 +191,7 @@ model:
     _target_: anemoi.models.layers.mapper.GNNBackwardMapper
     trainable_size: ${model.trainable_parameters.hidden2data}
     sub_graph_edge_attributes: ${model.attributes.edges}
-    num_chunks: 1
+    num_chunks: 3
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
   attributes:
@@ -215,7 +216,7 @@ training:
   model_task: anemoi.training.train.forecaster.GraphForecaster
   submodules_to_freeze: []
   num_sanity_val_steps: 2
-  load_weights_only: false
+  load_weights_only: False
   deterministic: false
   precision: 16-mixed
   multistep_input: 2
@@ -235,7 +236,7 @@ training:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
-  loss_gradient_scaling: false
+  loss_gradient_scaling: False
   rollout:
     start: 1
     epoch_increment: 1
@@ -246,32 +247,35 @@ training:
     iterations: 300000
     min: 3.0e-07
     warmup: 1000
-  variable_loss_scaling:
-    default: 1
-    pl:
-      P: 1
-    sfc: {}
+  scalers:
+    general_variable:
+      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+      weights:
+        default: 1
+        P: 1
+    pressure_level:
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: ml
+      y_intercept: 0.2
+      slope: 0.001
+    node_weights:
+      _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+      nodes_name: ${graph.data}
+      nodes_attribute_name: area_weight
+      norm: unit-sum
   metrics: []
+  variable_groups:
+    default: sfc
+    ml: [P, T, U, V]
   training_loss:
-    _target_: anemoi.training.losses.mse.WeightedMSELoss
-    scalars: ['variable', 'loss_weights_mask']
-  node_loss_weights:
-    _target_: anemoi.training.losses.nodeweights.GraphNodeAttribute
-    target_nodes: ${graph.data}
-    node_attribute: area_weight
+    _target_: anemoi.training.losses.MSELoss
+    scalers: ['pressure_level', 'general_variable', 'node_weights']
+    ignore_nans: False
   validation_metrics:
-    - _target_: anemoi.training.losses.mse.WeightedMSELoss
-      scalars: []
+    raw_mse:
+      _target_: anemoi.training.losses.MSELoss
+      scalers: []
       ignore_nans: False
-
-  scale_validation_metrics:
-    scalars_to_apply: ['variable']
-    metrics:
-      - 'all'
-  pressure_level_scaler:
-    _target_: anemoi.training.data.scaling.ReluPressureLevelScaler
-    minimum: 0.2
-    slope: 0.001
 
 diagnostics:
   plot:

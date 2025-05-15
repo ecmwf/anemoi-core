@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 import torch
 from sklearn.neighbors import NearestNeighbors
 
@@ -106,3 +108,31 @@ def haversine_distance(source_coords: torch.Tensor, target_coords: torch.Tensor)
     )
     c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
     return c
+
+
+class NodesAxis(Enum):
+    SOURCE = 0
+    TARGET = 1
+
+
+def get_edge_attributes(config: dict, source_name: str, target_name: str) -> dict:
+    """Get edge attributes out of a graph config
+
+    Parameters
+    ----------
+    config : dict
+        The graph configuration.
+    source_name : str
+        Name of source nodes of edges to be considered
+    target_name : str
+        Name of target nodes of edges to be considered
+    Returns
+    -------
+    dict
+        Dictionary of the form {attribute_name: attribute}
+    """
+    attrs = {}
+    for edges_config in config.get("edges", {}):
+        if edges_config["source_name"] == source_name and edges_config["target_name"] == target_name:
+            attrs.update(edges_config["attributes"])
+    return attrs

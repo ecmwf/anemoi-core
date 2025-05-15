@@ -1,9 +1,10 @@
 num_channels: 1024
 cpu_offload: False
-output_mask: null
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
 
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor

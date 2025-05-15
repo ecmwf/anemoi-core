@@ -20,13 +20,15 @@ from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
 
-from anemoi.training.schemas.utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ZarrNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.ZarrDatasetNodes"] = Field(..., alias="_target_")
+class AnemoiDatasetNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.AnemoiDatasetNodes", "anemoi.graphs.nodes.ZarrDatasetNodes"] = Field(
+        ..., alias="_target_"
+    )
     "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
     dataset: Union[str, list, dict]  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
@@ -144,7 +146,7 @@ class StretchedIcosahdralNodeSchema(BaseModel):
 
 NodeBuilderSchemas = Annotated[
     Union[
-        ZarrNodeSchema,
+        AnemoiDatasetNodeSchema,
         NPZnodeSchema,
         TextNodeSchema,
         ICONNodeSchema,

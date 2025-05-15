@@ -18,7 +18,7 @@ from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
 
-from anemoi.training.schemas.utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 
 class KNNEdgeSchema(BaseModel):
@@ -51,6 +51,8 @@ class MultiScaleEdgeSchema(BaseModel):
     "Multi-casle edges implementation from anemoi.graphs.edges."
     x_hops: PositiveInt = Field(example=1)
     "Number of hops (in the refined icosahedron) between two nodes to connect them with an edge. Default to 1."
+    scale_resolutions: Union[PositiveInt, list[PositiveInt], None] = Field(examples=[1, 2, 3, 4, 5])
+    "Specifies the resolution scales for computing the hop neighbourhood."
     source_mask_attr_name: Union[str, None] = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: Union[str, None] = Field(default=None, examples=["boundary_mask"])

@@ -274,7 +274,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
     ) -> OptPairTensor:
         for i in range(self.num_layers):
             x, edge_attr = self.blocks[i](
-                x, edge_attr, edge_index, shapes, batch_size, model_comm_group=model_comm_group, size=size, **kwargs
+                x, edge_attr, edge_index, shapes, batch_size, size, model_comm_group=model_comm_group, **kwargs
             )
 
         return x, edge_attr

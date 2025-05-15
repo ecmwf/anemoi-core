@@ -33,6 +33,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.mapper import GraphEdgeMixin
+from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
 from anemoi.training.diagnostics.plots import plot_graph_edge_features
@@ -41,7 +42,7 @@ from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
-from anemoi.training.losses.weightedloss import BaseWeightedLoss
+from anemoi.training.losses.base import BaseLoss
 from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
 
 if TYPE_CHECKING:
@@ -310,21 +311,24 @@ class LongRolloutPlots(BasePlotCallback):
     This function allows evaluating the performance of the model over an extended number
     of rollout steps to observe long-term behavior.
     Add the callback to the configuration file as follows:
-    ```
-      - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
-        rollout:
+
+    Example::
+
+        - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
+            rollout:
             - ${dataloader.validation_rollout}
-        video_rollout: ${dataloader.validation_rollout}
-        every_n_epochs: 1
-        sample_idx: ${diagnostics.plot.sample_idx}
-        parameters: ${diagnostics.plot.parameters}
-    ```
+            video_rollout: ${dataloader.validation_rollout}
+            every_n_epochs: 1
+            sample_idx: ${diagnostics.plot.sample_idx}
+            parameters: ${diagnostics.plot.parameters}
+
     The selected rollout steps for plots and video need to be lower or equal to dataloader.validation_rollout.
     Increasing dataloader.validation_rollout has no effect on the rollout steps during training.
     It ensures, that enough time steps are available for the plots and video in the validation batches.
 
     The runtime of creating one animation of one variable for 56 rollout steps is about 1 minute.
     Recommended use for video generation: Fork the run using fork_run_id for 1 additional epochs and enabled videos.
+
     """
 
     def __init__(
@@ -741,7 +745,11 @@ class PlotLoss(BasePerBatchPlotCallback):
         def automatically_determine_group(name: str) -> str:
             # first prefix of parameter name is group name
             parts = name.split("_")
-            return parts[0]
+            if len(parts) == 1:
+                # if no underscore is present, return full name
+                return parts[0]
+            # else remove last part of name
+            return name[: -len(parts[-1]) - 1]
 
         # group parameters by their determined group name for > 15 parameters
         if len(self.parameter_names) <= 15:
@@ -843,9 +851,17 @@ class PlotLoss(BasePerBatchPlotCallback):
         parameter_positions = list(pl_module.data_indices.internal_model.output.name_to_index.values())
         # reorder parameter_names by position
         self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
-        if not isinstance(pl_module.loss, BaseWeightedLoss):
+        self.metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
+
+        # Sort the list using the custom key
+        argsort_indices = argsort_variablename_variablelevel(
+            self.parameter_names,
+            metadata_variables=self.metadata_variables,
+        )
+        self.parameter_names = [self.parameter_names[i] for i in argsort_indices]
+        if not isinstance(pl_module.loss, BaseLoss):
             LOGGER.warning(
-                "Loss function must be a subclass of BaseWeightedLoss, or provide `squash`.",
+                "Loss function must be a subclass of BaseLoss, or provide `squash`.",
                 RuntimeWarning,
             )
 
@@ -861,6 +877,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             loss = pl_module.loss(y_hat, y_true, squash=False).cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
+            loss = loss[argsort_indices]
             fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
             self._output_figure(

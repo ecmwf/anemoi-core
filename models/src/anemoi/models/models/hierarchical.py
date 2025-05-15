@@ -187,7 +187,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 trainable_size=self.trainable_hidden_size, tensor_size=self._hidden_grid_sizes[hidden]
             )
 
-    def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
+    def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None, **kwargs) -> Tensor:
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
 

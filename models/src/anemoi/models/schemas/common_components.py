@@ -12,7 +12,7 @@ from typing import Union
 from pydantic import Field
 from pydantic import NonNegativeInt
 
-from anemoi.training.schemas.utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 
 class TransformerModelComponent(BaseModel):
