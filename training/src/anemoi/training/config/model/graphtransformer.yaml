@@ -1,13 +1,45 @@
 activation: GELU
 num_channels: 1024
 cpu_offload: False
-output_mask: null
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
-  _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
 
 
+# LayerKernels are optionally. If not specified, the default are pytorch.nn.LayerNorm and torch.nn.Linear.
+# TODO: Add to documentation: The query and key norms need to be autocast layer norms if flash attention is used.
 layer_kernels:
+  processor:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+      _partial_: True
+      #Any arguments to your chosen function go here
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+      #Any arguments to your chosen function go here
+    QueryNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+      bias: False
+      #Any arguments to your chosen function go here
+    KeyNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      _partial_: True
+      bias: False
+      #Any arguments to your chosen function go here
+  encoder:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+      _partial_: True
+      #Any arguments to your chosen function go here
+    Linear:
+      _target_: torch.nn.Linear
+      _partial_: True
+      #Any arguments to your chosen function go here
+  decoder:
     LayerNorm:
       _target_: torch.nn.LayerNorm
       _partial_: True
@@ -26,7 +58,9 @@ processor:
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: False
   cpu_offload: ${model.cpu_offload}
+
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -36,7 +70,9 @@ encoder:
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: False
   cpu_offload: ${model.cpu_offload}
+
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -46,7 +82,10 @@ decoder:
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
+  initialise_data_extractor_zero: False
+  qk_norm: False
   cpu_offload: ${model.cpu_offload}
+
 
 trainable_parameters:
   data: 8

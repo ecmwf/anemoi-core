@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.5.1...graphs-0.5.2) (2025-04-25)
+
+
+### Features
+
+* **graphs:** add scale_resolutions arg ([#188](https://github.com/ecmwf/anemoi-core/issues/188)) ([0ea0642](https://github.com/ecmwf/anemoi-core/commit/0ea06423e4979084b3afe70c30e43bb5dc5f88d5))
+* **graphs:** support edge indices sorting ([#187](https://github.com/ecmwf/anemoi-core/issues/187)) ([1444083](https://github.com/ecmwf/anemoi-core/commit/1444083dbe1dc260918b5141d927e145c962b244))
+
+
+### Bug Fixes
+
+* **graphs:** rename zarr occurrences in anemoi-graphs ([#273](https://github.com/ecmwf/anemoi-core/issues/273)) ([d0bafe9](https://github.com/ecmwf/anemoi-core/commit/d0bafe91f1e09dc6a7efd35da9bc9102543c40e0))
+
+## [0.5.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.5.0...graphs-0.5.1) (2025-04-16)
+
+
+### Features
+
+* edge post-processor ([#199](https://github.com/ecmwf/anemoi-core/issues/199)) ([1450de7](https://github.com/ecmwf/anemoi-core/commit/1450de739be9988cdb23fbdb23a0463859066e7c))
+
+
+### Bug Fixes
+
+* **graphs:** drop torch_geometric &lt; 2.5 dependency ([#207](https://github.com/ecmwf/anemoi-core/issues/207)) ([bf6c8af](https://github.com/ecmwf/anemoi-core/commit/bf6c8aff4b9289bb3d6195566c91aaa7b2d70f7a))
+* **graphs:** load graphs to cpu during inspection ([#206](https://github.com/ecmwf/anemoi-core/issues/206)) ([bb82adf](https://github.com/ecmwf/anemoi-core/commit/bb82adf7a0e285cd0a6068e05f0079450a07d10d))
+* **graphs:** torch_geometric version &lt; 2.5 ([#196](https://github.com/ecmwf/anemoi-core/issues/196)) ([843f944](https://github.com/ecmwf/anemoi-core/commit/843f9447aa919845c497f9f5c45997d99d30a4a9))
+* pydantic schemas move ([#228](https://github.com/ecmwf/anemoi-core/issues/228)) ([6bca9bc](https://github.com/ecmwf/anemoi-core/commit/6bca9bc66ff54ac294d97793b8cebed1cd1bb8a4))
+
+
+### Documentation
+
+* **graphs:** update graph docs to template (docathon) ([#219](https://github.com/ecmwf/anemoi-core/issues/219)) ([ae4f1c5](https://github.com/ecmwf/anemoi-core/commit/ae4f1c5a52b8be16480ae7cfb97124f553b5ac07))
+* **training:** Docathon ([#201](https://github.com/ecmwf/anemoi-core/issues/201)) ([e69430f](https://github.com/ecmwf/anemoi-core/commit/e69430f8c1ba8e7de50cd99f202e3f4876b806e0))
+
 ## [0.5.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.4.4...graphs-0.5.0) (2025-03-17)
 
 

@@ -14,46 +14,25 @@ import logging
 
 import torch
 
-from anemoi.training.losses.mse import BaseWeightedLoss
+from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedRMSELoss(BaseWeightedLoss):
-    """Node-weighted RMSE loss."""
+class RMSELoss(MSELoss):
+    """RMSE loss."""
 
-    name = "wrmse"
-
-    def __init__(
-        self,
-        node_weights: torch.Tensor,
-        ignore_nans: bool = False,
-        **kwargs,
-    ) -> None:
-        """Node- and (inverse-)variance-weighted RMSE Loss.
-
-        Parameters
-        ----------
-        node_weights : torch.Tensor of shape (N, )
-            Weight of each node in the loss function
-        ignore_nans : bool, optional
-            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-        """
-        super().__init__(
-            node_weights=node_weights,
-            ignore_nans=ignore_nans,
-            **kwargs,
-        )
+    name: str = "rmse"
 
     def forward(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
         squash: bool = True,
-        scalar_indices: tuple[int, ...] | None = None,
-        without_scalars: list[str] | list[int] | None = None,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted RMSE loss.
+        """Calculates the RMSE loss.
 
         Parameters
         ----------
@@ -63,22 +42,22 @@ class WeightedRMSELoss(BaseWeightedLoss):
             Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
-        scalar_indices: tuple[int,...], optional
-            Indices to subset the calculated scalar with, by default None
-        without_scalars: list[str] | list[int] | None, optional
-            list of scalars to exclude from scaling. Can be list of names or dimensions to exclude.
+        scaler_indices: tuple[int,...], optional
+            Indices to subset the calculated scaler with, by default None
+        without_scalers: list[str] | list[int] | None, optional
+            list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
 
         Returns
         -------
         torch.Tensor
-            Weighted RMSE loss
+            RMSE loss
         """
         mse = super().forward(
             pred=pred,
             target=target,
             squash=squash,
-            scalar_indices=scalar_indices,
-            without_scalars=without_scalars,
+            scaler_indices=scaler_indices,
+            without_scalers=without_scalers,
         )
         return torch.sqrt(mse)

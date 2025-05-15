@@ -21,7 +21,9 @@ from torch_geometric.utils import k_hop_subgraph
 from torch_geometric.utils import mask_to_index
 
 
-def get_k_hop_edges(nodes: Tensor, edge_attr: Tensor, edge_index: Adj, num_hops: int = 1) -> tuple[Adj, Tensor]:
+def get_k_hop_edges(
+    nodes: Tensor, edge_attr: Tensor, edge_index: Adj, num_hops: int = 1, num_nodes: Optional[int] = None
+) -> tuple[Adj, Tensor]:
     """Return 1 hop subgraph.
 
     Parameters
@@ -41,7 +43,7 @@ def get_k_hop_edges(nodes: Tensor, edge_attr: Tensor, edge_index: Adj, num_hops:
         K-hop subgraph of edge index and edge attributes
     """
     _, edge_index_k, _, edge_mask_k = k_hop_subgraph(
-        node_idx=nodes, num_hops=num_hops, edge_index=edge_index, directed=True
+        node_idx=nodes, num_hops=num_hops, edge_index=edge_index, directed=True, num_nodes=num_nodes
     )
 
     return edge_attr[mask_to_index(edge_mask_k)], edge_index_k
@@ -116,7 +118,7 @@ def sort_edges_1hop_chunks(
     edge_attr_list = []
     for node_chunk in node_chunks:
         if isinstance(num_nodes, int):
-            edge_attr_chunk, edge_index_chunk = get_k_hop_edges(node_chunk, edge_attr, edge_index)
+            edge_attr_chunk, edge_index_chunk = get_k_hop_edges(node_chunk, edge_attr, edge_index, num_nodes=num_nodes)
         else:
             edge_index_chunk, edge_attr_chunk = bipartite_subgraph(
                 (nodes_src, node_chunk),
