@@ -74,7 +74,6 @@ class Shape:
         return self.func(dimension)
 
 
-# TODO(Harrison Cook): Consider moving this to subclass from a pytorch object and allow for device moving completely
 class ScaleTensor:
     """Dynamically resolved tensor scaling class.
 
