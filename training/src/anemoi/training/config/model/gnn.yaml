@@ -20,7 +20,7 @@ processor:
     Linear:
       _target_: torch.nn.Linear
     Activation:
-      _target_: nn.torch.GELU
+      _target_: torch.nn.GELU
 
 encoder:
   _target_: anemoi.models.layers.mapper.GNNForwardMapper
@@ -36,7 +36,7 @@ encoder:
     Linear:
       _target_: torch.nn.Linear
     Activation:
-      _target_: nn.torch.GELU
+      _target_: torch.nn.GELU
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
@@ -52,7 +52,7 @@ decoder:
     Linear:
       _target_: torch.nn.Linear
     Activation:
-      _target_: nn.torch.GELU
+      _target_: torch.nn.GELU
 
 
 trainable_parameters:
