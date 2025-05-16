@@ -16,13 +16,13 @@ from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 NORTH_POLE = [0, 0, 1]  # North pole in 3D coordinates
 
 
-def direction_vec(points: torch.Tensor, reference: torch.Tensor, epsilon: float = 10e-11) -> torch.Tensor:
+def direction_vec(points: torch.Tensor, reference: torch.Tensor, epsilon: float = 1e-12) -> torch.Tensor:
     """Compute the unit direction vector from b to a in torch."""
     v = torch.cross(points, reference, dim=-1)
     vnorm1 = torch.pow(v, 2).sum(dim=-1)
     redo_idx = torch.nonzero(vnorm1 < epsilon, as_tuple=False).squeeze()
 
-    if len(redo_idx) > 0:
+    if redo_idx.numel() > 0:
         points[redo_idx] += epsilon
         v = torch.cross(points, reference, dim=-1)
         vnorm1 = torch.pow(v, 2).sum(dim=-1)
@@ -93,8 +93,7 @@ def compute_directions(source_coords: torch.Tensor, target_coords: torch.Tensor)
 
     # Compute the direction from the rotated vector to the north pole.
     direction = direction_vec(rotated_source_coords_xyz, north_pole)
-    normed_direction = direction / torch.norm(direction, dim=1).unsqueeze(-1)
 
     # All 3rd components should be 0s
-    assert torch.max(torch.abs(normed_direction[:, 2])) < 1e-9, "Rotation should be aligned with the north pole"
-    return normed_direction[:, :2]
+    assert torch.all(direction[:, 2] == 0), "Rotation should be aligned with the north pole"
+    return direction[:, :2]
