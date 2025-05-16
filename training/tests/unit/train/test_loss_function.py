@@ -61,6 +61,19 @@ def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return pred, target, loss_result
 
 
+@pytest.fixture
+def loss_inputs_fine(
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fixture for loss inputs with finer grid."""
+    pred, target, loss_result = loss_inputs
+
+    pred = torch.cat([pred, pred], dim=2)
+    target = torch.cat([target, target], dim=2)
+
+    return pred, target, loss_result
+
+
 def test_assert_of_grid_dim(functionalloss: type[FunctionalLoss]) -> None:
     """Test that the grid dimension is set correctly."""
     loss = functionalloss()
@@ -83,6 +96,13 @@ def simple_functionalloss(functionalloss: type[FunctionalLoss]) -> FunctionalLos
 def functionalloss_with_scaler(simple_functionalloss: FunctionalLoss) -> FunctionalLoss:
     loss = simple_functionalloss
     loss.add_scaler(TensorDim.GRID, torch.rand((4,)), name="test")
+    return loss
+
+
+@pytest.fixture
+def functionalloss_with_scaler_fine(functionalloss: FunctionalLoss) -> FunctionalLoss:
+    loss = functionalloss()
+    loss.add_scaler(TensorDim.GRID, torch.rand((8,)), name="test")
     return loss
 
 
@@ -156,7 +176,7 @@ def test_batch_invariance_without_squash(
     assert torch.allclose(loss_batch_size_1, loss_batch_size_2), "Losses should be equal between batch sizes"
 
 
-def test_batch_invariance_with_scalar(
+def test_batch_invariance_with_scaler(
     functionalloss_with_scaler: FunctionalLoss,
     loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> None:
@@ -181,6 +201,25 @@ def test_batch_invariance_with_scalar(
     assert isinstance(loss_batch_size_2, torch.Tensor)
 
     assert torch.allclose(loss_batch_size_1, loss_batch_size_2), "Losses should be equal between batch sizes"
+
+
+def test_grid_invariance(
+    functionalloss_with_scaler: FunctionalLoss,
+    functionalloss_with_scaler_fine: FunctionalLoss,
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
+    """Test for batch invariance."""
+    pred_coarse, target_coarse, _ = loss_inputs
+    pred_fine = torch.cat([pred_coarse, pred_coarse], dim=2)
+    target_fine = torch.cat([target_coarse, target_coarse], dim=2)
+
+    loss_coarse = functionalloss_with_scaler(pred_coarse, target_coarse)
+    loss_fine = functionalloss_with_scaler_fine(pred_fine, target_fine)
+
+    assert isinstance(loss_coarse, torch.Tensor)
+    assert isinstance(loss_fine, torch.Tensor)
+
+    assert torch.allclose(loss_coarse, loss_fine), "Losses should be equal between grid sizes"
 
 
 @pytest.mark.parametrize(
