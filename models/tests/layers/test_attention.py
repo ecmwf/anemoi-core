@@ -15,6 +15,7 @@ import torch.nn as nn
 from hypothesis import given
 from hypothesis import settings
 
+from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.utils import load_layer_kernels
 
@@ -29,16 +30,17 @@ def layer_kernels():
     embed_dim_multiplier=st.sampled_from([16, 32, 64]),
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
     softcap=st.floats(min_value=0.0, max_value=1.0),
+    attention_module=st.sampled_from([MultiHeadSelfAttention, MultiHeadCrossAttention]),
     attention_implementation=st.sampled_from(["scaled_dot_product_attention"]),
 )
 def test_multi_head_self_attention_init(
-    num_heads, embed_dim_multiplier, dropout_p, softcap, attention_implementation, layer_kernels
+    num_heads, embed_dim_multiplier, dropout_p, softcap, attention_module, attention_implementation, layer_kernels
 ):
     embed_dim = (
         num_heads * embed_dim_multiplier
     )  # TODO: Make assert in MHSA to check if embed_dim is divisible by num_heads
 
-    mhsa = MultiHeadSelfAttention(
+    mhsa = attention_module(
         num_heads,
         embed_dim,
         layer_kernels,
@@ -105,6 +107,65 @@ def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_di
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
     shapes = [list(x.shape)]
     output = mhsa.forward(x, shapes, batch_size)
+
+    # Dummy loss
+    loss = output.sum()
+    loss.backward()
+
+    assert x.grad is not None
+    assert x.grad.shape == x.shape
+
+
+@pytest.mark.gpu
+@given(
+    batch_size=st.integers(min_value=1, max_value=64),
+    num_heads=st.integers(min_value=1, max_value=20),
+    embed_dim_multiplier=st.integers(min_value=1, max_value=10),
+    dropout_p=st.floats(min_value=0.0, max_value=1.0),
+)
+@settings(deadline=None)
+def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
+    embed_dim = num_heads * embed_dim_multiplier
+
+    layer_kernels = load_layer_kernels(kernel_config={})
+    mhsa = MultiHeadCrossAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation="scaled_dot_product_attention",
+    )
+
+    x = torch.randn(batch_size * 2, embed_dim)
+    shapes = [list(x.shape)]
+    output = mhsa.forward((x, x), shapes, batch_size)
+
+    assert output.shape == x.shape
+
+
+@pytest.mark.gpu
+@given(
+    batch_size=st.integers(min_value=1, max_value=64),
+    num_heads=st.integers(min_value=1, max_value=20),
+    embed_dim_multiplier=st.integers(min_value=1, max_value=10),
+    dropout_p=st.floats(min_value=0.0, max_value=1.0),
+)
+@settings(deadline=None)
+def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
+    embed_dim = num_heads * embed_dim_multiplier
+
+    layer_kernels = load_layer_kernels(kernel_config={})
+    mhsa = MultiHeadCrossAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation="scaled_dot_product_attention",
+    )
+
+    x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
+    shapes = [list(x.shape)]
+    output = mhsa.forward((x, x), shapes, batch_size)
 
     # Dummy loss
     loss = output.sum()

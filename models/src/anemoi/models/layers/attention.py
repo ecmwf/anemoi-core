@@ -20,6 +20,7 @@ from packaging import version
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
@@ -49,6 +50,7 @@ class MultiHeadSelfAttention(nn.Module):
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
+        use_rotary_embeddings: bool = False,
     ):
         """Initialize MultiHeadSelfAttention.
 
@@ -100,6 +102,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.is_causal = is_causal
         self.qk_norm = qk_norm
         self.softcap = softcap
+        self.use_rotary_embeddings = use_rotary_embeddings
 
         self.set_attention_function()
 
@@ -110,7 +113,9 @@ class MultiHeadSelfAttention(nn.Module):
             self.alibi_slopes = None
 
         linear = layer_kernels.Linear
-        self.lin_qkv = linear(embed_dim, 3 * embed_dim, bias=qkv_bias)
+        self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.lin_v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
 
         self.projection = linear(embed_dim, embed_dim, bias=True)
 
@@ -130,14 +135,22 @@ class MultiHeadSelfAttention(nn.Module):
         LOGGER.info(f"Using {self.attention_implementation}")
 
         # initalise the attn func here
-        self.attention = attn_funcs[self.attention_implementation]()
+        if self.attention_implementation == "flash_attention":
+            self.attention = attn_funcs[self.attention_implementation](
+                use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
+            )
+        else:
+            self.attention = attn_funcs[self.attention_implementation]()
 
-    def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    def attention_computation(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
-
-        query, key, value = self.lin_qkv(x).chunk(3, -1)
-
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
@@ -180,6 +193,16 @@ class MultiHeadSelfAttention(nn.Module):
         out = self.projection(out)
 
         return out
+
+    def forward(
+        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    ) -> Tensor:
+
+        query = self.lin_q(x)
+        key = self.lin_k(x)
+        value = self.lin_v(x)
+
+        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
 
 
 class SDPAAttentionWrapper(nn.Module):
@@ -245,7 +268,7 @@ class SDPAAttentionWrapper(nn.Module):
 class FlashAttentionWrapper(nn.Module):
     """Wrapper for Flash attention."""
 
-    def __init__(self):
+    def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
         try:
             import flash_attn
@@ -255,7 +278,14 @@ class FlashAttentionWrapper(nn.Module):
         if version.parse(flash_attn.__version__) < version.parse("2.6.0"):
             raise RuntimeError("Error: Flash-attn version is too low. Update to 2.6.0 or higher.")
         else:
+            from flash_attn.layers.rotary import RotaryEmbedding
+
             self.attention = flash_attn.flash_attn_func
+
+        self.use_rotary_embeddings = use_rotary_embeddings
+
+        if self.use_rotary_embeddings:  # find alternative implementation
+            self.rotary_emb = RotaryEmbedding(dim=head_dim)
 
     def forward(
         self,
@@ -275,18 +305,44 @@ class FlashAttentionWrapper(nn.Module):
 
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
 
+        if self.use_rotary_embeddings:
+            key = key.unsqueeze(-3)
+            value = value.unsqueeze(-3)
+            keyvalue = torch.cat((key, value), dim=-3)
+            query, keyvalue = self.rotary_emb(
+                query, keyvalue, max_seqlen=max(keyvalue.shape[1], query.shape[1])
+            )  # assumption seq const
+            key = keyvalue[:, :, 0, ...]
+            value = keyvalue[:, :, 1, ...]
+
         out = self.attention(
             query,
             key,
             value,
             causal=False,
-            window_size=(window_size, window_size),
+            window_size=(window_size, window_size) if window_size is not None else (-1, -1),
             dropout_p=dropout_p,
             softcap=softcap,
             alibi_slopes=alibi_slopes,
         )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
+
+
+class MultiHeadCrossAttention(MultiHeadSelfAttention):
+    """Multi Head Cross Attention Pytorch Layer."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(
+        self, x: PairTensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    ) -> Tensor:
+        query = self.lin_q(x[1])
+        key = self.lin_k(x[0])
+        value = self.lin_v(x[0])
+
+        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
 
 
 def get_alibi_slopes(num_heads: int) -> Tensor:

@@ -9,13 +9,23 @@
 
 from typing import Union
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 
 from anemoi.utils.schemas import BaseModel
 
 
-class TransformerModelComponent(BaseModel):
+class TransformerModelComponent(PydanticBaseModel):
+    class Config:
+        """Pydantic BaseModel configuration."""
+
+        use_attribute_docstrings = True
+        use_enum_values = True
+        validate_assignment = True
+        validate_default = True
+        extra = "allow"  # Beware this allows extra fields in the config, typos are less likely to be spotted
+
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
     cpu_offload: bool = Field(example=False)

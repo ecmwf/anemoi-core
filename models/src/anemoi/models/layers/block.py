@@ -29,6 +29,7 @@ from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
+from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
@@ -78,6 +79,7 @@ class TransformerProcessorBlock(BaseBlock):
         attention_implementation: str = "flash_attention",
         softcap: float = None,
         use_alibi_slopes: bool = None,
+        use_rotary_embeddings: bool = False,
     ):
         super().__init__()
 
@@ -96,6 +98,7 @@ class TransformerProcessorBlock(BaseBlock):
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
+            use_rotary_embeddings=use_rotary_embeddings,
         )
 
         self.mlp = nn.Sequential(
@@ -122,6 +125,72 @@ class TransformerProcessorBlock(BaseBlock):
             )
         )
         return x
+
+
+class TransformerMapperBlock(TransformerProcessorBlock):
+    """Transformer mapper block with MultiHeadCrossAttention and MLPs."""
+
+    def __init__(
+        self,
+        num_channels: int,
+        hidden_dim: int,
+        num_heads: int,
+        activation: str,
+        window_size: int,
+        layer_kernels: DotDict,
+        dropout_p: float = 0.0,
+        qk_norm: bool = False,
+        attention_implementation: str = "flash_attention",
+        softcap: float = None,
+        use_alibi_slopes: bool = None,
+        use_rotary_embeddings: bool = False,
+    ):
+        super().__init__(
+            num_channels=num_channels,
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            activation=activation,
+            window_size=window_size,
+            layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
+            qk_norm=qk_norm,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
+            use_rotary_embeddings=use_rotary_embeddings,
+        )
+
+        self.attention = MultiHeadCrossAttention(
+            num_heads=num_heads,
+            embed_dim=num_channels,
+            window_size=window_size,
+            qkv_bias=False,
+            qk_norm=qk_norm,
+            is_causal=False,
+            dropout_p=dropout_p,
+            layer_kernels=layer_kernels,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
+            use_rotary_embeddings=use_rotary_embeddings,
+        )
+
+        self.layer_norm_attention_src = nn.LayerNorm(num_channels)
+        self.layer_norm_attention_dst = nn.LayerNorm(num_channels)
+        self.layer_norm_mpl = nn.LayerNorm(num_channels)
+
+    def forward(
+        self,
+        x: OptPairTensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> Tensor:
+        x_src = self.layer_norm_attention_src(x[0])
+        x_dst = self.layer_norm_attention_dst(x[1])
+        x_dst = x_dst + self.attention((x_src, x_dst), shapes, batch_size, model_comm_group=model_comm_group)
+        x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst))
+        return (x_src, x_dst), None  # logic expects return of edge_attr
 
 
 class GraphConvBaseBlock(BaseBlock):
@@ -201,7 +270,6 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         **kwargs,
     ):
         super().__init__(
-            self,
             in_channels=in_channels,
             out_channels=out_channels,
             layer_kernels=layer_kernels,
