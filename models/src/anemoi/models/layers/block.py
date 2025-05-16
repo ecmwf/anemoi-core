@@ -445,7 +445,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
         self.node_dst_mlp = nn.Sequential(
-            self.layer_norm_mlp,
             Linear(out_channels, hidden_dim),
             layer_kernels.Activation(),
             Linear(hidden_dim, out_channels),
