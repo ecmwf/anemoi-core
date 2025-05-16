@@ -2,7 +2,7 @@ import torch
 
 from anemoi.graphs.edges.directional import direction_vec
 
-tol = 1e-3
+tol = 1e-7
 
 
 def test_direction_vec():
