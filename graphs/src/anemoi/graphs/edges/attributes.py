@@ -44,11 +44,11 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
         if self.node_attr_name in source_nodes:
-           source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
+            source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
         else:
             source_nodes_data = None
             LOGGER.warning("The attribute %s is not in the source nodes.", self.node_attr_name)
-        
+
         if self.node_attr_name in target_nodes:
             target_nodes_data = target_nodes[self.node_attr_name].to(self.device)
         else:
@@ -153,7 +153,9 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
-        assert node_attr is not None, f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
+        assert (
+            node_attr is not None
+        ), f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
         return node_attr
 
 
