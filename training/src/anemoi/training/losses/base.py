@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch import nn
 
-from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.models.distributed.graph import reduce_tensor
+from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup

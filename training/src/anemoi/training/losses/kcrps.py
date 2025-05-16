@@ -96,7 +96,9 @@ class KernelCRPS(BaseLoss):
 
         kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs latlon v")
 
-        kcrps_ = self.scale(kcrps_.unsqueeze(1), scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        kcrps_ = self.scale(
+            kcrps_.unsqueeze(1), scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice,
+        )
 
         # divide by batch size
         if squash:

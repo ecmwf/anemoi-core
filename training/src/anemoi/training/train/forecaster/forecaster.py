@@ -185,8 +185,7 @@ class GraphForecaster(pl.LightningModule):
         # set flag if loss and metrics support sharding
         self.loss_supports_sharding = getattr(self.loss, "supports_sharding", False)
         self.metrics_support_sharding = all(
-            getattr(metric, "supports_sharding", False)
-            for metric in self.metrics.values()
+            getattr(metric, "supports_sharding", False) for metric in self.metrics.values()
         )
 
         if not self.loss_supports_sharding and self.keep_batch_sharded:
@@ -216,7 +215,12 @@ class GraphForecaster(pl.LightningModule):
         self.reader_group_rank = 0
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x, model_comm_group=self.model_comm_group, grid_shard_slice=self.grid_shard_slice, grid_shard_shapes=self.grid_shard_shapes)
+        return self.model(
+            x,
+            model_comm_group=self.model_comm_group,
+            grid_shard_slice=self.grid_shard_slice,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
 
     def define_delayed_scalers(self) -> None:
         """Update delayed scalers such as the loss weights mask for imputed variables."""
@@ -291,7 +295,9 @@ class GraphForecaster(pl.LightningModule):
     ) -> torch.Tensor:
         is_sharded = self.grid_shard_slice is not None
 
-        sharding_supported = (self.loss_supports_sharding or not training_mode) and (self.metrics_support_sharding or not validation_mode)
+        sharding_supported = (self.loss_supports_sharding or not training_mode) and (
+            self.metrics_support_sharding or not validation_mode
+        )
         if is_sharded and not sharding_supported:  # gather tensors if loss and metrics do not support sharding
             shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, self.grid_shard_shapes)
             y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
@@ -301,12 +307,16 @@ class GraphForecaster(pl.LightningModule):
             y_pred_full, y_full = y_pred, y
             grid_shard_slice = self.grid_shard_slice
 
-        loss = self.loss(
-            y_pred_full,
-            y_full,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-        ) if training_mode else None
+        loss = (
+            self.loss(
+                y_pred_full,
+                y_full,
+                grid_shard_slice=grid_shard_slice,
+                group=self.model_comm_group,
+            )
+            if training_mode
+            else None
+        )
 
         metrics_next = {}
         if validation_mode:
@@ -386,7 +396,6 @@ class GraphForecaster(pl.LightningModule):
                 validation_mode,
                 use_reentrant=False,
             )
-
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
@@ -513,7 +522,11 @@ class GraphForecaster(pl.LightningModule):
                     )
                     raise ValueError(exception_msg)
 
-                metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, scaler_indices=[..., indices], )
+                metrics[metric_step_name] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                    scaler_indices=[..., indices],
+                )
 
         return metrics
 
