@@ -92,19 +92,32 @@ def _gather(
     comm_rank = dist.get_rank(group=group)
 
     input_ = input_.contiguous(memory_format=input_format)
-    tensor_list = [
-        torch.empty(
-            shapes[rank], dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+
+    all_shards_equal_shape = all(shape == shapes[0] for shape in shapes)
+
+    if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
+        out_shape = list(input_.shape)
+        out_shape[dim_] = sum(shape[dim_] for shape in shapes)
+
+        output = torch.empty(
+            out_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
         )
-        for rank in range(comm_size)
-    ]
 
-    tensor_list[comm_rank] = input_
-    if gather_in_backward:
-        dist.all_gather(tensor_list, input_, group=group)
+        dist.all_gather_into_tensor(output, input_, group=group)
+    else:
+        tensor_list = [
+            torch.empty(
+                shapes[rank], dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+            )
+            for rank in range(comm_size)
+        ]
 
-    # Note: torch.cat already creates a contiguous tensor.
-    output = torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
+        tensor_list[comm_rank] = input_
+        if gather_in_backward:
+            dist.all_gather(tensor_list, input_, group=group)
+
+        # Note: torch.cat already creates a contiguous tensor.
+        output = torch.cat(tensor_list, dim=dim_).contiguous(memory_format=input_format)
 
     return output
 
