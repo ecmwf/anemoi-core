@@ -213,6 +213,12 @@ def test_grid_invariance(
     pred_fine = torch.cat([pred_coarse, pred_coarse], dim=2)
     target_fine = torch.cat([target_coarse, target_coarse], dim=2)
 
+    num_points_coarse = pred_coarse.shape[2]
+    num_points_fine = pred_fine.shape[2]
+
+    functionalloss_with_scaler.update_scaler("test", torch.ones((num_points_coarse,)) / num_points_coarse)
+    functionalloss_with_scaler_fine.update_scaler("test", torch.ones((num_points_fine,)) / num_points_fine)
+
     loss_coarse = functionalloss_with_scaler(pred_coarse, target_coarse)
     loss_fine = functionalloss_with_scaler_fine(pred_fine, target_fine)
 
