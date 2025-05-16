@@ -611,7 +611,10 @@ def plot_flat_sample(
             titles[5] = f"{vname} persist err: {np.nanmean(np.abs(data[5])):.{4}f} deg."
 
         else:
-            norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=0.0, vmax=np.nanmax(combined_error))
+            # ensure vcenter is between minimum and maximum error
+            vcenter = max(np.nanmin(combined_error), 0.0)
+            vcenter = min(np.nanmax(combined_error), vcenter)
+            norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=vcenter, vmax=np.nanmax(combined_error))
             norms[0] = norm
             norms[4] = norm_error
             norms[5] = norm_error

@@ -16,8 +16,8 @@ from anemoi.models.layers.bounding import FractionBounding
 from anemoi.models.layers.bounding import HardtanhBounding
 from anemoi.models.layers.bounding import LeakyFractionBounding
 from anemoi.models.layers.bounding import LeakyHardtanhBounding
-from anemoi.models.layers.bounding import LeakyNormalizedReluBounding
 from anemoi.models.layers.bounding import LeakyReluBounding
+from anemoi.models.layers.bounding import NormalizedLeakyReluBounding
 from anemoi.models.layers.bounding import NormalizedReluBounding
 from anemoi.models.layers.bounding import ReluBounding
 from anemoi.utils.config import DotDict
@@ -149,7 +149,7 @@ def test_hydra_instantiate_bounding(config, name_to_index, name_to_index_stats, 
             "total_var": config.total_var,
         },
         {
-            "_target_": "anemoi.models.layers.bounding.LeakyNormalizedReluBounding",
+            "_target_": "anemoi.models.layers.bounding.NormalizedLeakyReluBounding",
             "variables": config.variables,
             "min_val": [2.0, 2.0],
             "normalizer": ["mean-std", "min-max"],
@@ -228,8 +228,8 @@ def test_multi_chained_bounding_with_leaky(config, name_to_index, input_tensor):
     assert torch.allclose(output, expected_output, atol=1e-4)
 
 
-def test_leaky_normalized_relu_bounding(config, name_to_index, name_to_index_stats, input_tensor, statistics):
-    bounding = LeakyNormalizedReluBounding(
+def test_normalized_leaky_relu_bounding(config, name_to_index, name_to_index_stats, input_tensor, statistics):
+    bounding = NormalizedLeakyReluBounding(
         variables=config.variables,
         name_to_index=name_to_index,
         min_val=[2.0, 2.0],
