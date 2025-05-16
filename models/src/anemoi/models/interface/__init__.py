@@ -74,6 +74,28 @@ class AnemoiModelInterface(torch.nn.Module):
         self.data_indices = data_indices
         self._build_model()
 
+    @property
+    def inference_mode(self):
+        return self._inference_mode
+
+    @inference_mode.setter
+    def inference_mode(self, inference_mode: bool):
+        """Set the inference mode of the model.
+
+        This method sets the inference mode of the model and its pre- and post-processors.
+        Preprocessors handling NaNs have different behaviour in inference mode as they need to account
+        for possibly inconsistent NaN locations in the data.
+
+        Parameters
+        ----------
+        inference_mode : bool
+            If True, the model is in inference mode.
+        """
+        self._inference_mode = inference_mode
+        if hasattr(self, "pre_processors") and self.pre_processors is not None:
+            for name in self.pre_processors.processors:
+                self.pre_processors.processors[name].inference_mode = inference_mode
+
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
         # Instantiate processors

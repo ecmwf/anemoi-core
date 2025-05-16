@@ -205,6 +205,7 @@ def test_transform_with_nan_inference(imputer_fixture, data_fixture, request):
     """Check that the imputer correctly transforms a tensor with NaNs in inference."""
     x, expected = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
+    assert not imputer.inference_mode, "Inputer.inference_mode default should be inference_mode=False."
     transformed = imputer.transform(x, in_place=False)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
     # Split data to "inference size" removing "diagnostics"
@@ -310,9 +311,7 @@ def test_inference_imputer(imputer_fixture, data_fixture, request):
     x, expected = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
 
-    # Check training flag
-    assert imputer.training, "Imputer is not set to training mode."
-
+    # simulate training mode and set nan locations
     expected_mask = torch.isnan(x)
     transformed = imputer.transform(x, in_place=False)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
@@ -320,24 +319,26 @@ def test_inference_imputer(imputer_fixture, data_fixture, request):
     assert torch.allclose(restored, x, equal_nan=True), "Inverse transform does not restore NaNs correctly."
     assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after first run."
 
-    imputer.eval()
-    with torch.no_grad():
-        x2 = x.roll(-1, dims=0)
-        expected2 = expected.roll(-1, dims=0)
-        expected_mask2 = torch.isnan(x2)
+    # force inference mask to True
+    imputer.inference_mode = True
 
-        assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after first run."
+    # Check inference flag
+    assert imputer.inference_mode, "Imputer is not set to inference mode."
 
-        # Check training flag
-        assert not imputer.training, "Imputer is not set to evaluation mode."
+    # change nan locations
+    x2 = x.roll(-1, dims=0)
+    expected2 = expected.roll(-1, dims=0)
 
-        assert not torch.allclose(x, x2, equal_nan=True), "Failed to modify the input data."
-        assert not torch.allclose(expected, expected2, equal_nan=True), "Failed to modify the expected data."
-        assert not torch.allclose(expected_mask, expected_mask2, equal_nan=True), "Failed to modify the nan mask."
+    assert not torch.allclose(x, x2, equal_nan=True), "Failed to modify the input data."
+    assert not torch.allclose(expected, expected2, equal_nan=True), "Failed to modify the expected data."
 
-        transformed = imputer.transform(x2, in_place=False)
-        assert torch.allclose(transformed, expected2, equal_nan=True), "Transform does not handle NaNs correctly."
-        restored = imputer.inverse_transform(transformed, in_place=False)
-        assert torch.allclose(restored, x2, equal_nan=True), "Inverse transform does not restore NaNs correctly."
+    transformed = imputer.transform(x2, in_place=False)
+    assert torch.allclose(transformed, expected2, equal_nan=True), "Transform does not handle NaNs correctly."
 
-        assert torch.equal(imputer.nan_locations, expected_mask2), "Mask not saved correctly after evaluation run."
+    changed_nan_locations = ~torch.isnan(x) & torch.isnan(x2)  # locations where NaNs have been changed
+    x2[changed_nan_locations] = transformed[changed_nan_locations]
+    x2[imputer.nan_locations] = np.nan
+    restored = imputer.inverse_transform(transformed, in_place=False)
+    assert torch.allclose(restored, x2, equal_nan=True), "Inverse transform does not restore NaNs correctly."
+
+    assert torch.equal(imputer.nan_locations, expected_mask), "Cached mask has been changed after evaluation run."
