@@ -28,6 +28,7 @@ class TransformerProcessorConfig:
     softcap: float = 0
     use_alibi_slopes: bool = False
     window_size: int = 10
+    qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels = load_layer_kernels()
 

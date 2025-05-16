@@ -135,7 +135,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        activation: str,
         window_size: int,
         layer_kernels: DotDict,
         dropout_p: float = 0.0,
@@ -149,7 +148,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             num_channels=num_channels,
             hidden_dim=hidden_dim,
             num_heads=num_heads,
-            activation=activation,
             window_size=window_size,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
@@ -175,9 +173,11 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
-        self.layer_norm_attention_src = nn.LayerNorm(num_channels)
-        self.layer_norm_attention_dst = nn.LayerNorm(num_channels)
-        self.layer_norm_mpl = nn.LayerNorm(num_channels)
+        LayerNorm = layer_kernels.LayerNorm
+
+        self.layer_norm_attention_src = LayerNorm(num_channels)
+        self.layer_norm_attention_dst = LayerNorm(num_channels)
+        self.layer_norm_mpl = LayerNorm(num_channels)
 
     def forward(
         self,
