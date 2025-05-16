@@ -9,6 +9,7 @@
 
 
 import logging
+import sys
 import warnings
 from abc import ABC
 from typing import Optional
@@ -46,6 +47,15 @@ class BaseImputer(BasePreprocessor, ABC):
         self.nan_locations = None
         # weight imputed values with zero in loss calculation
         self.loss_mask_training = None
+        self.inference = not self._is_anemoi_training_loaded()
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        super().load_state_dict(state_dict, *args, **kwargs)
+        # Ensure inference is set correctly after loading the state
+        self.inference = not self._is_anemoi_training_loaded()
+
+    def _is_anemoi_training_loaded(self):
+        return "anemoi.training" in sys.modules
 
     def _validate_indices(self):
         assert len(self.index_training_input) == len(self.index_inference_input) <= len(self.replacement), (
@@ -103,9 +113,9 @@ class BaseImputer(BasePreprocessor, ABC):
 
             LOGGER.debug(f"Imputer: replacing NaNs in {name} with value {self.replacement[-1]}")
 
-    def _expand_subset_mask(self, x: torch.Tensor, idx_src: int) -> torch.Tensor:
+    def _expand_subset_mask(self, x: torch.Tensor, idx_src: int, nan_locations: torch.Tensor) -> torch.Tensor:
         """Expand the subset of the mask to the correct shape."""
-        return self.nan_locations[:, idx_src].expand(*x.shape[:-2], -1)
+        return nan_locations[:, idx_src].expand(*x.shape[:-2], -1)
 
     def get_nans(self, x: torch.Tensor) -> torch.Tensor:
         """get NaN mask from data"""
@@ -113,10 +123,10 @@ class BaseImputer(BasePreprocessor, ABC):
         idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
         return torch.isnan(x[idx].squeeze())
 
-    def fill_with_value(self, x, index):
+    def fill_with_value(self, x, index, nan_locations: torch.Tensor):
         for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
             if idx_dst is not None:
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = value
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src, nan_locations)] = value
         return x
 
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
@@ -124,15 +134,22 @@ class BaseImputer(BasePreprocessor, ABC):
         if not in_place:
             x = x.clone()
 
-        # Reset NaN locations outside of training for validation and inference.
-        if not self.training:
-            self.nan_locations = None
+        # work with copy of cached nan_nanlocations to avoid modifying the cached one
+        nan_locations = self.nan_locations
+
+        # Reset NaN locations for preprocesor in inference.
+        if self.inference:
+            nan_locations = None
 
         # Initialise mask if not cached.
-        if self.nan_locations is None:
+        if nan_locations is None:
 
             # Get NaN locations
-            self.nan_locations = self.get_nans(x)
+            nan_locations = self.get_nans(x)
+
+        # Cache NaN locations for training and postprocessing and set loss mask
+        if self.nan_locations is None:
+            self.nan_locations = nan_locations
 
             # Initialize training loss mask to weigh imputed values with zeroes once
             self.loss_mask_training = torch.ones(
@@ -141,7 +158,7 @@ class BaseImputer(BasePreprocessor, ABC):
             # for all variables that are imputed and part of the model output, set the loss weight to zero
             for idx_src, idx_dst in zip(self.index_training_input, self.index_inference_output):
                 if idx_dst is not None:
-                    self.loss_mask_training[:, idx_dst] = (~self.nan_locations[:, idx_src]).int()
+                    self.loss_mask_training[:, idx_dst] = (~nan_locations[:, idx_src]).int()
 
         # Choose correct index based on number of variables
         if x.shape[-1] == self.num_training_input_vars:
@@ -155,10 +172,10 @@ class BaseImputer(BasePreprocessor, ABC):
             )
 
         # Replace values
-        return self.fill_with_value(x, index)
+        return self.fill_with_value(x, index, nan_locations)
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
+        """Impute missing values in the input tensor using the cached nan_locations."""
         if not in_place:
             x = x.clone()
 
@@ -176,7 +193,7 @@ class BaseImputer(BasePreprocessor, ABC):
         # Replace values
         for idx_src, idx_dst in zip(self.index_training_input, index):
             if idx_dst is not None:
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = torch.nan
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = torch.nan
         return x
 
 
@@ -304,11 +321,13 @@ class CopyImputer(BaseImputer):
         for idx_src, (idx_dst, value) in zip(self.index_training_input, zip(index, self.replacement)):
             if idx_dst is not None:
                 assert not torch.isnan(
-                    x[..., self.data_indices.data.input.name_to_index[value]][self._expand_subset_mask(x, idx_src)]
+                    x[..., self.data_indices.data.input.name_to_index[value]][
+                        self._expand_subset_mask(x, idx_src, self.nan_locations)
+                    ]
                 ).any(), f"NaNs found in {value}."
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src)] = x[
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = x[
                     ..., self.data_indices.data.input.name_to_index[value]
-                ][self._expand_subset_mask(x, idx_src)]
+                ][self._expand_subset_mask(x, idx_src, self.nan_locations)]
         return x
 
     def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
