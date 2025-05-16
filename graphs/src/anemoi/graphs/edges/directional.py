@@ -95,5 +95,5 @@ def compute_directions(source_coords: torch.Tensor, target_coords: torch.Tensor)
     direction = direction_vec(rotated_source_coords_xyz, north_pole)
 
     # All 3rd components should be 0s
-    assert torch.max(torch.abs(direction[:, 2])) < 1e-9, "Rotation should be aligned with the north pole"
+    assert torch.all(direction[:, 2] == 0), "Rotation should be aligned with the north pole"
     return direction[:, :2]
