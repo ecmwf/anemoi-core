@@ -112,7 +112,7 @@ class MultiHeadSelfAttention(nn.Module):
         else:
             self.alibi_slopes = None
 
-        linear = layer_kernels["Linear"]
+        linear = layer_kernels.Linear
         self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
         self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
         self.lin_v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
