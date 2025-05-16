@@ -63,7 +63,7 @@ def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
 @pytest.fixture
 def loss_inputs_fine(
-    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs with finer grid."""
     pred, target, loss_result = loss_inputs
