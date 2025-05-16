@@ -1,6 +1,16 @@
-## Description
-
+## What changes have been introduced?
 <!-- Provide a brief summary of the changes introduced in this pull request. -->
+
+## What problem does this change solve?
+<!-- Explain the motivation behind the changes and the context in which they are being made. -->
+
+## What issue or task does this change relate to?
+<!-- This may link to an Issue number this change addresses, ideally in one of the "magic format" such as Closes #XYZ -->
+
+## Additional Review Notes (should be resolved and removed from the PR description before merging)
+<!-- Include any additional information, caveats, or considerations that the reviewer should be aware of. -->
+
+<!-- End of merge commit message -->
 
 ## Type of Change
 
@@ -8,12 +18,6 @@
 -   [ ] New feature (non-breaking change which adds functionality)
 -   [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 -   [ ] Documentation update
-
-## Issue Number
-
-<!-- Link the Issue number this change addresses, ideally in one of the "magic format" such as Closes #XYZ -->
-
-<!-- Alternatively, explain the motivation behind the changes and the context in which they are being made. -->
 
 ## Code Compatibility
 
@@ -46,7 +50,3 @@
 -   [ ] I have added comments to my code, particularly in hard-to-understand areas
 
 <!-- Describe any major updates to the documentation -->
-
-## Additional Notes
-
-<!-- Include any additional information, caveats, or considerations that the reviewer should be aware of. -->
