@@ -142,6 +142,34 @@ def lam_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> Omeg
     return cfg
 
 
+@pytest.fixture
+def ensemble_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+   with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
+       template = compose(config_name="ensemble_crps")
+
+   use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+
+   cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+   OmegaConf.resolve(cfg)
+   return cfg
+
+
+@pytest.fixture
+def ensemble_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
+        template = compose(config_name="ensemble_crps")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+
+    tmp_dir, (dataset) = _download_datasets(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = dataset
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
 def _download_datasets(config: OmegaConf, list_datasets: list[str]) -> tuple[str, list[str]]:
     tmp_paths = []
     dataset_names = []
