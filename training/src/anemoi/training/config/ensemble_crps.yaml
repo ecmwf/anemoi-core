@@ -9,7 +9,7 @@ defaults:
 - training: ensemble
 - _self_
 
-config_validation: False
+config_validation: True
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords
