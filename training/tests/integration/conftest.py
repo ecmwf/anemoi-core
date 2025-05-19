@@ -161,9 +161,9 @@ def ensemble_config_with_data(testing_modifications_with_temp_dir: OmegaConf) ->
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
 
-    tmp_dir, (dataset) = _download_datasets(use_case_modifications, ["dataset"])
+    tmp_dir, rel_paths = _download_datasets(use_case_modifications, ["dataset"])
     use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = dataset
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
