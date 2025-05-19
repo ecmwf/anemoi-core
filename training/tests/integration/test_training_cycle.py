@@ -63,6 +63,7 @@ def test_training_cycle_ensemble(ensemble_config_with_data: DictConfig) -> None:
 def test_config_validation_ensemble(ensemble_config: DictConfig) -> None:
     BaseSchema(**ensemble_config)
 
+
 @skip_if_offline
 @pytest.mark.longtests
 def test_restart_training(gnn_config_with_data: DictConfig) -> None:
