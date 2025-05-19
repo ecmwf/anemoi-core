@@ -2,11 +2,14 @@
 hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+    truncation: null
   files:
     dataset: anemoi-integration-tests/regional-use-cases/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    truncation: null
+    truncation_inv: null
 
 dataloader:
   training:
-    end: 1979-01-08 12:00:00
+    end: 2017-01-08 12:00:00
   validation:
-    start: 1979-01-08 18:00:00
+    start: 2017-01-08 18:00:00
