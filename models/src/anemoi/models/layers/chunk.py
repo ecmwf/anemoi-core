@@ -189,6 +189,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
             GraphConvProcessorBlock,
             in_channels=num_channels,
             out_channels=num_channels,
+            num_chunks=1,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
         )

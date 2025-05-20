@@ -20,7 +20,6 @@ class TestGraphTransformerProcessorChunk:
     def init(self):
         num_channels: int = 10
         num_layers: int = 3
-        num_chunks: int = 1
         num_heads: int = 16
         mlp_hidden_ratio: int = 4
         qk_norm = True
@@ -30,7 +29,6 @@ class TestGraphTransformerProcessorChunk:
             num_channels,
             num_layers,
             layer_kernels,
-            num_chunks,
             num_heads,
             mlp_hidden_ratio,
             qk_norm,
@@ -39,11 +37,10 @@ class TestGraphTransformerProcessorChunk:
 
     @pytest.fixture
     def processor_chunk(self, init):
-        num_channels, num_layers, num_chunks, layer_kernels, num_heads, mlp_hidden_ratio, qk_norm, edge_dim = init
+        num_channels, num_layers, layer_kernels, num_heads, mlp_hidden_ratio, qk_norm, edge_dim = init
         return GraphTransformerProcessorChunk(
             num_channels=num_channels,
             num_layers=num_layers,
-            num_chunks=num_chunks,
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
