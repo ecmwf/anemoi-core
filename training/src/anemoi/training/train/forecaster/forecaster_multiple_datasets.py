@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -395,9 +394,52 @@ class GraphForecasterMultiDataset(pl.LightningModule):
 
     def training_step(
         self,
-        batch: tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]],
+        batch: tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]],  # C - G - S - B - T
         batch_idx: int,
     ) -> torch.Tensor:
+
+
+        class Spec:
+            def __init__(self, spec: dict) -> None:
+                if spec is None:
+                    return TensorSpec()
+                self.spec = {k:Spec[k] for k in spec.keys()}
+
+            def check(self, batch):
+        
+        class TensorSpec(Spec):
+            pass
+
+
+        # C-G-S-B-T
+        spec = Spec(
+            dict(
+                input=dict(
+                    _era5={
+                        -1: {1: None},
+                        0: {1: None},
+                    }
+                ),
+                target=dict(
+                    era5_={
+                        1: {1: None},
+                    },
+                ),
+            ),
+        )
+        spec.check(batch)
+
+
+        spec = self.sample_provider.get_spec()
+        data = self.sample_provider.build_structure(batch)
+        indices = self.sample_provider.get_indices()
+
+        new_input = data.advance_input(data, indices)
+
+        for grp in groups:
+            batch[0][grp][]
+
+
         train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
             "train_" + self.loss.name + "_loss",
