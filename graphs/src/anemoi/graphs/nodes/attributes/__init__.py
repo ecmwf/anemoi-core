@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .area_weights import MaskedPlanarAreaWeights
 from .area_weights import PlanarAreaWeights
 from .area_weights import SphericalAreaWeights
 from .area_weights import UniformWeights
@@ -21,6 +22,7 @@ __all__ = [
     "PlanarAreaWeights",
     "UniformWeights",
     "CutOutMask",
+    "MaskedPlanarAreaWeights",
     "NonmissingAnemoiDatasetVariable",
     "BooleanAndMask",
     "BooleanNot",

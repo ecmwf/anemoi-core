@@ -41,6 +41,7 @@ class GraphEnsForecaster(GraphForecaster):
         graph_data: HeteroData,
         truncation_data: dict,
         statistics: dict,
+        statistics_tendencies: dict,
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict,
@@ -63,6 +64,7 @@ class GraphEnsForecaster(GraphForecaster):
             graph_data=graph_data,
             truncation_data=truncation_data,
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
@@ -213,16 +215,18 @@ class GraphEnsForecaster(GraphForecaster):
             None
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
-
-        ens_ic = self.ensemble_ic_generator(batch[0], batch[1] if len(batch) == 2 else None)
-
-        LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(ens_ic.shape))
-
         batch[0] = self.model.pre_processors(batch[0], in_place=not validation_mode)
-        x = self.model.pre_processors(
-            ens_ic,
-            in_place=not validation_mode,
-        )  # not in place required here??? ; shape = (bs, multistep, nens_per_device, latlon, input.full)
+
+        x = self.ensemble_ic_generator(
+            batch[0],
+            self.model.pre_processors(batch[1], in_place=not validation_mode) if len(batch) == 2 else None,
+        )
+        LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(x.shape))
+
+        # Scalers which are delayed need to be initialized after the pre-processors
+        if self.is_first_step:
+            self.define_delayed_scalers()
+            self.is_first_step = False
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -237,10 +241,6 @@ class GraphEnsForecaster(GraphForecaster):
         )
         assert batch[0].shape[1] >= rollout + self.multi_step, msg
 
-        if not self.updated_loss_mask:
-            # update loss scalar after first application and initialization of preprocessors
-            self.training_weights_for_imputed_variables(batch[0])
-
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, rollout_step)
@@ -249,7 +249,7 @@ class GraphEnsForecaster(GraphForecaster):
                 self.multi_step + rollout_step,
                 0,
                 :,
-                self.data_indices.internal_data.output.full,
+                self.data_indices.data.output.full,
             ]  # self.data_indices.data.output.full
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
@@ -280,7 +280,7 @@ class GraphEnsForecaster(GraphForecaster):
                     y,
                     rollout_step,
                 )
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], ens_ic if validation_mode else None
+            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
 
     def _step(
         self,
@@ -313,7 +313,7 @@ class GraphEnsForecaster(GraphForecaster):
         ):
             loss += loss_next
             metrics.update(metrics_next)
-            y_preds.extend(y_preds_next)
+            y_preds.append(y_preds_next)
 
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic

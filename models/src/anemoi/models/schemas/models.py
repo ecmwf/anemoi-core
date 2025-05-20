@@ -24,8 +24,10 @@ from anemoi.utils.schemas import BaseModel
 
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
+from .decoder import TransformerDecoderSchema  # noqa: TC001
 from .encoder import GNNEncoderSchema  # noqa: TC001
 from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
+from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
@@ -142,8 +144,20 @@ Bounding = Annotated[
 ]
 
 
-class BaseModelSchema(PydanticBaseModel):
+class NoOutputMaskSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.masks.NoOutputMask"] = Field(..., alias="_target_")
 
+
+class Boolean1DSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.masks.Boolean1DMask"] = Field(..., alias="_target_")
+    nodes_name: str = Field(examples="data")
+    attribute_name: str = Field(example="cutout_mask")
+
+
+OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
+
+
+class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     model: Model = Field(default_factory=Model)
@@ -154,21 +168,26 @@ class BaseModelSchema(PydanticBaseModel):
     "Learnable node and edge parameters."
     bounding: list[Bounding]
     "List of bounding configuration applied in order to the specified variables."
-    output_mask: Union[str, None] = Field(example=None)  # !TODO CHECK!
-    "Output mask, it must be a node attribute of the output nodes"
+    output_mask: OutputMaskSchemas  # !TODO CHECK!
+    "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
     grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
     "Index of grid residual connection, or use none. Currently only in interpolator."
-
     processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
         ...,
         discriminator="target_",
     )
     "GNN processor schema."
-    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema] = Field(..., discriminator="target_")
+    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema] = Field(
+        ...,
+        discriminator="target_",
+    )
     "GNN encoder schema."
-    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema] = Field(..., discriminator="target_")
+    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema, TransformerDecoderSchema] = Field(
+        ...,
+        discriminator="target_",
+    )
     "GNN decoder schema."
 
 

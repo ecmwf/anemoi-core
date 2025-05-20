@@ -29,6 +29,7 @@ from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
+from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mlp import MLP
 from anemoi.utils.config import DotDict
@@ -271,13 +272,13 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
 
         (x_src, x_dst), edge_attr = self.proc(
-            (x_src, x_dst),
-            edge_attr,
-            edge_index,
-            (shapes_src, shapes_dst, shapes_edge_attr),
-            batch_size,
-            model_comm_group,
+            x=(x_src, x_dst),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            shapes=(shapes_src, shapes_dst, shapes_edge_attr),
+            batch_size=batch_size,
             size=size,
+            model_comm_group=model_comm_group,
         )
 
         x_dst = self.post_process(x_dst, shapes_dst, model_comm_group)
@@ -760,3 +761,260 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
 
         _, x_dst = super().forward(x, batch_size, shard_shapes, model_comm_group)
         return x_dst
+
+
+class TransformerBaseMapper(BaseMapper):
+    """Transformer Base Mapper from hidden -> data or data -> hidden."""
+
+    def __init__(
+        self,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        layer_kernels: DotDict,
+        out_channels_dst: Optional[int],
+        num_chunks: int,
+        cpu_offload: bool,
+        activation: str,
+        num_heads: int,
+        mlp_hidden_ratio: int,
+        window_size: Optional[int] = None,
+        dropout_p: float = 0.0,
+        qk_norm: Optional[bool] = False,
+        attention_implementation: str = "flash_attention",
+        softcap: Optional[float] = None,
+        use_alibi_slopes: Optional[bool] = None,
+        use_rotary_embeddings: Optional[bool] = False,
+    ) -> None:
+        """Initialize TransformerBaseMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node
+        hidden_dim : int
+            Hidden dimension
+        trainable_size : int
+            Trainable tensor of edge
+        num_heads: int
+            Number of heads to use, default 16
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension, default 4
+        activation : str, optional
+            Activation function, by default "GELU"
+        cpu_offload : bool, optional
+            Whether to offload processing to CPU, by default False
+        out_channels_dst : Optional[int], optional
+            Output channels of the destination node, by default None
+        """
+        super().__init__(
+            in_channels_src,
+            in_channels_dst,
+            hidden_dim,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            activation=activation,
+        )
+
+        self.proc = TransformerMapperBlock(
+            num_channels=hidden_dim,
+            hidden_dim=mlp_hidden_ratio * hidden_dim,
+            num_heads=num_heads,
+            activation=activation,
+            window_size=window_size,
+            layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
+            qk_norm=qk_norm,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
+            use_rotary_embeddings=use_rotary_embeddings,
+        )
+
+        self.offload_layers(cpu_offload)
+
+        self.emb_nodes_dst = nn.Linear(self.in_channels_dst, self.hidden_dim)
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> PairTensor:
+
+        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
+
+        (x_src, x_dst), _ = self.proc(
+            (x_src, x_dst),
+            (shapes_src, shapes_dst),
+            batch_size,
+            model_comm_group,
+        )
+
+        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group)
+
+        return x_dst
+
+
+class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapper):
+    """Transformer Mapper from data -> hidden."""
+
+    def __init__(
+        self,
+        in_channels_src: int,
+        in_channels_dst: int,
+        layer_kernels: DotDict,
+        hidden_dim: int = 128,
+        out_channels_dst: Optional[int] = None,
+        num_chunks: int = 1,
+        cpu_offload: bool = False,
+        activation: str = "GELU",
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        window_size: Optional[int] = None,
+        dropout_p: float = 0.0,
+        qk_norm: bool = False,
+        attention_implementation: str = "flash_attention",
+        softcap: float = None,
+        use_alibi_slopes: bool = None,
+        use_rotary_embeddings: bool = False,
+        **kwargs,  # accept not needed extra arguments like subgraph etc.
+    ) -> None:
+        """Initialize TransformerForwardMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node
+        hidden_dim : int
+            Hidden dimension
+        trainable_size : int
+            Trainable tensor of edge
+        num_heads: int
+            Number of heads to use, default 16
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension, default 4
+        activation : str, optional
+            Activation function, by default "GELU"
+        cpu_offload : bool, optional
+            Whether to offload processing to CPU, by default False
+        out_channels_dst : Optional[int], optional
+            Output channels of the destination node, by default None
+        """
+        super().__init__(
+            in_channels_src,
+            in_channels_dst,
+            hidden_dim,
+            layer_kernels=layer_kernels,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            activation=activation,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            window_size=window_size,
+            dropout_p=dropout_p,
+            qk_norm=qk_norm,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
+            use_rotary_embeddings=use_rotary_embeddings,
+        )
+
+        self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int], tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> PairTensor:
+        x_dst = super().forward(x, batch_size, shard_shapes, model_comm_group)
+        return x[0], x_dst
+
+
+class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseMapper):
+    """Graph Transformer Mapper from hidden -> data."""
+
+    def __init__(
+        self,
+        in_channels_src: int,
+        in_channels_dst: int,
+        layer_kernels: DotDict,
+        hidden_dim: int = 128,
+        out_channels_dst: Optional[int] = None,
+        num_chunks: int = 1,
+        cpu_offload: bool = False,
+        activation: str = "GELU",
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        window_size: Optional[int] = None,
+        dropout_p: float = 0.0,
+        qk_norm: bool = False,
+        attention_implementation: str = "flash_attention",
+        softcap: float = None,
+        use_alibi_slopes: bool = None,
+        use_rotary_embeddings: bool = False,
+        **kwargs,  # accept not needed extra arguments like subgraph etc.
+    ) -> None:
+        """Initialize TransformerBackwardMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node
+        hidden_dim : int
+            Hidden dimension
+        trainable_size : int
+            Trainable tensor of edge
+        num_heads: int
+            Number of heads to use, default 16
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension, default 4
+        activation : str, optional
+            Activation function, by default "GELU"
+        cpu_offload : bool, optional
+            Whether to offload processing to CPU, by default False
+        out_channels_dst : Optional[int], optional
+            Output channels of the destination node, by default None
+        """
+        super().__init__(
+            in_channels_src,
+            in_channels_dst,
+            hidden_dim,
+            layer_kernels=layer_kernels,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            activation=activation,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            window_size=window_size,
+            dropout_p=dropout_p,
+            qk_norm=qk_norm,
+            attention_implementation=attention_implementation,
+            softcap=softcap,
+            use_alibi_slopes=use_alibi_slopes,
+            use_rotary_embeddings=use_rotary_embeddings,
+        )
+
+        self.node_data_extractor = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+        )
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None):
+        x_src, x_dst, shapes_src, shapes_dst = super().pre_process(x, shard_shapes, model_comm_group)
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
+        x_dst = self.emb_nodes_dst(x_dst)
+        shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+        return x_src, x_dst, shapes_src, shapes_dst

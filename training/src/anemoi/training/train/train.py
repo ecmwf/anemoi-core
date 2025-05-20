@@ -190,6 +190,7 @@ class AnemoiTrainer:
             "truncation_data": self.truncation_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
+            "statistics_tendencies": self.datamodule.statistics_tendencies,
             "supporting_arrays": self.supporting_arrays,
         }
 

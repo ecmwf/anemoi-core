@@ -147,9 +147,12 @@ def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
         "diagnostics",
         "graph",
         "metadata.config",
+        "config.dataset.sourcesmetadata.dataset.variables_metadata",
+        "metadata.dataset.sources",
+        "metadata.dataset.specific",
         "metadata.dataset.variables_metadata",
-        "metadata.dataset.specific.forward.forward.attrs.variables_metadata",
     ]
+
     keys_to_remove = [key for key in params if any(key.startswith(prefix) for prefix in prefixes_to_remove)]
     for key in keys_to_remove:
         del params[key]

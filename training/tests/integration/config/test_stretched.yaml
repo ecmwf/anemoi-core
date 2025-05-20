@@ -41,10 +41,6 @@ data:
     - "sin_julian_day"
     - "sin_local_time"
 
-training:
-  node_loss_weights:
-    weight_frac_of_total: .5 # ???-value in stretched config
-
 hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
@@ -59,3 +55,8 @@ graph:
         # use coarser resolution for testing
         lam_resolution: 5
         global_resolution: 3
+
+training:
+  scalers:
+    node_weights:
+      weight_frac_of_total: 0.25
