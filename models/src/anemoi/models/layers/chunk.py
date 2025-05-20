@@ -256,8 +256,9 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             in_channels=num_channels,
             hidden_dim=mlp_hidden_ratio * num_channels,
             out_channels=num_channels,
-            edge_dim=edge_dim,
             num_heads=num_heads,
+            num_chunks=1,
+            edge_dim=edge_dim,
             layer_kernels=layer_kernels,
             qk_norm=qk_norm,
         )
