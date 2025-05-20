@@ -91,10 +91,10 @@ class TestTransformerProcessorBlock:
         num_channels = num_heads * factor_attention_heads
         layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
         block = TransformerProcessorBlock(
-            num_channels,
-            hidden_dim,
-            num_heads,
-            window_size,
+            num_channels=num_channels,
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            window_size=window_size,
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
