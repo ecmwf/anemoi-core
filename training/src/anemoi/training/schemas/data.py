@@ -48,7 +48,7 @@ class ImputerSchema(BaseModel):
 
 
 class RemapperSchema(BaseModel):
-    default: str = Field(literals=["none", "cos_sin"])
+    default: str = Field(literals=["none", "log1p", "sqrt", "boxcox"])
     "Remapper default method to apply."
     none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be remapped."
