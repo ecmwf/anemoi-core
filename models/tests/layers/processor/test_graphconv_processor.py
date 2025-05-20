@@ -28,7 +28,7 @@ class GNNProcessorInit:
     src_grid_size: int = 0
     dst_grid_size: int = 0
     cpu_offload: bool = False
-    layer_kernels = load_layer_kernels(instance=False)
+    layer_kernels = load_layer_kernels()
 
 
 class TestGNNProcessor:

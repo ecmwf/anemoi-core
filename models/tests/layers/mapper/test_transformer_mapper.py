@@ -34,7 +34,7 @@ class TestTransformerBaseMapper:
                 "Linear": {"_target_": "torch.nn.Linear", "bias": False},
             }
         )
-        return load_layer_kernels(kernel_config, instance=False)
+        return load_layer_kernels(kernel_config)
 
     @pytest.fixture
     def mapper_init(self, layer_kernels):

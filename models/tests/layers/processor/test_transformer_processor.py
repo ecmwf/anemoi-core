@@ -30,7 +30,7 @@ class TransformerProcessorConfig:
     window_size: int = 10
     qk_norm: bool = True
     cpu_offload: bool = False
-    layer_kernels = load_layer_kernels(instance=False)
+    layer_kernels = load_layer_kernels()
 
 
 @pytest.fixture

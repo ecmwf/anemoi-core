@@ -69,7 +69,6 @@ class TransformerProcessorBlock(BaseBlock):
 
     def __init__(
         self,
-        *,
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
@@ -79,7 +78,7 @@ class TransformerProcessorBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
-        use_alibi_slopes: bool = False,
+        use_alibi_slopes: bool = None,
         use_rotary_embeddings: bool = False,
     ):
         super().__init__()
@@ -133,7 +132,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
 
     def __init__(
         self,
-        *,
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
@@ -142,8 +140,8 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
-        softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
+        softcap: float = None,
+        use_alibi_slopes: bool = None,
         use_rotary_embeddings: bool = False,
     ):
         super().__init__(
@@ -200,13 +198,12 @@ class GraphConvBaseBlock(BaseBlock):
 
     def __init__(
         self,
-        *,
         in_channels: int,
         out_channels: int,
-        num_chunks: int,
+        layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
         update_src_nodes: bool = True,
-        layer_kernels: DotDict,
+        num_chunks: int = 1,
         **kwargs,
     ) -> None:
         """Initialize GNNBlock.
@@ -264,13 +261,12 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
 
     def __ini__(
         self,
-        *,
         in_channels: int,
         out_channels: int,
-        num_chunks: int,
+        layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
         update_src_nodes: bool = False,
-        layer_kernels: DotDict,
+        num_chunks: int = 1,
         **kwargs,
     ):
         super().__init__(
@@ -387,17 +383,16 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
     def __init__(
         self,
-        *,
         in_channels: int,
         hidden_dim: int,
         out_channels: int,
-        num_heads: int,
-        num_chunks: int,
         edge_dim: int,
+        layer_kernels: DotDict,
+        num_heads: int = 16,
         bias: bool = True,
         qk_norm: bool = False,
+        num_chunks: int = 1,
         update_src_nodes: bool = False,
-        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -580,7 +575,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
     def __init__(
         self,
-        *,
         in_channels: int,
         hidden_dim: int,
         out_channels: int,
@@ -716,17 +710,16 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
 
     def __init__(
         self,
-        *,
         in_channels: int,
         hidden_dim: int,
         out_channels: int,
-        num_chunks: int,
-        num_heads: int,
         edge_dim: int,
+        layer_kernels: DotDict,
+        num_heads: int = 16,
         bias: bool = True,
         qk_norm: bool = False,
+        num_chunks: int = 1,
         update_src_nodes: bool = False,
-        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.

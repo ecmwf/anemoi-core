@@ -32,7 +32,7 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
-def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:
+def load_layer_kernels(kernel_config: Optional[DotDict] = None) -> DotDict["str" : nn.Module]:
     """Load layer kernels from the config.
 
     This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.
@@ -41,10 +41,6 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
     ----------
     kernel_config : DotDict
         Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear", "_partial_": True}}
-    instance : bool
-        If True, instantiate the kernels. If False, return the config.
-        This is useful for testing purposes.
-        Defaults to True.
 
     Returns
     -------
@@ -75,16 +71,13 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
 
     # Loop through all kernels in the layer_kernels config entry and try import them
     for name, kernel_entry in {**default_kernels, **kernel_config}.items():
-        if instance:
-            try:
-                layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
-            except InstantiationException:
-                LOGGER.info(
-                    f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
-                )
-                raise InstantiationException
-            else:
-                LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
+        try:
+            layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
+        except InstantiationException:
+            LOGGER.info(
+                f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+            )
+            raise InstantiationException
         else:
-            layer_kernels[name] = kernel_entry
+            LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
     return layer_kernels

@@ -26,7 +26,7 @@ class BaseMapperConfig:
     out_channels_dst: int = 5
     cpu_offload: bool = False
     trainable_size: int = 6
-    layer_kernels = load_layer_kernels(instance=False)
+    layer_kernels = load_layer_kernels()
 
 
 class TestBaseMapper:

@@ -20,7 +20,7 @@ class ProcessorInit:
     num_layers = 4
     num_channels = 128
     num_chunks = 2
-    layer_kernels = load_layer_kernels(instance=False)
+    layer_kernels = load_layer_kernels()
     cpu_offload = False
 
 
