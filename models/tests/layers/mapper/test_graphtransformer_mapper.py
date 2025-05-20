@@ -34,7 +34,7 @@ class MapperConfig:
     dst_grid_size: int = 0
     qk_norm: bool = True
     cpu_offload: bool = False
-    layer_kernels = load_layer_kernels()
+    layer_kernels = load_layer_kernels(instance=False)
 
 
 class TestGraphTransformerBaseMapper:

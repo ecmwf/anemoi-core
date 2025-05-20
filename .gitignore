@@ -135,3 +135,6 @@ _version.py
 *.to_upload
 tempCodeRunnerFile.python
 Untitled-*.py
+.envrc.local
+.requirements-installed
+.dev-installed

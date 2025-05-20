@@ -106,7 +106,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
             Normalize query and key, by default False
         dropout_p: float
             Dropout probability used for multi-head self attention, default 0.0
-        attention_implementation: str, optional
+        attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
         softcap : float, optional

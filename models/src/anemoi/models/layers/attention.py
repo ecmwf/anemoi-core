@@ -77,7 +77,7 @@ class MultiHeadSelfAttention(nn.Module):
             window_size, by default None
         dropout_p : float, optional
             dropout probability, by default 0.0
-        attention_implementation: str, optional
+        attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
         softcap : float, optional
