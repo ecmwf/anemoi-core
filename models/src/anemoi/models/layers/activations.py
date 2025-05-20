@@ -53,52 +53,48 @@ class GLU(nn.Module):
     Equation: GLU(x, W, V, b, c) = σ(xW + b) ⊗ (xV + c)
 
     The GLU layer can be initialised with a variation activation function
-    that is applied to the weights.
+    that is applied to the weights. You can pass in activation functions
+    like nn.SiLU(), nn.ReLU(), etc. The default is nn.Sigmoid().
+
+    In Hydra this can be initialised with the following config:
+
+    ```yaml
+    Activation:
+      _target_: anemoi.models.layers.activations.GLU
+      bias: False
+      variation:
+        _target_: torch.nn.ReLU6
+    ```
+
+    Note: In some preliminary tests, unbounded activations like ReLU, GeLU, or
+    Swish but even LogSigmoid, have shown to numerically explode when used to
+    train from scratch.
 
     Parameters
     ----------
     variation : nn.Module, optional
-        The activation function to apply to the weights, by default
-        nn.Sigmoid().
+        The activation function to apply to the weights, by default nn.Sigmoid().
+    bias : bool
+        Whether to apply a bias term in the linear layers, by default True.
     """
 
-    def __init__(self, variation: Optional[nn.Module] = None):
+    def __init__(self, variation: Optional[nn.Module] = None, bias: bool = True):
         super().__init__()
         self.dim = self.W = self.V = None
+        self.bias = bias
         self.variation = variation if variation is not None else nn.Sigmoid()
 
     def _post_init(self, x: torch.Tensor) -> None:
         """Initialize the weights and biases."""
         self.dim = x.shape[-1]
-        self.W = nn.Linear(self.dim, self.dim).to(x.device)
-        self.V = nn.Linear(self.dim, self.dim).to(x.device)
+        self.W = nn.Linear(self.dim, self.dim, bias=self.bias, device=x.device)
+        self.V = nn.Linear(self.dim, self.dim, bias=self.bias, device=x.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.dim is None:
             self._post_init(x)
 
         return self.variation(self.W(x)) * self.V(x)
-
-
-class SwiGLU(GLU):
-    """Swish GLU layer."""
-
-    def __init__(self):
-        super().__init__(nn.SiLU())
-
-
-class ReGLU(GLU):
-    """ReLU GLU layer."""
-
-    def __init__(self):
-        super().__init__(nn.ReLU())
-
-
-class GeGLU(GLU):
-    """GELU GLU layer."""
-
-    def __init__(self):
-        super().__init__(nn.GELU())
 
 
 class Sine(nn.Module):
