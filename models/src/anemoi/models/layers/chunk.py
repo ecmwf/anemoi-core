@@ -187,8 +187,8 @@ class GNNProcessorChunk(BaseProcessorChunk):
 
         self.build_blocks(
             GraphConvProcessorBlock,
-            num_channels,
-            num_channels,
+            in_channels=num_channels,
+            out_channels=num_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
         )

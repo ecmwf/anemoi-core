@@ -57,14 +57,14 @@ def mapper_block(init):
     ) = init
 
     return TransformerMapperBlock(
-        num_channels,
-        hidden_dim,
-        num_heads,
-        window_size,
-        layer_kernels,
-        dropout_p,
-        qk_norm,
-        attention_implementation,
+        num_channels=num_channels,
+        hidden_dim=hidden_dim,
+        num_heads=num_heads,
+        window_size=window_size,
+        layer_kernels=layer_kernels,
+        dropout_p=dropout_p,
+        qk_norm=qk_norm,
+        attention_implementation=attention_implementation,
     )
 
 
