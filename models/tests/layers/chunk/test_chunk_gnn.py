@@ -22,18 +22,16 @@ class TestGNNProcessorChunk:
         num_channels = 10
         num_layers = 3
         mlp_extra_layers = 3
-        num_chunks = 1
         edge_dim = None
         layer_kernels = load_layer_kernels()
-        return num_channels, num_layers, num_chunks, layer_kernels, mlp_extra_layers, edge_dim
+        return num_channels, num_layers, layer_kernels, mlp_extra_layers, edge_dim
 
     @pytest.fixture
     def processor_chunk(self, init):
-        num_channels, num_layers, num_chunks, layer_kernels, mlp_extra_layers, edge_dim = init
+        num_channels, num_layers, layer_kernels, mlp_extra_layers, edge_dim = init
         return GNNProcessorChunk(
             num_channels=num_channels,
             num_layers=num_layers,
-            num_chunks=num_chunks,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,

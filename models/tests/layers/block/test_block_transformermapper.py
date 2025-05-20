@@ -102,10 +102,10 @@ def test_forward_output(
     num_channels = num_heads * factor_attention_heads
     layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     block = TransformerMapperBlock(
-        num_channels,
-        hidden_dim,
-        num_heads,
-        window_size,
+        num_channels=num_channels,
+        hidden_dim=hidden_dim,
+        num_heads=num_heads,
+        window_size=window_size,
         dropout_p=dropout_p,
         layer_kernels=layer_kernels,
         attention_implementation="scaled_dot_product_attention",
