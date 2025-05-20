@@ -23,14 +23,13 @@ class MLP(nn.Module):
 
     def __init__(
         self,
-        *,
         in_features: int,
         hidden_dim: int,
         out_features: int,
+        layer_kernels: DotDict,
         n_extra_layers: int = 0,
         final_activation: bool = False,
         layer_norm: bool = True,
-        layer_kernels: DotDict,
     ) -> nn.Module:
         """Generate a multi-layer perceptron.
 
