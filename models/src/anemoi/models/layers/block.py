@@ -233,10 +233,10 @@ class GraphConvBaseBlock(BaseBlock):
         self.num_chunks = num_chunks
 
         self.node_mlp = MLP(
-            2 * in_channels,
-            out_channels,
-            out_channels,
-            layer_kernels,
+            in_features=2 * in_channels,
+            hidden_dim=out_channels,
+            out_features=out_channels,
+            layer_kernels=layer_kernels,
             n_extra_layers=mlp_extra_layers,
         )
 
@@ -324,10 +324,10 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         *,
         in_channels: int,
         out_channels: int,
-        layer_kernels: DotDict,
+        num_chunks: int,
         mlp_extra_layers: int = 0,
         update_src_nodes: bool = True,
-        num_chunks: int = 1,
+        layer_kernels: DotDict,
         **kwargs,
     ):
         super().__init__(
@@ -408,19 +408,21 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Number of input channels.
         out_channels : int
             Number of output channels.
-        edge_dim : int,
-            Edge dimension
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
-            Defined in config/models/<model>.yaml
         num_heads : int,
             Number of heads
+        num_chunks : int,
+            Number of chunks
+        edge_dim : int,
+            Edge dimension
         bias : bool, by default True,
             Add bias or not
         qk_norm : bool, by default False
             Normalize query and key
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(**kwargs)
 

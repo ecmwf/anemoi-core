@@ -23,13 +23,14 @@ class MLP(nn.Module):
 
     def __init__(
         self,
+        *,
         in_features: int,
         hidden_dim: int,
         out_features: int,
-        layer_kernels: DotDict,
         n_extra_layers: int = 0,
         final_activation: bool = False,
         layer_norm: bool = True,
+        layer_kernels: DotDict,
     ) -> nn.Module:
         """Generate a multi-layer perceptron.
 
@@ -41,15 +42,15 @@ class MLP(nn.Module):
             Hidden dimensions
         out_features : int
             Number of output features
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
-            Defined in config/models/<model>.yaml
         n_extra_layers : int, optional
             Number of extra layers in MLP, by default 0
         final_activation : bool, optional
             Whether to apply a final activation function to last layer, by default True
         layer_norm : bool, optional
             Whether to apply layer norm after activation, by default True
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
 
         Returns
         -------
