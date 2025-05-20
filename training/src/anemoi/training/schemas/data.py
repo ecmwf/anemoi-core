@@ -47,21 +47,30 @@ class ImputerSchema(BaseModel):
     "Variables not to be imputed."
 
 
+class RemapperSchema(BaseModel):
+    default: str = Field(literals=["none", "cos_sin"])
+    "Remapper default method to apply."
+    none: Union[list[str], None] = Field(default_factory=list)
+    "Variables not to be remapped."
+
+
 class PreprocessorTarget(str, Enum):
     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
+    remapper = "anemoi.models.preprocessing.remapper.Remapper"
 
 
 target_to_schema = {
     PreprocessorTarget.normalizer: NormalizerSchema,
     PreprocessorTarget.imputer: ImputerSchema,
+    PreprocessorTarget.remapper: RemapperSchema,
 }
 
 
 class PreprocessorSchema(BaseModel):
     target_: PreprocessorTarget = Field(..., alias="_target_")
-    "Processor object from anemoi.models.preprocessing.[normalizer|imputer]."
-    config: Union[NormalizerSchema, ImputerSchema]
+    "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
+    config: Union[NormalizerSchema, ImputerSchema, RemapperSchema]
     "Target schema containing processor methods."
 
     @model_validator(mode="after")
