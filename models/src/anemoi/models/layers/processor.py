@@ -125,7 +125,7 @@ class TransformerProcessor(BaseProcessor):
             Normalize query and key, by default False
         dropout_p: float, optional
             Dropout probability used for multi-head self attention, default 0.1
-        attention_implementation: str, optional
+        attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
         softcap : float, optional
