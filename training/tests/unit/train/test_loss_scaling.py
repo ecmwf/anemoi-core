@@ -177,42 +177,6 @@ expected_stdev_tendency_scaling = torch.Tensor(
         1 * 1,  # q (diagnostic)
         1 * 0.1,  # z (diagnostic)
         (1 / 8.6) * 100,  # other
-        1 * 1,  # d
-    ],
-)
-
-expected_var_tendency_scaling = torch.Tensor(
-    [
-        (10.0**2) / (5.0**2) * 0.5,  # y_50
-        (10.0**2) / (5.0**2) * 0.5,  # y_500
-        (10.0**2) / (5.0**2) * 0.5,  # y_850
-        1,  # q (diagnostic)
-        0.1,  # z (diagnostic)
-        (1**2) / (8.6**2) * 100,  # other
-        1 * 1,  # d
-    ],
-)
-
-expected_no_tendency_scaling = torch.Tensor(
-    [
-        1 * 0.5,  # y_50
-        1 * 0.5,  # y_500
-        1 * 0.5,  # y_850
-        1 * 1,  # q
-        1 * 0.1,  # z
-        1 * 100,  # other
-        1 * 1,  # d
-    ],
-)
-
-expected_stdev_tendency_scaling = torch.Tensor(
-    [
-        (10.0 / 5.0) * 0.5,  # y_50
-        (10.0 / 5.0) * 0.5,  # y_500
-        (10.0 / 5.0) * 0.5,  # y_850
-        1 * 1,  # q (diagnostic)
-        1 * 0.1,  # z (diagnostic)
-        (1 / 8.6) * 100,  # other
         1 * 2.0,  # d
     ],
 )
