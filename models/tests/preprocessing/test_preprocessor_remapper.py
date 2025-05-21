@@ -91,7 +91,7 @@ def test_unsupported_remapper():
     name_to_index = {"x": 0, "y": 1, "q": 2, "d": 3}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(KeyError):
         Remapper(
             config=config.data.remapper,
             data_indices=data_indices,
