@@ -12,6 +12,7 @@ import tempfile
 import numpy as np
 import pytest
 import torch
+import xarray as xr
 import yaml
 from torch_geometric.data import HeteroData
 
@@ -37,6 +38,30 @@ def mock_anemoi_dataset() -> MockAnemoiDataset:
     return MockAnemoiDataset(latitudes=coords[:, 0], longitudes=coords[:, 1])
 
 
+@pytest.fixture
+def mock_zarr_dataset_file(tmpdir) -> str:
+    lat_vals = np.linspace(-90, 90, 5)
+    lon_vals = np.linspace(0, 360, 5, endpoint=False)
+    lat, lon = np.meshgrid(lat_vals, lon_vals, indexing="ij")
+    data = np.random.randn(5, 5)
+
+    ds = xr.Dataset(
+        {
+            "variable": (
+                ["lat", "lon"],
+                data,
+            ),
+        },
+        coords={
+            "lat": (["x", "y"], lat),
+            "lon": (["x", "y"], lon),
+        },
+    )
+
+    fn = tmpdir / "tmp.zarr"
+    ds.to_zarr(fn, mode="w", consolidated=True)
+
+    return fn
 
 
 @pytest.fixture
