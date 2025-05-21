@@ -14,12 +14,15 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.nodes.attributes import CutOutMask
 
 
-def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cutout):
+def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_anemoi_dataset_cutout):
     """Test attribute builder for CutOutMask."""
     # Add dataset attribute required by CutOutMask
     graph_with_nodes["test_nodes"]["_dataset"] = {"cutout": None}
 
-    mocker.patch("anemoi.graphs.nodes.attributes.masks.open_dataset", return_value=mock_zarr_dataset_cutout)
+    mocker.patch(
+        "anemoi.graphs.nodes.attributes.masks.open_dataset",
+        return_value=mock_anemoi_dataset_cutout,
+    )
     mask = CutOutMask().compute(graph_with_nodes, "test_nodes")
 
     assert mask is not None
