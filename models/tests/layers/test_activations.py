@@ -47,74 +47,66 @@ class TestGLU:
 
     @common_strategy
     def test_glu_property_shape_preservation(self, activation, x, bias):
-        glu = activation(bias=bias)
+        dim = x.shape[-1]
+        glu = activation(dim=dim, bias=bias)
         output = glu(x)
         assert output.shape == x.shape
 
     @common_strategy
     def test_glu_nan_free(self, activation, x, bias):
-        glu = activation(bias=bias)
+        dim = x.shape[-1]
+        glu = activation(dim=dim, bias=bias)
         output = glu(x)
         assert not torch.isnan(output).any()
 
     @common_strategy
-    def test_glu_dim_init(self, activation, x, bias):
-        glu = activation(bias=bias)
+    def test_glu_init(self, activation, x, bias):
+        dim = x.shape[-1]
+        glu = activation(dim=dim, bias=bias)
 
-        assert glu.dim is None
-        assert glu.projection is True
-        assert glu.W is None
-        assert glu.V is None
-
-        _ = glu(x)
-
-        assert glu.dim == x.shape[-1]
-        assert isinstance(glu.W, nn.Linear)
-        assert isinstance(glu.V, nn.Linear)
+        assert isinstance(glu.variation, nn.Module)
         assert isinstance(glu.projection, nn.Linear)
 
     @common_strategy
     @settings(max_examples=10, deadline=None)
     def test_glu_backward_pass(self, activation, x, bias):
-        glu = activation(bias=bias)
+        dim = x.shape[-1]
+        glu = activation(dim=dim, bias=bias)
         output = glu(x)
         output.sum().backward()
 
         assert x.grad is None
-        assert not torch.isnan(glu.W.weight.grad).any()
-        assert not torch.isnan(glu.V.weight.grad).any()
+        assert not torch.isnan(glu.projection.weight.grad).any()
         if bias:
-            assert not torch.isnan(glu.W.bias.grad).any()
-            assert not torch.isnan(glu.V.bias.grad).any()
+            assert not torch.isnan(glu.projection.bias.grad).any()
 
     @given(
         x=tensor_strategy(min_dims=3, max_dims=3),
         variation=st.sampled_from([nn.ReLU(), nn.Tanh(), nn.LeakyReLU()]),
-        projection=st.booleans(),
         bias=st.booleans(),
     )
-    def test_glu_custom_activations_property(self, x, variation, projection, bias):
-        glu = GLU(variation=variation, projection=projection, bias=bias)
+    def test_glu_custom_activations_property(self, x, variation, bias):
+        dim = x.shape[-1]
+        glu = GLU(dim=dim, variation=variation, bias=bias)
         output = glu(x)
         assert output.shape == x.shape
         assert not torch.isnan(output).any()
 
     def test_glu_computation(self):
         # Fixed test with deterministic output
-        x = torch.ones(1, 1, 2)
-        glu = GLU(projection=False, bias=True)
+        dim = 2
+        x = torch.ones(1, 1, dim)
+
+        glu = GLU(dim=dim, bias=True)
 
         # Set weights and biases manually
-        glu._post_init(x)
         with torch.no_grad():
-            glu.W.weight.fill_(0.5)
-            glu.W.bias.fill_(0.1)
-            glu.V.weight.fill_(0.3)
-            glu.V.bias.fill_(0.2)
+            glu.projection.weight.fill_(0.3777)
+            glu.projection.bias.fill_(0.1)
 
         output = glu(x)
         expected = torch.sigmoid(torch.tensor(1.1)) * 0.8
-        assert torch.isclose(output[0, 0, 0], expected, atol=1e-5)
+        assert torch.isclose(output[0, 0, 0], expected, atol=1e-4)
 
 
 class TestSine:

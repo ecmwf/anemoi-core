@@ -62,49 +62,32 @@ class GLU(nn.Module):
     Activation:
       _target_: anemoi.models.layers.activations.GLU
       bias: False
+      dim: ${model.hidden_dim} # Or other dimension in your component.
       variation:
         _target_: torch.nn.ReLU6
     ```
 
-    Note: In some preliminary tests, unbounded activations like ReLU, GeLU, or
-    Swish but even LogSigmoid, have shown to numerically explode without using
-    the projection layer. Bounded activations like Sigmoid, Tanh, or ReLU6
-    seem to work well without the projection layer.
-
     Parameters
     ----------
+    dim : int
+        The size of the feature dimension (last in tensor).
     variation : nn.Module, optional
         The activation function to apply to the weights, by default nn.Sigmoid().
     bias : bool
         Whether to apply a bias term in the linear layers, by default True.
-    projection : bool
-        Whether to project the input tensor to a higher dimension, by default True.
     """
 
-    def __init__(self, *, variation: Optional[nn.Module] = None, bias: bool = True, projection: bool = True):
+    def __init__(self, *, dim: int, variation: Optional[nn.Module] = None, bias: bool = True):
         super().__init__()
-        self.bias, self.projection = bias, projection
-        self.dim = self.W = self.V = None
+
         self.variation = variation if variation is not None else nn.Sigmoid()
 
-    def _post_init(self, x: torch.Tensor) -> None:
-        """Initialize the weights and biases."""
-        self.dim = x.shape[-1]
-        if self.projection:
-            self.projection = nn.Linear(self.dim, self.dim * 2, bias=False, device=x.device)
-        self.V = nn.Linear(self.dim, self.dim, bias=self.bias, device=x.device)
-        self.W = nn.Linear(self.dim, self.dim, bias=self.bias, device=x.device)
+        self.projection = nn.Linear(dim, 2 * dim, bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.dim is None:
-            self._post_init(x)
+        x, gate = self.projection(x).chunk(2, dim=-1)
 
-        if self.projection:
-            x, gate = self.projection(x).chunk(2, dim=-1)
-        else:
-            gate = x
-
-        return self.variation(self.W(gate)) * self.V(x)
+        return self.variation(gate) * x
 
 
 class SwiGLU(GLU):
@@ -117,12 +100,14 @@ class SwiGLU(GLU):
 
     Parameters
     ----------
+    dim : int
+        The size of the feature dimension (last in tensor).
     bias : bool
         Whether to apply a bias term in the linear layers, by default True.
     """
 
-    def __init__(self, *, bias: bool = True):
-        super().__init__(variation=torch.nn.SiLU(), bias=bias, projection=True)
+    def __init__(self, *, dim: int, bias: bool = True):
+        super().__init__(variation=torch.nn.SiLU(), bias=bias, dim=dim)
 
 
 class GEGLU(GLU):
@@ -135,12 +120,14 @@ class GEGLU(GLU):
 
     Parameters
     ----------
+    dim : int
+        The size of the feature dimension (last in tensor).
     bias : bool
         Whether to apply a bias term in the linear layers, by default True.
     """
 
-    def __init__(self, *, bias: bool = True):
-        super().__init__(variation=torch.nn.GELU(), bias=bias, projection=True)
+    def __init__(self, *, dim: int, bias: bool = True):
+        super().__init__(variation=torch.nn.GELU(), bias=bias, dim=dim)
 
 
 class ReGLU(GLU):
@@ -153,12 +140,14 @@ class ReGLU(GLU):
 
     Parameters
     ----------
+    dim : int
+        The size of the feature dimension (last in tensor).
     bias : bool
         Whether to apply a bias term in the linear layers, by default True.
     """
 
-    def __init__(self, *, bias: bool = True):
-        super().__init__(variation=torch.nn.ReLU(), bias=bias, projection=True)
+    def __init__(self, *, dim: int, bias: bool = True):
+        super().__init__(variation=torch.nn.ReLU(), bias=bias, dim=dim)
 
 
 class Sine(nn.Module):

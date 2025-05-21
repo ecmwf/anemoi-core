@@ -78,7 +78,7 @@ class TransformerProcessorBlock(BaseBlock):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
-        softcap: float = None,
+        softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -217,15 +217,15 @@ class GraphConvBaseBlock(BaseBlock):
             Number of input channels.
         out_channels : int
             Number of output channels.
+        num_chunks : int
+            do message passing in X chunks
+        mlp_extra_layers : int
+            Extra layers in MLP, by default 0
+        update_src_nodes: bool
+            Update src if src and dst nodes are given, by default True
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        mlp_extra_layers : int, optional
-            Extra layers in MLP, by default 0
-        update_src_nodes: bool, by default True
-            Update src if src and dst nodes are given
-        num_chunks : int, by default 1
-            do message passing in X chunks
         """
         super().__init__(**kwargs)
 
@@ -272,7 +272,26 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         **kwargs,
-    ):
+    ) -> None:
+        """Initialize Graph Processor Block.
+
+        Parameters
+        ----------
+        in_channels : int
+            Number of input channels.
+        out_channels : int
+            Number of output channels.
+        num_chunks : int
+            Number of chunks
+        mlp_extra_layers : int
+            Extra layers in MLP, by default 0
+        update_src_nodes : bool
+            Update src if src and dst nodes are given, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+        kwargs : dict
+            Additional arguments for the base class.
+        """
         super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -329,7 +348,26 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
         **kwargs,
-    ):
+    ) -> None:
+        """Initialize GNN Mapper Block.
+
+        Parameters
+        ----------
+        in_channels : int
+            Number of input channels.
+        out_channels : int
+            Number of output channels.
+        num_chunks : int
+            Number of chunks
+        mlp_extra_layers : int, optional
+            Extra layers in MLP, by default 0
+        update_src_nodes : bool, optional
+            Update src if src and dst nodes are given, by default True
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+        kwargs : dict
+            Additional arguments for the base class.
+        """
         super().__init__(
             self,
             in_channels=in_channels,
@@ -586,13 +624,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         in_channels: int,
         hidden_dim: int,
         out_channels: int,
+        num_heads: int,
+        num_chunks: int,
         edge_dim: int,
-        layer_kernels: DotDict,
-        num_heads: int = 16,
         bias: bool = True,
         qk_norm: bool = False,
-        num_chunks: int = 1,
         update_src_nodes: bool = False,
+        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -601,21 +639,25 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         ----------
         in_channels : int
             Number of input channels.
+        hidden_dim : int
+            Hidden dimension
         out_channels : int
             Number of output channels.
+        num_heads : int,
+            Number of heads
+        num_chunks : int,
+            Number of chunks
         edge_dim : int,
             Edge dimension
+        bias : bool
+            Apply bias in layers, by default Tru
+        qk_norm: bool
+            Normalize query and key, by default False
+        update_src_nodes: bool
+            Update src if src and dst nodes are given, by default False
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        num_heads : int,
-            Number of heads
-        bias : bool, by default True,
-            Add bias or not
-        qk_norm: bool, optional
-            Normalize query and key, by default False
-        update_src_nodes: bool, by default False
-            Update src if src and dst nodes are given
         """
         super().__init__(
             in_channels=in_channels,
@@ -722,8 +764,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         in_channels: int,
         hidden_dim: int,
         out_channels: int,
-        num_chunks: int,
         num_heads: int,
+        num_chunks: int,
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
@@ -739,19 +781,21 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             Number of input channels.
         out_channels : int
             Number of output channels.
+        num_heads : int,
+            Number of heads
+        num_chunks : int,
+            Number of chunks
         edge_dim : int,
             Edge dimension
+        bias : bool
+            Add bias or not, by default True
+        qk_norm: bool
+            Normalize query and key, by default False
+        update_src_nodes: bool
+            Update src if src and dst nodes are given, by default False
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        num_heads : int,
-            Number of heads
-        bias : bool, by default True,
-            Add bias or not
-        qk_norm: bool, optional
-            Normalize query and key, by default False
-        update_src_nodes: bool, by default False
-            Update src if src and dst nodes are given
         """
 
         super().__init__(

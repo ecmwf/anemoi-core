@@ -40,7 +40,7 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
     Parameters
     ----------
     kernel_config : DotDict
-        Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear", "_partial_": True}}
+        Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear"}}
     instance : bool
         If True, instantiate the kernels. If False, return the config.
         This is useful for testing purposes.
