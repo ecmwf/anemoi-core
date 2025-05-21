@@ -180,6 +180,9 @@ model:
     num_chunks: 2
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
+    layer_kernels:
+      Activation:
+        _target_: torch.nn.GELU
   encoder:
     _target_: anemoi.models.layers.mapper.GNNForwardMapper
     trainable_size: ${model.trainable_parameters.data2hidden}
@@ -187,6 +190,9 @@ model:
     num_chunks: 1
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
+    layer_kernels:
+      Activation:
+        _target_: torch.nn.GELU
   decoder:
     _target_: anemoi.models.layers.mapper.GNNBackwardMapper
     trainable_size: ${model.trainable_parameters.hidden2data}
@@ -194,6 +200,9 @@ model:
     num_chunks: 3
     mlp_extra_layers: 0
     cpu_offload: ${model.cpu_offload}
+    layer_kernels:
+      Activation:
+        _target_: torch.nn.GELU
   attributes:
     edges:
     - edge_length
