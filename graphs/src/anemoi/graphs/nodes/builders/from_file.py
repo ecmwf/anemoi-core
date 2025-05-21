@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import xarray as xr
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
@@ -47,7 +48,9 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 
     def __init__(self, dataset: DictConfig, name: str) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
+        self.dataset = (
+            dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
+        )
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
@@ -66,7 +69,9 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 class ZarrDatasetNodes(AnemoiDatasetNodes):
     def __init__(self, dataset: DictConfig, name: str) -> None:
         super().__init__(dataset, name)
-        LOGGER.warning(f"{self.__class__.__name__} is now deprecated in favour of AnemoiDatasetNodes.")
+        LOGGER.warning(
+            f"{self.__class__.__name__} is now deprecated in favour of AnemoiDatasetNodes."
+        )
 
 
 class TextNodes(BaseNodeBuilder):
@@ -82,7 +87,9 @@ class TextNodes(BaseNodeBuilder):
         The index of the latitude in the dataset.
     """
 
-    def __init__(self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
+    def __init__(
+        self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1
+    ) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset
         self.idx_lon = idx_lon
@@ -125,7 +132,13 @@ class NPZFileNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, npz_file: str, name: str, lat_key: str = "latitudes", lon_key: str = "longitudes") -> None:
+    def __init__(
+        self,
+        npz_file: str,
+        name: str,
+        lat_key: str = "latitudes",
+        lon_key: str = "longitudes",
+    ) -> None:
         """Initialize the NPZFileNodes builder.
 
         The builder suppose the grids are stored in files with the name `grid-{resolution}.npz`.
@@ -154,7 +167,9 @@ class NPZFileNodes(BaseNodeBuilder):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
-        assert self.npz_file.exists(), f"{self.__class__.__name__}.file does not exists: {self.npz_file}"
+        assert (
+            self.npz_file.exists()
+        ), f"{self.__class__.__name__}.file does not exists: {self.npz_file}"
         grid_data = np.load(self.npz_file)
         coords = self.reshape_coords(grid_data[self.lat_key], grid_data[self.lon_key])
         return coords
@@ -173,7 +188,9 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
     ) -> None:
-        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
+        self.area_mask_builder = KNNAreaMaskBuilder(
+            reference_node_name, margin_radius_km, mask_attr_name
+        )
 
         super().__init__(npz_file, name, lat_key, lon_key)
 
@@ -190,7 +207,62 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         )
         area_mask = self.area_mask_builder.get_mask(coords)
 
-        LOGGER.info("Dropping %d nodes from the processor mesh.", len(area_mask) - area_mask.sum())
+        LOGGER.info(
+            "Dropping %d nodes from the processor mesh.",
+            len(area_mask) - area_mask.sum(),
+        )
         coords = coords[area_mask]
 
         return coords
+
+
+class XArrayNodes(BaseNodeBuilder):
+    """
+    Class for creating graph nodes based on a CF-compliant file format that can be opened with xarray.
+
+    Parameters
+    ----------
+    dataset_path : str
+        Path to the CF-compliant file (e.g., NetCDF or zarr) containing the latitude and longitude variables.
+    name : str
+        Identifier to use for the nodes within the graph.
+    lat : str, optional
+        Variable name for latitude in the dataset (default: "lat").
+    lon : str, optional
+        Variable name for longitude in the dataset (default: "lon").
+
+    Methods
+    -------
+    get_coordinates()
+        Get the lat-lon coordinates of the nodes.
+    register_nodes(graph, name)
+        Register the nodes in the graph.
+    register_attributes(graph, name, config)
+        Register the attributes in the nodes of the graph specified.
+    update_graph(graph, name, attrs_config)
+        Update the graph with new nodes and attributes.
+    """
+
+    def __init__(
+        self, dataset: str, name: str, lat_name: str = "lat", lon_name: str = "lon"
+    ) -> None:
+
+        super().__init__(name)
+        self.dataset = dataset
+        self.lat_name = lat_name
+        self.lon_name = lon_name
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
+
+    def get_coordinates(self) -> torch.Tensor:
+        ds = xr.open_dataset(self.dataset)
+
+        assert (
+            self.lat_name in ds
+        ), f"Latitude variable '{self.lat_name}' not found in dataset."
+        assert (
+            self.lon_name in ds
+        ), f"Longitude variable '{self.lon_name}' not found in dataset."
+
+        lat = ds[self.lat_name].values.flatten()
+        lon = ds[self.lon_name].values.flatten()
+        return self.reshape_coords(lat, lon)
