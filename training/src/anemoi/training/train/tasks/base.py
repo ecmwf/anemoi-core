@@ -212,7 +212,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             scalers=self.scalers,
             data_indices=self.data_indices,
         )
-        print_variable_scaling(self.loss, data_indices)
+        self._scaling_values = print_variable_scaling(self.loss, data_indices)
 
         self.metrics = torch.nn.ModuleDict(
             {
@@ -761,3 +761,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+
+    def setup(self, stage: str) -> None:
+        """Lightning hook that is called after model is initialized but before training starts."""
+        # Log variable scaling on rank 0
+        # The two ifs should be separate, but are combined due to pre-commit hook
+        if stage == "fit" and self.trainer.is_global_zero:
+            self.logger.log_hyperparams({"variable_scaling": self._scaling_values})
