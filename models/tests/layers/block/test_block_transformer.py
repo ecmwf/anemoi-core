@@ -31,7 +31,14 @@ class TestTransformerProcessorBlock:
         factor_attention_heads=st.integers(min_value=1, max_value=10),
         hidden_dim=st.integers(min_value=1, max_value=100),
         num_heads=st.integers(min_value=1, max_value=10),
-        activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU", "anemoi.models.layers.activations.GLU"]),
+        activation=st.sampled_from(
+            [
+                "torch.nn.ReLU",
+                "torch.nn.GELU",
+                "anemoi.models.layers.activations.GLU",
+                "anemoi.models.layers.activations.SwiGLU",
+            ]
+        ),
         window_size=st.integers(min_value=1, max_value=512),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
         softcap=st.floats(min_value=0.0, max_value=1.0),
@@ -42,7 +49,12 @@ class TestTransformerProcessorBlock:
         self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p, softcap, qk_norm
     ):
         num_channels = num_heads * factor_attention_heads
-        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
+
+        kwargs = dict()
+        if "GLU" in activation:
+            kwargs["dim"] = num_channels
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, **kwargs}})
+
         block = TransformerProcessorBlock(
             num_channels=num_channels,
             hidden_dim=hidden_dim,
@@ -66,7 +78,14 @@ class TestTransformerProcessorBlock:
         factor_attention_heads=st.integers(min_value=1, max_value=10),
         hidden_dim=st.integers(min_value=1, max_value=100),
         num_heads=st.integers(min_value=1, max_value=10),
-        activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU", "anemoi.models.layers.activations.GLU"]),
+        activation=st.sampled_from(
+            [
+                "torch.nn.ReLU",
+                "torch.nn.GELU",
+                "anemoi.models.layers.activations.GLU",
+                "anemoi.models.layers.activations.SwiGLU",
+            ]
+        ),
         window_size=st.integers(min_value=1, max_value=512),
         shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
         batch_size=st.integers(min_value=1, max_value=40),
@@ -89,7 +108,12 @@ class TestTransformerProcessorBlock:
         qk_norm,
     ):
         num_channels = num_heads * factor_attention_heads
-        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
+
+        kwargs = dict()
+        if "GLU" in activation:
+            kwargs["dim"] = num_channels
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, **kwargs}})
+
         block = TransformerProcessorBlock(
             num_channels=num_channels,
             hidden_dim=hidden_dim,
@@ -113,7 +137,14 @@ class TestGraphConvProcessorBlock:
         in_channels=st.integers(min_value=1, max_value=100),
         out_channels=st.integers(min_value=1, max_value=100),
         mlp_extra_layers=st.integers(min_value=1, max_value=5),
-        activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU", "anemoi.models.layers.activations.GLU"]),
+        activation=st.sampled_from(
+            [
+                "torch.nn.ReLU",
+                "torch.nn.GELU",
+                "anemoi.models.layers.activations.GLU",
+                "anemoi.models.layers.activations.SwiGLU",
+            ]
+        ),
         update_src_nodes=st.booleans(),
         num_chunks=st.integers(min_value=1, max_value=10),
     )
@@ -127,7 +158,11 @@ class TestGraphConvProcessorBlock:
         update_src_nodes,
         num_chunks,
     ):
-        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
+        kwargs = dict()
+        if "GLU" in activation:
+            kwargs["dim"] = in_channels
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, **kwargs}})
+
         block = GraphConvProcessorBlock(
             in_channels=in_channels,
             out_channels=out_channels,

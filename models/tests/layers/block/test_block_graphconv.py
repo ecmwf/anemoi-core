@@ -24,7 +24,14 @@ class TestGraphConvProcessorBlock:
         in_channels=st.integers(min_value=1, max_value=100),
         out_channels=st.integers(min_value=1, max_value=100),
         mlp_extra_layers=st.integers(min_value=1, max_value=5),
-        activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU", "anemoi.models.layers.activations.GLU"]),
+        activation=st.sampled_from(
+            [
+                "torch.nn.ReLU",
+                "torch.nn.GELU",
+                "anemoi.models.layers.activations.GLU",
+                "anemoi.models.layers.activations.SwiGLU",
+            ]
+        ),
         update_src_nodes=st.booleans(),
         num_chunks=st.integers(min_value=1, max_value=10),
     )
@@ -38,10 +45,14 @@ class TestGraphConvProcessorBlock:
         update_src_nodes,
         num_chunks,
     ):
+        kwargs = dict()
+        if "GLU" in activation:
+            kwargs["dim"] = in_channels  # GLU requires the input dimension to be specified
         layer_kernels = load_layer_kernels(
             {
                 "Activation": {
                     "_target_": activation,
+                    **kwargs,
                 }
             }
         )
@@ -67,7 +78,14 @@ class TestGraphConvMapperBlock:
         in_channels=st.integers(min_value=1, max_value=100),
         out_channels=st.integers(min_value=1, max_value=100),
         mlp_extra_layers=st.integers(min_value=1, max_value=5),
-        activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU", "anemoi.models.layers.activations.GLU"]),
+        activation=st.sampled_from(
+            [
+                "torch.nn.ReLU",
+                "torch.nn.GELU",
+                "anemoi.models.layers.activations.GLU",
+                "anemoi.models.layers.activations.SwiGLU",
+            ]
+        ),
         update_src_nodes=st.booleans(),
         num_chunks=st.integers(min_value=1, max_value=10),
     )
@@ -81,13 +99,10 @@ class TestGraphConvMapperBlock:
         update_src_nodes,
         num_chunks,
     ):
-        layer_kernels = load_layer_kernels(
-            {
-                "Activation": {
-                    "_target_": activation,
-                }
-            }
-        )
+        kwargs = dict()
+        if "GLU" in activation:
+            kwargs["dim"] = in_channels
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, **kwargs}})
         block = GraphConvMapperBlock(
             in_channels=in_channels,
             out_channels=out_channels,
