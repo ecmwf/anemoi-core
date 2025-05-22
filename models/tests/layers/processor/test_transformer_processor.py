@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
 from dataclasses import dataclass
 
 import pytest
@@ -41,19 +42,7 @@ def transformer_processor_init():
 @pytest.fixture
 def transformer_processor(transformer_processor_init):
     return TransformerProcessor(
-        num_layers=transformer_processor_init.num_layers,
-        num_channels=transformer_processor_init.num_channels,
-        num_chunks=transformer_processor_init.num_chunks,
-        num_heads=transformer_processor_init.num_heads,
-        mlp_hidden_ratio=transformer_processor_init.mlp_hidden_ratio,
-        dropout_p=transformer_processor_init.dropout_p,
-        attention_implementation=transformer_processor_init.attention_implementation,
-        softcap=transformer_processor_init.softcap,
-        use_alibi_slopes=transformer_processor_init.use_alibi_slopes,
-        window_size=transformer_processor_init.window_size,
-        qk_norm=transformer_processor_init.qk_norm,
-        cpu_offload=transformer_processor_init.cpu_offload,
-        layer_kernels=transformer_processor_init.layer_kernels,
+        **asdict(transformer_processor_init),
     )
 
 

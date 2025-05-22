@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
 from dataclasses import dataclass
 
 import pytest
@@ -32,11 +33,7 @@ def processor_init():
 @pytest.fixture()
 def base_processor(processor_init):
     return BaseProcessor(
-        num_layers=processor_init.num_layers,
-        num_channels=processor_init.num_channels,
-        num_chunks=processor_init.num_chunks,
-        cpu_offload=processor_init.cpu_offload,
-        layer_kernels=processor_init.layer_kernels,
+        **asdict(processor_init),
     )
 
 

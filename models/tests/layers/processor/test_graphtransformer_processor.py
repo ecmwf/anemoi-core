@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
 from dataclasses import dataclass
 
 import pytest
@@ -55,19 +56,9 @@ class TestGraphTransformerProcessor:
     @pytest.fixture
     def graphtransformer_processor(self, graphtransformer_init, fake_graph):
         return GraphTransformerProcessor(
-            num_layers=graphtransformer_init.num_layers,
-            num_channels=graphtransformer_init.num_channels,
-            num_chunks=graphtransformer_init.num_chunks,
-            num_heads=graphtransformer_init.num_heads,
-            mlp_hidden_ratio=graphtransformer_init.mlp_hidden_ratio,
-            trainable_size=graphtransformer_init.trainable_size,
+            **asdict(graphtransformer_init),
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            src_grid_size=graphtransformer_init.src_grid_size,
-            dst_grid_size=graphtransformer_init.dst_grid_size,
-            qk_norm=graphtransformer_init.qk_norm,
-            cpu_offload=graphtransformer_init.cpu_offload,
-            layer_kernels=graphtransformer_init.layer_kernels,
         )
 
     def test_graphtransformer_processor_init(self, graphtransformer_processor, graphtransformer_init):

@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
 from dataclasses import dataclass
 
 import pytest
@@ -44,15 +45,9 @@ class TestBaseMapper:
     def mapper(self, mapper_init, fake_graph):
 
         return BaseMapper(
-            in_channels_src=mapper_init.in_channels_src,
-            in_channels_dst=mapper_init.in_channels_dst,
-            hidden_dim=mapper_init.hidden_dim,
-            layer_kernels=mapper_init.layer_kernels,
-            out_channels_dst=mapper_init.out_channels_dst,
-            cpu_offload=mapper_init.cpu_offload,
+            **asdict(mapper_init),
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            trainable_size=mapper_init.trainable_size,
         )
 
     @pytest.fixture

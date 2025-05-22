@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
 from dataclasses import dataclass
 
 import pytest
@@ -53,17 +54,9 @@ class TestGNNProcessor:
     @pytest.fixture
     def graphconv_processor(self, graphconv_init, fake_graph):
         return GNNProcessor(
-            num_channels=graphconv_init.num_channels,
-            num_layers=graphconv_init.num_layers,
-            num_chunks=graphconv_init.num_chunks,
-            mlp_extra_layers=graphconv_init.mlp_extra_layers,
-            trainable_size=graphconv_init.trainable_size,
+            **asdict(graphconv_init),
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            src_grid_size=graphconv_init.src_grid_size,
-            dst_grid_size=graphconv_init.dst_grid_size,
-            cpu_offload=graphconv_init.cpu_offload,
-            layer_kernels=graphconv_init.layer_kernels,
         )
 
     def test_graphconv_processor_init(self, graphconv_processor, graphconv_init):

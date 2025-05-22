@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
 from dataclasses import dataclass
 
 import pytest
@@ -49,19 +50,9 @@ class TestGNNBaseMapper:
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
         return GNNBaseMapper(
-            in_channels_src=mapper_init.in_channels_src,
-            in_channels_dst=mapper_init.in_channels_dst,
-            hidden_dim=mapper_init.hidden_dim,
-            out_channels_dst=mapper_init.out_channels_dst,
-            trainable_size=mapper_init.trainable_size,
-            num_chunks=mapper_init.num_chunks,
-            mlp_extra_layers=mapper_init.mlp_extra_layers,
-            src_grid_size=mapper_init.src_grid_size,
-            dst_grid_size=mapper_init.dst_grid_size,
+            **asdict(mapper_init),
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            cpu_offload=mapper_init.cpu_offload,
-            layer_kernels=mapper_init.layer_kernels,
         )
 
     @pytest.fixture
@@ -128,19 +119,9 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
         return GNNForwardMapper(
-            in_channels_src=mapper_init.in_channels_src,
-            in_channels_dst=mapper_init.in_channels_dst,
-            hidden_dim=mapper_init.hidden_dim,
-            out_channels_dst=mapper_init.out_channels_dst,
-            trainable_size=mapper_init.trainable_size,
-            num_chunks=mapper_init.num_chunks,
-            mlp_extra_layers=mapper_init.mlp_extra_layers,
-            src_grid_size=mapper_init.src_grid_size,
-            dst_grid_size=mapper_init.dst_grid_size,
+            **asdict(mapper_init),
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            cpu_offload=mapper_init.cpu_offload,
-            layer_kernels=mapper_init.layer_kernels,
         )
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
@@ -198,19 +179,9 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
     def mapper(self, mapper_init, fake_graph):
 
         return GNNBackwardMapper(
-            in_channels_src=mapper_init.in_channels_src,
-            in_channels_dst=mapper_init.in_channels_dst,
-            hidden_dim=mapper_init.hidden_dim,
-            out_channels_dst=mapper_init.out_channels_dst,
-            trainable_size=mapper_init.trainable_size,
-            num_chunks=mapper_init.num_chunks,
-            mlp_extra_layers=mapper_init.mlp_extra_layers,
-            src_grid_size=mapper_init.src_grid_size,
-            dst_grid_size=mapper_init.dst_grid_size,
+            **asdict(mapper_init),
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            cpu_offload=mapper_init.cpu_offload,
-            layer_kernels=mapper_init.layer_kernels,
         )
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
