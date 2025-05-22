@@ -9,20 +9,25 @@
 
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 
 from anemoi.models.layers.processor import BaseProcessor
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 @dataclass
 class ProcessorInit:
-    num_layers = 4
-    num_channels = 128
-    num_chunks = 2
-    layer_kernels = load_layer_kernels(instance=False)
-    cpu_offload = False
+    num_layers: int = 4
+    num_channels: int = 128
+    num_chunks: int = 2
+    layer_kernels: field(default_factory=DotDict) = None
+    cpu_offload: bool = False
+
+    def __post_init__(self):
+        self.layer_kernels = load_layer_kernels(instance=False)
 
 
 @pytest.fixture

@@ -9,6 +9,7 @@
 
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
@@ -17,6 +18,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 @dataclass
@@ -29,7 +31,10 @@ class GNNProcessorInit:
     src_grid_size: int = 0
     dst_grid_size: int = 0
     cpu_offload: bool = False
-    layer_kernels = load_layer_kernels(instance=False)
+    layer_kernels: field(default_factory=DotDict) = None
+
+    def __post_init__(self):
+        self.layer_kernels = load_layer_kernels(instance=False)
 
 
 class TestGNNProcessor:

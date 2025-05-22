@@ -9,6 +9,7 @@
 
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
@@ -17,6 +18,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.mapper import BaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 @dataclass
@@ -27,7 +29,10 @@ class BaseMapperConfig:
     out_channels_dst: int = 5
     cpu_offload: bool = False
     trainable_size: int = 6
-    layer_kernels = load_layer_kernels(instance=False)
+    layer_kernels: field(default_factory=DotDict) = None
+
+    def __post_init__(self):
+        self.layer_kernels = load_layer_kernels(instance=False)
 
 
 class TestBaseMapper:

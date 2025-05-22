@@ -9,6 +9,7 @@
 
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
@@ -19,6 +20,7 @@ from anemoi.models.layers.mapper import GNNBackwardMapper
 from anemoi.models.layers.mapper import GNNBaseMapper
 from anemoi.models.layers.mapper import GNNForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 @dataclass
@@ -33,7 +35,10 @@ class MapperConfig:
     src_grid_size: int = 0
     dst_grid_size: int = 0
     cpu_offload: bool = False
-    layer_kernels = load_layer_kernels(instance=False)
+    layer_kernels: field(default_factory=DotDict) = None
+
+    def __post_init__(self):
+        self.layer_kernels = load_layer_kernels(instance=False)
 
 
 class TestGNNBaseMapper:
