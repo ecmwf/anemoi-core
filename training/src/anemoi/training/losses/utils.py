@@ -8,18 +8,23 @@
 # nor does it submit to any jurisdiction.
 
 
-import logging
+from __future__ import annotations
 
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses.base import BaseLoss
+import logging
+from typing import TYPE_CHECKING
+
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> None:
+def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dict[str, float]:
     """
-    Log the final variable scaling for each variable in the model.
+    Log the final variable scaling for each variable in the model and return the scaling values.
 
     Parameters
     ----------
@@ -27,9 +32,20 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> Non
         Loss function to get the variable scaling from.
     data_indices : IndexCollection
         Index collection to get the variable names from.
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary mapping variable names to their scaling values.
     """
     variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).squeeze()
     log_text = "Final Variable Scaling: "
+    scaling_values = {}
+
     for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):
-        log_text += f"{name}: {variable_scaling[idx]:.4g}, "
+        value = float(variable_scaling[idx])
+        log_text += f"{name}: {value:.4g}, "
+        scaling_values[name] = value
+
     LOGGER.debug(log_text)
+    return scaling_values
