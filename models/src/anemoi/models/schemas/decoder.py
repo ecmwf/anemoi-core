@@ -8,8 +8,10 @@
 #
 
 from typing import Literal
+from typing import Union
 
 from pydantic import Field
+from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 
 from .common_components import GNNModelComponent
@@ -32,3 +34,20 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Normalize the query and key vectors. Default to False."
     initialise_data_extractor_zero: bool = Field(example=False)
     "Initialise the data extractor with zeros. Default to False."
+
+
+class TransformerDecoderSchema(TransformerModelComponent):
+    target_: Literal["anemoi.models.layers.mapper.TransformerBackwardMapper"] = Field(..., alias="_target_")
+    "Transformer Encoder object from anemoi.models.layers.mapper."
+    window_size: Union[NonNegativeInt, None] = Field(example=512)
+    "Attention window size along the longitude axis. Default to 512."
+    dropout_p: NonNegativeFloat = Field(example=0.0)
+    "Dropout probability used for multi-head self attention, default 0.0"
+    attention_implementation: str = Field(example="flash_attention")
+    "Attention implementation to use. Default to 'flash_attention'."
+    softcap: NonNegativeFloat = Field(example=0.0)
+    "Softcap value for attention. Default to 0.0."
+    use_alibi_slopes: bool = Field(example=False)
+    "Use alibi slopes for attention implementation. Default to False."
+    use_rotary_embeddings: bool = Field(example=False)
+    "Use rotary embeddings for attention implementation. Default to False."

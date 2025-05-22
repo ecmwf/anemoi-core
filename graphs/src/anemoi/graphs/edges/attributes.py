@@ -43,7 +43,19 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             raise TypeError(error_msg)
 
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
-        return source_nodes[self.node_attr_name].to(self.device), target_nodes[self.node_attr_name].to(self.device)
+        if self.node_attr_name in source_nodes:
+            source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
+        else:
+            source_nodes_data = None
+            LOGGER.warning("The attribute %s is not in the source nodes.", self.node_attr_name)
+
+        if self.node_attr_name in target_nodes:
+            target_nodes_data = target_nodes[self.node_attr_name].to(self.device)
+        else:
+            target_nodes_data = None
+            LOGGER.warning("The attribute %s is not in the target nodes.", self.node_attr_name)
+
+        return source_nodes_data, target_nodes_data
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
         x = self.subset_node_information(*x)
@@ -140,7 +152,11 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        return (x_j, x_i)[self.nodes_axis.value]
+        node_attr = (x_j, x_i)[self.nodes_axis.value]
+        assert (
+            node_attr is not None
+        ), f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
+        return node_attr
 
 
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
