@@ -144,7 +144,7 @@ def lam_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> Omeg
 
 @pytest.fixture
 def ensemble_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
-    overrides = ['model=graphtransformer_ens', 'graph=multi_scale']
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
         template = compose(config_name="ensemble_crps", overrides=overrides)
@@ -158,7 +158,7 @@ def ensemble_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf
 
 @pytest.fixture
 def ensemble_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
-    overrides = ['model=graphtransformer_ens', 'graph=multi_scale']
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
         template = compose(config_name="ensemble_crps", overrides=overrides)
