@@ -129,7 +129,7 @@ lint.select = [
   "C4",     # Comprehensions
   "C90",    # Mccabe complexity
   "COM",    # Commas
-  # "CPY",    # Copyright
+  "CPY",    # Copyright
   # "C",  # pylint convention
   "D", # pydocstyle
   # "DOC", # pydoclint
