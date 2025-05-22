@@ -35,8 +35,6 @@ class TestTransformerProcessorBlock:
             [
                 "torch.nn.ReLU",
                 "torch.nn.GELU",
-                "anemoi.models.layers.activations.GLU",
-                "anemoi.models.layers.activations.SwiGLU",
             ]
         ),
         window_size=st.integers(min_value=1, max_value=512),
@@ -50,10 +48,7 @@ class TestTransformerProcessorBlock:
     ):
         num_channels = num_heads * factor_attention_heads
 
-        kwargs = dict()
-        if "GLU" in activation:
-            kwargs["dim"] = num_channels
-        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, **kwargs}})
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
 
         block = TransformerProcessorBlock(
             num_channels=num_channels,
@@ -111,7 +106,7 @@ class TestTransformerProcessorBlock:
 
         kwargs = dict()
         if "GLU" in activation:
-            kwargs["dim"] = num_channels
+            kwargs["dim"] = hidden_dim
         layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, **kwargs}})
 
         block = TransformerProcessorBlock(
