@@ -13,6 +13,15 @@ noise_injector:
   noise_mlp_hidden_dim: 32
   inject_noise: True
 
+layer_kernels:
+  LayerNorm:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
   trainable_size: ${model.trainable_parameters.hidden2hidden}
@@ -33,12 +42,15 @@ processor:
       #Any arguments to your chosen function go here
     Linear:
       _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU
     QueryNorm:
       _target_: anemoi.models.layers.normalization.AutocastLayerNorm
       bias: False
     KeyNorm:
       _target_: anemoi.models.layers.normalization.AutocastLayerNorm
       bias: False
+
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
@@ -48,8 +60,7 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
-
-
+  layer_kernels: ${model.layer_kernels}
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -61,8 +72,7 @@ decoder:
   initialise_data_extractor_zero: True
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
-
-
+  layer_kernels: ${model.layer_kernels}
 
 trainable_parameters:
   data: 8
@@ -70,7 +80,6 @@ trainable_parameters:
   data2hidden: 8
   hidden2data: 8
   hidden2hidden: 8 # GNN and GraphTransformer Processor only
-
 
 attributes:
   edges:

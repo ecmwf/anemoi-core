@@ -1,10 +1,17 @@
 num_channels: 512
 cpu_offload: False
-output_mask:
-  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
+
+layer_kernels:
+  LayerNorm:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
 
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor
@@ -14,14 +21,7 @@ processor:
   num_chunks: 2
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
-  layer_kernels:
-    LayerNorm:
-      # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: torch.nn.GELU
+  layer_kernels: ${model.layer_kernels}
 
 encoder:
   _target_: anemoi.models.layers.mapper.GNNForwardMapper
@@ -30,14 +30,7 @@ encoder:
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
-  layer_kernels:
-    LayerNorm:
-      # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: torch.nn.GELU
+  layer_kernels: ${model.layer_kernels}
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
@@ -46,14 +39,10 @@ decoder:
   num_chunks: 1
   mlp_extra_layers: 0
   cpu_offload: ${model.cpu_offload}
-  layer_kernels:
-    LayerNorm:
-      # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: torch.nn.GELU
+  layer_kernels: ${model.layer_kernels}
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 
 trainable_parameters:

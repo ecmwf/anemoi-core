@@ -1,10 +1,17 @@
 num_channels: 1024
 cpu_offload: False
-output_mask:
-  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
+
+layer_kernels:
+  LayerNorm:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
 
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
@@ -16,7 +23,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
-  # LayerKernels are optional. If not specified, the default are pytorch.nn.LayerNorm and torch.nn.Linear.
+  layer_kernels: ${model.layer_kernels}
   # TODO: Add to documentation: The query and key norms need to be autocast layer norms if flash attention is used.
 
 encoder:
@@ -28,6 +35,7 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
 
 
 decoder:
@@ -40,7 +48,10 @@ decoder:
   initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
 
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
   data: 8

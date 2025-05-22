@@ -1,11 +1,17 @@
 num_channels: 1024
 cpu_offload: False
-output_mask:
-  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
 
+layer_kernels:
+  LayerNorm:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
@@ -21,7 +27,7 @@ processor:
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   use_rotary_embeddings: False
-
+  layer_kernels: ${model.layer_kernels}
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -32,7 +38,7 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
-
+  layer_kernels: ${model.layer_kernels}
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -44,14 +50,16 @@ decoder:
   initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
 
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
   data: 8
   hidden: 8
   data2hidden: 8
   hidden2data: 8
-
 
 attributes:
   edges:
