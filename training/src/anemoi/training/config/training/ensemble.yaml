@@ -67,7 +67,7 @@ loss_gradient_scaling: False
 # loss function for the model
 training_loss:
   # loss class to initialise, can be anything subclassing torch.nn.Module
-  _target_: anemoi.training.losses.AlmostFairKernelCRPS
+  _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
   # Scalers to include in loss calculation
   # A selection of available scalers are listed in training/scalers.
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
@@ -85,7 +85,7 @@ training_loss:
 validation_metrics:
   # loss class to initialise, can be anything subclassing torch.nn.Module
   fkcrps:
-    _target_: anemoi.training.losses.AlmostFairKernelCRPS
+    _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
     scalers: []
     ignore_nans: False
     alpha: 1.0

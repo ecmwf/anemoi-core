@@ -267,7 +267,7 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = Union[BaseLossSchema, HuberLossSchema, CombinedLossSchema]
+LossSchemas = Union[BaseLossSchema, HuberLossSchema, CombinedLossSchema, AlmostFairKernelCRPSSchema, KernelCRPSSchema]
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
