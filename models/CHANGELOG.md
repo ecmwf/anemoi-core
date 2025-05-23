@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.1](https://github.com/ecmwf/anemoi-core/compare/models-0.6.0...models-0.6.1) (2025-05-23)
+
+
+### Features
+
+* transformer mapper ([#179](https://github.com/ecmwf/anemoi-core/issues/179)) ([2cea7db](https://github.com/ecmwf/anemoi-core/commit/2cea7db51d5c5ef63bb4b9c266deb05fb2acf66f))
+
 ## [0.6.0](https://github.com/ecmwf/anemoi-core/compare/models-0.5.1...models-0.6.0) (2025-05-15)
 
 
