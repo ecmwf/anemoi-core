@@ -31,7 +31,9 @@ class GraphInterpolator(GraphForecaster):
         *,
         config: DictConfig,
         graph_data: HeteroData,
+        truncation_data: dict,
         statistics: dict,
+        statistics_tendencies: dict,
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
@@ -57,7 +59,9 @@ class GraphInterpolator(GraphForecaster):
         super().__init__(
             config=config,
             graph_data=graph_data,
+            truncation_data=truncation_data,
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
@@ -92,10 +96,13 @@ class GraphInterpolator(GraphForecaster):
         metrics = {}
         y_preds = []
 
+        # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
 
-        if not self.updated_loss_mask:
-            self.training_weights_for_imputed_variables(batch)
+        # Delayed scalers need to be initialized after the pre-processors once
+        if self.is_first_step:
+            self.define_delayed_scalers()
+            self.is_first_step = False
 
         x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
             ...,
