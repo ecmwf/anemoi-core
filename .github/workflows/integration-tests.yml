@@ -20,7 +20,7 @@ jobs:
 
   notify-team:
     needs: integration_tests
-    if: failure()
+    if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Add failure comment
