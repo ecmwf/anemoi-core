@@ -252,7 +252,9 @@ class SDPAAttentionWrapper(nn.Module):
         if window_size is not None and (self.mask is None or tuple(self.mask.shape) != (sequence_len, sequence_len)):
             self.update_mask(sequence_len, window_size=window_size, device=query.device)
 
-        with torch.nn.attention.sdpa_kernel(backends=[torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel(
+            backends=[torch.nn.attention.SDPBackend.FLASH_ATTENTION, torch.nn.attention.SDPBackend.MATH]
+        ):
             out = self.attention(
                 query,
                 key,
