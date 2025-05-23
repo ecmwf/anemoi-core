@@ -207,8 +207,7 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
 
 
 class XArrayNodes(BaseNodeBuilder):
-    """
-    Class for creating graph nodes based on a CF-compliant file format that can be opened with xarray.
+    """Class for creating graph nodes based on a CF-compliant file format that can be opened with xarray.
 
     Parameters
     ----------

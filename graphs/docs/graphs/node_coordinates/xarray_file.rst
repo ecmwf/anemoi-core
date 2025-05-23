@@ -1,6 +1,6 @@
-#################
+##################
  From XArray file
-#################
+##################
 
 To define the `node coordinates` based on a XArray file, you can use the
 following YAML configuration:
@@ -15,6 +15,6 @@ following YAML configuration:
          lat_key: latitudes
          lon_key: longitudes
 
-where `my_grid` is the path to the xarray compatible file and `lat_key` and `lon_key`
-are optional arguments with the key names of the latitude and longitude
-arrays.
+where `my_grid` is the path to the xarray compatible file and `lat_key`
+and `lon_key` are optional arguments with the key names of the latitude
+and longitude arrays.
