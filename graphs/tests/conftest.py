@@ -69,9 +69,7 @@ def mock_anemoi_dataset_cutout() -> MockAnemoiDataset:
     """Mock zarr dataset with nodes."""
     coords = 2 * torch.pi * np.array([[lat, lon] for lat in lats for lon in lons])
     grids = int(0.3 * len(coords)), len(coords) - int(0.3 * len(coords))
-    return MockAnemoiDataset(
-        latitudes=coords[:, 0], longitudes=coords[:, 1], grids=grids
-    )
+    return MockAnemoiDataset(latitudes=coords[:, 0], longitudes=coords[:, 1], grids=grids)
 
 
 @pytest.fixture
@@ -95,9 +93,7 @@ def graph_with_nodes() -> HeteroData:
     graph = HeteroData()
     graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
     graph["test_nodes"].mask = torch.tensor([True] * len(coords)).unsqueeze(-1)
-    graph["test_nodes"].mask2 = torch.tensor(
-        [True] * (len(coords) - 2) + [False] * 2
-    ).unsqueeze(-1)
+    graph["test_nodes"].mask2 = torch.tensor([True] * (len(coords) - 2) + [False] * 2).unsqueeze(-1)
     graph["test_nodes"].interior_mask = torch.tensor(
         [
             False,
@@ -122,12 +118,8 @@ def graph_with_nodes() -> HeteroData:
 def graph_with_isolated_nodes() -> HeteroData:
     graph = HeteroData()
     graph["test_nodes"].x = torch.tensor([[1], [2], [3], [4], [5], [6]])
-    graph["test_nodes"]["mask_attr"] = torch.tensor(
-        [[1], [1], [1], [0], [0], [0]], dtype=torch.bool
-    )
-    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor(
-        [[2, 3, 4], [1, 2, 3]]
-    )
+    graph["test_nodes"]["mask_attr"] = torch.tensor([[1], [1], [1], [0], [0], [0]], dtype=torch.bool)
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[2, 3, 4], [1, 2, 3]])
     return graph
 
 
@@ -138,9 +130,7 @@ def graph_nodes_and_edges() -> HeteroData:
     graph = HeteroData()
     graph["test_nodes"].x = 2 * torch.pi * torch.tensor(coords)
     graph["test_nodes"].mask = torch.tensor([True] * len(coords)).unsqueeze(-1)
-    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor(
-        [[3, 1, 2, 0], [2, 0, 1, 3]]
-    )
+    graph[("test_nodes", "to", "test_nodes")].edge_index = torch.tensor([[3, 1, 2, 0], [2, 0, 1, 3]])
     graph[("test_nodes", "to", "test_nodes")].edge_attr = (
         10 * graph[("test_nodes", "to", "test_nodes")].edge_index[0][:, None]
     )
@@ -151,15 +141,9 @@ def graph_nodes_and_edges() -> HeteroData:
 def graph_long_and_short_edges() -> HeteroData:
     """Graph with a pair of short (800km) and a pair of long (20000km) edges."""
     graph = HeteroData()
-    graph["test_nodes"].x = (
-        2 * torch.pi * torch.tensor([[-0.01, 0], [0.01, 0], [-0.01, 0.5], [0.01, 0.5]])
-    )
-    graph["test_nodes"]["southern_hemisphere_mask"] = torch.tensor(
-        [[1], [0], [1], [0]], dtype=torch.bool
-    )
-    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor(
-        [[0, 0, 1, 3], [1, 3, 2, 2]]
-    )
+    graph["test_nodes"].x = 2 * torch.pi * torch.tensor([[-0.01, 0], [0.01, 0], [-0.01, 0.5], [0.01, 0.5]])
+    graph["test_nodes"]["southern_hemisphere_mask"] = torch.tensor([[1], [0], [1], [0]], dtype=torch.bool)
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[0, 0, 1, 3], [1, 3, 2, 2]])
     return graph
 
 
@@ -186,12 +170,8 @@ def config_file(tmp_path) -> tuple[str, str]:
                     },
                 ],
                 "attributes": {
-                    "dist_norm": {
-                        "_target_": "anemoi.graphs.edges.attributes.EdgeLength"
-                    },
-                    "edge_dirs": {
-                        "_target_": "anemoi.graphs.edges.attributes.EdgeDirection"
-                    },
+                    "dist_norm": {"_target_": "anemoi.graphs.edges.attributes.EdgeLength"},
+                    "edge_dirs": {"_target_": "anemoi.graphs.edges.attributes.EdgeDirection"},
                 },
             },
         ],

@@ -51,11 +51,7 @@ def test_register_attributes(mocker, graph_with_nodes: HeteroData, attr_class):
     """Test AnemoiDatasetNodes register correctly the weights."""
     mocker.patch.object(from_file, "open_dataset", return_value=None)
     node_builder = from_file.AnemoiDatasetNodes("dataset.zarr", name="test_nodes")
-    config = {
-        "test_attr": {
-            "_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"
-        }
-    }
+    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
     graph = node_builder.register_attributes(graph_with_nodes, config)
 
