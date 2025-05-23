@@ -216,9 +216,9 @@ class XArrayNodes(BaseNodeBuilder):
         Path to the CF-compliant file (e.g., NetCDF or zarr) containing the latitude and longitude variables.
     name : str
         Identifier to use for the nodes within the graph.
-    lat : str, optional
+    lat_key : str, optional
         Variable name for latitude in the dataset (default: "lat").
-    lon : str, optional
+    lon_key : str, optional
         Variable name for longitude in the dataset (default: "lon").
 
     Methods
@@ -233,20 +233,20 @@ class XArrayNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: str, name: str, lat_name: str = "lat", lon_name: str = "lon") -> None:
+    def __init__(self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon") -> None:
 
         super().__init__(name)
         self.dataset = dataset
-        self.lat_name = lat_name
-        self.lon_name = lon_name
+        self.lat_key = lat_key
+        self.lon_key = lon_key
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
     def get_coordinates(self) -> torch.Tensor:
         ds = xr.open_dataset(self.dataset)
 
-        assert self.lat_name in ds, f"Latitude variable '{self.lat_name}' not found in dataset."
-        assert self.lon_name in ds, f"Longitude variable '{self.lon_name}' not found in dataset."
+        for var in [self.lat_key, self.lon_key]:
+            assert var in ds, f"Variable '{var}' not found in dataset."
 
-        lat = ds[self.lat_name].values.flatten()
-        lon = ds[self.lon_name].values.flatten()
+        lat = ds[self.lat_key].values.flatten()
+        lon = ds[self.lon_key].values.flatten()
         return self.reshape_coords(lat, lon)
