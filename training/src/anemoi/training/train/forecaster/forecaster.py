@@ -455,8 +455,7 @@ class GraphForecaster(pl.LightningModule):
         self.rollout = min(self.rollout, self.rollout_max)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
-        """
-        Calculate the loss over a validation batch using the training loss function.
+        """Calculate the loss over a validation batch using the training loss function.
 
         Parameters
         ----------
