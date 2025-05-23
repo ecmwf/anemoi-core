@@ -26,7 +26,6 @@ def input_normalizer():
                 "normalizer": {"default": "mean-std", "min-max": ["x"], "max": ["y"], "none": ["z"], "mean-std": ["q"]},
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
-                "remapped": {},
             },
         },
     )
@@ -57,7 +56,6 @@ def remap_normalizer():
                 },
                 "forcing": ["z", "q"],
                 "diagnostic": ["other"],
-                "remapped": {},
             },
         },
     )

@@ -186,7 +186,7 @@ By default, only `all` is kept in the normalised space and scaled.
    # List of validation metrics to keep in normalised space, and scalers to be applied
    # Use '*' in reference all metrics, or a list of metric names.
    # Unlike above, variable scaling is possible due to these metrics being
-   # calculated in the same way as the training loss, within the internal model space.
+   # calculated in the same way as the training loss, within the model space.
    scale_validation_metrics:
    scalers_to_apply: ['variable']
    metrics:
