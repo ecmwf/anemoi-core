@@ -55,7 +55,6 @@ dependencies = [
   "torch-geometric>=2.3.1",
   "trimesh>=4.1",
   "typeguard>=4",
-  "xarray<=2025.4",
 ]
 
 optional-dependencies.all = [  ]
@@ -70,6 +69,7 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
   "termcolor",
   "tomli",
+  "xarray<=2025.4",
 ]
 
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
