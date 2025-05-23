@@ -152,11 +152,35 @@ level scalers.
 If working with upper-air variables from variable levels, the
 temperature fields start with the variable reference `t` followed by the
 level, i.e. `t_500`, `t_850`, etc. Since `t` is specified under variable
-group `pl`, all temperature fields are considered group `pl`. If the
-datasets are build from mars the variable reference is etracted from
-metadata, otherwise by splitting the variable name by `_` and taking the
-first part, see class
+group `pl`, all temperature fields are considered group `pl`.
+
+If the datasets are built from mars the variable reference is extracted
+from metadata, otherwise it is found by splitting the variable name by
+`_` and taking the first part, see class
 `anemoi.training.utils.ExtractVariableGroupAndLevel`.
+
+If more complex variable groups are required, it is possible to define
+the group values as a dictionary, such that the variable's metadata must
+contain the key and value pair. See
+`anemoi.transforms.variable.Variable` for the metadata attributes that
+are available.
+
+.. code:: yaml
+
+   variable_groups:
+     default: sfc
+     pl:
+        is_pressure_level: True
+     z_ml:
+        is_model_level: True
+        param: 'z'
+
+If metadata is not available, complex variable groups cannot be defined,
+and an error will be raised.
+
+If multiple groups are defined for a variable, the first group in the
+`variable_groups` is used. If the variable is not in any group, it is
+assigned to the default group.
 
 ********************
  Validation Metrics
