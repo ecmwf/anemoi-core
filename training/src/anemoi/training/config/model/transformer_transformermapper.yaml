@@ -1,15 +1,21 @@
-activation: GELU
 num_channels: 1024
 cpu_offload: False
-output_mask: null
 
 model:
   _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
+layer_kernels:
+  LayerNorm:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
   _convert_: all
-  activation: ${model.activation}
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
@@ -22,12 +28,12 @@ processor:
   cpu_offload: ${model.cpu_offload}
   qk_norm: False
   use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
 
 encoder:
   _target_: anemoi.models.layers.mapper.TransformerForwardMapper
   _convert_: all
   cpu_offload: ${model.cpu_offload}
-  activation: ${model.activation}
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -38,13 +44,13 @@ encoder:
   use_alibi_slopes: False # Transformer only
   qk_norm: False
   use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
 
 
 decoder:
   _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
   _convert_: all
   cpu_offload: ${model.cpu_offload}
-  activation: ${model.activation}
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
@@ -55,15 +61,15 @@ decoder:
   use_alibi_slopes: False # Transformer only
   qk_norm: False
   use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
 
-
+output_mask: null
 
 trainable_parameters:
   data: 8
   hidden: 8
   data2hidden: 8
   hidden2data: 8
-
 
 attributes:
   edges:
