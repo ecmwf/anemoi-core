@@ -50,6 +50,12 @@ def test_training_cycle_lam(lam_config_with_data: DictConfig) -> None:
     AnemoiTrainer(lam_config_with_data).train()
 
 
+@skip_if_offline
+@pytest.mark.longtests
+def test_training_cycle_lam_with_existing_graph(lam_config_with_data_and_graph: DictConfig) -> None:
+    AnemoiTrainer(lam_config_with_data_and_graph).train()
+
+
 def test_config_validation_lam(lam_config: DictConfig) -> None:
     BaseSchema(**lam_config)
 
