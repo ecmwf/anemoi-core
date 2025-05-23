@@ -27,6 +27,7 @@ Keep it human-readable, your future self will thank you!
 
 * **graphs:** add scale_resolutions arg ([#188](https://github.com/ecmwf/anemoi-core/issues/188)) ([0ea0642](https://github.com/ecmwf/anemoi-core/commit/0ea06423e4979084b3afe70c30e43bb5dc5f88d5))
 * **graphs:** support edge indices sorting ([#187](https://github.com/ecmwf/anemoi-core/issues/187)) ([1444083](https://github.com/ecmwf/anemoi-core/commit/1444083dbe1dc260918b5141d927e145c962b244))
+* **graphs:** add nodebuilder for xarray compatible files ([#330](https://github.com/ecmwf/anemoi-core/pull/330)
 
 
 ### Bug Fixes
