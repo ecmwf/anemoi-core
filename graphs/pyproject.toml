@@ -69,6 +69,7 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
   "termcolor",
   "tomli",
+  "xarray<=2025.4",
 ]
 
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
