@@ -160,16 +160,12 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 
 
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
-    """
-    Copy an attribute of the source node to the edge.
-    """
+    """Copy an attribute of the source node to the edge."""
 
     nodes_axis = NodesAxis.SOURCE
 
 
 class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
-    """
-    Copy an attribute of the target node to the edge.
-    """
+    """Copy an attribute of the target node to the edge."""
 
     nodes_axis = NodesAxis.TARGET

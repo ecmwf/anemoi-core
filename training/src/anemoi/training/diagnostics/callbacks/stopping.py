@@ -69,8 +69,7 @@ class TimeLimit(pl.callbacks.Callback):
         self._run_stopping_check(trainer)
 
     def _run_stopping_check(self, trainer: pl.Trainer) -> None:
-        """
-        Check if the time limit has been reached and stop the training if so.
+        """Check if the time limit has been reached and stop the training if so.
 
         Parameters
         ----------
@@ -85,8 +84,7 @@ class TimeLimit(pl.callbacks.Callback):
         self._log_to_file(trainer)
 
     def _log_to_file(self, trainer: pl.Trainer) -> None:
-        """
-        Log the last checkpoint path to a file if given.
+        """Log the last checkpoint path to a file if given.
 
         Parameters
         ----------
@@ -107,8 +105,7 @@ class EarlyStopping(pl.callbacks.EarlyStopping):
     """Thin wrapper around Pytorch Lightning's EarlyStopping callback."""
 
     def __init__(self, config: DictConfig, **kwargs) -> None:
-        """
-        Early stopping callback.
+        """Early stopping callback.
 
         Set `monitor` to metric to check.
         Common names within `Anemoi` are:
