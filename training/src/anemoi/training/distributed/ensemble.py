@@ -32,6 +32,7 @@ def gather_ensemble_members(
     nens: int,
     ndevices: int,
     memspacing: int,
+    offset: int,
     mgroup: ProcessGroup,
     scale_gradients: bool = _SCALE_GRAD_DEFAULT,
 ) -> Tensor:
@@ -66,7 +67,17 @@ def gather_ensemble_members(
     Tensor
         Gathered ensemble members
     """
-    return _GatherEnsembleMembers.apply(input_, dim, shapes, nens, ndevices, memspacing, scale_gradients, mgroup)
+    return _GatherEnsembleMembers.apply(
+        input_,
+        dim,
+        shapes,
+        nens,
+        ndevices,
+        memspacing,
+        offset,
+        scale_gradients,
+        mgroup,
+    )
 
 
 class _GatherEnsembleMembers(torch.autograd.Function):
@@ -81,6 +92,7 @@ class _GatherEnsembleMembers(torch.autograd.Function):
         nens_: int,
         ndevice_: int,
         memspacing_: int,
+        offset_: int,
         scale_gradients_: bool,
         mgroup_: ProcessGroup,
     ) -> Tensor:
@@ -93,7 +105,13 @@ class _GatherEnsembleMembers(torch.autograd.Function):
         ctx.scale_gradients = scale_gradients_
         if mgroup_:
             out = _gather(input_, dim_, shapes_, group=mgroup_)
-            return _filter(out, dim_, ndevice_, memspacing_)
+            return _filter(
+                out,
+                dim_,
+                ndevice_,
+                memspacing_,
+                offset_,
+            )  # proof of concept, backwards not working like this
 
         return input_
 
@@ -101,7 +119,7 @@ class _GatherEnsembleMembers(torch.autograd.Function):
     def backward(
         ctx: torch.autograd.function.FunctionContext,
         grad_output: Tensor,
-    ) -> tuple[Tensor, None, None, None, None, None, None, None]:
+    ) -> tuple[Tensor, None, None, None, None, None, None, None, None]:
         if ctx.comm_group:
             grad_output = _expand(grad_output, ctx.dim, ctx.nens, ctx.memspacing)
             grad_output = _split(grad_output, ctx.dim, ctx.shapes, group=ctx.comm_group)
@@ -116,8 +134,9 @@ class _GatherEnsembleMembers(torch.autograd.Function):
                 None,
                 None,
                 None,
+                None,
             )
-        return grad_output, None, None, None, None, None, None, None
+        return grad_output, None, None, None, None, None, None, None, None
 
 
 def _expand(input_: Tensor, dim_: int, nens_: int, memspacing_: int) -> Tensor:
@@ -159,12 +178,12 @@ def _split(input_: Tensor, dim_: int, shapes_: tuple, group: ProcessGroup) -> Te
     return input_list[rank].contiguous(memory_format=input_format)
 
 
-def _filter(input_: Tensor, dim_: int, ndevices_: int, memspacing_: int) -> Tensor:
+def _filter(input_: Tensor, dim_: int, ndevices_: int, memspacing_: int, offset_: int = 0) -> Tensor:
     """Only keep every x member input tensor along dim of members."""
     if memspacing_ == 1:
         return input_
 
     assert input_.shape[dim_] % ndevices_ == 0
 
-    input_list = torch.chunk(input_, ndevices_, dim=dim_)[::memspacing_]
+    input_list = torch.chunk(input_, ndevices_, dim=dim_)[offset_::memspacing_]
     return torch.cat(input_list, dim=dim_).contiguous(memory_format=get_memory_format(input_))

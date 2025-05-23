@@ -4,6 +4,8 @@ cpu_offload: False
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
+keep_batch_sharded: True
+
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
 

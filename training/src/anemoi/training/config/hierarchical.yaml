@@ -19,6 +19,7 @@ config_validation: True
 #   num_gpus_per_node: 1
 
 model:
+  keep_batch_sharded: False # not yet supported for Hierarchical
   model:
     _target_: anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical
   enable_hierarchical_level_processing: True
