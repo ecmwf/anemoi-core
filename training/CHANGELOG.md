@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.0](https://github.com/ecmwf/anemoi-core/compare/training-0.4.0...training-0.5.0) (2025-05-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* Rework Loss Scalings to provide better modularity ([#52](https://github.com/ecmwf/anemoi-core/issues/52))
+
+### Features
+
+* **graphs:** add scale_resolutions arg ([#188](https://github.com/ecmwf/anemoi-core/issues/188)) ([0ea0642](https://github.com/ecmwf/anemoi-core/commit/0ea06423e4979084b3afe70c30e43bb5dc5f88d5))
+* transformer mapper ([#179](https://github.com/ecmwf/anemoi-core/issues/179)) ([2cea7db](https://github.com/ecmwf/anemoi-core/commit/2cea7db51d5c5ef63bb4b9c266deb05fb2acf66f))
+
+
+### Bug Fixes
+
+* Adapt ensemble configs to work with loss refactor.  ([#300](https://github.com/ecmwf/anemoi-core/issues/300)) ([c210478](https://github.com/ecmwf/anemoi-core/commit/c210478d8e84aaa2e93256aa1b4ceda74e191c7d))
+* Adapt predict_step in model interface to pass on arguments for model classes ([#281](https://github.com/ecmwf/anemoi-core/issues/281)) ([a5b2643](https://github.com/ecmwf/anemoi-core/commit/a5b26432bc7b78577cd1febd5091b059cc82805c))
+* Change output format in validation step to fix issue in plotting ([#305](https://github.com/ecmwf/anemoi-core/issues/305)) ([cc941f3](https://github.com/ecmwf/anemoi-core/commit/cc941f3d7520e230e733654cb45e5c6473b64152))
+* clean params complement ([#291](https://github.com/ecmwf/anemoi-core/issues/291)) ([4e9ca31](https://github.com/ecmwf/anemoi-core/commit/4e9ca313f838f5eccb305d6bf3b9afd8426f095f))
+* Move scaler to device in scale ([#317](https://github.com/ecmwf/anemoi-core/issues/317)) ([1592d09](https://github.com/ecmwf/anemoi-core/commit/1592d09f0915dddba7dcfc1c11897e0cae5cb6d0))
+* Rework Loss Scalings to provide better modularity ([#52](https://github.com/ecmwf/anemoi-core/issues/52)) ([162b906](https://github.com/ecmwf/anemoi-core/commit/162b9062882c321a4a265b0cf561be3f141ac97a))
+* **training:** bump anemoi-graphs version to 0.5.2 ([#276](https://github.com/ecmwf/anemoi-core/issues/276)) ([9b8ec13](https://github.com/ecmwf/anemoi-core/commit/9b8ec13b56f0a18ac887c754d5d95a7953b2625d))
+* **training:** no logging variable metadata to mlflow ([#304](https://github.com/ecmwf/anemoi-core/issues/304)) ([4f7c2c9](https://github.com/ecmwf/anemoi-core/commit/4f7c2c9c75ae6e67a148699a317528cd7651bf46))
+
+
+### Documentation
+
+* Fix minor mistakes in CRPS user guide. ([#264](https://github.com/ecmwf/anemoi-core/issues/264)) ([52d9a2e](https://github.com/ecmwf/anemoi-core/commit/52d9a2e5e0cef82b65b604ed2dc55016a48aeaa2))
+
 ## [0.4.0](https://github.com/ecmwf/anemoi-core/compare/training-0.3.3...training-0.4.0) (2025-04-16)
 
 
