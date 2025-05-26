@@ -123,8 +123,7 @@ class BaseLoss(nn.Module, ABC):
         out: torch.Tensor,
         squash: bool = True,
     ) -> torch.Tensor:
-        """
-        Reduce the out of the loss.
+        """Reduce the out of the loss.
 
         If `squash` is True, the last dimension is averaged.
 
