@@ -79,8 +79,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
         return self._model_metadata
 
     def _adjust_epoch_progress(self, trainer: pl.Trainer) -> None:
-        """
-        Adjust the epoch progress when saving a mid-epoch checkpoint.
+        """Adjust the epoch progress when saving a mid-epoch checkpoint.
 
         Since Pytorch Lightning advances one epoch at end of training (on_train-end),
         we need to correct the checkpoint epoch progress to avoid inconsistencies.
@@ -91,8 +90,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
         trainer.fit_loop.epoch_progress.total.completed = trainer.fit_loop.epoch_progress.total.completed - 1
 
     def on_train_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """
-        Save the last checkpoint at the end of training.
+        """Save the last checkpoint at the end of training.
 
         If the candidates aren't better than the last checkpoint, then no checkpoints are saved.
         Note - this method if triggered when using max_epochs, it won't save any checkpoints
