@@ -146,6 +146,7 @@ class BaseLoss(nn.Module, ABC):
         if squash:
             out = self.avg_function(out, dim=TensorDim.VARIABLE)
 
+        # here the grid dimension is summed because the normalisation is handled in the node weighting
         grid_summed = self.sum_function(out, dim=(TensorDim.GRID))
         return self.avg_function(
             grid_summed,
