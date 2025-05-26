@@ -50,14 +50,16 @@ log:
     tracking_uri: ???
     experiment_name: 'anemoi-debug'
     project_name: 'Anemoi'
-    system: True
+    system:
+      enabled: False
+      interval: 100 #Every interval seconds, the system metrics will be collected. By default interval=10.
     terminal: True
     run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
     http_max_retries: 35
-  interval: 100
+  interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
 print_memory_summary: False

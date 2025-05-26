@@ -461,7 +461,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         return super().experiment
 
     @rank_zero_only
-    def log_system_metrics(self) -> None:
+    def log_system_metrics(self, interval: int = 10) -> None:
         """Log system metrics (CPU, GPU, etc)."""
         import mlflow
         from mlflow.system_metrics.metrics.disk_monitor import DiskMonitor
@@ -491,6 +491,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                     LOGGER.warning("Failed to init AMD GPU Monitor: %s", e)
 
         mlflow.enable_system_metrics_logging()
+        mlflow.set_system_metrics_sampling_interval(interval)
         system_monitor = CustomSystemMetricsMonitor(
             self.run_id,
             resume_logging=self.run_id is not None,
