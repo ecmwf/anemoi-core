@@ -199,7 +199,9 @@ class AnemoiTrainer:
 
         # Load the model weights
         if self.load_weights_only:
-            ckpt_data_idx = torch.load(self.last_checkpoint, weights_only=False)["hyper_parameters"]["data_indices"].name_to_index
+            ckpt_data_idx = torch.load(self.last_checkpoint, weights_only=False)["hyper_parameters"][
+                "data_indices"
+            ].name_to_index
             # Sanify the checkpoint for transfer learning
             if self.config.training.transfer_learning:
                 LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
