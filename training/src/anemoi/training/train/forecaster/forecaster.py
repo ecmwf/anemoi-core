@@ -174,9 +174,6 @@ class GraphForecaster(pl.LightningModule):
         return self.model(x, model_comm_group=self.model_comm_group)
 
     def on_load_checkpoint(self, checkpoint):
-        import ipdb
-
-        ipdb.set_trace()
         self.ckpt_data_idx = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
     def define_delayed_scalers(self) -> None:
