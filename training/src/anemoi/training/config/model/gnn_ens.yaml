@@ -13,6 +13,7 @@ noise_injector:
 
 
 layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
     # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
     _target_: anemoi.models.layers.normalization.AutocastLayerNorm

@@ -5,13 +5,19 @@ model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
 
 layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
-    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
-    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    _target_: torch.nn.LayerNorm
   Linear:
     _target_: torch.nn.Linear
   Activation:
     _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
 
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
