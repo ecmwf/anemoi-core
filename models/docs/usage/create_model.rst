@@ -269,12 +269,12 @@ Suitable Alternatives
 
 Examples for suitable alternatives within Anemoi are:
 
-**Normalisation Layers** (see :ref:`modules/normalization`):
+**Normalisation Layers** (see :doc:`modules/normalization`):
 
 -  ``anemoi.models.layers.normalization.AutocastLayerNorm``
 -  ``anemoi.models.layers.normalization.ConditionalLayerNorm``
 
-**Activation functions** (see :ref:`modules/activations`):
+**Activation functions** (see :doc:`modules/activations`):
 
 -  ``anemoi.models.layers.activation.GLU``
 -  ``anemoi.models.layers.activation.SwiGLU``
