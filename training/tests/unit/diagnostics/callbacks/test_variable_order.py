@@ -44,6 +44,7 @@ def name_to_index_rename_permute() -> dict:
 @pytest.fixture
 def fake_trainer(mocker: Any, name_to_index: dict) -> AnemoiTrainer:
     trainer = mocker.Mock(spec=AnemoiTrainer)
+    trainer.model.module._ckpt_model_name_to_index = name_to_index
     trainer.datamodule.data_indices.name_to_index = name_to_index
     return trainer
 
@@ -59,44 +60,21 @@ def checkpoint(mocker: Any, name_to_index: dict) -> dict[str, dict[str, IndexCol
 def callback() -> CheckVariableOrder:
     callback = CheckVariableOrder()
     assert callback is not None
-    assert hasattr(callback, "on_load_checkpoint")
-    assert hasattr(callback, "on_sanity_check_start")
-    assert hasattr(callback, "on_train_epoch_start")
-    assert hasattr(callback, "on_validation_epoch_start")
-    assert hasattr(callback, "on_test_epoch_start")
+    assert hasattr(callback, "on_train_start")
+    assert hasattr(callback, "on_validation_start")
+    assert hasattr(callback, "on_test_start")
 
     assert callback._model_name_to_index is None
 
     return callback
 
 
-def test_on_load_checkpoint(
-    fake_trainer: AnemoiTrainer,
-    callback: CheckVariableOrder,
-    checkpoint: dict,
-    name_to_index: dict,
-) -> None:
-    assert callback._model_name_to_index is None
-    callback.on_load_checkpoint(fake_trainer, None, checkpoint)
-    assert callback._model_name_to_index == name_to_index
-
-    assert callback._compare_variables(name_to_index) is None
-
-
-def test_on_sanity(fake_trainer: AnemoiTrainer, callback: CheckVariableOrder, name_to_index: dict) -> None:
-    assert callback._model_name_to_index is None
-    callback.on_sanity_check_start(fake_trainer, None)
-    assert callback._model_name_to_index == name_to_index
-
-    assert callback._compare_variables(name_to_index) is None
-
-
 def test_on_epoch(fake_trainer: AnemoiTrainer, callback: CheckVariableOrder, name_to_index: dict) -> None:
     """Test all epoch functions with "working" indices."""
     assert callback._model_name_to_index is None
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
     assert callback._model_name_to_index is None
 
     assert callback._compare_variables(name_to_index) is None
@@ -108,11 +86,11 @@ def test_on_epoch(fake_trainer: AnemoiTrainer, callback: CheckVariableOrder, nam
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
 
-    assert callback._compare_variables(name_to_index) is None
+    assert trainer.datamodule.data_indices._compare_variables(name_to_index) is None
 
 
 def test_on_epoch_permute(
@@ -126,9 +104,9 @@ def test_on_epoch_permute(
     Expecting errors in all cases.
     """
     assert callback._model_name_to_index is None
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
     assert callback._model_name_to_index is None
 
     assert callback._compare_variables(name_to_index) is None
@@ -141,13 +119,13 @@ def test_on_epoch_permute(
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index_permute
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
-        callback.on_train_epoch_start(fake_trainer, None)
+        callback.on_train_start(fake_trainer, None)
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
-        callback.on_validation_epoch_start(fake_trainer, None)
+        callback.on_validation_start(fake_trainer, None)
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
-        callback.on_test_epoch_start(fake_trainer, None)
+        callback.on_test_start(fake_trainer, None)
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
 
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
@@ -166,9 +144,9 @@ def test_on_epoch_rename(
     Expecting passes in all cases.
     """
     assert callback._model_name_to_index is None
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
     assert callback._model_name_to_index is None
 
     assert callback._compare_variables(name_to_index) is None
@@ -180,9 +158,9 @@ def test_on_epoch_rename(
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index_rename
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_rename
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
 
     callback._compare_variables(name_to_index_rename)
 
@@ -198,9 +176,9 @@ def test_on_epoch_rename_permute(
     Expects all passes (but warnings).
     """
     assert callback._model_name_to_index is None
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
     assert callback._model_name_to_index is None
 
     assert callback._compare_variables(name_to_index) is None
@@ -212,9 +190,9 @@ def test_on_epoch_rename_permute(
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index_rename_permute
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_rename_permute
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename_permute
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
 
     callback._compare_variables(name_to_index_rename_permute)
 
@@ -230,9 +208,9 @@ def test_on_epoch_partial_rename_permute(
     Expects all errors.
     """
     assert callback._model_name_to_index is None
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
     assert callback._model_name_to_index is None
 
     assert callback._compare_variables(name_to_index) is None
@@ -245,11 +223,11 @@ def test_on_epoch_partial_rename_permute(
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_partial_rename_permute
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index_partial_rename_permute
     with pytest.raises(ValueError, match="The variable order in the model and data is different."):
-        callback.on_train_epoch_start(fake_trainer, None)
+        callback.on_train_start(fake_trainer, None)
     with pytest.raises(ValueError, match="The variable order in the model and data is different."):
-        callback.on_validation_epoch_start(fake_trainer, None)
+        callback.on_validation_start(fake_trainer, None)
     with pytest.raises(ValueError, match="The variable order in the model and data is different."):
-        callback.on_test_epoch_start(fake_trainer, None)
+        callback.on_test_start(fake_trainer, None)
 
     with pytest.raises(ValueError, match="The variable order in the model and data is different."):
         callback._compare_variables(name_to_index_partial_rename_permute)
@@ -264,9 +242,9 @@ def test_on_epoch_wrong_validation(
 ) -> None:
     """Test all epoch functions with "working" indices, but different validation indices."""
     assert callback._model_name_to_index is None
-    callback.on_train_epoch_start(fake_trainer, None)
-    callback.on_validation_epoch_start(fake_trainer, None)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
+    callback.on_validation_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
     assert callback._model_name_to_index is None
 
     assert callback._compare_variables(name_to_index) is None
@@ -278,12 +256,12 @@ def test_on_epoch_wrong_validation(
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename
-    callback.on_train_epoch_start(fake_trainer, None)
+    callback.on_train_start(fake_trainer, None)
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
-        callback.on_validation_epoch_start(fake_trainer, None)
+        callback.on_validation_start(fake_trainer, None)
     assert " {'c': (2, 1), 'b': (1, 2)}" in str(
         exc_info.value,
     ) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
-    callback.on_test_epoch_start(fake_trainer, None)
+    callback.on_test_start(fake_trainer, None)
 
     assert callback._compare_variables(name_to_index) is None
