@@ -81,7 +81,9 @@ def open_log_file(filename):
         row_name="training_avg_throughput"
     else:
         raise ValueError
-    file_path = next(iter(glob.glob(f"/dev/shm/_tmpdir_.naco.36507301/pytest-of-naco/pytest-0/test_benchmark_training_cycle0profiler/[a-z0-9]*/{filename}")))
+    tmpdir=os.getenv("TMPDIR")
+    user=os.getenv("USER") #TODO should use a more portable and secure way
+    file_path = next(iter(glob.glob(f"{tmpdir}/pytest-of-{user}/pytest-0/test_benchmark_training_cycle0profiler/[a-z0-9]*/{filename}")))
     with Path(file_path).open(newline='') as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
