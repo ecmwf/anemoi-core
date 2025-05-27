@@ -206,7 +206,9 @@ class AnemoiTrainer:
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
-            import ipdb; ipdb.set_trace()
+            import ipdb
+
+            ipdb.set_trace()
             # check data indices in original checkpoint and current data indices are the same
             self.data_indices.compare_variables(model.ckpt_data_idx, model.data_indices.name_to_index)
 
