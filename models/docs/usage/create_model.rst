@@ -1,3 +1,5 @@
+.. _usage-create-model:
+
 #########################
  Create your first model
 #########################
@@ -11,8 +13,7 @@ and decoder and a sliding window transformer [#f1]_ for the processor.
 
 Our implemented models are instantiated by omegaconf [#f2]_ and hydra
 [#f3]_. Commonly used model configurations can be found in
-``configs/models`` (see `Generating user config files
-<https://anemoi.readthedocs.io/projects/training/en/latest/start/hydra-intro.html#generating-user-config-files>`_)
+``configs/models`` (see :doc:`anemoi-training:start/hydra-intro`).
 
 *********************
  Model Configuration
@@ -54,8 +55,8 @@ First, let's take the model configuration ``transformer.yaml``:
      - edge_dirs
      nodes: []
 
-Typically the model is instantiated in ``anemoi-training`` or
-``anemoi-inference``. For this example we will load the model
+Typically the model is instantiated in :doc:`anemoi-training:index` or
+:doc:`anemoi-inference:index`. For this example we will load the model
 configuration by itself to understand the different components needed to
 create a model.
 
@@ -69,12 +70,14 @@ create a model.
  Define statistics, data indices and supporting arrays
 *******************************************************
 
-As described in :ref:`overview` we want to create a model interface that
-can be used for training and inference. For that we need to create the
-statistics, data indices and supporting arrays which is required for the
-pre- and postprocessing. These attributes are provided by the
-`anemoi-dataset
-<https://anemoi.readthedocs.io/projects/datasets/en/latest/index.html>`_.
+As described in :ref:`overview`, we want to create a model interface
+that can be used for training and inference. For that we need to create
+the statistics, data indices and supporting arrays which is required for
+the pre- and postprocessing. These attributes are provided by the
+:doc:`anemoi-datasets:index`.
+
+Statistics
+==========
 
 The **statistics** are simply stored in a dictionary with the mean,
 stdev, maximum and minimum of the variables. They are usually loaded
@@ -89,15 +92,19 @@ from the dataset, i.e. ``ds.statistics``:
        "minimum": [0.0, 0.0, 0.0],
    }
 
+Data Indices
+============
+
 **Data indices** is a dictionary with the forcing and diagnostic
 variables. They are usually created from the dataset, i.e.
-``ds.name_to_index```:
+``ds.name_to_index``:
 
 .. code:: python
 
    from anemoi.models.data_indices.collection import IndexCollection
 
    name_to_index = {"10u": 0, "10v": 1, "2d": 2, "2t": 3}
+
    # This part is usually defined in the config/data/zarr.yaml file.
    data_config = dict(
        data={
@@ -108,13 +115,19 @@ variables. They are usually created from the dataset, i.e.
    )
    data_indices = IndexCollection(data_config, name_to_index)
 
+Supporting Arrays
+=================
+
 **Supporting arrays** is a dictionary with the latitudes and longitudes
 of the grid and naturally comes from the dataset, i.e.
 ``ds.supporting_arrays``.
 
 .. code:: python
 
-   supporting_arrays = {"latitudes": [90.0, 89.0, 88.0], "longitudes": [0.0, 1.0, 2.0]}
+   supporting_arrays = {
+       "latitudes": [90.0, 89.0, 88.0],
+       "longitudes": [0.0, 1.0, 2.0]
+   }
 
 ********************
  Creating the Graph
@@ -122,7 +135,7 @@ of the grid and naturally comes from the dataset, i.e.
 
 All our currently implemented models are based on a graph encoder and
 decoder. The graph is created by the ``GraphCreator`` class which is
-part of the ``anemoi-graphs`` package (:ref:`anemoi-graphs`).
+part of the :doc:`anemoi-graphs:index`.
 
 .. code:: python
 
@@ -173,9 +186,9 @@ actual model (see :ref:`overview`).
    -  ``y = model_interface.predict_step(x)`` with ``x`` and ``y`` are
       absolute values.
 
-***********************
- The ``pytorch`` Model
-***********************
+*******************
+ The PyTorch Model
+*******************
 
 The model architecture is in ``model_interface.model`` which is a
 ``pytorch.nn.Module``. The model therefore has a ``forward()`` function
@@ -205,11 +218,11 @@ In this example, ``model_interface.model`` is the following:
 
 .. _layer-kernels:
 
-***********************************
- Switching out Layers in the Model
-***********************************
+**************************************
+ Layer Kernels - Switching out Layers
+**************************************
 
-The model interface allows to switch out layers in the model. For
+The model interface allows switching out layers in the model. For
 example, if you want to use a different activation function, you can
 simply change the activation function in the model configuration. Anemoi
 will automatically train the model with the new activation function.
@@ -231,43 +244,52 @@ processor below:
        Activation:
          _target_: anemoi.models.layers.activation.GLU
 
+Available Layer Kernels
+=======================
+
 This is entirely optional and uses sensible defaults for each layer.
 Currently, you can switch out the following layers (with a given key):
 
--  Activation function: ``Activation`` with default ``torch.nn.GELU``
--  Linear layers: ``Linear`` with default ``torch.nn.Linear``
--  Layer Normalisation: ``LayerNorm`` with default
+-  **Activation function** (``Activation``): Default ``torch.nn.GELU``
+-  **Linear layers** (``Linear``): Default ``torch.nn.Linear``
+-  **Layer Normalisation** (``LayerNorm``): Default
    ``torch.nn.LayerNorm``
--  Query Normalisation: ``QueryNorm`` with default
+-  **Query Normalisation** (``QueryNorm``): Default
    ``anemoi.models.layers.normalization.AutocastLayerNorm``
--  Key Normalisation: ``KeyNorm`` with default
+-  **Key Normalisation** (``KeyNorm``): Default
    ``anemoi.models.layers.normalization.AutocastLayerNorm``
 
-These layers can technically accept any type of Pytorch ``nn.Module``
+These layers can technically accept any type of PyTorch ``nn.Module``
 that implements a forward pass. The default layers are chosen to be
 compatible with the model architecture and the training process.
 
+Suitable Alternatives
+=====================
+
 Examples for suitable alternatives within Anemoi are:
 
--  Normalisation Layers :ref:`Activations` :
+**Normalisation Layers** (see :ref:`normalization`):
 
-      -  ``anemoi.models.layers.normalization.AutocastLayerNorm``
-      -  ``anemoi.models.layers.normalization.ConditionalLayerNorm``
+-  ``anemoi.models.layers.normalization.AutocastLayerNorm``
+-  ``anemoi.models.layers.normalization.ConditionalLayerNorm``
 
--  Activation functions :ref:`Normalization`:
+**Activation functions** (see :ref:`activations`):
 
-      -  ``anemoi.models.layers.activation.GLU``
-      -  ``anemoi.models.layers.activation.SwiGLU``
-      -  ``anemoi.models.layers.activation.Sine``
+-  ``anemoi.models.layers.activation.GLU``
+-  ``anemoi.models.layers.activation.SwiGLU``
+-  ``anemoi.models.layers.activation.Sine``
 
-but the ``_target_`` can be any local or installed class (see Hydra
+The ``_target_`` can be any local or installed class (see Hydra
 documentation [#f4]_).
+
+When to Use Layer Kernels
+=========================
 
 Layer kernels are particularly useful when:
 
 #. You need to use specialized implementations for efficiency
 #. You want to experiment with different normalization techniques
-#. You need to customize the behavior of specific layers in different
+#. You need to customize the behaviour of specific layers in different
    parts of the model
 
 .. rubric:: Footnotes
