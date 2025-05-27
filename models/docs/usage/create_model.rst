@@ -203,6 +203,8 @@ In this example, ``model_interface.model`` is the following:
      )
    )
 
+.. _layer-kernels:
+
 ***********************************
  Switching out Layers in the Model
 ***********************************
@@ -247,19 +249,19 @@ compatible with the model architecture and the training process.
 
 Examples for suitable alternatives within Anemoi are:
 
--  Normalisation Layers [#f4]_:
+-  Normalisation Layers :ref:`Activations` :
 
       -  ``anemoi.models.layers.normalization.AutocastLayerNorm``
       -  ``anemoi.models.layers.normalization.ConditionalLayerNorm``
 
--  Activation functions [#f5]_:
+-  Activation functions :ref:`Normalization`:
 
       -  ``anemoi.models.layers.activation.GLU``
       -  ``anemoi.models.layers.activation.SwiGLU``
       -  ``anemoi.models.layers.activation.Sine``
 
 but the ``_target_`` can be any local or installed class (see Hydra
-documentation [#f6]_).
+documentation [#f4]_).
 
 Layer kernels are particularly useful when:
 
@@ -283,13 +285,5 @@ Layer kernels are particularly useful when:
    https://hydra-documentation.readthedocs.io/en/latest/
 
 .. [#f4]
-
-   https://anemoi.readthedocs.io/projects/models/en/latest/modules/normalization.html
-
-.. [#f5]
-
-   https://anemoi.readthedocs.io/projects/models/en/latest/modules/activations.html
-
-.. [#f6]
 
    https://hydra.cc/docs/advanced/instantiate_objects/overview/

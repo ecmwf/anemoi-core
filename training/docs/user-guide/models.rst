@@ -96,9 +96,28 @@ coarser than the resolution of the base data.
  Encoders/Decoders
 *******************
 
-The encoder and decoder can be chosen to be a GNN or a GraphTransformer.
-This choice is independent of the processor, but currently the encoder
-and decoder must be the same model type otherwise the code will break.
+The encoder and decoder can be chosen to be a GNN, a GraphTransformer,
+or a Transformer. This choice is independent of the processor, but
+currently the encoder and decoder must be the same model type otherwise
+the code will break.
+
+*******************
+ Switchable Layers
+*******************
+
+Layer kernels provide a flexible mechanism to customize the
+implementation of linear layers and layer normalization in different
+parts of the model (encoder, processor, decoder) through the
+`config.yaml`.
+
+This allows you to switch out the default layers with alternative
+implementations, such as different activation functions or normalization
+techniques, without modifying the underlying model code. This is done by
+specifying the desired layer implementations in the configuration file
+under the `layer_kernels` section.
+
+This is documented in the :doc:`model creation guide
+<anemoi-models:layer-kernels>`.
 
 ******************
  Field Truncation
