@@ -199,7 +199,6 @@ class AnemoiTrainer:
 
         # Load the model weights
         if self.load_weights_only:
-            ckpt_data_idx = torch.load(self.last_checkpoint, weights_only=False)["hyper_parameters"]["data_indices"].name_to_index
             # Sanify the checkpoint for transfer learning
             if self.config.training.transfer_learning:
                 LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
@@ -207,9 +206,9 @@ class AnemoiTrainer:
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+            import ipdb; ipdb.set_trace()
             # check data indices in original checkpoint and current data indices are the same
-            model_data_idx = model.data_indices.name_to_index
-            self.data_indices._compare_variables(ckpt_data_idx, model_data_idx)
+            self.data_indices.compare_variables(model.ckpt_data_idx, model.data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights

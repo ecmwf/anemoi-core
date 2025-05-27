@@ -128,8 +128,8 @@ class IndexCollection:
     @staticmethod
     def representer(dumper, data):
         return dumper.represent_scalar(f"!{data.__class__.__name__}", repr(data))
-    
-    def _compare_variables(self, ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]) -> None:
+
+    def compare_variables(ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]) -> None:
         """Compare the order of the variables in the model from checkpoint and the data.
 
         Parameters
@@ -148,7 +148,7 @@ class IndexCollection:
 
         if ckpt_name_to_index == data_name_to_index:
             LOGGER.info("The order of the variables in the model matches the order in the data.")
-            LOGGER.debug("%s, %s", self._model_name_to_index, data_name_to_index)
+            LOGGER.debug("%s, %s", ckpt_name_to_index, data_name_to_index)
             return
 
         keys1 = set(ckpt_name_to_index.keys())
