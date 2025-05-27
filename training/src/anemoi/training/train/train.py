@@ -197,6 +197,8 @@ class AnemoiTrainer:
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)
 
+        kwargs.pop("data_indices")
+
         # Load the model weights
         if self.load_weights_only:
             # Sanify the checkpoint for transfer learning
@@ -208,7 +210,7 @@ class AnemoiTrainer:
                 model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
             # check data indices in original checkpoint and current data indices are the same
-            self.data_indices.compare_variables(model.ckpt_data_idx, model.data_indices.name_to_index)
+            self.data_indices.compare_variables(model._ckpt_model_name_to_index, self.data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
