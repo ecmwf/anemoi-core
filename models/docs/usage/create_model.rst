@@ -232,7 +232,7 @@ processor below:
 This is entirely optional and uses sensible defaults for each layer.
 Currently, you can switch out the following layers (with a given key):
 
--  Activation function: ``Activation`` with default ``GELU``
+-  Activation function: ``Activation`` with default ``torch.nn.GELU``
 -  Linear layers: ``Linear`` with default ``torch.nn.Linear``
 -  Layer Normalisation: ``LayerNorm`` with default
    ``torch.nn.LayerNorm``
@@ -240,6 +240,33 @@ Currently, you can switch out the following layers (with a given key):
    ``anemoi.models.layers.normalization.AutocastLayerNorm``
 -  Key Normalisation: ``KeyNorm`` with default
    ``anemoi.models.layers.normalization.AutocastLayerNorm``
+
+These layers can technically accept any type of Pytorch ``nn.Module``
+that implements a forward pass. The default layers are chosen to be
+compatible with the model architecture and the training process.
+
+Examples for suitable alternatives within Anemoi are:
+
+-  Normalisation Layers [#f4]_:
+
+      -  ``anemoi.models.layers.normalization.AutocastLayerNorm``
+      -  ``anemoi.models.layers.normalization.ConditionalLayerNorm``
+
+-  Activation functions [#f5]_:
+
+      -  ``anemoi.models.layers.activation.GLU``
+      -  ``anemoi.models.layers.activation.SwiGLU``
+      -  ``anemoi.models.layers.activation.Sine``
+
+but the ``_target_`` can be any local or installed class (see Hydra
+documentation [#f6]_).
+
+Layer kernels are particularly useful when:
+
+#. You need to use specialized implementations for efficiency
+#. You want to experiment with different normalization techniques
+#. You need to customize the behavior of specific layers in different
+   parts of the model
 
 .. rubric:: Footnotes
 
@@ -254,3 +281,15 @@ Currently, you can switch out the following layers (with a given key):
 .. [#f3]
 
    https://hydra-documentation.readthedocs.io/en/latest/
+
+.. [#f4]
+
+   https://anemoi.readthedocs.io/projects/models/en/latest/modules/normalization.html
+
+.. [#f5]
+
+   https://anemoi.readthedocs.io/projects/models/en/latest/modules/activations.html
+
+.. [#f6]
+
+   https://hydra.cc/docs/advanced/instantiate_objects/overview/
