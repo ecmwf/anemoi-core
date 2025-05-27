@@ -13,7 +13,7 @@ and decoder and a sliding window transformer [#f1]_ for the processor.
 
 Our implemented models are instantiated by omegaconf [#f2]_ and hydra
 [#f3]_. Commonly used model configurations can be found in
-``configs/models`` (see :doc:`anemoi-training:start/hydra-intro`).
+``configs/models`` (see :doc:`anemoi-training:user-guide/hydra-intro`).
 
 *********************
  Model Configuration
@@ -55,8 +55,9 @@ First, let's take the model configuration ``transformer.yaml``:
      - edge_dirs
      nodes: []
 
-Typically the model is instantiated in :doc:`anemoi-training:index` or
-:doc:`anemoi-inference:index`. For this example we will load the model
+Typically the model is instantiated in :doc:`Anemoi Training
+<anemoi-training:index>` or :doc:`Anemoi Inference
+<anemoi-inference:index>`. For this example we will load the model
 configuration by itself to understand the different components needed to
 create a model.
 
@@ -135,7 +136,7 @@ of the grid and naturally comes from the dataset, i.e.
 
 All our currently implemented models are based on a graph encoder and
 decoder. The graph is created by the ``GraphCreator`` class which is
-part of the :doc:`anemoi-graphs:index`.
+part of :doc:`Anemoi Graphs <anemoi-graphs:index>`.
 
 .. code:: python
 
@@ -268,12 +269,12 @@ Suitable Alternatives
 
 Examples for suitable alternatives within Anemoi are:
 
-**Normalisation Layers** (see :ref:`normalization`):
+**Normalisation Layers** (see :ref:`modules/normalization`):
 
 -  ``anemoi.models.layers.normalization.AutocastLayerNorm``
 -  ``anemoi.models.layers.normalization.ConditionalLayerNorm``
 
-**Activation functions** (see :ref:`activations`):
+**Activation functions** (see :ref:`modules/activations`):
 
 -  ``anemoi.models.layers.activation.GLU``
 -  ``anemoi.models.layers.activation.SwiGLU``
