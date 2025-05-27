@@ -8,9 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 import operator
 
-import logging
 import yaml
 from omegaconf import OmegaConf
 
@@ -22,6 +22,7 @@ from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 
 LOGGER = logging.getLogger(__name__)
+
 
 class IndexCollection:
     """Collection of data and model indices."""
@@ -129,7 +130,7 @@ class IndexCollection:
     def representer(dumper, data):
         return dumper.represent_scalar(f"!{data.__class__.__name__}", repr(data))
 
-    def compare_variables(ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]) -> None:
+    def compare_variables(self, ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]) -> None:
         """Compare the order of the variables in the model from checkpoint and the data.
 
         Parameters
