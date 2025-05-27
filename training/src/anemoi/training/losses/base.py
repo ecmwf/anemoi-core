@@ -19,6 +19,7 @@ import torch
 from torch import nn
 
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -58,11 +59,11 @@ class BaseLoss(nn.Module, ABC):
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
 
-    @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
+    @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
         self.scaler.add_scaler(dimension=dimension, scaler=scaler, name=name)
 
-    @functools.wraps(ScaleTensor.update_scaler, assigned=("__doc__", "__annotations__"))
+    @functools.wraps(ScaleTensor.update_scaler)
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
 
@@ -98,6 +99,13 @@ class BaseLoss(nn.Module, ABC):
 
         self.scaler.to(x.device)
 
+        if TensorDim.GRID not in self.scaler:
+            error_msg = (
+                "Scaler tensor must be at least applied to the GRID dimension. "
+                "Please add a scaler here, use `UniformWeights` for simple uniform scaling.",
+            )
+            raise RuntimeError(error_msg)
+
         scale_tensor = self.scaler
         if without_scalers is not None and len(without_scalers) > 0:
             if isinstance(without_scalers[0], str):
@@ -110,11 +118,42 @@ class BaseLoss(nn.Module, ABC):
 
         return x[subset_indices] * scaler[subset_indices]
 
-    def reduce(self, out: torch.Tensor, squash: bool = True) -> torch.Tensor:
-        if squash:
-            out = self.avg_function(out, dim=-1)
+    def reduce(
+        self,
+        out: torch.Tensor,
+        squash: bool = True,
+    ) -> torch.Tensor:
+        """Reduce the out of the loss.
 
-        return self.sum_function(out, dim=(0, 1, 2))
+        If `squash` is True, the last dimension is averaged.
+
+        Irrespective of `squash`, the output is reduced over the
+        batch, ensemble and grid dimensions.
+
+        Parameters
+        ----------
+        out : torch.Tensor
+            Difference tensor, of shape TensorDim
+        squash : bool, optional
+            Whether to squash the variable dimension, by default True
+
+        Returns
+        -------
+        torch.Tensor
+            Reduced output tensor
+        """
+        if squash:
+            out = self.avg_function(out, dim=TensorDim.VARIABLE)
+
+        # here the grid dimension is summed because the normalisation is handled in the node weighting
+        grid_summed = self.sum_function(out, dim=(TensorDim.GRID))
+        return self.avg_function(
+            grid_summed,
+            dim=(
+                TensorDim.BATCH_SIZE,
+                TensorDim.ENSEMBLE_DIM,
+            ),
+        )
 
     @property
     def name(self) -> str:
@@ -205,4 +244,5 @@ class FunctionalLoss(BaseLoss):
         """
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers)
+
         return self.reduce(out, squash)
