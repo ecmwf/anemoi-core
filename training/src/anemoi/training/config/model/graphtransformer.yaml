@@ -30,7 +30,6 @@ processor:
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
-  # TODO: Add to documentation: The query and key norms need to be autocast layer norms if flash attention is used.
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
