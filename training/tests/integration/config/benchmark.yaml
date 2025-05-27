@@ -1,0 +1,31 @@
+# Modifications for the basic template "config.yaml"
+hardware:
+  files:
+  #TODO change to n320-o96 (transformer?)
+    dataset: anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+
+
+dataloader:
+  training:
+    end: 1979-01-08 12:00:00
+  validation:
+    start: 1979-01-08 18:00:00
+    #start: 1979-01-08 18:00:00
+
+diagnostics:
+  print_memory_summary: true
+  benchmark_profiler:
+    memory:
+      enabled: false
+    time:
+      verbose: true
+    model_summary:
+      enabled: false
+  log:
+    mlflow:
+      enabled: true
+      offline: True
+      tracking_uri: ""
+    interval: 1

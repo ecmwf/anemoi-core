@@ -16,7 +16,10 @@ from omegaconf import DictConfig
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.train.profiler import AnemoiProfiler
 from anemoi.utils.testing import skip_if_offline
+
+from torch.cuda import memory_stats, reset_peak_memory_stats
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -63,6 +66,47 @@ def test_training_cycle_ensemble(ensemble_config_with_data: DictConfig) -> None:
 def test_config_validation_ensemble(ensemble_config: DictConfig) -> None:
     BaseSchema(**ensemble_config)
 
+#return_val = value for speed profiler or 'avg_time' for time_profiler
+def open_log_file(filename):
+    import os
+    import glob
+    import csv
+    if filename == "time_profiler.csv":
+        return_val="avg_time"
+        row_selector="name"
+        row_name="run_training_batch"
+    elif filename == "speed_profiler.csv":
+        return_val="value"
+        row_selector="metric"
+        row_name="training_avg_throughput"
+    else:
+        raise ValueError
+    file_path = next(iter(glob.glob(f"/dev/shm/_tmpdir_.naco.36507301/pytest-of-naco/pytest-0/test_benchmark_training_cycle0profiler/[a-z0-9]*/{filename}")))
+    with Path(file_path).open(newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            if row.get(row_selector) == row_name:
+                result=row.get(return_val)
+                break
+    return float(result)
+                
+
+#@skip_if_offline
+@pytest.mark.longtests
+def test_benchmark_training_cycle(benchmark_config_with_data: DictConfig) -> None:
+    reset_peak_memory_stats()
+    AnemoiProfiler(benchmark_config_with_data).profile()
+    
+    #read memory and mlflow stats
+    stats=memory_stats(device=0)
+    peak_active_mem_mb=stats['active_bytes.all.peak']/1024/1024 
+    av_training_throughput = open_log_file("speed_profiler.csv")
+    av_training_batch_time_s = open_log_file("time_profiler.csv")
+    
+    
+    print(f"Peak memory: {peak_active_mem_mb:.2f}MB")
+    print(f"Av. training batch time: {av_training_batch_time_s}s")
+    print(f"Av. training throughput: {av_training_throughput}iter/s")
 
 @skip_if_offline
 @pytest.mark.longtests
