@@ -197,8 +197,6 @@ class AnemoiTrainer:
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)
 
-        kwargs.pop("data_indices")
-
         # Load the model weights
         if self.load_weights_only:
             # Sanify the checkpoint for transfer learning
@@ -207,8 +205,10 @@ class AnemoiTrainer:
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
+                kwargs.pop("data_indices")
                 model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
+            model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
             self.data_indices.compare_variables(model._ckpt_model_name_to_index, self.data_indices.name_to_index)
 

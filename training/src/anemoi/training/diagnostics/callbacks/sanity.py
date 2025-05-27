@@ -20,7 +20,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
     def __init__(self) -> None:
         super().__init__()
 
-    def on_train_epoch_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
+    def on_train_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the training data.
 
         Parameters
@@ -39,7 +39,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
 
         trainer.datamodule.data_indices.compare_variables(self._model_name_to_index, data_name_to_index)
 
-    def on_validation_epoch_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
+    def on_validation_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.
 
         Parameters
@@ -58,7 +58,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
 
         trainer.datamodule.data_indices.compare_variables(self._model_name_to_index, data_name_to_index)
 
-    def on_test_epoch_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
+    def on_test_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the test data.
 
         Parameters
@@ -70,7 +70,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
 
-        if self._model_name_to_index is None:
+        if hasattr(trainer.model.module, "_ckpt_model_name_to_index"):
+            self._model_name_to_index = trainer.model.module._ckpt_model_name_to_index
+        else:
             self._model_name_to_index = trainer.datamodule.data_indices.name_to_index
 
         trainer.datamodule.data_indices.compare_variables(self._model_name_to_index, data_name_to_index)
