@@ -54,13 +54,6 @@ def fake_trainer(mocker: Any, name_to_index: dict) -> AnemoiTrainer:
     return trainer
 
 
-# @pytest.fixture
-# def checkpoint(mocker: Any, name_to_index: dict) -> dict[str, dict[str, IndexCollection]]:
-#     data_index = mocker.Mock(spec=IndexCollection)
-#     data_index.name_to_index = name_to_index
-#     return {"hyper_parameters": {"data_indices": data_index}}
-
-
 @pytest.fixture
 def callback() -> CheckVariableOrder:
     callback = CheckVariableOrder()
@@ -74,15 +67,6 @@ def callback() -> CheckVariableOrder:
 
 def test_on_epoch(fake_trainer: AnemoiTrainer, callback: CheckVariableOrder, name_to_index: dict) -> None:
     """Test all epoch functions with "working" indices."""
-    # callback.on_train_start(fake_trainer, None)
-    # callback.on_validation_start(fake_trainer, None)
-    # callback.on_test_start(fake_trainer, None)
-
-    # assert fake_trainer.datamodule.data_indices.compare_variables(fake_trainer.model.module._ckpt_model_name_to_index, name_to_index) is None
-
-    # # Test with initialised model_name_to_index
-    # callback.on_sanity_check_start(fake_trainer, None)
-    # assert callback._model_name_to_index == name_to_index
 
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index
@@ -109,11 +93,6 @@ def test_on_epoch_permute(
 
     Expecting errors in all cases.
     """
-    # callback.on_train_start(fake_trainer, None)
-    # callback.on_validation_start(fake_trainer, None)
-    # callback.on_test_start(fake_trainer, None)
-
-    # assert fake_trainer.datamodule.data_indices.compare_variables(fake_trainer.model.module._ckpt_model_name_to_index, name_to_index) is None
 
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index_permute
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
