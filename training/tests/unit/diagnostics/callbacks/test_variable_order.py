@@ -48,7 +48,8 @@ def fake_trainer(mocker: Any, name_to_index: dict) -> AnemoiTrainer:
     trainer.model.module._ckpt_model_name_to_index = name_to_index
     trainer.model.module.data_name_to_index = name_to_index
     trainer.datamodule.data_indices.compare_variables = types.MethodType(
-        IndexCollection.compare_variables, trainer.datamodule.data_indices,
+        IndexCollection.compare_variables,
+        trainer.datamodule.data_indices,
     )
     return trainer
 
@@ -92,7 +93,8 @@ def test_on_epoch(fake_trainer: AnemoiTrainer, callback: CheckVariableOrder, nam
 
     assert (
         fake_trainer.datamodule.data_indices.compare_variables(
-            fake_trainer.model.module._ckpt_model_name_to_index, name_to_index,
+            fake_trainer.model.module._ckpt_model_name_to_index,
+            name_to_index,
         )
         is None
     )
@@ -128,7 +130,8 @@ def test_on_epoch_permute(
 
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
         fake_trainer.datamodule.data_indices.compare_variables(
-            fake_trainer.model.module._ckpt_model_name_to_index, name_to_index_permute,
+            fake_trainer.model.module._ckpt_model_name_to_index,
+            name_to_index_permute,
         )
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
 
@@ -150,7 +153,8 @@ def test_on_epoch_rename(
     callback.on_test_start(fake_trainer, None)
 
     fake_trainer.datamodule.data_indices.compare_variables(
-        fake_trainer.model.module._ckpt_model_name_to_index, name_to_index_rename,
+        fake_trainer.model.module._ckpt_model_name_to_index,
+        name_to_index_rename,
     )
 
 
@@ -171,7 +175,8 @@ def test_on_epoch_rename_permute(
     callback.on_test_start(fake_trainer, None)
 
     fake_trainer.datamodule.data_indices.compare_variables(
-        fake_trainer.model.module._ckpt_model_name_to_index, name_to_index_rename_permute,
+        fake_trainer.model.module._ckpt_model_name_to_index,
+        name_to_index_rename_permute,
     )
 
 
@@ -196,7 +201,8 @@ def test_on_epoch_partial_rename_permute(
 
     with pytest.raises(ValueError, match="The variable order in the model and data is different."):
         fake_trainer.datamodule.data_indices.compare_variables(
-            fake_trainer.model.module._ckpt_model_name_to_index, name_to_index_partial_rename_permute,
+            fake_trainer.model.module._ckpt_model_name_to_index,
+            name_to_index_partial_rename_permute,
         )
 
 
@@ -221,7 +227,8 @@ def test_on_epoch_wrong_validation(
 
     assert (
         fake_trainer.datamodule.data_indices.compare_variables(
-            fake_trainer.model.module._ckpt_model_name_to_index, name_to_index,
+            fake_trainer.model.module._ckpt_model_name_to_index,
+            name_to_index,
         )
         is None
     )
