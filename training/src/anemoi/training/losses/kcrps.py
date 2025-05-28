@@ -10,11 +10,16 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import einops
 import torch
 
+from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.base import BaseLoss
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +83,10 @@ class KernelCRPS(BaseLoss):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
 
         y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
         y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
@@ -88,15 +96,22 @@ class KernelCRPS(BaseLoss):
 
         kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs latlon v")
 
-        kcrps_ = self.scale(kcrps_.unsqueeze(1), scaler_indices, without_scalers=without_scalers)
+        kcrps_ = self.scale(
+            kcrps_.unsqueeze(1),
+            scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
 
         # divide by batch size
         if squash:
-            return kcrps_.sum() / bs_
+            loss = kcrps_.sum() / bs_
+            return reduce_tensor(loss, group) if is_sharded else loss
 
         # sum only across the batch dimension; enable this to generate per-variable CRPS "maps"
         loss = kcrps_.sum(dim=0) / bs_
-        return loss.sum(dim=0)
+        loss = loss.sum(dim=0)
+        return reduce_tensor(loss, group) if is_sharded else loss
 
     @property
     def name(self) -> str:
@@ -177,7 +192,10 @@ class AlmostFairKernelCRPS(BaseLoss):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
 
         y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
         y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
@@ -191,15 +209,17 @@ class AlmostFairKernelCRPS(BaseLoss):
 
         # The ensemble member dimension is of course gone in the crps but scalers require 4 dimensions
         kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs latlon v").unsqueeze(1)
-        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers)
+        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
         # divide by (weighted point count) * (batch size)
         if squash:
-            return kcrps_.sum() / bs_
+            loss = kcrps_.sum() / bs_
+            return reduce_tensor(loss, group) if is_sharded else loss
 
         # sum only across the batch dimension; enable this to generate per-variable CRPS "maps"
         loss = kcrps_.sum(dim=0) / bs_
-        return loss.sum(dim=0)
+        loss = loss.sum(dim=0)
+        return reduce_tensor(loss, group) if is_sharded else loss
 
     @property
     def name(self) -> str:
