@@ -53,13 +53,6 @@ dependencies = [
   "typeguard>=4",
 ]
 
-optional-dependencies.extra = [
-  "anemoi-datasets>=0.5.21",
-  "h3>=3.7.7,<4",
-  "healpy>=1.17", 
-  "trimesh>=4.1",
-]
-
 optional-dependencies.all = [ "anemoi-graphs[extra]" ]
 optional-dependencies.dev = [ "anemoi-graphs[docs,tests]" ]
 
@@ -72,6 +65,13 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
   "termcolor",
   "tomli",
+]
+
+optional-dependencies.extra = [
+  "anemoi-datasets>=0.5.21",
+  "h3>=3.7.7,<4",
+  "healpy>=1.17",
+  "trimesh>=4.1",
 ]
 
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]

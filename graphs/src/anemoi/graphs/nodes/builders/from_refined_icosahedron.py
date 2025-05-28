@@ -105,7 +105,7 @@ class TriNodes(IcosahedralNodes):
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
-        
+
         return create_tri_nodes(resolution=max(self.resolutions))
 
 
@@ -138,7 +138,7 @@ class LimitedAreaTriNodes(LimitedAreaIcosahedralNodes):
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
-        
+
         return create_tri_nodes(resolution=max(self.resolutions), area_mask_builder=self.area_mask_builder)
 
 
@@ -202,7 +202,7 @@ class StretchedTriNodes(StretchedIcosahedronNodes):
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         from anemoi.graphs.generate.tri_icosahedron import create_stretched_tri_nodes
-        
+
         return create_stretched_tri_nodes(
             base_resolution=self.global_resolution,
             lam_resolution=max(self.resolutions),
