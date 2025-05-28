@@ -9,7 +9,6 @@
 
 
 import logging
-from abc import ABC
 from typing import Optional
 
 import torch
@@ -27,7 +26,7 @@ from anemoi.models.preprocessing.mappings import square_converter
 LOGGER = logging.getLogger(__name__)
 
 
-class Remapper(BasePreprocessor, ABC):
+class Remapper(BasePreprocessor):
     """Remap and convert variables for single variables."""
 
     supported_methods = {
