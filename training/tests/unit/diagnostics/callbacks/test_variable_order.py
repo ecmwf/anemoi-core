@@ -67,7 +67,6 @@ def callback() -> CheckVariableOrder:
 
 def test_on_epoch(fake_trainer: AnemoiTrainer, callback: CheckVariableOrder, name_to_index: dict) -> None:
     """Test all epoch functions with "working" indices."""
-
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index
@@ -93,7 +92,6 @@ def test_on_epoch_permute(
 
     Expecting errors in all cases.
     """
-
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index_permute
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index_permute
