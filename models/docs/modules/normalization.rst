@@ -23,7 +23,6 @@ Example configuration using layer kernels:
      processor:
        LayerNorm:
          _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-         _partial_: True
          bias: False
 
 The normalization layers are particularly useful when:

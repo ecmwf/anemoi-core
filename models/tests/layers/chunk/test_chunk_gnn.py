@@ -9,7 +9,6 @@
 
 
 import pytest
-from hydra.utils import instantiate
 
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.chunk import GNNProcessorChunk
@@ -24,7 +23,7 @@ class TestGNNProcessorChunk:
         num_layers = 3
         mlp_extra_layers = 3
         edge_dim = None
-        layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+        layer_kernels = load_layer_kernels()
         return num_channels, num_layers, layer_kernels, mlp_extra_layers, edge_dim
 
     @pytest.fixture
@@ -35,7 +34,6 @@ class TestGNNProcessorChunk:
             num_layers=num_layers,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
-            activation="SiLU",
             edge_dim=edge_dim,
         )
 
