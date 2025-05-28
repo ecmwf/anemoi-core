@@ -461,7 +461,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         return super().experiment
 
     @rank_zero_only
-    def log_system_metrics(self, interval: int = 10) -> None:
+    def log_system_metrics(self, interval:int=10) -> None:
         """Log system metrics (CPU, GPU, etc)."""
         import mlflow
         from mlflow.system_metrics.metrics.disk_monitor import DiskMonitor
