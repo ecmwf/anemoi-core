@@ -11,10 +11,10 @@ following YAML configuration:
      data: # name of the nodes
        node_builder:
          _target_: anemoi.graphs.nodes.XArrayNodes
-         npz_file: /path/to/folder/with/grids/my_grid.zarr
+         dataset: /path/to/folder/with/grids/my_grid.zarr
          lat_key: latitudes
          lon_key: longitudes
 
-where `my_grid` is the path to the xarray compatible file and `lat_key`
+where `dataset` is the path to the xarray compatible file and `lat_key`
 and `lon_key` are optional arguments with the key names of the latitude
 and longitude arrays.
