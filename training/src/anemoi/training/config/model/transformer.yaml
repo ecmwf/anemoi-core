@@ -1,55 +1,26 @@
-activation: GELU
 num_channels: 1024
 cpu_offload: False
-output_mask:
-  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
 
-# LayerKernels are optionally. If not specified, the default are pytorch.nn.LayerNorm and torch.nn.Linear.
 layer_kernels:
-  processor:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-      _partial_: True
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear
-      _partial_: True
-      #Any arguments to your chosen function go here
-    QueryNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
-      bias: False
-      #Any arguments to your chosen function go here
-    KeyNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
-      bias: False
-      #Any arguments to your chosen function go here
-  encoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-      _partial_: True
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear
-      _partial_: True
-      #Any arguments to your chosen function go here
-  decoder:
-    LayerNorm:
-      _target_: torch.nn.LayerNorm
-      _partial_: True
-      #Any arguments to your chosen function go here e.g.
-    Linear:
-      _target_: torch.nn.Linear
-      _partial_: True
-      #Any arguments to your chosen function go here e.g.
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: torch.nn.LayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
-  activation: ${model.activation}
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
@@ -61,41 +32,40 @@ processor:
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
-  qk_norm: False
   use_rotary_embeddings: False
-
+  layer_kernels: ${model.layer_kernels}
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
-
+  layer_kernels: ${model.layer_kernels}
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
   initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
 
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
   data: 8
   hidden: 8
   data2hidden: 8
   hidden2data: 8
-
 
 attributes:
   edges:

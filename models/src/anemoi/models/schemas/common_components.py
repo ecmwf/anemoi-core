@@ -7,39 +7,13 @@
 # nor does it submit to any jurisdiction.
 #
 
-from enum import Enum
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 
 from anemoi.utils.schemas import BaseModel
-
-
-class ActivationFunctons(str, Enum):
-    GELU = "GELU"
-    SiLU = "SiLU"
-    ELU = "ELU"
-    ReLU = "ReLU"
-    Tanh = "Tanh"
-    Sigmoid = "Sigmoid"
-    Hardshrink = "Hardshrink"
-    Hardsigmoid = "Hardsigmoid"
-    Hardtanh = "Hardtanh"
-    Hardswish = "Hardswish"
-    LeakyReLU = "LeakyReLU"
-    LogSigmoid = "LogSigmoid"
-    PReLU = "PReLU"
-    ReLU6 = "ReLU6"
-    SELU = "SELU"
-    CELU = "CELU"
-    Mish = "Mish"
-    Softplus = "Softplus"
-    Softshrink = "Softshrink"
-    Softsign = "Softsign"
-    Tanhshrink = "Tanhshrink"
-    Threshold = "Threshold"
-    GLU = "GLU"
 
 
 class TransformerModelComponent(PydanticBaseModel):
@@ -52,8 +26,6 @@ class TransformerModelComponent(PydanticBaseModel):
         validate_default = True
         extra = "allow"  # Beware this allows extra fields in the config, typos are less likely to be spotted
 
-    activation: ActivationFunctons = Field(example="GELU")
-    "Activation function to use for the transformer model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
     cpu_offload: bool = Field(example=False)
@@ -64,11 +36,11 @@ class TransformerModelComponent(PydanticBaseModel):
     "Ratio of mlp hidden dimension to embedding dimension. Default to 4."
     num_heads: NonNegativeInt = Field(example=16)
     "Number of attention heads. Default to 16."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
 class GNNModelComponent(BaseModel):
-    activation: ActivationFunctons = Field(example="GELU")
-    "Activation function to use for the GNN model component. Default to GELU."
     convert_: str = Field("all", alias="_convert_")
     "Target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
     trainable_size: NonNegativeInt = Field(example=8)
@@ -81,3 +53,5 @@ class GNNModelComponent(BaseModel):
     "Edge attributes to consider in the model component features."
     mlp_extra_layers: NonNegativeInt = Field(example=0)
     "The number of extra hidden layers in MLP. Default to 0."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder processor and decoder blocks"

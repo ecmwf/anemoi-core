@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,13 +12,17 @@ import hypothesis.strategies as st
 import pytest
 import torch
 import torch.nn as nn
-from hydra.utils import instantiate
 from hypothesis import given
 from hypothesis import settings
 
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.utils import load_layer_kernels
+
+
+@pytest.fixture(scope="session")
+def layer_kernels():
+    return load_layer_kernels()
 
 
 @given(
@@ -30,12 +34,12 @@ from anemoi.models.layers.utils import load_layer_kernels
     attention_implementation=st.sampled_from(["scaled_dot_product_attention"]),
 )
 def test_multi_head_self_attention_init(
-    num_heads, embed_dim_multiplier, dropout_p, softcap, attention_module, attention_implementation
+    num_heads, embed_dim_multiplier, dropout_p, softcap, attention_module, attention_implementation, layer_kernels
 ):
     embed_dim = (
         num_heads * embed_dim_multiplier
     )  # TODO: Make assert in MHSA to check if embed_dim is divisible by num_heads
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+
     mhsa = attention_module(
         num_heads,
         embed_dim,
@@ -63,10 +67,9 @@ def test_multi_head_self_attention_init(
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
 @settings(deadline=None)
-def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
+def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p, layer_kernels):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     mhsa = MultiHeadSelfAttention(
         num_heads,
         embed_dim,
@@ -90,10 +93,9 @@ def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
 @settings(deadline=None)
-def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
+def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p, layer_kernels):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     mhsa = MultiHeadSelfAttention(
         num_heads,
         embed_dim,
@@ -125,7 +127,7 @@ def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_di
 def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+    layer_kernels = load_layer_kernels(kernel_config={})
     mhsa = MultiHeadCrossAttention(
         num_heads,
         embed_dim,
@@ -152,7 +154,7 @@ def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_di
 def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+    layer_kernels = load_layer_kernels(kernel_config={})
     mhsa = MultiHeadCrossAttention(
         num_heads,
         embed_dim,
