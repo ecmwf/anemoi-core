@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import xarray as xr
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
