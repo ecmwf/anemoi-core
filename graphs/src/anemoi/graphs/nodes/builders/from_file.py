@@ -211,8 +211,8 @@ class XArrayNodes(BaseNodeBuilder):
 
     Parameters
     ----------
-    dataset_path : str
-        Path to the CF-compliant file (e.g., NetCDF or zarr) containing the latitude and longitude variables.
+    dataset : str
+        Path to xarray compatible file (e.g., NetCDF or zarr) containing latitude and longitude variables.
     name : str
         Identifier to use for the nodes within the graph.
     lat_key : str, optional
@@ -233,6 +233,7 @@ class XArrayNodes(BaseNodeBuilder):
     """
 
     def __init__(self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon") -> None:
+        import xarray as xr
 
         super().__init__(name)
         self.dataset = dataset
@@ -241,6 +242,8 @@ class XArrayNodes(BaseNodeBuilder):
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
     def get_coordinates(self) -> torch.Tensor:
+        import xarray as xr
+
         ds = xr.open_dataset(self.dataset)
 
         for var in [self.lat_key, self.lon_key]:
