@@ -214,7 +214,7 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
         attr_values = super().get_raw_values(nodes, **kwargs)
-        mask = nodes[self.mask_node_attr_name].squeeze()
+        mask = nodes[self.mask_node_attr_name].squeeze().to(self.device)
         return attr_values * mask
 
 
