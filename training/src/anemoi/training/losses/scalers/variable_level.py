@@ -87,7 +87,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
             "Variable Level Scaling: Applying %s scaling to %s variables (%s)",
             self.__class__.__name__,
             self.scaling_group,
-            self.variable_metadata_extractor.get_group_variables(self.scaling_group),
+            self.variable_metadata_extractor.get_group_specification(self.scaling_group),
         )
         LOGGER.info("with slope = %s and y-intercept/minimum = %s.", self.slope, self.y_intercept)
 
