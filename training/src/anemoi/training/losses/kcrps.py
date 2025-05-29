@@ -57,7 +57,7 @@ class KernelCRPS(BaseLoss):
             The point-wise kernel CRPS, shape (batch_size, 1, latlon).
         """
         ens_size = preds.shape[-1]
-        mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
+        mae = self.avg_function(torch.abs(targets[..., None] - preds), dim=-1)
 
         assert ens_size > 1, "Ensemble size must be greater than 1."
 
@@ -65,7 +65,7 @@ class KernelCRPS(BaseLoss):
 
         ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
         for i in range(ens_size):  # loop version to reduce memory usage
-            ens_var += torch.sum(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+            ens_var += self.sum_function(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
         ens_var = coef * ens_var
 
         return mae + ens_var
@@ -167,7 +167,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         assert ens_size > 1, "Ensemble size must be greater than 1."
 
         coef = 1.0 / (2.0 * ens_size * (ens_size - 1))
-        return coef * torch.sum(mem_err + mem_err_transpose - (1 - epsilon) * var, dim=(-1, -2))
+        return coef * self.sum_function(mem_err + mem_err_transpose - (1 - epsilon) * var, dim=(-1, -2))
 
     def forward(
         self,
