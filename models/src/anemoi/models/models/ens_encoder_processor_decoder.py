@@ -18,7 +18,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
-from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -48,8 +47,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         model_config = DotDict(model_config)
         self.noise_injector = instantiate(
             model_config.model.noise_injector,
+            _recursive_=False,
             num_channels=self.num_channels,
-            layer_kernels=load_layer_kernels(model_config.get("model.layer_kernels.noise_injector", {})),
         )
 
     def _calculate_input_dim(self, model_config):

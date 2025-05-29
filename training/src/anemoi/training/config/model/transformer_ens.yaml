@@ -10,6 +10,10 @@ noise_injector:
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
   inject_noise: True
+  layer_kernels:
+    Activation:
+      _target_: torch.nn.GELU
+
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
