@@ -18,8 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> None:
-    """
-    Log the final variable scaling for each variable in the model.
+    """Log the final variable scaling for each variable in the model.
 
     Parameters
     ----------

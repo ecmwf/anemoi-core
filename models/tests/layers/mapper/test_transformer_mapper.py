@@ -10,7 +10,6 @@
 
 import pytest
 import torch
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
@@ -31,13 +30,11 @@ class TestTransformerBaseMapper:
             {
                 "LayerNorm": {
                     "_target_": "torch.nn.LayerNorm",
-                    "_partial_": True,
                 },
-                "Linear": {"_target_": "torch.nn.Linear", "_partial_": True, "bias": False},
+                "Linear": {"_target_": "torch.nn.Linear", "bias": False},
             }
         )
-        layer_kernels = load_layer_kernels(kernel_config)
-        return instantiate(layer_kernels)
+        return load_layer_kernels(kernel_config, instance=False)
 
     @pytest.fixture
     def mapper_init(self, layer_kernels):
@@ -47,7 +44,6 @@ class TestTransformerBaseMapper:
         out_channels_dst: int = 5
         num_chunks: int = 1
         cpu_offload: bool = False
-        activation: str = "SiLU"
         num_heads: int = 16
         mlp_hidden_ratio: int = 7
         attention_implementation: str = "scaled_dot_product_attention"
@@ -58,7 +54,6 @@ class TestTransformerBaseMapper:
             out_channels_dst,
             num_chunks,
             cpu_offload,
-            activation,
             num_heads,
             mlp_hidden_ratio,
             layer_kernels,
@@ -74,7 +69,6 @@ class TestTransformerBaseMapper:
             out_channels_dst,
             num_chunks,
             cpu_offload,
-            activation,
             num_heads,
             mlp_hidden_ratio,
             layer_kernels,
@@ -88,7 +82,6 @@ class TestTransformerBaseMapper:
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             attention_implementation=attention_implementation,
@@ -103,7 +96,6 @@ class TestTransformerBaseMapper:
             _out_channels_dst,
             _num_chunks,
             _cpu_offload,
-            _activation,
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
@@ -137,7 +129,6 @@ class TestTransformerBaseMapper:
             out_channels_dst,
             _num_chunks,
             _cpu_offload,
-            activation,
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,
@@ -148,7 +139,6 @@ class TestTransformerBaseMapper:
         assert mapper.in_channels_dst == in_channels_dst
         assert mapper.hidden_dim == hidden_dim
         assert mapper.out_channels_dst == out_channels_dst
-        assert mapper.activation == activation
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         # Should be a no-op in the base class
@@ -160,7 +150,6 @@ class TestTransformerBaseMapper:
             _out_channels_dst,
             _num_chunks,
             _cpu_offload,
-            _activation,
             _num_heads,
             _mlp_hidden_ratio,
             _layer_kernels,

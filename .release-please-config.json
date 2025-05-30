@@ -10,7 +10,7 @@
   "draft-pull-request": true,
   "pull-request-title-pattern": "chore${scope}: Release${component} ${version}",
   "pull-request-header": ":robot: Automated Release PR\n\nThis PR was created by `release-please` to prepare the next release. Once merged:\n\n1. A new version tag will be created\n2. A GitHub release will be published\n3. The changelog will be updated\n\nChanges to be included in the next release:",
-  "pull-request-footer": "> [!IMPORTANT]\n> :warning: Merging this PR will:\n> - Create a new release\n> - Trigger deployment pipelines\n> - Update package versions\n\n **Before merging:**\n - Ensure all tests pass\n - Review the changelog carefully\n - Get required approvals\n\n [Release-please documentation](https://github.com/googleapis/release-please)",
+  "pull-request-footer": "> [!IMPORTANT]\n> Please do not change the PR title, manifest file, or any other automatically generated content in this PR unless you understand the implications. Changes here can break the release process.\n> \n> :warning: Merging this PR will:\n> - Create a new release\n> - Trigger deployment pipelines\n> - Update package versions\n\n **Before merging:**\n - Ensure all tests pass\n - Review the changelog carefully\n - Get required approvals\n\n [Release-please documentation](https://github.com/googleapis/release-please)",
   "packages": {
     "training": {
         "package-name": "anemoi-training",

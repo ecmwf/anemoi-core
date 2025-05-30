@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from enum import Enum
+from enum import IntEnum
 
 
-class TensorDim(Enum):
+class TensorDim(IntEnum):
     BATCH_SIZE = 0
     ENSEMBLE_DIM = 1
     GRID = 2
