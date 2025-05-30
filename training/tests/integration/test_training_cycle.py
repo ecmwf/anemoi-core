@@ -36,6 +36,14 @@ def test_config_validation_architecture_configs(architecture_config: DictConfig)
 
 @skip_if_offline
 @pytest.mark.longtests
+def test_training_cycle_without_config_validation(gnn_config_with_data: DictConfig) -> None:
+    gnn_config_with_data.config_validation = False
+    gnn_config_with_data.hardware.files.graph = "dummpy.pt"  # Mandatory input when running without config validation
+    AnemoiTrainer(gnn_config_with_data).train()
+
+
+@skip_if_offline
+@pytest.mark.longtests
 def test_training_cycle_stretched(stretched_config_with_data: DictConfig) -> None:
     AnemoiTrainer(stretched_config_with_data).train()
 
