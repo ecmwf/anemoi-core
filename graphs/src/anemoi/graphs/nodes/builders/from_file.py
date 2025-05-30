@@ -18,7 +18,6 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-from anemoi.datasets import open_dataset
 from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
@@ -59,6 +58,8 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
+        from anemoi.datasets import open_dataset
+
         dataset = open_dataset(self.dataset)
         return self.reshape_coords(dataset.latitudes, dataset.longitudes)
 
