@@ -213,7 +213,7 @@ def test_on_epoch_wrong_validation(
     )
 
 
-def test_on_load_checkpoint_restores_name_to_index():
+def test_on_load_checkpoint_restores_name_to_index() -> None:
 
     model = GraphForecaster.__new__(GraphForecaster)
 
