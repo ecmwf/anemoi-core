@@ -65,12 +65,11 @@ class BaseTendencyScaler(BaseScaler):
     def get_level_scaling(self, variable_level: int) -> float: ...
 
     def get_scaling_values(self, **_kwargs) -> np.ndarray:
-        variable_level_scaling = np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32)
+        variable_level_scaling = np.ones((len(self.data_indices.data.output.full),), dtype=np.float32)
 
-        for key, idx in self.data_indices.internal_model.output.name_to_index.items():
-            if (
-                idx in self.data_indices.internal_model.output.prognostic
-                and self.data_indices.data.output.name_to_index.get(key)
+        for key, idx in self.data_indices.model.output.name_to_index.items():
+            if idx in self.data_indices.model.output.prognostic and self.data_indices.data.output.name_to_index.get(
+                key,
             ):
                 prog_idx = self.data_indices.data.output.name_to_index[key]
                 variable_stdev = self.statistics["stdev"][prog_idx] if self.statistics_tendencies else 1

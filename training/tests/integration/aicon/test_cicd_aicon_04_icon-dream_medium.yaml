@@ -159,7 +159,6 @@ data:
   num_features: null
   format: zarr
   diagnostic: []
-  remapped:
   remapper:
     default: "none"
 

@@ -29,9 +29,6 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
             "data": {
                 "forcing": ["x"],
                 "diagnostic": ["z", "q"],
-                "remapped": {
-                    "d": ["cos_d", "sin_d"],
-                },
             },
             "training": {
                 "training_loss": {
@@ -123,8 +120,7 @@ expected_linear_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
-        1,  # cos_d
-        1,  # sin_d
+        1,  # d
     ],
 )
 expected_relu_scaling = torch.Tensor(
@@ -135,8 +131,7 @@ expected_relu_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
-        1,  # cos_d
-        1,  # sin_d
+        1,  # d
     ],
 )
 expected_constant_scaling = torch.Tensor(
@@ -147,8 +142,7 @@ expected_constant_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
-        1,  # cos_d
-        1,  # sin_d
+        1,  # d
     ],
 )
 expected_polynomial_scaling = torch.Tensor(
@@ -159,8 +153,7 @@ expected_polynomial_scaling = torch.Tensor(
         1,  # q
         0.1,  # z
         100,  # other
-        1,  # cos_d
-        1,  # sin_d
+        1,  # d
     ],
 )
 
@@ -172,8 +165,7 @@ expected_no_tendency_scaling = torch.Tensor(
         1 * 1,  # q
         1 * 0.1,  # z
         1 * 100,  # other
-        1 * 1,  # cos_d
-        1 * 1,  # sin_d
+        1 * 1,  # d
     ],
 )
 
@@ -185,8 +177,7 @@ expected_stdev_tendency_scaling = torch.Tensor(
         1 * 1,  # q (diagnostic)
         1 * 0.1,  # z (diagnostic)
         (1 / 8.6) * 100,  # other
-        1 * 1,  # cos_d (remapped)
-        1 * 1,  # sin_d (remapped)
+        1 * 2.0,  # d
     ],
 )
 
@@ -198,8 +189,7 @@ expected_var_tendency_scaling = torch.Tensor(
         1,  # q (diagnostic)
         0.1,  # z (diagnostic)
         (1**2) / (8.6**2) * 100,  # other
-        1 * 1,  # cos_d (remapped)
-        1 * 1,  # sin_d (remapped)
+        (2**2) / (1**2),  # d
     ],
 )
 
@@ -245,12 +235,11 @@ def test_variable_loss_scaling_vals(
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices, _, _ = fake_data
 
-    metric_range, metric_ranges_validation = get_metric_ranges(config, data_indices)
+    metric_range = get_metric_ranges(config, data_indices)
 
     del metric_range["all"]
-    del metric_ranges_validation["all"]
 
-    expected_metric_range_validation = {
+    expected_metric_range = {
         "pl_y": [
             data_indices.model.output.name_to_index["y_50"],
             data_indices.model.output.name_to_index["y_500"],
@@ -264,10 +253,4 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
         "y_850": [data_indices.model.output.name_to_index["y_850"]],
     }
 
-    expected_metric_range = expected_metric_range_validation.copy()
-    del expected_metric_range["sfc_d"]
-    expected_metric_range["sfc_cos_d"] = [data_indices.internal_model.output.name_to_index["cos_d"]]
-    expected_metric_range["sfc_sin_d"] = [data_indices.internal_model.output.name_to_index["sin_d"]]
-
-    assert metric_ranges_validation == expected_metric_range_validation
     assert metric_range == expected_metric_range
