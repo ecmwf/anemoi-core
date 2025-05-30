@@ -41,7 +41,7 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest training/tests/integration --longtests
+            python3 -m pytest -v training/tests/integration --longtests
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
