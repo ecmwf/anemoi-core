@@ -491,6 +491,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
                     LOGGER.warning("Failed to init AMD GPU Monitor: %s", e)
 
         mlflow.enable_system_metrics_logging()
+        # https://mlflow.org/docs/latest/system-metrics/
+        # By default, system metrics are sampled every 10 seconds
+        # we choose to update this to 100 - system metrics are logged every 1 min 30 seconds
+        mlflow.set_system_metrics_sampling_interval(interval=100)
         system_monitor = CustomSystemMetricsMonitor(
             self.run_id,
             resume_logging=self.run_id is not None,
