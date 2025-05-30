@@ -58,6 +58,10 @@ dependencies = [
 ]
 
 optional-dependencies.all = [  ]
+optional-dependencies.data = [
+  "xarray<=2025.4",
+]
+
 optional-dependencies.dev = [ "anemoi-graphs[docs,tests]" ]
 
 optional-dependencies.docs = [
