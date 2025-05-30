@@ -52,3 +52,22 @@ jobs:
             #SBATCH --gres=gpu:1
             #SBATCH --mem=16G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
+
+  notify-team:
+    needs: integration-tests
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add failure comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: 294
+          body: |
+            ## 🚨 Nightly Job Failed
+
+            **Repository:** ${{ github.repository }}
+            **Workflow:** ${{ github.workflow }}
+            **Run URL:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Time:** ${{ github.event.schedule }}
+
+            cc: @ecmwf/anemoisecurity
