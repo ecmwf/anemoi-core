@@ -58,7 +58,7 @@ def _gather(
     input_: Tensor,
     dim_: int,
     shapes: tuple,
-    gather_in_backward: Optional[bool] = True,
+    gather_in_backward: bool = True,
     group: Optional[ProcessGroup] = None,
 ) -> Tensor:
     """Gather tensors and concatenate along the last dimension."""
@@ -109,7 +109,7 @@ def _gather(
     return output
 
 
-def _reduce(input_: Tensor, use_fp32: Optional[bool] = True, group: Optional[ProcessGroup] = None) -> Tensor:
+def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
     """All-reduce the input tensor across model parallel group."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
