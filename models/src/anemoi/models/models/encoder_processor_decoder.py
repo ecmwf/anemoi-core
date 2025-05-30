@@ -127,6 +127,15 @@ class AnemoiModelEncProcDec(nn.Module):
             layer_kernels=self.layer_kernels_decoder,
         )
 
+        # Residual connection x(t+1) = model(x(t)) + residual(x(t))
+        self.residual = instantiate(
+            model_config.model.residual,
+            nlat=len(torch.unique(self._graph_data[self._graph_name_data].x[:, 0])),
+            nlon=len(torch.unique(self._graph_data[self._graph_name_data].x[:, 1])),
+            internal_input_idx=data_indices.internal_model.input.prognostic,
+            forcings_input_idx=data_indices.model.input.name_to_index,
+        )
+
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
             [
@@ -203,7 +212,7 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # residual connection (just for the prognostic variables)
-        x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
+        x_out[..., self._internal_output_idx] += self.residual(x_skip)
 
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
