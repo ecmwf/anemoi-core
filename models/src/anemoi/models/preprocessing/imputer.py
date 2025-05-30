@@ -346,8 +346,7 @@ class CopyImputer(BaseImputer):
 
 
 class DynamicMixin:
-    """
-    Mixin to add dynamic imputation behavior.
+    """Mixin to add dynamic imputation behavior.
     To be used when NaN maps change at different timesteps.
     """
 

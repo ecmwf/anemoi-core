@@ -162,8 +162,6 @@ class BaseModelSchema(PydanticBaseModel):
     "Feature tensor size in the hidden space."
     model: Model = Field(default_factory=Model)
     "Model schema."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
-    "Settings related to custom kernels for encoder processor and decoder blocks"
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
     bounding: list[Bounding]
@@ -202,6 +200,8 @@ class NoiseInjectorSchema(BaseModel):
     "Hidden dimension of the MLP used to process the noise."
     inject_noise: bool = Field(default=True)
     "Whether to inject noise or not."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
 class EnsModelSchema(BaseModelSchema):
