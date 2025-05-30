@@ -1,6 +1,6 @@
 # This workflow assigns labels to a pull request based on the Conventional Commits format.
 # This is necessary for release-please to work properly.
-name: "[Pull Request] Label Conventional Commits"
+name: "[PR] Label Conventional Commits"
 
 on:
   pull_request:

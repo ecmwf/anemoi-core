@@ -15,7 +15,6 @@ from hydra.utils import instantiate
 from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
-from omegaconf import OmegaConf
 
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.block import TransformerMapperBlock
@@ -23,35 +22,19 @@ from anemoi.models.layers.utils import load_layer_kernels
 
 
 @pytest.fixture
-def layer_kernels():
-    kernel_config = OmegaConf.create(
-        {
-            "LayerNorm": {
-                "_target_": "torch.nn.LayerNorm",
-                "_partial_": True,
-            },
-            "Linear": {"_target_": "torch.nn.Linear", "_partial_": True, "bias": False},
-        }
-    )
-    layer_kernels = load_layer_kernels(kernel_config)
-    return instantiate(layer_kernels)
-
-
-@pytest.fixture
-def init(layer_kernels):
+def init():
     num_channels: int = 8
     hidden_dim: int = 256
     num_heads: int = 4
-    activation: str = "SiLU"
     window_size: int = None
     dropout_p: float = (0.0,)
     qk_norm: bool = (False,)
     attention_implementation: str = "scaled_dot_product_attention"
+    layer_kernels = load_layer_kernels()
     return (
         num_channels,
         hidden_dim,
         num_heads,
-        activation,
         window_size,
         layer_kernels,
         dropout_p,
@@ -66,7 +49,6 @@ def mapper_block(init):
         num_channels,
         hidden_dim,
         num_heads,
-        activation,
         window_size,
         layer_kernels,
         dropout_p,
@@ -75,15 +57,14 @@ def mapper_block(init):
     ) = init
 
     return TransformerMapperBlock(
-        num_channels,
-        hidden_dim,
-        num_heads,
-        activation,
-        window_size,
-        layer_kernels,
-        dropout_p,
-        qk_norm,
-        attention_implementation,
+        num_channels=num_channels,
+        hidden_dim=hidden_dim,
+        num_heads=num_heads,
+        window_size=window_size,
+        layer_kernels=layer_kernels,
+        dropout_p=dropout_p,
+        qk_norm=qk_norm,
+        attention_implementation=attention_implementation,
     )
 
 
@@ -101,7 +82,6 @@ def test_TransformerMapperBlock_init(mapper_block):
     factor_attention_heads=st.integers(min_value=1, max_value=10),
     hidden_dim=st.integers(min_value=1, max_value=100),
     num_heads=st.integers(min_value=1, max_value=10),
-    activation=st.sampled_from(["ReLU", "GELU", "Tanh"]),
     window_size=st.integers(min_value=1, max_value=512),
     shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
     batch_size=st.integers(min_value=1, max_value=40),
@@ -113,7 +93,6 @@ def test_forward_output(
     factor_attention_heads,
     hidden_dim,
     num_heads,
-    activation,
     window_size,
     shapes,
     batch_size,
@@ -123,11 +102,10 @@ def test_forward_output(
     num_channels = num_heads * factor_attention_heads
     layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
     block = TransformerMapperBlock(
-        num_channels,
-        hidden_dim,
-        num_heads,
-        activation,
-        window_size,
+        num_channels=num_channels,
+        hidden_dim=hidden_dim,
+        num_heads=num_heads,
+        window_size=window_size,
         dropout_p=dropout_p,
         layer_kernels=layer_kernels,
         attention_implementation="scaled_dot_product_attention",

@@ -13,7 +13,6 @@ import importlib
 import pytest
 import torch
 import torch.nn as nn
-from hydra.utils import instantiate
 
 import anemoi.models.layers.block
 from anemoi.models.layers.block import GraphTransformerMapperBlock
@@ -29,10 +28,9 @@ def init():
     out_channels = 128
     edge_dim = 11
     bias = True
-    activation = "GELU"
     num_heads = 8
     num_chunks = 2
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+    layer_kernels = load_layer_kernels()
     qk_norm = True
     return (
         in_channels,
@@ -41,7 +39,6 @@ def init():
         edge_dim,
         layer_kernels,
         bias,
-        activation,
         num_heads,
         num_chunks,
         qk_norm,
@@ -57,7 +54,6 @@ def block(init):
         edge_dim,
         layer_kernels,
         bias,
-        activation,
         num_heads,
         num_chunks,
         qk_norm,
@@ -70,7 +66,6 @@ def block(init):
         layer_kernels=layer_kernels,
         num_heads=num_heads,
         bias=bias,
-        activation=activation,
         update_src_nodes=False,
         num_chunks=num_chunks,
         qk_norm=qk_norm,
@@ -85,7 +80,6 @@ def test_GraphTransformerProcessorBlock_init(init, block):
         _edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         num_heads,
         num_chunks,
         _qk_norm,
@@ -120,7 +114,6 @@ def test_GraphTransformerProcessorBlock_shard_qkve_heads(init, block):
         _edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         num_heads,
         _num_chunks,
         _qk_norm,
@@ -146,7 +139,6 @@ def test_GraphTransformerProcessorBlock_shard_output_seq(init, block):
         _edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         num_heads,
         _num_chunks,
         _qk_norm,
@@ -167,7 +159,6 @@ def test_GraphTransformerProcessorBlock_forward_backward(init, block):
         edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         _num_heads,
         _num_chunks,
         _qk_norm,
@@ -254,7 +245,6 @@ def mapper_block(init):
         edge_dim,
         layer_kernels,
         bias,
-        activation,
         num_heads,
         num_chunks,
         qk_norm,
@@ -267,7 +257,6 @@ def mapper_block(init):
         layer_kernels=layer_kernels,
         num_heads=num_heads,
         bias=bias,
-        activation=activation,
         update_src_nodes=False,
         num_chunks=num_chunks,
         qk_norm=qk_norm,
@@ -282,7 +271,6 @@ def test_GraphTransformerMapperBlock_init(init, mapper_block):
         _edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         num_heads,
         num_chunks,
         _qk_norm,
@@ -314,7 +302,6 @@ def test_GraphTransformerMapperBlock_shard_qkve_heads(init, mapper_block):
         _edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         num_heads,
         _num_chunks,
         _qk_norm,
@@ -341,7 +328,6 @@ def test_GraphTransformerMapperBlock_shard_output_seq(init, mapper_block):
         _edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         num_heads,
         _num_chunks,
         _qk_norm,
@@ -362,7 +348,6 @@ def test_GraphTransformerMapperBlock_forward_backward(init, mapper_block):
         edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         _num_heads,
         _num_chunks,
         _qk_norm,
@@ -411,7 +396,6 @@ def test_GraphTransformerMapperBlock_chunking(init, mapper_block, monkeypatch):
         edge_dim,
         _layer_kernels,
         _bias,
-        _activation,
         _num_heads,
         _num_chunks,
         _qk_norm,
