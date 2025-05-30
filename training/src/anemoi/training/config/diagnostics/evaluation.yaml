@@ -50,9 +50,7 @@ log:
     tracking_uri: ???
     experiment_name: 'anemoi-debug'
     project_name: 'Anemoi'
-    system:
-      enabled: False
-      interval: 100 #Every interval seconds, the system metrics will be collected. By default interval=10.
+    system: False
     terminal: True
     run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True

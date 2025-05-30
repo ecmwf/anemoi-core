@@ -97,9 +97,8 @@ def get_mlflow_logger(config: BaseSchema) -> None:
 
     if config.diagnostics.log.mlflow.terminal:
         logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)
-    if config.diagnostics.log.mlflow.system.enabled:
-        interval = config.diagnostics.log.mlflow.system.interval
-        logger.log_system_metrics(interval)
+    if config.diagnostics.log.mlflow.system:
+        logger.log_system_metrics()
 
     return logger
 
