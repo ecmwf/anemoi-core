@@ -9,14 +9,14 @@
 
 import types
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.train.forecaster.forecaster import GraphForecaster
+from anemoi.training.train.train import AnemoiTrainer
 
 
 @pytest.fixture
@@ -220,11 +220,7 @@ def test_on_load_checkpoint_restores_name_to_index():
     model.on_load_checkpoint = types.MethodType(GraphForecaster.on_load_checkpoint, GraphForecaster)
 
     mock_name_to_index = {"var1": 0, "var2": 1}
-    mock_checkpoint = {
-        "hyper_parameters": {
-            "data_indices": MagicMock(name_to_index=mock_name_to_index)
-        }
-    }
+    mock_checkpoint = {"hyper_parameters": {"data_indices": MagicMock(name_to_index=mock_name_to_index)}}
     # Act
     model.on_load_checkpoint(mock_checkpoint)
 
