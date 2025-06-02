@@ -15,8 +15,7 @@ from abc import abstractmethod
 
 import torch
 
-from anemoi.models.interface import AnemoiModelInterface
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.utils.enums import OutputTensorDim
 from anemoi.training.utils.enums import TensorDim
 
 if sys.version_info < (3, 11):
@@ -34,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
-    scale_dims: tuple[TensorDim, ...]
+    scale_dims: tuple[TensorDim | OutputTensorDim] = None
 
     def __init__(self, norm: str | None = None) -> None:
         """Initialise BaseScaler.
@@ -52,7 +51,7 @@ class BaseScaler(ABC):
             "unit-mean",
         ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
         assert self.scale_dims is not None, f"Class {self.__class__.__name__} must define 'scale_dims'"
-        if isinstance(self.scale_dims, TensorDim):
+        if isinstance(self.scale_dims, (TensorDim, OutputTensorDim)):
             self.scale_dims = (self.scale_dims,)
 
     @abstractmethod

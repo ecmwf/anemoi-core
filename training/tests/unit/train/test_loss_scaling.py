@@ -21,6 +21,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.utils.enums import OutputTensorDim
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -65,10 +66,11 @@ def fake_data(
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
+    relative_date_indices = [0, 1, 3, 6, 12]
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
-    return config, data_indices, statistics, statistics_tendencies
+    return config, data_indices, statistics, statistics_tendencies, relative_date_indices
 
 
 @pytest.fixture
@@ -101,10 +103,11 @@ def fake_data_no_param() -> tuple[DictConfig, IndexCollection, dict[str, list[fl
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
+    relative_date_indices = [0, 1, 3, 6, 12]
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
-    return config, data_indices, statistics, statistics_tendencies
+    return config, data_indices, statistics, statistics_tendencies, relative_date_indices
 
 
 @pytest.fixture
@@ -236,6 +239,13 @@ reweighted_graph_node_scaler = {
     "norm": "unit-sum",
 }
 
+lead_time_decay_scaler = {
+    "_target_": "anemoi.training.losses.scalers.LeadTimeDecayScaler",
+    "decay_factor": 0.15,
+    "method": "linear",
+    "inverse": False,
+}
+
 expected_linear_scaling = torch.Tensor(
     [
         50 / 1000 * 0.5,  # y_50
@@ -317,6 +327,8 @@ expected_var_tendency_scaling = torch.Tensor(
     ],
 )
 
+expected_lead_time_decay_scaling = 1 - 0.15 * torch.tensor([0, 1, 3, 6, 12]) / torch.tensor(12)
+
 
 @pytest.mark.parametrize(
     ("fake_data", "expected_scaling"),
@@ -336,8 +348,7 @@ def test_variable_loss_scaling_vals(
     expected_scaling: torch.Tensor,
     graph_with_nodes: HeteroData,
 ) -> None:
-    config, data_indices, statistics, statistics_tendencies = fake_data
-
+    config, data_indices, statistics, statistics_tendencies, _ = fake_data
     metadata_extractor = ExtractVariableGroupAndLevel(
         config.training.variable_groups,
     )
@@ -356,12 +367,70 @@ def test_variable_loss_scaling_vals(
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 
-    assert torch.allclose(final_variable_scaling, expected_scaling)
+    assert torch.allclose(torch.tensor(final_variable_scaling), expected_scaling)
+
+
+@pytest.mark.parametrize(
+    ("fake_data", "expected_scaling"),
+    [(lead_time_decay_scaler, expected_lead_time_decay_scaling)],
+    indirect=["fake_data"],
+)
+def test_lead_time_decay_loss_scaling(
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    expected_scaling: torch.Tensor,
+) -> None:
+    config, data_indices, _, _, relative_date_indices = fake_data
+
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        group_config=config.training.variable_groups,
+        relative_date_indices=relative_date_indices,
+        output_mask=NoOutputMask(),
+    )
+
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    final_variable_scaling = (
+        loss.scaler.subset("additional_scaler")
+        .subset_by_dim(OutputTensorDim.TIME.value)
+        .get_scaler(len(OutputTensorDim))
+    )
+    unique_scaling = final_variable_scaling[0, :, 0, 0, 0]
+    assert torch.allclose(unique_scaling, expected_scaling)
+
+
+@pytest.mark.parametrize(
+    ("fake_data", "expected_scaling"),
+    [(lead_time_decay_scaler, expected_lead_time_decay_scaling)],
+    indirect=["fake_data"],
+)
+def test_lead_time_decay_loss_scaling(
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    expected_scaling: torch.Tensor,
+) -> None:
+    config, data_indices, _, _, relative_date_indices = fake_data
+
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        group_config=config.training.variable_groups,
+        relative_date_indices=relative_date_indices,
+        output_mask=NoOutputMask(),
+    )
+
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    final_variable_scaling = (
+        loss.scaler.subset("additional_scaler")
+        .subset_by_dim(OutputTensorDim.TIME.value)
+        .get_scaler(len(OutputTensorDim))
+    )
+    unique_scaling = final_variable_scaling[0, :, 0, 0, 0]
+    assert torch.allclose(unique_scaling, expected_scaling)
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
-    config, data_indices, _, _ = fake_data
+    config, data_indices, _, _, _ = fake_data
 
     metadata_extractor = ExtractVariableGroupAndLevel(config.training.variable_groups)
     metric_range = get_metric_ranges(config, data_indices, metadata_extractor=metadata_extractor)
