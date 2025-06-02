@@ -7,11 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.training.losses.scalers.base_scaler import BaseScaler
-from anemoi.training.utils.enums import OutputTensorDim
 import logging
 
 import torch
+
+from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.utils.enums import OutputTensorDim
 
 LOGGER = logging.getLogger(__name__)
 
