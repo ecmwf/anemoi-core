@@ -71,8 +71,9 @@ optional-dependencies.docs = [
   "tomli",
 ]
 
-optional-dependencies.data = [
+optional-dependencies.extra = [
   "xarray<=2025.4",
+  "zarr>=3.0",
 ]
 
 
@@ -83,9 +84,6 @@ urls.Homepage = "https://github.com/ecmwf/anemoi-graphs/"
 urls.Issues = "https://github.com/ecmwf/anemoi-graphs/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-graphs/"
 scripts.anemoi-graphs = "anemoi.graphs.__main__:main"
-
-[tool.black]
-line-length = 120
 
 [tool.setuptools_scm]
 root = ".."
