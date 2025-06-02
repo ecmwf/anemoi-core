@@ -84,6 +84,9 @@ urls.Issues = "https://github.com/ecmwf/anemoi-graphs/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-graphs/"
 scripts.anemoi-graphs = "anemoi.graphs.__main__:main"
 
+[tool.black]
+line-length = 120
+
 [tool.setuptools_scm]
 root = ".."
 version_scheme = "post-release"
