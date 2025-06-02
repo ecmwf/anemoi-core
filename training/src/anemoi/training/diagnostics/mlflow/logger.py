@@ -438,6 +438,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 parent_run_id = fork_run_id
                 tags["forkedRun"] = "True"
                 tags["forkedRunId"] = parent_run_id
+                tags["mlflow.parentRunId"] = parent_run_id
                 run = mlflow_client.get_run(parent_run_id)
                 self._check_server2server_lineage(run)
                 self._check_dry_run(run)
