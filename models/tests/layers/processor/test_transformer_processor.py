@@ -7,130 +7,71 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
+from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
-from hydra.utils import instantiate
 
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
+
+
+@dataclass
+class TransformerProcessorConfig:
+    num_layers: int = 2
+    num_channels: int = 128
+    num_chunks: int = 2
+    num_heads: int = 16
+    mlp_hidden_ratio: int = 4
+    dropout_p: float = 0.1
+    attention_implementation: str = "scaled_dot_product_attention"
+    softcap: float = 0
+    use_alibi_slopes: bool = False
+    window_size: int = 10
+    qk_norm: bool = True
+    cpu_offload: bool = False
+    layer_kernels: field(default_factory=DotDict) = None
+
+    def __post_init__(self):
+        self.layer_kernels = load_layer_kernels(instance=False)
 
 
 @pytest.fixture
 def transformer_processor_init():
-    num_layers = 2
-    window_size = 10
-    num_channels = 128
-    num_chunks = 2
-    activation = "GELU"
-    cpu_offload = False
-    num_heads = 16
-    mlp_hidden_ratio = 4
-    dropout_p = 0.1
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
-    softcap = 0.5
-    attention_implementation = "scaled_dot_product_attention"
-    qk_norm = True
-
-    return (
-        num_layers,
-        layer_kernels,
-        window_size,
-        num_channels,
-        num_chunks,
-        activation,
-        cpu_offload,
-        num_heads,
-        mlp_hidden_ratio,
-        dropout_p,
-        softcap,
-        attention_implementation,
-        qk_norm,
-    )
+    return TransformerProcessorConfig()
 
 
 @pytest.fixture
 def transformer_processor(transformer_processor_init):
-    (
-        num_layers,
-        layer_kernels,
-        window_size,
-        num_channels,
-        num_chunks,
-        activation,
-        cpu_offload,
-        num_heads,
-        mlp_hidden_ratio,
-        dropout_p,
-        softcap,
-        attention_implementation,
-        qk_norm,
-    ) = transformer_processor_init
     return TransformerProcessor(
-        num_layers=num_layers,
-        layer_kernels=layer_kernels,
-        window_size=window_size,
-        num_channels=num_channels,
-        num_chunks=num_chunks,
-        activation=activation,
-        cpu_offload=cpu_offload,
-        num_heads=num_heads,
-        mlp_hidden_ratio=mlp_hidden_ratio,
-        dropout_p=dropout_p,
-        attention_implementation=attention_implementation,
-        softcap=softcap,
-        qk_norm=qk_norm,
+        **asdict(transformer_processor_init),
     )
 
 
 def test_transformer_processor_init(transformer_processor, transformer_processor_init):
-    (
-        num_layers,
-        _layer_kernels,
-        _window_size,
-        num_channels,
-        num_chunks,
-        _activation,
-        _cpu_offload,
-        _num_heads,
-        _mlp_hidden_ratio,
-        _dropout_p,
-        _attention_implementation,
-        _softcap,
-        _qk_norm,
-    ) = transformer_processor_init
     assert isinstance(transformer_processor, TransformerProcessor)
-    assert transformer_processor.num_chunks == num_chunks
-    assert transformer_processor.num_channels == num_channels
-    assert transformer_processor.chunk_size == num_layers // num_chunks
+    assert transformer_processor.num_chunks == transformer_processor_init.num_chunks
+    assert transformer_processor.num_channels == transformer_processor_init.num_channels
+    assert (
+        transformer_processor.chunk_size
+        == transformer_processor_init.num_layers // transformer_processor_init.num_chunks
+    )
 
 
 def test_transformer_processor_forward(transformer_processor, transformer_processor_init):
-    (
-        _num_layers,
-        _layer_kernels,
-        _window_size,
-        num_channels,
-        _num_chunks,
-        _activation,
-        _cpu_offload,
-        _num_heads,
-        _mlp_hidden_ratio,
-        _dropout_p,
-        _attention_implementation,
-        _softcap,
-        _qk_norm,
-    ) = transformer_processor_init
     gridsize = 100
     batch_size = 1
-    x = torch.rand(gridsize, num_channels)
+    x = torch.rand(gridsize, transformer_processor_init.num_channels)
     shard_shapes = [list(x.shape)]
 
     output = transformer_processor.forward(x, batch_size, shard_shapes)
     assert output.shape == x.shape
 
     # Generate dummy target and loss function
-    target = torch.randn(gridsize, num_channels)
+    target = torch.randn(gridsize, transformer_processor_init.num_channels)
     loss_fn = torch.nn.MSELoss()
 
     # Compute loss

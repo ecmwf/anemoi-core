@@ -32,6 +32,7 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -42,12 +43,13 @@ class BaseMapper(nn.Module, ABC):
 
     def __init__(
         self,
-        in_channels_src: int = 0,
-        in_channels_dst: int = 0,
-        hidden_dim: int = 128,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
         cpu_offload: bool = False,
-        activation: str = "SiLU",
+        layer_kernels: DotDict,
         **kwargs,
     ) -> None:
         """Initialize BaseMapper."""
@@ -57,7 +59,8 @@ class BaseMapper(nn.Module, ABC):
         self.in_channels_dst = in_channels_dst
         self.hidden_dim = hidden_dim
         self.out_channels_dst = out_channels_dst
-        self.activation = activation
+        self.layer_factory = load_layer_kernels(layer_kernels)
+        self.activation = self.layer_factory.Activation()
 
         self.proc = NotImplemented
 
@@ -178,21 +181,21 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
     def __init__(
         self,
-        in_channels_src: int = 0,
-        in_channels_dst: int = 0,
-        hidden_dim: int = 128,
-        trainable_size: int = 8,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
-        cpu_offload: bool = False,
-        activation: str = "GELU",
+        trainable_size: int,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
         qk_norm: bool = False,
-        num_heads: int = 16,
-        mlp_hidden_ratio: int = 4,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
+        cpu_offload: bool = False,
         layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
@@ -205,51 +208,57 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int, optional
+            Output channels of the destination node, by default None
         trainable_size : int
             Trainable tensor of edge
+        num_chunks : int
+            Number of chunks to split into
         num_heads: int
-            Number of heads to use, default 16
+            Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
+            ratio of mlp hidden dimension to embedding dimension
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
         layer_kernels : DotDict, optional
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
+            layer_kernels=layer_kernels,
         )
 
-        # Linear = layer_kernels.get("Linear", torch.nn.Linear)
-        Linear = layer_kernels["Linear"]
+        Linear = self.layer_factory.Linear
 
         self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
 
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
         self.proc = GraphTransformerMapperBlock(
-            hidden_dim,
-            mlp_hidden_ratio * hidden_dim,
-            hidden_dim,
+            in_channels=hidden_dim,
+            hidden_dim=mlp_hidden_ratio * hidden_dim,
+            out_channels=hidden_dim,
             num_heads=num_heads,
             edge_dim=self.edge_dim,
-            activation=activation,
-            qk_norm=qk_norm,
             num_chunks=num_chunks,
-            layer_kernels=layer_kernels,
+            qk_norm=qk_norm,
+            layer_kernels=self.layer_factory,
         )
 
         self.offload_layers(cpu_offload)
@@ -291,21 +300,21 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
 
     def __init__(
         self,
-        in_channels_src: int = 0,
-        in_channels_dst: int = 0,
-        hidden_dim: int = 128,
-        trainable_size: int = 8,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
-        cpu_offload: bool = False,
-        activation: str = "GELU",
+        trainable_size: int,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
         qk_norm: bool = False,
-        num_heads: int = 16,
-        mlp_hidden_ratio: int = 4,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
+        cpu_offload: bool = False,
         layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
@@ -318,30 +327,39 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int
+            Output channels of the destination node, by default None
         trainable_size : int
             Trainable tensor of edge
+        num_chunks : int
+            Number of chunks to split into
         num_heads: int
-            Number of heads to use, default 16
+            Number of heads in transformer
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
-        cpu_offload : bool, optional
+        cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            trainable_size,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
+            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
             qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
@@ -352,7 +370,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             layer_kernels=layer_kernels,
         )
 
-        self.emb_nodes_src = layer_kernels["Linear"](self.in_channels_src, self.hidden_dim)
+        self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
 
     def forward(
         self,
@@ -370,22 +388,22 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
 
     def __init__(
         self,
-        in_channels_src: int = 0,
-        in_channels_dst: int = 0,
-        hidden_dim: int = 128,
-        trainable_size: int = 8,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
-        cpu_offload: bool = False,
-        activation: str = "GELU",
+        trainable_size: int,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
         qk_norm: bool = False,
-        num_heads: int = 16,
-        mlp_hidden_ratio: int = 4,
         initialise_data_extractor_zero: bool = False,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
+        cpu_offload: bool = False,
         layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
@@ -398,35 +416,42 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int
+            Output channels of the destination node
         trainable_size : int
             Trainable tensor of edge
+        num_chunks : int
+            Number of chunks to split into
         num_heads: int
-            Number of heads to use, default 16
+            Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
+            Ratio of mlp hidden dimension to embedding dimension
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         initialise_data_extractor_zero : bool, default False:
             Whether to initialise the data extractor to zero
-        activation : str, optional
-            Activation function, by default "GELU"
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+        layer_kernels : DotDict, optional
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            trainable_size,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
+            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
             qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
@@ -461,20 +486,20 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
 
     def __init__(
         self,
-        in_channels_src: int = 0,
-        in_channels_dst: int = 0,
-        hidden_dim: int = 128,
-        trainable_size: int = 8,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
+        trainable_size: int,
+        num_chunks: int,
+        mlp_extra_layers: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
         cpu_offload: bool = False,
-        activation: str = "SiLU",
-        mlp_extra_layers: int = 0,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
-        layer_kernels: DotDict = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GNNBaseMapper.
 
@@ -486,30 +511,38 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int
+            Output channels of the destination node
         trainable_size : int
             Trainable tensor of edge
-        mlp_extra_layers : int, optional
-            Number of extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
         num_chunks : int
-            Do message passing in X chunks
+            Number of chunks to split into
+        num_heads: int
+            Number of heads in transformer
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+        layer_kernels : DotDict, optional
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
+            layer_kernels=layer_kernels,
         )
 
         self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
@@ -518,9 +551,8 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             in_features=self.edge_dim,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
-            activation=activation,
         )
 
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
@@ -570,20 +602,20 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
 
     def __init__(
         self,
-        in_channels_src: int = 0,
-        in_channels_dst: int = 0,
-        hidden_dim: int = 128,
-        trainable_size: int = 8,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
+        trainable_size: int,
+        num_chunks: int,
+        mlp_extra_layers: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
         cpu_offload: bool = False,
-        activation: str = "SiLU",
-        mlp_extra_layers: int = 0,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
-        layer_kernels: DotDict = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GNNForwardMapper.
 
@@ -595,32 +627,37 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        edge_dim : int
+        out_channels_dst : int
+            Output channels of the destination node, by default None
+        trainable_size : int
             Trainable tensor of edge
+        num_chunks: int
+            Number of chunks to split into
         mlp_extra_layers : int, optional
             Number of extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
-        num_chunks : int
-            Do message passing in X chunks
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            trainable_size,
-            out_channels_dst,
-            num_chunks,
-            cpu_offload,
-            activation,
-            mlp_extra_layers,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            trainable_size=trainable_size,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            mlp_extra_layers=mlp_extra_layers,
             sub_graph=sub_graph,
             sub_graph_edge_attributes=sub_graph_edge_attributes,
             src_grid_size=src_grid_size,
@@ -629,11 +666,10 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         )
 
         self.proc = GraphConvMapperBlock(
-            hidden_dim,
-            hidden_dim,
-            layer_kernels=layer_kernels,
+            in_channels=hidden_dim,
+            out_channels=hidden_dim,
+            layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
             update_src_nodes=True,
             num_chunks=num_chunks,
         )
@@ -644,18 +680,16 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             in_features=in_channels_src,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
-            activation=activation,
         )
 
         self.emb_nodes_dst = MLP(
             in_features=in_channels_dst,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
-            activation=activation,
         )
 
 
@@ -664,20 +698,20 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
 
     def __init__(
         self,
-        in_channels_src: int = 0,
-        in_channels_dst: int = 0,
-        hidden_dim: int = 128,
-        trainable_size: int = 8,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
+        trainable_size: int,
+        num_chunks: int,
+        mlp_extra_layers: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
         cpu_offload: bool = False,
-        activation: str = "SiLU",
-        mlp_extra_layers: int = 0,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: int = 0,
-        dst_grid_size: int = 0,
-        layer_kernels: DotDict = None,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize GNNBackwardMapper.
 
@@ -689,31 +723,36 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        edge_dim : int
+        out_channels_dst : int
+            Output channels of the destination node
+        trainable_size : int
             Trainable tensor of edge
-        mlp_extra_layers : int, optional
-            Number of extra layers in MLP, by default 0
-        activation : str, optional
-            Activation function, by default "SiLU"
-        num_chunks : int
-            Do message passing in X chunks
-        cpu_offload : bool, optional
+        num_chunks: int
+            Number of chunks to split into
+        mlp_extra_layers : int
+            Number of extra layers in MLP
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
+        cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
-            Output channels of the destination node, by default None
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels['Linear'] = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            trainable_size,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            trainable_size=trainable_size,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
             mlp_extra_layers=mlp_extra_layers,
             sub_graph=sub_graph,
             sub_graph_edge_attributes=sub_graph_edge_attributes,
@@ -723,11 +762,10 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         )
 
         self.proc = GraphConvMapperBlock(
-            hidden_dim,
-            hidden_dim,
-            layer_kernels=layer_kernels,
+            in_channels=hidden_dim,
+            out_channels=hidden_dim,
+            layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
-            activation=activation,
             update_src_nodes=False,
             num_chunks=num_chunks,
         )
@@ -738,9 +776,8 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             in_features=self.hidden_dim,
             hidden_dim=self.hidden_dim,
             out_features=self.out_channels_dst,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
-            activation=self.activation,
             layer_norm=False,
             final_activation=False,
         )
@@ -768,23 +805,23 @@ class TransformerBaseMapper(BaseMapper):
 
     def __init__(
         self,
+        *,
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        layer_kernels: DotDict,
-        out_channels_dst: Optional[int],
+        out_channels_dst: Optional[int] = None,
         num_chunks: int,
-        cpu_offload: bool,
-        activation: str,
         num_heads: int,
         mlp_hidden_ratio: int,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
-        qk_norm: Optional[bool] = False,
+        qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
-        use_alibi_slopes: Optional[bool] = None,
-        use_rotary_embeddings: Optional[bool] = False,
+        use_alibi_slopes: bool = False,
+        use_rotary_embeddings: bool = False,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
     ) -> None:
         """Initialize TransformerBaseMapper.
 
@@ -796,36 +833,45 @@ class TransformerBaseMapper(BaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        trainable_size : int
-            Trainable tensor of edge
-        num_heads: int
-            Number of heads to use, default 16
-        mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
-        cpu_offload : bool, optional
-            Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
+        out_channels_dst : int, optional
             Output channels of the destination node, by default None
+        mlp_hidden_ratio: int
+            Ratio of mlp hidden dimension to embedding dimension
+        qk_norm: bool, optional
+            Normalize query and key, by default False
+        dropout_p: float, optional
+            Dropout probability used for multi-head self attention, default 0.1
+        attention_implementation: str
+            A predefined string which selects which underlying attention
+            implementation, by default "flash_attention"
+        softcap : float, optional
+            Anything > 0 activates softcapping flash attention, by default 0
+        use_alibi_slopes : bool
+            Use aLiBI option, only used for flash attention, by default False
+        window_size: int, optional
+            1/2 size of shifted window for attention computation, by default None
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
+            layer_kernels=layer_kernels,
             cpu_offload=cpu_offload,
-            activation=activation,
         )
 
         self.proc = TransformerMapperBlock(
             num_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
             num_heads=num_heads,
-            activation=activation,
             window_size=window_size,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
             attention_implementation=attention_implementation,
@@ -865,23 +911,23 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
 
     def __init__(
         self,
+        *,
         in_channels_src: int,
         in_channels_dst: int,
-        layer_kernels: DotDict,
-        hidden_dim: int = 128,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
-        cpu_offload: bool = False,
-        activation: str = "GELU",
-        num_heads: int = 16,
-        mlp_hidden_ratio: int = 4,
-        window_size: Optional[int] = None,
-        dropout_p: float = 0.0,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
         qk_norm: bool = False,
+        dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
-        use_alibi_slopes: bool = None,
+        use_alibi_slopes: bool = False,
+        cpu_offload: bool = False,
+        window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
+        layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerForwardMapper.
@@ -894,28 +940,37 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        trainable_size : int
-            Trainable tensor of edge
-        num_heads: int
-            Number of heads to use, default 16
-        mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
-        cpu_offload : bool, optional
-            Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
+        out_channels_dst : int, optional
             Output channels of the destination node, by default None
+        mlp_hidden_ratio: int
+            Ratio of mlp hidden dimension to embedding dimension
+        qk_norm: bool, optional
+            Normalize query and key, by default False
+        dropout_p: float, optional
+            Dropout probability used for multi-head self attention, default 0.1
+        attention_implementation: str
+            A predefined string which selects which underlying attention
+            implementation, by default "flash_attention"
+        softcap : float, optional
+            Anything > 0 activates softcapping flash attention, by default 0
+        use_alibi_slopes : bool
+            Use aLiBI option, only used for flash attention, by default False
+        window_size: int, optional
+            1/2 size of shifted window for attention computation, by default None
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             layer_kernels=layer_kernels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             window_size=window_size,
@@ -945,23 +1000,23 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
 
     def __init__(
         self,
+        *,
         in_channels_src: int,
         in_channels_dst: int,
-        layer_kernels: DotDict,
-        hidden_dim: int = 128,
+        hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        num_chunks: int = 1,
-        cpu_offload: bool = False,
-        activation: str = "GELU",
-        num_heads: int = 16,
-        mlp_hidden_ratio: int = 4,
-        window_size: Optional[int] = None,
-        dropout_p: float = 0.0,
+        num_chunks: int,
+        num_heads: int,
+        mlp_hidden_ratio: int,
         qk_norm: bool = False,
+        dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: float = None,
-        use_alibi_slopes: bool = None,
+        use_alibi_slopes: bool = False,
+        cpu_offload: bool = False,
+        window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
+        layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerBackwardMapper.
@@ -974,28 +1029,37 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        trainable_size : int
-            Trainable tensor of edge
-        num_heads: int
-            Number of heads to use, default 16
-        mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
-        activation : str, optional
-            Activation function, by default "GELU"
-        cpu_offload : bool, optional
-            Whether to offload processing to CPU, by default False
-        out_channels_dst : Optional[int], optional
+        out_channels_dst : int, optional
             Output channels of the destination node, by default None
+        mlp_hidden_ratio: int
+            Ratio of mlp hidden dimension to embedding dimension
+        qk_norm: bool, optional
+            Normalize query and key, by default False
+        dropout_p: float, optional
+            Dropout probability used for multi-head self attention, default 0.1
+        attention_implementation: str
+            A predefined string which selects which underlying attention
+            implementation, by default "flash_attention"
+        softcap : float, optional
+            Anything > 0 activates softcapping flash attention, by default 0
+        use_alibi_slopes : bool
+            Use aLiBI option, only used for flash attention, by default False
+        window_size: int, optional
+            1/2 size of shifted window for attention computation, by default None
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
         """
         super().__init__(
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
             layer_kernels=layer_kernels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
-            activation=activation,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             window_size=window_size,

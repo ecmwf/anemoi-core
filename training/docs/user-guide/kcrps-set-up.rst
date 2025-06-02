@@ -111,7 +111,6 @@ conditional layer norm.
       processor:
          LayerNorm:
             _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-            _partial_: True
             normalized_shape: ${model.num_channels}
             condition_shape: ${model.noise_injector.noise_channels_dim}
             w_one_bias_zero_init: True

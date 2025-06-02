@@ -34,14 +34,15 @@ This package provides the *Anemoi* training functionality.
 
    user-guide/overview
    user-guide/basic-set-up
-   user-guide/kcrps-set-up
    user-guide/hydra-intro
    user-guide/configuring
+   user-guide/kcrps-set-up
    user-guide/training
    user-guide/models
    user-guide/tracking
    user-guide/benchmarking
    user-guide/distributed
+   user-guide/download-era5-o96
 
 .. toctree::
    :maxdepth: 1

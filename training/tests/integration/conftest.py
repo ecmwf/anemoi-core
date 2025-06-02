@@ -17,6 +17,7 @@ from hydra import initialize
 from omegaconf import OmegaConf
 
 from anemoi.utils.testing import get_test_archive
+from anemoi.utils.testing import get_test_data
 
 
 @pytest.fixture(autouse=True)
@@ -140,6 +141,19 @@ def lam_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> Omeg
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg
+
+
+@pytest.fixture
+def lam_config_with_data_and_graph(lam_config_with_data: OmegaConf) -> OmegaConf:
+    existing_graph_config = OmegaConf.load(Path.cwd() / "training/src/anemoi/training/config/graph/existing.yaml")
+    lam_config_with_data.graph = existing_graph_config
+
+    url_graph = lam_config_with_data.hardware.files["graph"]
+    tmp_path_graph = get_test_data(url_graph)
+    lam_config_with_data.hardware.paths.graph = Path(tmp_path_graph).parent
+    lam_config_with_data.hardware.files.graph = Path(tmp_path_graph).name
+
+    return lam_config_with_data
 
 
 @pytest.fixture

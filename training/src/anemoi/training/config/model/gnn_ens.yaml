@@ -1,28 +1,7 @@
-activation: GELU
 num_channels: 512
-output_mask:
-  _target_: anemoi.training.utils.masks.NoOutputMask
 
 model:
   _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
-
-layer_kernels:
-  processor:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      _partial_: True
-      normalized_shape: ${model.num_channels}
-      condition_shape: ${model.noise_injector.noise_channels_dim}
-      w_one_bias_zero_init: True
-      autocast: false
-  encoder:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
-  decoder:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-      _partial_: True
 
 noise_injector:
   _target_: anemoi.models.layers.ensemble.NoiseConditioning
@@ -31,34 +10,58 @@ noise_injector:
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
   inject_noise: True
+  layer_kernels:
+    Activation:
+      _target_: torch.nn.GELU
+
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
 
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor
   _convert_: all
-  activation: ${model.activation}
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
   mlp_extra_layers: 0
+  layer_kernels:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+      normalized_shape: ${model.num_channels}
+      condition_shape: ${model.noise_injector.noise_channels_dim}
+      w_one_bias_zero_init: True
+      autocast: false
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU
 
 encoder:
   _target_: anemoi.models.layers.mapper.GNNForwardMapper
   _convert_: all
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
+  layer_kernels: ${model.layer_kernels}
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
   _convert_: all
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  activation: ${model.activation}
   num_chunks: 1
   mlp_extra_layers: 0
+  layer_kernels: ${model.layer_kernels}
 
 trainable_parameters:
   data: 8
@@ -66,6 +69,10 @@ trainable_parameters:
   data2hidden: 8
   hidden2data: 8
   hidden2hidden: 8
+
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 attributes:
   edges:

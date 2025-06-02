@@ -10,6 +10,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -40,13 +41,14 @@ class NoiseInjector(nn.Module):
         # Noise channels
         self.noise_channels = noise_channels_dim
 
+        self.layer_factory = load_layer_kernels(layer_kernels)
+
         self.noise_mlp = MLP(
             noise_channels_dim,
             noise_mlp_hidden_dim,
             noise_channels_dim,
-            layer_kernels=layer_kernels,
+            layer_kernels=self.layer_factory,
             n_extra_layers=-1,
-            activation="GELU",
             final_activation=False,
             layer_norm=True,
         )

@@ -5,7 +5,7 @@
 The user can pick between different model tasks and types when using
 anemoi-training:
 
-Model Tasks:
+**Model Tasks:**
 
 #. Deterministic Forecasting (GraphForecaster)
 #. Ensemble Forecasting (GraphEnsForecaster)
@@ -15,7 +15,7 @@ The model tasks specify the training objective and are specified in the
 configuration through ``training.model_task``. They are our
 `LightningModules <https://lightning.ai/docs/pytorch/lightning.html>`_.
 
-Model Types:
+**Model Types:**
 
 #. Graph Neural Network (GNN)
 #. Graph Transformer Neural Network
@@ -28,6 +28,9 @@ to a latent space where the processing takes place.
 
 For a more detailed read on connections in Graph Neural Networks,
 `Velickovic (2023) <https://arxiv.org/pdf/2301.08210>`_ is recommended.
+
+For detailed instructions on creating models, see the
+:ref:`anemoi-models:usage-create-model`.
 
 .. note::
 
@@ -42,9 +45,10 @@ The processor is the part of the model that performs the computation on
 the latent space. The processor can be chosen to be a GNN,
 GraphTransformer or Transformer with Flash attention.
 
-**GNN**
+GNN
+===
 
-The GNN structure is similar to that user in Keisler (2022) and Lam et
+The GNN structure is similar to that used in Keisler (2022) and Lam et
 al. (2023).
 
 The physical data is encoded on to a multi-mesh latent space of
@@ -64,7 +68,8 @@ layer and are aggregated by summing over the messages received from
 neighbours. The data is then decoded by the decoder back to a single
 resolution grid.
 
-**Graph Transformer**
+Graph Transformer
+=================
 
 The GraphTransformer uses convolutional multi-message passing on the
 processor. In this case, instead of the messages from neighbouring nodes
@@ -72,16 +77,17 @@ being weighted equally (as in the case for GNNs), the GNN can learn
 which node embeddings are important and selectively weight those more
 through learning the `attention weight` to give to each embedding.
 
-Note that here, the processor grid is a single resolution whih is
+Note that here, the processor grid is a single resolution which is
 coarser than the resolution of the base data.
 
-**Transformer**
+Transformer
+===========
 
 The Transformer uses a multi-head self attention on the processor. Note
 that this requires `flash-attention
 <https://github.com/Dao-AILab/flash-attention>`__ to be installed.
 
-Thhe attention windows are chosen in such a way that a complete grid
+The attention windows are chosen in such a way that a complete grid
 neighbourhood is always included (see Figure below). Like with the
 GraphTransformer, the processor grid is a single resolution which is
 coarser than the resolution of the base data.
@@ -96,9 +102,28 @@ coarser than the resolution of the base data.
  Encoders/Decoders
 *******************
 
-The encoder and decoder can be chosen to be a GNN or a GraphTransformer.
-This choice is independent of the processor, but currently the encoder
-and decoder must be the same model type otherwise the code will break.
+The encoder and decoder can be chosen to be a GNN, a GraphTransformer,
+or a Transformer. This choice is independent of the processor, but
+currently the encoder and decoder must be the same model type otherwise
+the code will break.
+
+*******************
+ Switchable Layers
+*******************
+
+Layer kernels provide a flexible mechanism to customize the
+implementation of linear layers and layer normalization in different
+parts of the model (encoder, processor, decoder) through the
+``config.yaml``.
+
+This allows you to switch out the default layers with alternative
+implementations, such as different activation functions or normalization
+techniques, without modifying the underlying model code. This is done by
+specifying the desired layer implementations in the configuration file
+under the ``layer_kernels`` section.
+
+For detailed information and examples, see
+:ref:`anemoi-models:layer-kernels`.
 
 ******************
  Field Truncation

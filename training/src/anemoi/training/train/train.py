@@ -183,6 +183,22 @@ class AnemoiTrainer:
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
+        assert (
+            not (
+                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
+                and ".Transformer" in self.config.model.processor.target_
+            )
+            and not (
+                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
+                and ".Transformer" in self.config.model.encoder.target_
+            )
+            and not (
+                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
+                and ".Transformer" in self.config.model.decoder.target_
+            )
+        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
+        "Please use a different activation function."
+
         kwargs = {
             "config": self.config,
             "data_indices": self.data_indices,
