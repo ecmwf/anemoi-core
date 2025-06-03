@@ -112,7 +112,7 @@ class GraphForecaster(pl.LightningModule):
             output_mask=self.output_mask,
         )
 
-        self.internal_metric_ranges, self.val_metric_ranges = get_metric_ranges(
+        self.val_metric_ranges = get_metric_ranges(
             config,
             data_indices,
             metadata["dataset"].get("variables_metadata"),
@@ -215,9 +215,9 @@ class GraphForecaster(pl.LightningModule):
         x = x.roll(-1, dims=1)
 
         # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.internal_model.input.prognostic] = y_pred[
+        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
             ...,
-            self.data_indices.internal_model.output.prognostic,
+            self.data_indices.model.output.prognostic,
         ]
 
         x[:, -1] = self.output_mask.rollout_boundary(
@@ -227,12 +227,12 @@ class GraphForecaster(pl.LightningModule):
         )
 
         # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices.internal_model.input.forcing] = batch[
+        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
             :,
             self.multi_step + rollout_step,
             :,
             :,
-            self.data_indices.internal_data.input.forcing,
+            self.data_indices.data.input.forcing,
         ]
         return x
 
@@ -267,8 +267,7 @@ class GraphForecaster(pl.LightningModule):
             Loss value, metrics, and predictions (per step)
 
         """
-        # for validation not normalized in-place because remappers cannot be applied in-place
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
+        batch = self.model.pre_processors(batch)  # normalized in-place
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
@@ -280,7 +279,7 @@ class GraphForecaster(pl.LightningModule):
             :,
             0 : self.multi_step,
             ...,
-            self.data_indices.internal_data.input.full,
+            self.data_indices.data.input.full,
         ]  # (bs, multi_step, latlon, nvar)
         msg = (
             "Batch length not sufficient for requested multi_step length!"
@@ -292,7 +291,7 @@ class GraphForecaster(pl.LightningModule):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
+            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 

@@ -249,7 +249,7 @@ class GraphEnsForecaster(GraphForecaster):
                 self.multi_step + rollout_step,
                 0,
                 :,
-                self.data_indices.internal_data.output.full,
+                self.data_indices.data.output.full,
             ]  # self.data_indices.data.output.full
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
