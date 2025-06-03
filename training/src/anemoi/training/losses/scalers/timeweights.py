@@ -6,27 +6,29 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+from __future__ import annotations
 
 import logging
+from typing import Optional
 
 import torch
 
-from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.scalers.base_scaler import TimeVaryingScaler
 from anemoi.training.utils.enums import OutputTensorDim
 
 LOGGER = logging.getLogger(__name__)
 
 
-class LeadTimeDecayScaler(BaseScaler):
+class LeadTimeScaler(TimeVaryingScaler):
     """Class to weight each specific predicted lead time in the batch."""
 
     scale_dims = OutputTensorDim.TIME
 
     def __init__(
         self,
-        relative_date_indices: list[int],
         decay_factor: float,
-        method: str = "linear",
+        max_lead_time: int,
+        decay_type: str = "linear",
         inverse: bool = False,
         norm: str | None = None,
         **kwargs,
@@ -35,13 +37,12 @@ class LeadTimeDecayScaler(BaseScaler):
 
         Parameters
         ----------
-        relative_date_indices : list[int]
-           List of relative date indices for the target nodes. These are the indices of the lead times
-           relative to the current time step, e.g. [0, 1, 2, ...] for a sequence of lead times.
-        decay factor : float
-           decay factor for the lead time weights computation. Higher values lead to faster decay.
-        method : str, optional
-            Method to use for the decay weights. Options are "exponential" and "linear", by default "linear".
+        decay_factor : float
+           Decay factor for the lead time weights computation. Higher values lead to faster decay.
+        max_lead_time : int
+           Max predicted lead time relative to the current time step, i.e. 6 for 6 steps forwards.
+        decay_type : str, optional
+            Decay type to use for the decay weights. Options are "exponential" and "linear", by default "linear".
         inverse : bool, optional
             Whether to use the inverse of the weights, by default False.
         norm : str, optional
@@ -51,40 +52,33 @@ class LeadTimeDecayScaler(BaseScaler):
         """
         super().__init__(norm=norm)
         del kwargs
-        assert method in ["exponential", "linear"], f"Method {method} not supported"
-        self.method = method
+        assert decay_type in ["exponential", "linear"], f"decay_type {decay_type} not supported"
+        self.decay_type = decay_type
         self.decay_factor = decay_factor
         self.inverse = inverse
-        self.relative_date_indices = relative_date_indices
+        self.max_lead_time = max_lead_time
 
-    def scale_forward(self) -> torch.Tensor:
+    def scale_forward(self, lead_time: int) -> torch.Tensor:
         """Attributes the lead time weights to the target nodes."""
-        if self.method == "exponential":
-            return torch.exp(-self.decay_factor * torch.tensor(self.relative_date_indices))
-        if self.method == "linear":
-            return (
-                1
-                - self.decay_factor
-                * torch.tensor(self.relative_date_indices)
-                / torch.tensor(self.relative_date_indices).max()
-            )
-        msg = f"Method {self.method} not supported"
+        if self.decay_type == "exponential":
+            return torch.exp(-self.decay_factor * torch.tensor(lead_time))
+        if self.decay_type == "linear":
+            return 1 - self.decay_factor * torch.tensor(lead_time) / self.max_lead_time
+        msg = f"decay_type {self.decay_type} not supported"
         raise NotImplementedError(msg)
 
-    def scale_backward(self) -> torch.Tensor:
-        """Same that forward weights but attributes an increasing weight to predicted tensors close to final lead time (e.g. max rollout or interpolator upper bound value)."""
-        if self.method == "exponential":
-            return 1 - torch.exp(-self.decay_factor * torch.tensor(self.relative_date_indices))
-        if self.method == "linear":
-            return (
-                self.decay_factor
-                * torch.tensor(self.relative_date_indices)
-                / torch.tensor(self.relative_date_indices).max()
-            )
-        msg = f"Method {self.method} not supported"
+    def scale_backward(self, lead_time: int) -> torch.Tensor:
+        """Same as forward weights but attributes an increasing weight to predicted tensors close to final lead time."""
+        if self.decay_type == "exponential":
+            return 1 - torch.exp(-self.decay_factor * torch.tensor(lead_time))
+        if self.decay_type == "linear":
+            return self.decay_factor * torch.tensor(lead_time) / self.max_lead_time
+        msg = f"decay_type {self.decay_type} not supported"
         raise NotImplementedError(msg)
 
-    def get_scaling_values(self) -> torch.Tensor:
+    def get_scaling_values(self, lead_time: Optional[int] = None) -> torch.Tensor:
+        if lead_time is None:
+            return torch.tensor([1])
         if self.inverse:
-            return self.scale_backward()
-        return self.scale_forward()
+            return self.scale_backward(lead_time)
+        return torch.tensor([self.scale_forward(lead_time)])

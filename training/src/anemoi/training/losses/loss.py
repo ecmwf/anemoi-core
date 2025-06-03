@@ -77,10 +77,11 @@ def get_loss_function(
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
-    for key in scalers_to_include:
-        if key not in scalers or []:
-            error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
-            raise ValueError(error_msg)
+    scalers = scalers or {}
+    found_scalers = set(scalers_to_include).intersection(scalers.keys())
+    for key in found_scalers:
+        warning_msg = f"Initializing non-delayed or time-varying scalers {list(found_scalers)}. "
+        LOGGER.warning(warning_msg)
         if key in ["stdev_tendency", "var_tendency"]:
             for var_key, idx in data_indices.model.output.name_to_index.items():
                 if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
