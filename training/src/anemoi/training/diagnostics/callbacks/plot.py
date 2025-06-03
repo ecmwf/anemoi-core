@@ -74,7 +74,6 @@ class BasePlotCallback(Callback, ABC):
         self.save_basedir = config.hardware.paths.plots
 
         self.post_processors = None
-        self.pre_processors = None
         self.latlons = None
         init_plot_settings()
 
@@ -432,12 +431,12 @@ class LongRolloutPlots(BasePlotCallback):
         )
 
         # prepare input tensor for plotting
-        input_batch = pl_module.model.pre_processors(batch, in_place=False)
-        input_tensor_0 = input_batch[
+        # the batch is already preprocessed in-place
+        input_tensor_0 = batch[
             self.sample_idx,
             pl_module.multi_step - 1,
             ...,
-            pl_module.data_indices.internal_data.output.full,
+            pl_module.data_indices.data.output.full,
         ].cpu()
         data_0 = self.post_processors(input_tensor_0).numpy()
 
@@ -461,7 +460,7 @@ class LongRolloutPlots(BasePlotCallback):
                     self._plot_rollout_step(
                         pl_module,
                         plot_parameters_dict,
-                        input_batch,
+                        batch,
                         data_0,
                         rollout_step,
                         y_pred,
@@ -515,7 +514,7 @@ class LongRolloutPlots(BasePlotCallback):
             self.sample_idx,
             pl_module.multi_step + rollout_step,  # (pl_module.multi_step - 1) + (rollout_step + 1)
             ...,
-            pl_module.data_indices.internal_data.output.full,
+            pl_module.data_indices.data.output.full,
         ].cpu()
         data_rollout_step = self.post_processors(input_tensor_rollout_step).numpy()
         # predicted output tensor
@@ -576,7 +575,7 @@ class LongRolloutPlots(BasePlotCallback):
             frames = []
             # Prepare the figure
             fig, ax = plt.subplots(figsize=(10, 6), dpi=72)
-            cmap = "twilight" if variable_name == "mwd" else "viridis"
+            cmap = "viridis"
 
             # Create initial data and colorbar
             ax, scatter_frame = get_scatter_frame(
@@ -847,8 +846,8 @@ class PlotLoss(BasePerBatchPlotCallback):
         logger = trainer.logger
         _ = batch_idx
 
-        parameter_names = list(pl_module.data_indices.internal_model.output.name_to_index.keys())
-        parameter_positions = list(pl_module.data_indices.internal_model.output.name_to_index.values())
+        parameter_names = list(pl_module.data_indices.model.output.name_to_index.keys())
+        parameter_positions = list(pl_module.data_indices.model.output.name_to_index.values())
         # reorder parameter_names by position
         self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
         self.metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
@@ -865,14 +864,13 @@ class PlotLoss(BasePerBatchPlotCallback):
                 RuntimeWarning,
             )
 
-        batch = pl_module.model.pre_processors(batch, in_place=False)
         for rollout_step in range(pl_module.rollout):
             y_hat = outputs[1][rollout_step]
             y_true = batch[
                 :,
                 pl_module.multi_step + rollout_step,
                 ...,
-                pl_module.data_indices.internal_data.output.full,
+                pl_module.data_indices.data.output.full,
             ]
             loss = pl_module.loss(y_hat, y_true, squash=False).cpu().numpy()
 
@@ -972,12 +970,11 @@ class PlotSample(BasePerBatchPlotCallback):
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
         local_rank = pl_module.local_rank
 
-        batch = pl_module.model.pre_processors(batch, in_place=False)
         input_tensor = batch[
             self.sample_idx,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
-            pl_module.data_indices.internal_data.output.full,
+            pl_module.data_indices.data.output.full,
         ].cpu()
         data = self.post_processors(input_tensor)
 
@@ -1024,21 +1021,17 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         # When running in Async mode, it might happen that in the last epoch these tensors
         # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
         # but internal ones would be on the cpu), The lines below allow to address this problem
-        if self.pre_processors is None:
-            # Copy to be used across all the training cycle
-            self.pre_processors = copy.deepcopy(pl_module.model.pre_processors).cpu()
         if self.post_processors is None:
             # Copy to be used across all the training cycle
             self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
 
-        batch = pl_module.model.pre_processors(batch, in_place=False)
         input_tensor = batch[
             self.sample_idx,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
-            pl_module.data_indices.internal_data.output.full,
+            pl_module.data_indices.data.output.full,
         ].cpu()
 
         data = self.post_processors(input_tensor)
