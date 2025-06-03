@@ -221,18 +221,20 @@ class AnemoiTrainer:
 
         # Load the model weights
         if self.load_weights_only:
-            if hasattr(self.config.training, "transfer_learning"):
-                # Sanify the checkpoint for transfer learning
-                if self.config.training.transfer_learning:
-                    LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
-                    model = transfer_learning_loading(model, self.last_checkpoint)
-                else:
-                    LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                    model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
-
+            # Sanify the checkpoint for transfer learning
+            if self.config.training.transfer_learning:
+                LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
+                model = transfer_learning_loading(model, self.last_checkpoint)
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
+                # pop data_indices so that the data indices on the checkpoint do not get overwritten
+                # by the data indices from the new config
+                kwargs.pop("data_indices")
                 model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+
+            model.data_indices = self.data_indices
+            # check data indices in original checkpoint and current data indices are the same
+            self.data_indices.compare_variables(model._ckpt_model_name_to_index, self.data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
