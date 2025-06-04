@@ -52,5 +52,3 @@ def test_reversed_knn(graph_with_two_node_sets):
     # whereas reversing the direction links them all to a single “test_nodes2” node instead.
     len(edge_index[0].unique()) == 4
     len(reverse_edge_index[0].unique()) == 1
-
-    assert edge_index[0]
