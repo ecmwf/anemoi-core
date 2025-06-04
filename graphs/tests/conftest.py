@@ -71,8 +71,8 @@ def graph_with_nodes() -> HeteroData:
 @pytest.fixture
 def graph_with_two_node_sets() -> HeteroData:
     """Graph with 12 nodes over the globe, stored in \"test_nodes\"."""
-    lats = [0, 1]
-    lons = [0, 1]
+    lats = [0, 0.25]
+    lons = [0, 0.25]
     coords1 = np.array([[lat, lon] for lat in lats for lon in lons])
     coords2 = np.array([[lat / 1000, lon / 1000] for lat in lats for lon in lons])
     graph = HeteroData()
