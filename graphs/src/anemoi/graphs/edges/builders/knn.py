@@ -122,3 +122,34 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
             edge_index = self._compute_edge_index_sklearn(source_nodes, target_nodes)
 
         return edge_index
+
+
+class ReversedKNNEdges(KNNEdges):
+    """
+    For each target node, this builder connects its K nearest neighbors among the source nodes.
+
+    Attributes
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    num_nearest_neighbours : int
+        Number of nearest neighbours.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
+
+    Methods
+    -------
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
+    """
+
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        return super().compute_edge_index(target_nodes, source_nodes)

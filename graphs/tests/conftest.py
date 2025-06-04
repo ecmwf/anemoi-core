@@ -69,6 +69,21 @@ def graph_with_nodes() -> HeteroData:
 
 
 @pytest.fixture
+def graph_with_two_node_sets() -> HeteroData:
+    """Graph with 12 nodes over the globe, stored in \"test_nodes\"."""
+    lats = [0, 1]
+    lons = [0, 1]
+    coords1 = np.array([[lat, lon] for lat in lats for lon in lons])
+    coords2 = np.array([[lat / 1000, lon / 1000] for lat in lats for lon in lons])
+    graph = HeteroData()
+    graph["test_nodes1"].x = 2 * torch.pi * torch.tensor(coords1)
+    graph["test_nodes2"].x = 2 * torch.pi * torch.tensor(coords2)
+    graph["test_nodes1"]["_grid_reference_distance"] = 1
+    graph["test_nodes2"]["_grid_reference_distance"] = 1
+    return graph
+
+
+@pytest.fixture
 def graph_with_isolated_nodes() -> HeteroData:
     graph = HeteroData()
     graph["test_nodes"].x = torch.tensor([[1], [2], [3], [4], [5], [6]])

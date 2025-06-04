@@ -192,3 +192,36 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
             edge_index = self._compute_edge_index_sklearn(source_nodes, target_nodes)
 
         return edge_index
+
+
+class ReversedCutOffEdges(CutOffEdges):
+    """
+    For each target node, this builder connects all source nodes within the cutoff_factor.
+
+    Attributes
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    cutoff_factor : float
+        Factor to multiply the grid reference distance to get the cut-off radius.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
+    max_num_neighbours : int
+        The maximum number of nearest neighbours to consider when building edges.
+
+    Methods
+    -------
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
+    """
+
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        return super().compute_edge_index(target_nodes, source_nodes)
