@@ -50,8 +50,5 @@ def test_reversed_cutoff(graph_with_two_node_sets):
 
     # The graph is arranged so that all four nodes in “test_nodes2” lie very close to one node in “test_nodes1.”
     # Consequently, all nodes will be connected to the same node
-
-    print(edge_index)
-    print(reverse_edge_index)
     assert len(edge_index[0].unique()) == 1
     assert len(reverse_edge_index[0].unique()) == 4
