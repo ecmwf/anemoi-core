@@ -52,3 +52,17 @@ YAML configuration:
    will be the lowest value without isolated nodes. This optimal value
    depends on the node distribution, so it is recommended to tune it for
    each case.
+
+There is also a ReversedCutOffEdges variant that will connect each
+target node to its all source nodes within the cutoff radius, but the
+resulting edge direction is still from the source nodes to the target
+nodes.
+
+.. code:: yaml
+
+   edges:
+     -  source_name: source
+        target_name: target
+        edge_builders:
+        - _target_: anemoi.graphs.edges.ReversedCutOffEdges
+          cutoff_factor: 0.6
