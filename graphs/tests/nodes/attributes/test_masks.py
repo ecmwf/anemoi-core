@@ -11,7 +11,8 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import CutOutMask, GridsMask
+from anemoi.graphs.nodes.attributes import CutOutMask
+from anemoi.graphs.nodes.attributes import GridsMask
 
 
 @pytest.mark.parametrize("mask_class", [CutOutMask, GridsMask])

@@ -24,7 +24,7 @@ class MockZarrDataset:
         self.latitudes = latitudes
         self.longitudes = longitudes
         self.num_nodes = len(latitudes)
-        self.grids = grids if grids is not None else (self.num_nodes, )
+        self.grids = grids if grids is not None else (self.num_nodes,)
 
 
 @pytest.fixture

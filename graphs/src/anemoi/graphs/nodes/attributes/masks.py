@@ -58,7 +58,9 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute):
             nodes["_dataset"], dict
         ), "The '_dataset' attribute must be a dictionary."
         grids_size = open_dataset(nodes["_dataset"]).grids
-        assert len(grids_size) == 2, f"{self.__class__.__name__} is only supported for combining operations over 2 datasets."
+        assert (
+            len(grids_size) == 2
+        ), f"{self.__class__.__name__} is only supported for combining operations over 2 datasets."
         return torch.tensor([True] * grids_size[0] + [False] * grids_size[1], dtype=torch.bool)
 
 

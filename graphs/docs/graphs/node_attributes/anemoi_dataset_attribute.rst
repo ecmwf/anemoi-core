@@ -18,11 +18,10 @@ provenance of the resulting nodes. An example is shown below:
 .. literalinclude:: ../yaml/attributes_cutout.yaml
    :language: yaml
 
-Similarly, when using the "grids" operation to combine datasets, 
+Similarly, when using the "grids" operation to combine datasets,
 you can create a `grids_mask` to track which nodes came from which
- dataset. The mask will be `True` for nodes from the first dataset 
+ dataset. The mask will be `True` for nodes from the first dataset
  and `False` for nodes from the second dataset. Here's an example:
 
 .. literalinclude:: ../yaml/attributes_grids.yaml
    :language: yaml
-

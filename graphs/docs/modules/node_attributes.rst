@@ -10,7 +10,6 @@
    :no-undoc-members:
    :show-inheritance:
 
-
 .. automodule:: anemoi.graphs.nodes.attributes.masks
    :members:
    :exclude-members: BaseCombineAnemoiDatasetsMask
