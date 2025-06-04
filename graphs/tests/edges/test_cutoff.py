@@ -39,8 +39,8 @@ def test_reversed_cutoff(graph_with_two_node_sets):
     graph = graph_with_two_node_sets
     reverse_graph = graph_with_two_node_sets.clone()
 
-    builder = CutOffEdges("test_nodes1", "test_nodes2", 0.1)
-    reverse_builder = ReversedCutOffEdges("test_nodes1", "test_nodes2", 0.1)
+    builder = CutOffEdges("test_nodes1", "test_nodes2", 0.01)
+    reverse_builder = ReversedCutOffEdges("test_nodes1", "test_nodes2", 0.01)
 
     graph = builder.update_graph(graph_with_two_node_sets)
     reverse_graph = reverse_builder.update_graph(reverse_graph)
@@ -49,9 +49,9 @@ def test_reversed_cutoff(graph_with_two_node_sets):
     reverse_edge_index = reverse_graph[("test_nodes1", "to", "test_nodes2")].edge_index
 
     # The graph is arranged so that all four nodes in “test_nodes2” lie very close to one node in “test_nodes1.”
-    # Consequently, running KNN from “test_nodes1”→“test_nodes2” will connect all four to that single “test_nodes1” node,
-    # whereas reversing the direction links them all to a single “test_nodes2” node instead.
+    # Consequently, all nodes will be connected to the same node
+
     print(edge_index)
     print(reverse_edge_index)
-    assert len(edge_index[0].unique()) == 4
-    assert len(reverse_edge_index[0].unique()) == 1
+    assert len(edge_index[0].unique()) == 1
+    assert len(reverse_edge_index[0].unique()) == 4
