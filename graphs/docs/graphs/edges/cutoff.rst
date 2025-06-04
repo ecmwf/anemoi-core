@@ -54,7 +54,7 @@ YAML configuration:
    each case.
 
 There is also a ReversedCutOffEdges variant that will connect each
-target node to its all source nodes within the cutoff radius, but the
+target node to all source nodes within the cutoff radius, but the
 resulting edge direction is still from the source nodes to the target
 nodes.
 
