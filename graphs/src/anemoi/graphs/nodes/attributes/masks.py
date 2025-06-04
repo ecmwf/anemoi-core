@@ -50,13 +50,21 @@ class NonmissingAnemoiDatasetVariable(BooleanBaseNodeAttribute):
         return torch.from_numpy(~np.isnan(ds))
 
 
-class CutOutMask(BooleanBaseNodeAttribute):
-    """Cut out mask."""
+class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute):
+    """Base class for computing mask based on anemoi-datasets combining operations."""
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert "_dataset" in nodes and isinstance(
             nodes["_dataset"], dict
         ), "The '_dataset' attribute must be a dictionary."
-        assert "cutout" in nodes["_dataset"], "The 'dataset' attribute must contain a 'cutout' key."
-        num_lam, num_other = open_dataset(nodes["_dataset"]).grids
-        return torch.tensor([True] * num_lam + [False] * num_other, dtype=torch.bool)
+        grids_size = open_dataset(nodes["_dataset"]).grids
+        assert len(grids_size) == 2, f"{self.__class__.__name__} is only supported for combining operations over 2 datasets."
+        return torch.tensor([True] * grids_size[0] + [False] * grids_size[1], dtype=torch.bool)
+
+
+class CutOutMask(BaseCombineAnemoiDatasetsMask):
+    """Cut out mask."""
+
+
+class GridsMask(BaseCombineAnemoiDatasetsMask):
+    """Grids mask."""
