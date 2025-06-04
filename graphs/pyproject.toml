@@ -53,7 +53,7 @@ dependencies = [
   "typeguard>=4",
 ]
 
-optional-dependencies.all = [ "anemoi-graphs[extra]" ]
+optional-dependencies.all = [ "anemoi-graphs[anemoi,tri,hex,healpix]" ]
 optional-dependencies.dev = [ "anemoi-graphs[docs,tests]" ]
 
 optional-dependencies.docs = [
@@ -67,13 +67,10 @@ optional-dependencies.docs = [
   "tomli",
 ]
 
-optional-dependencies.extra = [
-  "anemoi-datasets>=0.5.21",
-  "h3>=3.7.7,<4",
-  "healpy>=1.17",
-  "trimesh>=4.1",
-]
-
+optional-dependencies.anemoi = [ "anemoi-datasets>=0.5.21" ]
+optional-dependencies.hex = [ "h3>=3.7.7,<4" ]
+optional-dependencies.healpix = [ "healpy>=1.17" ]
+optional-dependencies.tri = [ "trimesh>=4.1" ]
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
 
 urls.Documentation = "https://anemoi-graphs.readthedocs.io/"
