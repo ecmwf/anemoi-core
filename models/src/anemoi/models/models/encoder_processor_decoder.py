@@ -74,8 +74,6 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self._truncation_data = truncation_data
 
-        self.input_dim = self._calculate_input_dim(model_config)
-
         # we can't register these as buffers because DDP does not support sparse tensors
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
         self.A_down, self.A_up = None, None
@@ -203,9 +201,6 @@ class AnemoiModelEncProcDec(nn.Module):
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
         return x_out
-
-    def _calculate_input_dim(self, model_config):
-        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.model.input)
