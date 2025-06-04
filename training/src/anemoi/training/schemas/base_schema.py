@@ -89,6 +89,21 @@ class BaseSchema(BaseModel):
             raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
         return self
 
+    @model_validator(mode="after")
+    def check_bounding_not_used_with_data_extractor_zero(self) -> BaseSchema:
+        """Check that bounding is not used with zero data extractor."""
+        if (
+            self.model.decoder.target_ == "anemoi.models.layers.mapper.GraphTransformerBackwardMapper"
+            and self.model.decoder.initialise_data_extractor_zero
+            and self.model.bounding is not None
+        ):
+            error = "bounding_conflict_with_data_extractor_zero"
+            msg = "Boundings cannot be used with zero data extractor."
+            raise PydanticCustomError(
+                error,
+                msg,
+            )
+
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
