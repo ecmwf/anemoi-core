@@ -41,7 +41,7 @@ repos:
     - --profile black
     - --project anemoi
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.11.4
+  rev: v0.11.12
   hooks:
   - id: ruff
     args:
@@ -65,7 +65,7 @@ repos:
   - id: docconvert
     args: ["numpy"]
 - repo: https://github.com/tox-dev/pyproject-fmt
-  rev: "v2.5.1"
+  rev: "v2.6.0"
   hooks:
   - id: pyproject-fmt
 -   repo: https://github.com/jshwi/docsig # Check docstrings against function sig
