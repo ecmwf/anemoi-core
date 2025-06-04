@@ -195,8 +195,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
 
 
 class ReversedCutOffEdges(CutOffEdges):
-    """
-    For each target node, this builder connects all source nodes within the cutoff_factor.
+    """For each target node, this builder connects all source nodes within the cutoff_factor.
 
     Attributes
     ----------
