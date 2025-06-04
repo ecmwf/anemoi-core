@@ -51,11 +51,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             num_channels=self.num_channels,
         )
 
-    def _calculate_input_dim(self, model_config):
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        input_dim += self.num_input_channels_prognostic
-        input_dim += 1
-        return input_dim
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        super()._calculate_shapes_and_indices(data_indices)
+        self.input_dim += self.num_input_channels_prognostic
+        self.input_dim += 1
 
     def _assemble_input(self, x, fcstep, bse):
         x_skip = x[:, -1, :, :, self._internal_input_idx]
@@ -115,6 +114,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 Forecast step
             model_comm_group: Optional[ProcessGroup], optional
                 Model communication group
+            **kwargs: Additional keyword arguments
+
         Returns:
             Output tensor
         """
