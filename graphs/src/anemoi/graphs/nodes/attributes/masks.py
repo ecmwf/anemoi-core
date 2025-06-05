@@ -52,6 +52,7 @@ class NonmissingAnemoiDatasetVariable(BooleanBaseNodeAttribute):
 
 class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute):
     """Base class for computing mask based on anemoi-datasets combining operations."""
+
     def get_grid_sizes(self, nodes):
         assert "_dataset" in nodes and isinstance(
             nodes["_dataset"], dict
@@ -69,6 +70,7 @@ class CutOutMask(BaseCombineAnemoiDatasetsMask):
     compute(self, graph, nodes_name)
         Compute the attribute for each node.
     """
+
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         grid_sizes = self.get_grid_sizes(nodes)
         return torch.tensor([True] * grid_sizes[0] + [False] * grid_sizes[1], dtype=torch.bool)
@@ -89,6 +91,7 @@ class GridsMask(BaseCombineAnemoiDatasetsMask):
     compute(self, graph, nodes_name)
         Compute the attribute for each node.
     """
+
     def __init__(self, grids: int | list[int] = 0) -> None:
         super().__init__()
         self.grids = [grids] if isinstance(grids, int) else grids
@@ -97,7 +100,7 @@ class GridsMask(BaseCombineAnemoiDatasetsMask):
         grid_sizes = self.get_grid_sizes(nodes)
         mask = torch.zeros(sum(grid_sizes), dtype=torch.bool)
         for grid_id in self.grids:
-            start_grid = 0 if grid_id == 0 else grid_sizes[grid_id-1]
-            end_grid = grid_sizes[grid_id-1]
+            start_grid = 0 if grid_id == 0 else grid_sizes[grid_id - 1]
+            end_grid = grid_sizes[grid_id - 1]
             mask[start_grid:end_grid] = True
         return mask
