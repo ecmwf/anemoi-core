@@ -305,5 +305,6 @@ class BaseAnemoiModelEncProcDec(nn.Module):
 
         return x_out
 
+
 class AnemoiModelEncProcDec(BaseAnemoiModelEncProcDec):
     pass
