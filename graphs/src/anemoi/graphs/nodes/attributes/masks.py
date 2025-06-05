@@ -9,8 +9,8 @@
 
 from __future__ import annotations
 
+from abc import ABC
 import logging
-
 import numpy as np
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -50,14 +50,35 @@ class NonmissingAnemoiDatasetVariable(BooleanBaseNodeAttribute):
         return torch.from_numpy(~np.isnan(ds))
 
 
-class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute):
+class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
     """Base class for computing mask based on anemoi-datasets combining operations."""
+
+    grids: list[int] | None = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        if self.grids is None:
+            raise AttributeError(f"{self.__class__.__name__} class must set 'grids' attribute.")
 
     def get_grid_sizes(self, nodes):
         assert "_dataset" in nodes and isinstance(
             nodes["_dataset"], dict
         ), "The '_dataset' attribute must be a dictionary."
         return open_dataset(nodes["_dataset"]).grids
+
+    @staticmethod
+    def get_mask_from_grid_sizes(grid_sizes: tuple[int], masked_grids_posisitons: list[int]):
+        assert isinstance(masked_grids_posisitons, list), "masked_grids_positions must be a list"
+        assert min(masked_grids_posisitons) >= 0, "masked_grids_positions must be non-negative"
+        assert max(masked_grids_posisitons) < len(grid_sizes), f"masked_grids_positions must be < {len(grid_sizes)}"
+        mask = torch.zeros(sum(grid_sizes), dtype=torch.bool)
+        for grid_id in masked_grids_posisitons:
+            mask[sum(grid_sizes[:grid_id]):sum(grid_sizes[:grid_id+1])] = True
+        return mask
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        grid_sizes = self.get_grid_sizes(nodes)
+        return BaseCombineAnemoiDatasetsMask.get_mask_from_grid_sizes(grid_sizes, self.grids)
 
 
 class CutOutMask(BaseCombineAnemoiDatasetsMask):
@@ -70,10 +91,9 @@ class CutOutMask(BaseCombineAnemoiDatasetsMask):
     compute(self, graph, nodes_name)
         Compute the attribute for each node.
     """
-
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        grid_sizes = self.get_grid_sizes(nodes)
-        return torch.tensor([True] * grid_sizes[0] + [False] * grid_sizes[1], dtype=torch.bool)
+    def __init__(self) -> None:
+        self.grids = [0] # It sets as true the nodes from the first (index=0) grid
+        super().__init__()
 
 
 class GridsMask(BaseCombineAnemoiDatasetsMask):
@@ -93,14 +113,5 @@ class GridsMask(BaseCombineAnemoiDatasetsMask):
     """
 
     def __init__(self, grids: int | list[int] = 0) -> None:
-        super().__init__()
         self.grids = [grids] if isinstance(grids, int) else grids
-
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        grid_sizes = self.get_grid_sizes(nodes)
-        mask = torch.zeros(sum(grid_sizes), dtype=torch.bool)
-        for grid_id in self.grids:
-            start_grid = 0 if grid_id == 0 else grid_sizes[grid_id - 1]
-            end_grid = grid_sizes[grid_id - 1]
-            mask[start_grid:end_grid] = True
-        return mask
+        super().__init__()
