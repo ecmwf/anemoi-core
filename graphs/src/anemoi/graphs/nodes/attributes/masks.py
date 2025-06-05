@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from abc import ABC
 
 import numpy as np
 import torch
@@ -50,13 +51,69 @@ class NonmissingAnemoiDatasetVariable(BooleanBaseNodeAttribute):
         return torch.from_numpy(~np.isnan(ds))
 
 
-class CutOutMask(BooleanBaseNodeAttribute):
-    """Cut out mask."""
+class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
+    """Base class for computing mask based on anemoi-datasets combining operations."""
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+    grids: list[int] | None = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        if self.grids is None:
+            raise AttributeError(f"{self.__class__.__name__} class must set 'grids' attribute.")
+
+    def get_grid_sizes(self, nodes):
         assert "_dataset" in nodes and isinstance(
             nodes["_dataset"], dict
         ), "The '_dataset' attribute must be a dictionary."
-        assert "cutout" in nodes["_dataset"], "The 'dataset' attribute must contain a 'cutout' key."
-        num_lam, num_other = open_dataset(nodes["_dataset"]).grids
-        return torch.tensor([True] * num_lam + [False] * num_other, dtype=torch.bool)
+        return open_dataset(nodes["_dataset"]).grids
+
+    @staticmethod
+    def get_mask_from_grid_sizes(grid_sizes: tuple[int], masked_grids_posisitons: list[int]):
+        assert isinstance(masked_grids_posisitons, list), "masked_grids_positions must be a list"
+        assert min(masked_grids_posisitons) >= 0, "masked_grids_positions must be non-negative"
+        assert max(masked_grids_posisitons) < len(grid_sizes), f"masked_grids_positions must be < {len(grid_sizes)}"
+        mask = torch.zeros(sum(grid_sizes), dtype=torch.bool)
+        for grid_id in masked_grids_posisitons:
+            mask[sum(grid_sizes[:grid_id]) : sum(grid_sizes[: grid_id + 1])] = True
+        return mask
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        grid_sizes = self.get_grid_sizes(nodes)
+        return BaseCombineAnemoiDatasetsMask.get_mask_from_grid_sizes(grid_sizes, self.grids)
+
+
+class CutOutMask(BaseCombineAnemoiDatasetsMask):
+    """Cut out mask.
+
+    It computes a mask for the first dataset in the cutout operation.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the attribute for each node.
+    """
+
+    def __init__(self) -> None:
+        self.grids = [0]  # It sets as true the nodes from the first (index=0) grid
+        super().__init__()
+
+
+class GridsMask(BaseCombineAnemoiDatasetsMask):
+    """Grids mask.
+
+    It reads a variable from a Anemoi dataset and returns a boolean mask of nonmissing values in the first timestep.
+
+    Attributes
+    ----------
+    grids : int | list[int], optional
+        Grid positions to set as True. Defaults to 0, which sets True only the nodes from the first dataset.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the attribute for each node.
+    """
+
+    def __init__(self, grids: int | list[int] = 0) -> None:
+        self.grids = [grids] if isinstance(grids, int) else grids
+        super().__init__()

@@ -1,0 +1,11 @@
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset:
+        grids: ...
+    attributes:
+      grids_mask:
+        _target_: anemoi.graphs.nodes.attributes.GridsMask
+        grids: [0] # set as True the nodes from the first grid
+  hidden: ...
