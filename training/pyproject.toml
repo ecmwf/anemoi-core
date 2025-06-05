@@ -42,7 +42,7 @@ dynamic = [ "version" ]
 dependencies = [
   "anemoi-datasets>=0.5.13",
   "anemoi-graphs>=0.5.2",
-  "anemoi-models>=0.7",
+  "anemoi-models>=0.8",
   "anemoi-utils[provenance]>=0.4.22",
   "datashader>=0.16.3,<0.17; python_version<'3.10'",
   "datashader>=0.17; python_version>='3.10'",
