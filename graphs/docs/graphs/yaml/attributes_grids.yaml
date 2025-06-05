@@ -5,6 +5,7 @@ nodes:
       dataset:
         grids: ...
     attributes:
-      cutout_mask:
+      grids_mask:
         _target_: anemoi.graphs.nodes.attributes.GridsMask
+        grids: [0] # set as True the nodes from the first grid
   hidden: ...
