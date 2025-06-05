@@ -18,13 +18,13 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
-from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.models import BaseAnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
+class AnemoiEnsModelEncProcDec(BaseAnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
 
     def __init__(
