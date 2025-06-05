@@ -33,7 +33,7 @@ def test_combined_datasets_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_
 
 def test_get_mask_from_grid_size():
     grid_sizes1 = (1, 2, 3, 2, 1)
-    grid_sizes2 = (4, )
+    grid_sizes2 = (4,)
     grid_ids1 = [0, 1, 4]
     grid_ids2 = [1]
 
