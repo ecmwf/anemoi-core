@@ -9,8 +9,9 @@
 
 from __future__ import annotations
 
-from abc import ABC
 import logging
+from abc import ABC
+
 import numpy as np
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -73,7 +74,7 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
         assert max(masked_grids_posisitons) < len(grid_sizes), f"masked_grids_positions must be < {len(grid_sizes)}"
         mask = torch.zeros(sum(grid_sizes), dtype=torch.bool)
         for grid_id in masked_grids_posisitons:
-            mask[sum(grid_sizes[:grid_id]):sum(grid_sizes[:grid_id+1])] = True
+            mask[sum(grid_sizes[:grid_id]) : sum(grid_sizes[: grid_id + 1])] = True
         return mask
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
@@ -91,8 +92,9 @@ class CutOutMask(BaseCombineAnemoiDatasetsMask):
     compute(self, graph, nodes_name)
         Compute the attribute for each node.
     """
+
     def __init__(self) -> None:
-        self.grids = [0] # It sets as true the nodes from the first (index=0) grid
+        self.grids = [0]  # It sets as true the nodes from the first (index=0) grid
         super().__init__()
 
 
