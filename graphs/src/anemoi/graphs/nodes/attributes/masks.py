@@ -16,7 +16,6 @@ import numpy as np
 import torch
 from torch_geometric.data.storage import NodeStorage
 
-from anemoi.datasets import open_dataset
 from anemoi.graphs.nodes.attributes.base_attributes import BooleanBaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
@@ -43,6 +42,8 @@ class NonmissingAnemoiDatasetVariable(BooleanBaseNodeAttribute):
         self.variable = variable
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        from anemoi.datasets import open_dataset
+
         assert nodes["node_type"] in [
             "ZarrDatasetNodes",
             "AnemoiDatasetNodes",
@@ -62,6 +63,8 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
             raise AttributeError(f"{self.__class__.__name__} class must set 'grids' attribute.")
 
     def get_grid_sizes(self, nodes):
+        from anemoi.datasets import open_dataset
+
         assert "_dataset" in nodes and isinstance(
             nodes["_dataset"], dict
         ), "The '_dataset' attribute must be a dictionary."
