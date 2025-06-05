@@ -98,7 +98,10 @@ class BaseSchema(BaseModel):
             and self.model.bounding is not None
         ):
             error = "bounding_conflict_with_data_extractor_zero"
-            msg = "Boundings cannot be used with zero data extractor."
+            msg = (
+                "Boundings cannot be used with zero initialized weights in decoder. "
+                "Set initalise_data_extractor_zero to False."
+            )
             raise PydanticCustomError(
                 error,
                 msg,
