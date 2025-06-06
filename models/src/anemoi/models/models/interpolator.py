@@ -33,6 +33,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -51,7 +52,11 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         )
         self.input_times = len(model_config.training.explicit_times.input)
         super().__init__(
-            model_config=model_config, data_indices=data_indices, statistics=statistics, graph_data=graph_data
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+            truncation_data=truncation_data,
         )
 
         self.latent_skip = model_config.model.latent_skip
@@ -65,13 +70,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             + self.num_target_forcings
         )
 
-    def forward(
-        self, x: Tensor, *, target_forcing: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, **kwargs
-    ) -> Tensor:
-        batch_size = x.shape[0]
-        ensemble_size = x.shape[2]
-
-        # add data positional info (lat/lon)
+    def _assemble_input(self, x, target_forcing, batch_size):
+        # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
@@ -81,6 +81,54 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             dim=-1,  # feature dimension
         )
 
+        if self.grid_skip is not None:
+            x_skip = x[:, self.grid_skip, ...]
+            if self.A_down is not None or self.A_up is not None:
+                x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
+                # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
+                # hence we check that they are on the correct device ; copy should only happen in the first forward run
+                if self.A_down is not None:
+                    self.A_down = self.A_down.to(x_skip.device)
+                    x_skip = self._truncate_fields(x_skip, self.A_down)  # to coarse resolution
+                if self.A_up is not None:
+                    self.A_up = self.A_up.to(x_skip.device)
+                    x_skip = self._truncate_fields(x_skip, self.A_up)  # back to high resolution
+                x_skip = einops.rearrange(
+                    x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size
+                )
+        else:
+            x_skip = None
+
+        return x_data_latent, x_skip
+
+    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
+        x_out = (
+            einops.rearrange(
+                x_out,
+                "(batch ensemble grid) vars -> batch ensemble grid vars",
+                batch=batch_size,
+                ensemble=ensemble_size,
+            )
+            .to(dtype=dtype)
+            .clone()
+        )
+
+        # residual connection (just for the prognostic variables)
+        if x_skip is not None:
+            x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
+
+        for bounding in self.boundings:
+            # bounding performed in the order specified in the config file
+            x_out = bounding(x_out)
+        return x_out
+
+    def forward(
+        self, x: Tensor, *, target_forcing: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, **kwargs
+    ) -> Tensor:
+        batch_size = x.shape[0]
+        ensemble_size = x.shape[2]
+
+        x_data_latent, x_skip = self._assemble_input(x, target_forcing, batch_size)
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
 
         # get shard shapes
@@ -116,23 +164,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
         )
 
-        x_out = (
-            einops.rearrange(
-                x_out,
-                "(batch ensemble grid) vars -> batch ensemble grid vars",
-                batch=batch_size,
-                ensemble=ensemble_size,
-            )
-            .to(dtype=x.dtype)
-            .clone()
-        )
-
-        # residual connection (just for the prognostic variables)
-        if self.grid_skip is not None:
-            x_out[..., self._internal_output_idx] += x[:, self.grid_skip, :, :, self._internal_input_idx]
-
-        for bounding in self.boundings:
-            # bounding performed in the order specified in the config file
-            x_out = bounding(x_out)
+        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
