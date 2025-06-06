@@ -122,6 +122,7 @@ class BaseLoss(nn.Module, ABC):
         self,
         out: torch.Tensor,
         squash: bool = True,
+        squash_mode: str = "avg",
     ) -> torch.Tensor:
         """Reduce the out of the loss.
 
@@ -136,14 +137,29 @@ class BaseLoss(nn.Module, ABC):
             Difference tensor, of shape TensorDim
         squash : bool, optional
             Whether to squash the variable dimension, by default True
+        squash_mode : str, optional
+            Mode to use for squashing the variable dimension, by default "avg"
+            If "avg", the last dimension is averaged.
+            If "sum", the last dimension is summed.
 
         Returns
         -------
         torch.Tensor
             Reduced output tensor
+
+        Raises
+        ------
+        ValueError
+            If squash_mode is not one of ['avg', 'sum']
         """
         if squash:
-            out = self.avg_function(out, dim=TensorDim.VARIABLE)
+            if squash_mode == "avg":
+                out = self.avg_function(out, dim=TensorDim.VARIABLE)
+            elif squash_mode == "sum":
+                out = self.sum_function(out, dim=TensorDim.VARIABLE)
+            else:
+                msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
+                raise ValueError(msg)
 
         # here the grid dimension is summed because the normalisation is handled in the node weighting
         grid_summed = self.sum_function(out, dim=(TensorDim.GRID))
@@ -170,7 +186,7 @@ class BaseLoss(nn.Module, ABC):
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted scaled loss.
+        """Calculates the area-weighted scaled loss.
 
         Parameters
         ----------
@@ -221,7 +237,7 @@ class FunctionalLoss(BaseLoss):
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        """Calculates the lat-weighted scaled loss.
+        """Calculates the area-weighted scaled loss.
 
         Parameters
         ----------

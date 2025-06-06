@@ -12,15 +12,18 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import CutOutMask
+from anemoi.graphs.nodes.attributes import GridsMask
+from anemoi.graphs.nodes.attributes.masks import BaseCombineAnemoiDatasetsMask
 
 
-def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cutout):
+@pytest.mark.parametrize("mask_class", [CutOutMask, GridsMask])
+def test_combined_datasets_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cutout, mask_class):
     """Test attribute builder for CutOutMask."""
     # Add dataset attribute required by CutOutMask
-    graph_with_nodes["test_nodes"]["_dataset"] = {"cutout": None}
+    graph_with_nodes["test_nodes"]["_dataset"] = {}
 
-    mocker.patch("anemoi.graphs.nodes.attributes.masks.open_dataset", return_value=mock_zarr_dataset_cutout)
-    mask = CutOutMask().compute(graph_with_nodes, "test_nodes")
+    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_zarr_dataset_cutout)
+    mask = mask_class().compute(graph_with_nodes, "test_nodes")
 
     assert mask is not None
     assert isinstance(mask, torch.Tensor)
@@ -28,17 +31,29 @@ def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cut
     assert mask.shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
 
 
-def test_cutout_mask_missing_dataset(graph_with_nodes: HeteroData):
+def test_get_mask_from_grid_size():
+    grid_sizes1 = (1, 2, 3, 2, 1)
+    grid_sizes2 = (4,)
+    grid_ids1 = [0, 1, 4]
+    grid_ids2 = [1]
+
+    grids_mask1 = BaseCombineAnemoiDatasetsMask.get_mask_from_grid_sizes(grid_sizes1, grid_ids1)
+    grids_mask2 = BaseCombineAnemoiDatasetsMask.get_mask_from_grid_sizes(grid_sizes1, grid_ids2)
+
+    with pytest.raises(AssertionError):
+        BaseCombineAnemoiDatasetsMask.get_mask_from_grid_sizes(grid_sizes2, grid_ids2)
+
+    assert all(grids_mask1 == torch.tensor([1, 1, 1, 0, 0, 0, 0, 0, 1], dtype=torch.bool))
+    assert all(grids_mask2 == torch.tensor([0, 1, 1, 0, 0, 0, 0, 0, 0], dtype=torch.bool))
+
+
+@pytest.mark.parametrize("mask_class", [CutOutMask, GridsMask])
+def test_combined_datasets_mask_missing_dataset(graph_with_nodes: HeteroData, mask_class):
     """Test CutOutMask fails when dataset attribute is missing."""
-    node_attr_builder = CutOutMask()
+    node_attr_builder = mask_class()
     with pytest.raises(AssertionError):
         node_attr_builder.compute(graph_with_nodes, "test_nodes")
 
 
-def test_cutout_mask_missing_cutout(graph_with_nodes: HeteroData):
-    """Test CutOutMask fails when cutout key is missing."""
-    graph_with_nodes["test_nodes"]["_dataset"] = {}
-
-    node_attr_builder = CutOutMask()
-    with pytest.raises(AssertionError):
-        node_attr_builder.compute(graph_with_nodes, "test_nodes")
+if __name__ == "__main__":
+    pytest.main([__file__])
