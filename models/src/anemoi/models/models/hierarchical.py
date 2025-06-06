@@ -21,13 +21,13 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.graph import TrainableTensor
-from anemoi.models.models import BaseAnemoiModelEncProcDec
+from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelEncProcDecHierarchical(BaseAnemoiModelEncProcDec):
+class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     """Message passing hierarchical graph neural network."""
 
     def __init__(
