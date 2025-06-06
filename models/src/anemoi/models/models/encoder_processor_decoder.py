@@ -28,7 +28,7 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelEncProcDec(nn.Module):
+class BaseAnemoiModelEncProcDec(nn.Module):
     """Message passing graph neural network."""
 
     def __init__(
@@ -304,3 +304,7 @@ class AnemoiModelEncProcDec(nn.Module):
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
+
+
+class AnemoiModelEncProcDec(BaseAnemoiModelEncProcDec):
+    pass
