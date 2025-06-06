@@ -70,7 +70,17 @@ class AnemoiModelEncProcDec(nn.Module):
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
+        precision_mapping = {
+            "16-true": torch.float16,
+            "bf16": torch.bfloat16,
+        }
+        self.dtype = precision_mapping.get(model_config.training.precision)
+        torch.set_default_dtype(self.dtype)
+        LOGGER.debug(f"Default dtype: {self.dtype}")
+
+        self.node_attributes = NamedNodesAttributes(
+            model_config.model.trainable_parameters.hidden, self._graph_data
+        ).type(self.dtype)
 
         self._truncation_data = truncation_data
 
