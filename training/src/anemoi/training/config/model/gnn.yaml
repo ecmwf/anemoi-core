@@ -1,6 +1,8 @@
 num_channels: 512
 cpu_offload: False
 
+keep_batch_sharded: True
+
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
 
