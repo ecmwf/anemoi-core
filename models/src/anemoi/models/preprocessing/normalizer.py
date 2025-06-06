@@ -132,7 +132,11 @@ class InputNormalizer(BasePreprocessor):
             ], f"{method} is not a valid normalisation method"
 
     def transform(
-        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        data_index: Optional[torch.Tensor] = None,
+        in_advance_input: bool = False,
     ) -> torch.Tensor:
         """Normalizes an input tensor x of shape [..., nvars].
 
@@ -158,6 +162,11 @@ class InputNormalizer(BasePreprocessor):
         if not in_place:
             x = x.clone()
 
+        if in_advance_input:
+            # In rollout training, we do not normalize the input data
+            # as it is already normalized in the training phase.
+            return x
+
         if data_index is not None:
             x.mul_(self._norm_mul[data_index]).add_(self._norm_add[data_index])
         elif x.shape[-1] == len(self._input_idx):
@@ -168,7 +177,11 @@ class InputNormalizer(BasePreprocessor):
         return x
 
     def inverse_transform(
-        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        data_index: Optional[torch.Tensor] = None,
+        in_advance_input: bool = False,
     ) -> torch.Tensor:
         """Denormalizes an input tensor x of shape [..., nvars | nvars_pred].
 
@@ -193,6 +206,11 @@ class InputNormalizer(BasePreprocessor):
         """
         if not in_place:
             x = x.clone()
+
+        if in_advance_input:
+            # In rollout training, we do not denormalize the input data
+            # as it is already normalized in the training phase.
+            return x
 
         # Denormalize dynamic or full tensors
         # input and predicted tensors have different shapes

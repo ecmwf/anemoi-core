@@ -217,11 +217,26 @@ class GraphForecaster(pl.LightningModule):
     ) -> torch.Tensor:
         x = x.roll(-1, dims=1)
 
+        # apply rollout-training post-processors to model output variables
+        y_pred = self.model.post_processors(y_pred, in_advance_input=True)
+
         # Get prognostic variables
         x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
             ...,
             self.data_indices.model.output.prognostic,
         ]
+
+        # apply rollout-training pre-processors to model input variables
+        x[:, -1, :, :, self.data_indices.internal_model.input.full] = self.model.pre_processors(
+            x[
+                :,
+                -1,
+                :,
+                :,
+                self.data_indices.internal_model.input.full,
+            ],
+            in_advance_input=True,
+        )
 
         x[:, -1] = self.output_mask.rollout_boundary(
             x[:, -1],
@@ -298,11 +313,14 @@ class GraphForecaster(pl.LightningModule):
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
-
             metrics_next = {}
             if validation_mode:
                 metrics_next = self.calculate_val_metrics(y_pred, y, rollout_step)
+
+            if rollout_step < (rollout or self.rollout) - 1:
+                # advance the input for the next step, not the last step
+                x = self.advance_input(x, y_pred, batch, rollout_step)
+
             yield loss, metrics_next, y_pred
 
     def _step(
