@@ -23,6 +23,7 @@ from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema  # noqa: TC001
+from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema  # noqa: TC001
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import CUSTOM_MESSAGES
@@ -93,7 +94,7 @@ class BaseSchema(BaseModel):
     def check_bounding_not_used_with_data_extractor_zero(self) -> BaseSchema:
         """Check that bounding is not used with zero data extractor."""
         if (
-            self.model.decoder.target_ == "anemoi.models.layers.mapper.GraphTransformerBackwardMapper"
+            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
             and self.model.decoder.initialise_data_extractor_zero
             and self.model.bounding is not None
         ):
