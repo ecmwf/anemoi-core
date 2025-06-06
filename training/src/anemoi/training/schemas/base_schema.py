@@ -23,6 +23,7 @@ from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema  # noqa: TC001
+from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema  # noqa: TC001
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import CUSTOM_MESSAGES
@@ -88,6 +89,24 @@ class BaseSchema(BaseModel):
             msg = ", ".join(logger) + " logging path(s) not provided."
             raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
         return self
+
+    @model_validator(mode="after")
+    def check_bounding_not_used_with_data_extractor_zero(self) -> BaseSchema:
+        """Check that bounding is not used with zero data extractor."""
+        if (
+            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
+            and self.model.decoder.initialise_data_extractor_zero
+            and self.model.bounding is not None
+        ):
+            error = "bounding_conflict_with_data_extractor_zero"
+            msg = (
+                "Boundings cannot be used with zero initialized weights in decoder. "
+                "Set initalise_data_extractor_zero to False."
+            )
+            raise PydanticCustomError(
+                error,
+                msg,
+            )
 
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
