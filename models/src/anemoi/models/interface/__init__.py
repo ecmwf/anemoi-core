@@ -47,7 +47,7 @@ class AnemoiModelInterface(torch.nn.Module):
         Pre-processing steps to apply to the data before passing it to the model.
     post_processors : Processors
         Post-processing steps to apply to the model's output.
-    model : BaseAnemoiModelEncProcDec
+    model : AnemoiModelEncProcDec
         The underlying Anemoi model.
     """
 
