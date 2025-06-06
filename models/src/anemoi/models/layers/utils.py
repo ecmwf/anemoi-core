@@ -88,3 +88,43 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
         else:
             layer_kernels[name] = kernel_entry
     return layer_kernels
+
+
+def mark_module_for_zero_init(module: nn.Module, module_path: str):
+    """Mark a specific module for zero initialization.
+
+    Parameters
+    ----------
+    module_path : str
+        Dot-separated path to the module (e.g., 'decoder.node_data_extractor')
+    """
+    try:
+        for part in module_path.split("."):
+            module = getattr(module, part)
+
+        module._zero_init = True
+    except AttributeError:
+        LOGGER.warning(f"Could not find module at path: {module_path}")
+
+    return module
+
+
+def apply_zero_init(module: nn.Module):
+    """Apply zero initialization to modules set in the config."""
+
+    def zero_init_if_marked(m):
+        if hasattr(m, "_zero_init") and m._zero_init:
+            if isinstance(m, nn.Linear):
+                nn.init.constant_(m.weight, 0.0)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+            elif isinstance(m, nn.Sequential):
+                for submodule in m.modules():
+                    if isinstance(submodule, nn.Linear):
+                        nn.init.constant_(submodule.weight, 0.0)
+                        if submodule.bias is not None:
+                            nn.init.constant_(submodule.bias, 0.0)
+
+    module.apply(zero_init_if_marked)
+
+    return module

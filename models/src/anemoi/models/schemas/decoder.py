@@ -32,8 +32,6 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
-    initialise_data_extractor_zero: bool = Field(example=False)
-    "Initialise the data extractor with zeros. Default to False."
 
 
 class TransformerDecoderSchema(TransformerModelComponent):

@@ -23,6 +23,10 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shape_shards
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.normalization import AutocastLayerNorm
+from anemoi.models.layers.utils import apply_zero_init
+from anemoi.models.layers.utils import mark_module_for_zero_init
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -131,6 +135,51 @@ class AnemoiModelEncProcDec(nn.Module):
                 for cfg in getattr(model_config.model, "bounding", [])
             ]
         )
+
+        # Weight initialization
+        LOGGER.info("Initializing weights!")
+        self.apply(self._init_weights)
+
+        # Zero initialization for specific modules if needed
+        # this could be extended to other initialization schemes
+        if (
+            hasattr(model_config.model.custom_weight_initialization, "zero")
+            and model_config.model.custom_weight_initialization.zero
+        ):
+            for module_path in model_config.model.custom_weight_initialization.zero:
+                self = mark_module_for_zero_init(self, module_path)
+            self = apply_zero_init(self)
+
+    def _init_weights(self, m):
+        """Initialize weights for modules."""
+
+        # Skip modules that have been marked to skip initialization
+        if hasattr(m, "_skip_init") and m._skip_init:
+            return
+
+        if isinstance(m, nn.Linear):
+            # ViTs typically use truncated normal initialization
+            # e.g. https://github.com/microsoft/Swin-Transformer
+            nn.init.trunc_normal_(m.weight, std=0.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, (nn.LayerNorm, AutocastLayerNorm)):
+            # Standard LayerNorm initialization
+            nn.init.constant_(m.weight, 1.0)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, TrainableTensor):
+            # TrainableTensor should use constant zero initialization
+            if hasattr(m, "trainable") and m.trainable is not None:
+                nn.init.constant_(m.trainable, 0)
+        elif isinstance(m, nn.Embedding):
+            # Initialize embeddings with truncated normal initialization
+            nn.init.trunc_normal_(m.weight, std=0.02)
+        elif isinstance(m, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+            # GraphAttention typically uses xavier uniform initialization (https://arxiv.org/abs/1710.10903)
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
 
     def _make_truncation_matrix(self, A, data_type=torch.float32):
         A_ = torch.sparse_coo_tensor(

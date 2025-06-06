@@ -50,7 +50,6 @@ decoder:
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
@@ -64,6 +63,12 @@ trainable_parameters:
   data2hidden: 8
   hidden2data: 8
   hidden2hidden: 8 # GNN and GraphTransformer Processor only
+
+# Weight initialization
+custom_weight_initialization: null
+  # Zero initialization for specific modules can be specified as a list of module paths
+  # zero:
+  #   - "decoder.node_data_extractor" # Do not use zero initialization of the last layer with boundings
 
 
 attributes:

@@ -402,7 +402,6 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         src_grid_size: int,
         dst_grid_size: int,
         qk_norm: bool = False,
-        initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
     ) -> None:
@@ -434,8 +433,6 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             Source grid size
         dst_grid_size : int
             Destination grid size
-        initialise_data_extractor_zero : bool, default False:
-            Whether to initialise the data extractor to zero
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
@@ -465,12 +462,6 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
-        if initialise_data_extractor_zero:
-            for module in self.node_data_extractor.modules():
-                if isinstance(module, nn.Linear):
-                    nn.init.constant_(module.weight, 0.0)
-                    if module.bias is not None:
-                        nn.init.constant_(module.bias, 0.0)
 
     def pre_process(self, x, shard_shapes, model_comm_group=None):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(x, shard_shapes, model_comm_group)

@@ -77,6 +77,12 @@ trainable_parameters:
   data2hidden: 8
   hidden2data: 8
 
+# Weight initialization
+custom_weight_initialization: null
+  # Zero initialization for specific modules can be specified as a list of module paths
+  # zero:
+  #   - "decoder.node_data_extractor" # Do not use zero initialization of the last layer with boundings
+
 attributes:
   edges:
   - edge_length
