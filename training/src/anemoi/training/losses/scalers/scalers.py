@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from hydra.utils import instantiate
 
 from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
+from anemoi.training.losses.scalers.base_scaler import TimeVaryingScaler
 
 if TYPE_CHECKING:
 
@@ -25,13 +26,15 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_scalers(scalers_config: DotDict, **kwargs) -> tuple[dict[str, SCALER_DTYPE], dict[str, SCALER_DTYPE]]:
-    scalers, delayed_scaler_builders = {}, {}
+    scalers, delayed_scaler_builders, time_varying_scalers = {}, {}, {}
     for name, config in scalers_config.items():
         scaler_builder = instantiate(config, **kwargs)
 
         if isinstance(scaler_builder, BaseDelayedScaler):
             delayed_scaler_builders[name] = scaler_builder
+        elif isinstance(scaler_builder, TimeVaryingScaler):
+            time_varying_scalers[name] = scaler_builder
+        else:
+            scalers[name] = scaler_builder.get_scaling()
 
-        scalers[name] = scaler_builder.get_scaling()
-
-    return scalers, delayed_scaler_builders
+    return scalers, delayed_scaler_builders, time_varying_scalers

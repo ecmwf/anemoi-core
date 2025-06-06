@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from typing import Optional
 
 import pytorch_lightning as pl
 import torch
@@ -56,6 +57,7 @@ class GraphForecaster(pl.LightningModule):
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
+        relative_date_indices: Optional[dict] = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -73,6 +75,8 @@ class GraphForecaster(pl.LightningModule):
             Provenance information
         supporting_arrays : dict
             Supporting NumPy arrays to store in the checkpoint
+        relative_date_indices : dict, optional
+            Relative date indices from the datamodule, by default None
 
         """
         super().__init__()
@@ -92,6 +96,7 @@ class GraphForecaster(pl.LightningModule):
         )
         self.config = config
         self.data_indices = data_indices
+        self.relative_date_indices = relative_date_indices
 
         self.save_hyperparameters()
 
@@ -101,7 +106,7 @@ class GraphForecaster(pl.LightningModule):
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Instantiate all scalers with the training configuration
-        self.scalers, self.delayed_scaler_builders = create_scalers(
+        self.scalers, self.delayed_scaler_builders, self.time_varying_scalers = create_scalers(
             config.model_dump(by_alias=True).training.scalers,
             group_config=config.model_dump(by_alias=True).training.variable_groups,
             data_indices=data_indices,
@@ -181,6 +186,15 @@ class GraphForecaster(pl.LightningModule):
         for name, scaler_builder in self.delayed_scaler_builders.items():
             self.scalers[name] = scaler_builder.get_delayed_scaling(model=self.model)
             self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
+
+    def define_time_varying_scaling(self, lead_time: int) -> None:
+        """Update time varying scalers such as lead time decay scaling."""
+        for name, scaler_builder in self.time_varying_scalers.items():
+            self.scalers[name] = scaler_builder.get_scaling_values(lead_time=lead_time)
+            if self.loss.scaler.has_scaler(name):
+                self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
+            else:
+                self.loss.add_scaler(*self.scalers[name], name=name)
 
     def set_model_comm_group(
         self,
@@ -296,6 +310,7 @@ class GraphForecaster(pl.LightningModule):
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
+            self.define_time_varying_scaling(rollout_step + 1)
             loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
             x = self.advance_input(x, y_pred, batch, rollout_step)

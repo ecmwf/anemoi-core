@@ -13,9 +13,11 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+from typing import Optional
 
 import numpy as np
 
+from anemoi.training.utils.enums import OutputTensorDim
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -28,7 +30,7 @@ SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
-    scale_dims: tuple[TensorDim] = None
+    scale_dims: tuple[TensorDim | OutputTensorDim] = None
 
     def __init__(self, norm: str | None = None) -> None:
         """Initialise BaseScaler.
@@ -46,7 +48,7 @@ class BaseScaler(ABC):
             "unit-mean",
         ], f"{self.__class__.__name__}.norm must be one of: None, unit-sum, l1, unit-mean"
         assert self.scale_dims is not None, f"Class {self.__class__.__name__} must define 'scale_dims'"
-        if isinstance(self.scale_dims, TensorDim):
+        if isinstance(self.scale_dims, (TensorDim, OutputTensorDim)):
             self.scale_dims = (self.scale_dims,)
 
     @abstractmethod
@@ -79,6 +81,18 @@ class BaseScaler(ABC):
             Scaler values
         """
         scaler_values = self.get_scaling_values()
+        scaler_values = self.normalise(scaler_values)
+        scale_dims = tuple(x.value for x in self.scale_dims)
+        return scale_dims, scaler_values
+
+
+class TimeVaryingScaler(BaseScaler):
+
+    @abstractmethod
+    def get_scaling_values(self, lead_time: Optional[int] = None, **kwargs) -> np.ndarray: ...
+
+    def get_time_varying_scaler(self, lead_time: Optional[int] = None, **kwargs) -> SCALER_DTYPE:
+        scaler_values = self.get_scaling_values(lead_time, **kwargs)
         scaler_values = self.normalise(scaler_values)
         scale_dims = tuple(x.value for x in self.scale_dims)
         return scale_dims, scaler_values

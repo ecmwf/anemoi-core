@@ -287,6 +287,23 @@ class ScaleTensor:
 
         return FrozenStateRecord()
 
+    def has_scaler(self, name: str | int) -> bool:
+        """Check if a scaler with the given name or index exists.
+
+        Parameters
+        ----------
+        name : str | int
+            Name or index of the scaler to check
+
+        Returns
+        -------
+        bool
+            True if the scaler exists, False otherwise
+        """
+        if isinstance(name, int):
+            return name in self._specified_dimensions.values()
+        return name in self.tensors
+
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         """Update an existing scaler maintaining original dimensions.
 

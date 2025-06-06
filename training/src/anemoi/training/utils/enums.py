@@ -15,3 +15,11 @@ class TensorDim(IntEnum):
     ENSEMBLE_DIM = 1
     GRID = 2
     VARIABLE = 3
+
+
+class OutputTensorDim(IntEnum):
+    BATCH_SIZE = 0
+    TIME = 1
+    ENSEMBLE_DIM = 2
+    GRID = 3
+    VARIABLE = 4
