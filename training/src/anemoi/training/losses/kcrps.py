@@ -10,11 +10,15 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import einops
 import torch
 
 from anemoi.training.losses.base import BaseLoss
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +82,10 @@ class KernelCRPS(BaseLoss):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
 
         y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
         y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
@@ -86,9 +93,9 @@ class KernelCRPS(BaseLoss):
         kcrps_ = self._kernel_crps(y_pred, y_target)
 
         kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs 1 latlon v")
-        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers)
+        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(kcrps_, squash=squash, squash_mode="sum")
+        return self.reduce(kcrps_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
 
     @property
     def name(self) -> str:
@@ -169,7 +176,10 @@ class AlmostFairKernelCRPS(BaseLoss):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
 
         y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
         y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
@@ -181,9 +191,9 @@ class AlmostFairKernelCRPS(BaseLoss):
             kcrps_ = self._kernel_crps(y_pred, y_target, alpha=self.alpha)
 
         kcrps_ = einops.rearrange(kcrps_, "bs v latlon -> bs 1 latlon v")
-        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers)
+        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(kcrps_, squash=squash, squash_mode="sum")
+        return self.reduce(kcrps_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
 
     @property
     def name(self) -> str:

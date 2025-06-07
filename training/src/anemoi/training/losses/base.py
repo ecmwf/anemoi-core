@@ -14,12 +14,17 @@ import functools
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
 
+from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +64,8 @@ class BaseLoss(nn.Module, ABC):
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
 
+        self.supports_sharding = True
+
     @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
         self.scaler.add_scaler(dimension=dimension, scaler=scaler, name=name)
@@ -73,6 +80,7 @@ class BaseLoss(nn.Module, ABC):
         subset_indices: tuple[int, ...] | None = None,
         *,
         without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Scale a tensor by the variable_scaling.
 
@@ -85,6 +93,8 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None, optional
             list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
+        grid_shard_slice : slice, optional
+            Slice of the grid if x comes sharded, by default None
 
         Returns
         -------
@@ -114,6 +124,10 @@ class BaseLoss(nn.Module, ABC):
                 scale_tensor = self.scaler.without_by_dim(without_scalers)
 
         scaler = scale_tensor.get_scaler(x.ndim)
+
+        if grid_shard_slice is not None:
+            scaler = scaler[:, :, grid_shard_slice, :]
+
         scaler = scaler.expand_as(x)
 
         return x[subset_indices] * scaler[subset_indices]
@@ -123,6 +137,7 @@ class BaseLoss(nn.Module, ABC):
         out: torch.Tensor,
         squash: bool = True,
         squash_mode: str = "avg",
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         """Reduce the out of the loss.
 
@@ -163,13 +178,15 @@ class BaseLoss(nn.Module, ABC):
 
         # here the grid dimension is summed because the normalisation is handled in the node weighting
         grid_summed = self.sum_function(out, dim=(TensorDim.GRID))
-        return self.avg_function(
+        out = self.avg_function(
             grid_summed,
             dim=(
                 TensorDim.BATCH_SIZE,
                 TensorDim.ENSEMBLE_DIM,
             ),
         )
+
+        return out if group is None else reduce_tensor(out, group)
 
     @property
     def name(self) -> str:
@@ -185,6 +202,8 @@ class BaseLoss(nn.Module, ABC):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -201,6 +220,10 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None, optional
             list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
+        grid_shard_slice : slice, optional
+            Slice of the grid if x comes sharded, by default None
+        group: ProcessGroup, optional
+            Distributed group to reduce over, by default None
 
         Returns
         -------
@@ -236,6 +259,8 @@ class FunctionalLoss(BaseLoss):
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -252,13 +277,18 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None, optional
             list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
+        grid_shard_slice : slice, optional
+            Slice of the grid if x comes sharded, by default None
+        group: ProcessGroup, optional
+            Distributed group, by default None
 
         Returns
         -------
         torch.Tensor
             Weighted loss
         """
+        is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
-        out = self.scale(out, scaler_indices, without_scalers=without_scalers)
+        out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(out, squash)
+        return self.reduce(out, squash, group=group if is_sharded else None)

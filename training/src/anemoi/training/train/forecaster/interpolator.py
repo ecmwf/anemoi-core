@@ -90,14 +90,12 @@ class GraphInterpolator(GraphForecaster):
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
 
         del batch_idx
-        batch = self.allgather_batch(batch)
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
-        # for validation not normalized in-place because remappers cannot be applied in-place
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
+        batch = self.model.pre_processors(batch)
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
@@ -130,15 +128,17 @@ class GraphInterpolator(GraphForecaster):
             y_pred = self(x_bound, target_forcing)
             y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
 
-            loss += checkpoint(self.loss, y_pred, y, use_reentrant=False)
+            loss_step, metrics_next = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                interp_step - 1,
+                training_mode=True,
+                validation_mode=validation_mode,
+                use_reentrant=False,
+            )
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred,
-                    y,
-                    interp_step - 1,
-                )  # expects rollout but can be repurposed here.
+            loss += loss_step
             metrics.update(metrics_next)
             y_preds.append(y_pred)
 
@@ -146,4 +146,9 @@ class GraphInterpolator(GraphForecaster):
         return loss, metrics, y_preds
 
     def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
-        return self.model(x, target_forcing=target_forcing, model_comm_group=self.model_comm_group)
+        return self.model(
+            x,
+            target_forcing=target_forcing,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
