@@ -41,9 +41,12 @@ shown in the figure below
    Model Sharding (source: `Jacobs et al. (2023) <https://arxiv.org/pdf/2309.14509>`_)
 
 To use model sharding, set ``config.hardware.num_gpus_per_model`` to the
-number of GPUs you wish to shard the model across. It is recommended to
-only shard if the model does not fit in GPU memory, as data distribution
-is a much more efficient way to parallelise the training.
+number of GPUs you wish to shard the model across. Set ``config.model.
+keep_batch_sharded=True`` to also keep batches fully sharded throughout
+training, reducing memory usage for large inputs or long rollouts. It is
+recommended to only shard if the model does not fit in GPU memory, as
+data distribution is a much more efficient way to parallelise the
+training.
 
 Anemoi Training provides different sharding strategies depending if the
 model task is deterministic or ensemble based.

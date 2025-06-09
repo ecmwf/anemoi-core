@@ -246,6 +246,9 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(config)
         self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
 
+        if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
+            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -255,15 +258,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         batch_idx: int,
         **kwargs,
     ) -> None:
-        if (
-            self.config.diagnostics.plot.asynchronous
-            and self.config.dataloader.read_group_size > 1
-            and pl_module.local_rank == 0
-        ):
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
-
         if batch_idx % self.every_n_batches == 0:
+            # gather tensors if necessary
             batch = pl_module.allgather_batch(batch)
+            # output: [loss, [pred1, pred2, ...]], gather predictions for plotting
+            output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
 
             self.plot(
                 trainer,
@@ -398,6 +397,9 @@ class LongRolloutPlots(BasePlotCallback):
             self.video_rollout,
             every_n_epochs,
         )
+
+        if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
+            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
 
     def _plot(
         self,
@@ -622,6 +624,7 @@ class LongRolloutPlots(BasePlotCallback):
     ) -> None:
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
             batch = pl_module.allgather_batch(batch)
+            output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
 
             precision_mapping = {
                 "16-mixed": torch.float16,
