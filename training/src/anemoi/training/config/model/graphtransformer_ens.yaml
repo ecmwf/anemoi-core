@@ -80,7 +80,7 @@ decoder:
   num_chunks: 1
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: True
+  initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
