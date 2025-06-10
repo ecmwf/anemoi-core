@@ -97,7 +97,7 @@ class PlanarAreaWeights(BaseNodeAttribute):
     """
 
     def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
-        return nodes.x
+        return nodes.x.to(torch.float64)
 
     def _compute_mean_nearest_distance(self, points: np.ndarray) -> float:
         """Compute mean distance to nearest neighbor for each point.
@@ -259,6 +259,9 @@ class SphericalAreaWeights(BaseNodeAttribute):
         self.centre = centre
         self.fill_value = fill_value
 
+    def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
+        return nodes.x.to(torch.float64)
+
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         """Compute the area associated to each node.
 
@@ -276,7 +279,7 @@ class SphericalAreaWeights(BaseNodeAttribute):
         np.ndarray
             Attributes.
         """
-        points = latlon_rad_to_cartesian(nodes.x.cpu())
+        points = latlon_rad_to_cartesian(self.get_latlon_coordinates(nodes).cpu())
         sv = SphericalVoronoi(points, self.radius, self.centre)
         mask = np.array([bool(i) for i in sv.regions])
         sv.regions = [region for region in sv.regions if region]
