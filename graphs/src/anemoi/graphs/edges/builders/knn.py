@@ -125,8 +125,7 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
 
 
 class ReversedKNNEdges(KNNEdges):
-    """
-    For each target node, this builder connects its K nearest neighbors among the source nodes.
+    """For each target node, this builder connects its K nearest neighbors among the source nodes.
 
     Attributes
     ----------
