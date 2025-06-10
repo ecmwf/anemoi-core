@@ -72,12 +72,12 @@ optional-dependencies.healpix = [ "healpy>=1.17" ]
 optional-dependencies.hex = [ "h3>=3.7.7,<4" ]
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
 
+optional-dependencies.tri = [ "trimesh>=4.1" ]
+
 optional-dependencies.xarray = [
   "xarray<=2025.4",
   "zarr<3",
 ]
-
-optional-dependencies.tri = [ "trimesh>=4.1" ]
 
 urls.Documentation = "https://anemoi-graphs.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-graphs/"

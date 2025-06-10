@@ -233,7 +233,6 @@ class XArrayNodes(BaseNodeBuilder):
     """
 
     def __init__(self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon") -> None:
-        import xarray as xr
 
         super().__init__(name)
         self.dataset = dataset
