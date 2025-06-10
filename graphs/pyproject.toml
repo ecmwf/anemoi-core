@@ -40,10 +40,7 @@ classifiers = [
 
 dynamic = [ "version" ]
 dependencies = [
-  "anemoi-datasets>=0.5.21",
   "anemoi-utils>=0.4.11",
-  "h3>=3.7.7,<4",
-  "healpy>=1.17",
   "hydra-core>=1.3",
   "matplotlib>=3.6",
   "netcdf4>1.7",
@@ -53,11 +50,11 @@ dependencies = [
   "scikit-learn>=1.5",
   "torch>=2.2",
   "torch-geometric>=2.3.1",
-  "trimesh>=4.1",
   "typeguard>=4",
 ]
 
-optional-dependencies.all = [  ]
+optional-dependencies.all = [ "anemoi-graphs[anemoi,tri,hex,healpix]" ]
+optional-dependencies.anemoi = [ "anemoi-datasets>=0.5.21" ]
 optional-dependencies.dev = [ "anemoi-graphs[docs,tests]" ]
 
 optional-dependencies.docs = [
@@ -71,12 +68,16 @@ optional-dependencies.docs = [
   "tomli",
 ]
 
+optional-dependencies.healpix = [ "healpy>=1.17" ]
+optional-dependencies.hex = [ "h3>=3.7.7,<4" ]
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
 
 optional-dependencies.xarray = [
   "xarray<=2025.4",
   "zarr<3",
 ]
+
+optional-dependencies.tri = [ "trimesh>=4.1" ]
 
 urls.Documentation = "https://anemoi-graphs.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-graphs/"

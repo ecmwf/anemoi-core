@@ -25,8 +25,7 @@ class MockAnemoiDataset:
         self.latitudes = latitudes
         self.longitudes = longitudes
         self.num_nodes = len(latitudes)
-        if grids is not None:
-            self.grids = grids
+        self.grids = grids if grids is not None else (self.num_nodes,)
 
 
 @pytest.fixture

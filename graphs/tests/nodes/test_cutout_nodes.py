@@ -31,6 +31,7 @@ def test_init(mocker, mock_anemoi_dataset_cutout):
 def test_register_nodes(mocker, mock_anemoi_dataset_cutout):
     """Test AnemoiDatasetNodes register correctly the nodes with cutout operation."""
     mocker.patch.object(from_file, "open_dataset", return_value=mock_anemoi_dataset_cutout)
+
     node_builder = from_file.AnemoiDatasetNodes(
         OmegaConf.create({"cutout": ["lam.zarr", "global.zarr"]}), name="test_nodes"
     )
@@ -48,6 +49,7 @@ def test_register_nodes(mocker, mock_anemoi_dataset_cutout):
 def test_register_attributes(mocker, mock_anemoi_dataset_cutout, graph_with_nodes: HeteroData, attr_class):
     """Test AnemoiDatasetNodes register correctly the weights with cutout operation."""
     mocker.patch.object(from_file, "open_dataset", return_value=mock_anemoi_dataset_cutout)
+
     node_builder = from_file.AnemoiDatasetNodes(
         OmegaConf.create({"cutout": ["lam.zarr", "global.zarr"]}), name="test_nodes"
     )

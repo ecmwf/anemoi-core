@@ -19,6 +19,7 @@ from anemoi.graphs.nodes.builders import from_file
 def test_init(mocker, mock_anemoi_dataset):
     """Test AnemoiDatasetNodes initialization."""
     mocker.patch.object(from_file, "open_dataset", return_value=mock_anemoi_dataset)
+
     node_builder = from_file.AnemoiDatasetNodes("anemoi-dataset", name="test_nodes")
 
     assert isinstance(node_builder, from_file.BaseNodeBuilder)
@@ -35,6 +36,7 @@ def test_fail():
 def test_register_nodes(mocker, mock_anemoi_dataset):
     """Test AnemoiDatasetNodes register correctly the nodes."""
     mocker.patch.object(from_file, "open_dataset", return_value=mock_anemoi_dataset)
+
     node_builder = from_file.AnemoiDatasetNodes("dataset.zarr", name="test_nodes")
     graph = HeteroData()
 
@@ -49,7 +51,7 @@ def test_register_nodes(mocker, mock_anemoi_dataset):
 @pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])
 def test_register_attributes(mocker, graph_with_nodes: HeteroData, attr_class):
     """Test AnemoiDatasetNodes register correctly the weights."""
-    mocker.patch.object(from_file, "open_dataset", return_value=None)
+    mocker.patch("anemoi.datasets.open_dataset", return_value=None)
     node_builder = from_file.AnemoiDatasetNodes("dataset.zarr", name="test_nodes")
     config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
