@@ -22,7 +22,7 @@ and longitude arrays.
 .. note::
 
    To enable reading from XArray files you must install xarray or the
-   “data” extras:
+   “xarray” extras:
 
    .. code:: bash
 
