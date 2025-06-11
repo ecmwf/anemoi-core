@@ -1,6 +1,6 @@
-##################
- From XArray file
-##################
+###############################
+ From XArray Compatible Source
+###############################
 
 To define the `node coordinates` based on a XArray file, you can use the
 following YAML configuration:
@@ -11,7 +11,7 @@ following YAML configuration:
      data: # name of the nodes
        node_builder:
          _target_: anemoi.graphs.nodes.XArrayNodes
-         dataset: /path/to/xarray/compatible/file.zarr
+         dataset: /path/to/xarray/compatible/source.zarr
          lat_key: latitudes
          lon_key: longitudes
 
@@ -21,8 +21,8 @@ and longitude arrays.
 
 .. note::
 
-   To enable reading from XArray files you must install xarray or the
-   “xarray” extras:
+   To enable reading from XArray compatible sources you must install
+   xarray or the “xarray” extras:
 
    .. code:: bash
 
