@@ -26,4 +26,4 @@ and longitude arrays.
 
    .. code:: bash
 
-      pip install anemoi-graphs[data]
+      pip install anemoi-graphs[xarray]
