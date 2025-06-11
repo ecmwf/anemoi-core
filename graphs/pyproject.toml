@@ -75,7 +75,7 @@ optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3
 optional-dependencies.tri = [ "trimesh>=4.1" ]
 
 optional-dependencies.xarray = [
-  "xarray<=2025.4",
+  "xarray",
   "zarr<3",
 ]
 
