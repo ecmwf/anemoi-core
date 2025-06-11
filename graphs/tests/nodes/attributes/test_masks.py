@@ -21,10 +21,7 @@ def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_anemoi_dataset_c
     # Add dataset attribute required by CutOutMask
     graph_with_nodes["test_nodes"]["_dataset"] = {}
 
-    mocker.patch(
-        "anemoi.graphs.nodes.attributes.masks.open_dataset",
-        return_value=mock_anemoi_dataset_cutout,
-    )
+    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset_cutout)
     mask = CutOutMask().compute(graph_with_nodes, "test_nodes")
 
     assert mask is not None
