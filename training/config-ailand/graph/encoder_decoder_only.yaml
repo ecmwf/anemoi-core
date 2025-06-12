@@ -1,0 +1,57 @@
+---
+overwrite: True
+
+data: "data"
+hidden: "hidden"
+
+nodes:
+  # Data nodes
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
+      dataset: ${dataloader.dataset}
+    attributes: ${graph.attributes.nodes} # options: l1, l2, unit-max, unit-sum, unit-std
+  # Hidden nodes
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes # options: AnemoiDatasetNodes, NPZFileNodes
+      grid: o48 # o32, o48, ...
+
+
+edges:
+# Encoder configuration
+- source_name: ${graph.data}
+  target_name: ${graph.hidden}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 0.6 # only for cutoff method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+
+  attributes: ${graph.attributes.edges}
+  # Decoder configuration
+- source_name: ${graph.hidden}
+  target_name: ${graph.data}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 3 # only for knn method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
+      norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
+      fill_value: 0
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []

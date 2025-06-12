@@ -1,0 +1,55 @@
+defaults:
+- data: zarr_ailand
+- dataloader: native_grid_ailand
+- datamodule: single
+- diagnostics: evaluation_ailand
+- hardware: slurm
+- graph: ailand
+- model: graphtransformer_ailand
+- training: default_ailand
+- _self_
+
+
+config_validation: False
+
+hardware:
+  num_gpus_per_model: 1
+
+diagnostics:
+  log:
+    wandb:
+      entity: a
+    mlflow:
+      enabled: True
+      offline: False  # True  # False
+      experiment_name: 'ailand'
+      run_name: 'test-ms1-reduced'
+      terminal: True
+      authentication: True
+  files:
+    truncation: null
+    truncation_inv: null
+    graph: "debug.pt"
+    # dataset: ???
+  # plot:
+  #   callbacks: []
+model:
+  processor:
+    _target_: anemoi.models.layers.processor.PointMLP
+    num_layers: 4
+    num_chunks: 2
+    mlp_hidden_ratio: 4
+  num_channels: 128
+dataloader:
+  limit_batches:
+    training: null
+    validation: null
+training:
+  # max_epochs: 2
+  # max_epochs: 67
+  max_steps: 150000
+  lr:
+    # rate: 3.125e-5  # Do I need to multiply by 4 if only have 4 nodes on ATOS?
+    rate: 1.25e-4  # 3.125e-5 * 4 for ATOS change make for 16-node runs!!
+    iterations: 150000
+    min: 3e-7  # Not scaled by GPU

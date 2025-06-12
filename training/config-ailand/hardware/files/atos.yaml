@@ -1,0 +1,10 @@
+dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
+dataset_land: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2024-6h-v2-land-reduced-snow.zarr
+graph: graph_enc_proc_dec_${data.resolution}.pt
+truncation: null
+truncation_inv: null
+checkpoint:
+  every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+  every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+  every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+warm_start: null

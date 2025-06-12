@@ -1,0 +1,12 @@
+data: ???
+output: ???
+truncation: null
+logs:
+  base: ${hardware.paths.output}logs/
+  wandb: ${hardware.paths.logs.base}
+  mlflow: ${hardware.paths.logs.base}mlflow/
+  tensorboard: ${hardware.paths.logs.base}tensorboard/
+checkpoints: ${hardware.paths.output}checkpoint/
+plots: ${hardware.paths.output}plots/
+profiler: ${hardware.paths.output}profiler/
+graph: ${hardware.paths.output}graphs/

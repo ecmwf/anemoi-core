@@ -1,0 +1,82 @@
+---
+overwrite: True
+
+data: "data"
+hidden: "hidden"
+
+nodes:
+  # Data nodes
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.training.dataset}
+    attributes: ${graph.attributes.nodes}
+  # Hidden nodes
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.LimitedAreaTriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
+      resolution: 6 # grid resolution for npz (o32, o48, ...)
+      reference_node_name: ${graph.data}
+      mask_attr_name: cutout_mask
+      margin_radius_km: 10
+
+edges:
+# Encoder configuration
+- source_name: ${graph.data}
+  target_name: ${graph.hidden}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 0.6 # only for cutoff method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  - _target_: anemoi.graphs.edges.CutOffEdges # connects only boundary nodes
+    cutoff_factor: 1.5 # only for cutoff method
+    source_mask_attr_name: boundary_mask
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+# Processor configuration
+- source_name: ${graph.hidden}
+  target_name: ${graph.hidden}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+# Decoder configuration
+- source_name: ${graph.hidden}
+  target_name: ${graph.data}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 3 # only for knn method
+    source_mask_attr_name: null
+    target_mask_attr_name: cutout_mask
+  attributes: ${graph.attributes.edges}
+
+post_processors:
+  - _target_: anemoi.graphs.processors.RemoveUnconnectedNodes
+    nodes_name: data
+    ignore: cutout_mask # optional
+    save_mask_indices_to_attr: indices_connected_nodes # optional
+
+attributes:
+  nodes:
+    # Attributes for data nodes
+    cutout_mask:
+      _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    boundary_mask:
+      _target_: anemoi.graphs.nodes.attributes.BooleanNot
+      masks:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights # options: Uniform
+      mask_node_attr_name: cutout_mask
+      norm: unit-max
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
