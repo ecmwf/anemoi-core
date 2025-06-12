@@ -16,9 +16,10 @@ from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders import from_file
 
 
-def test_init(mocker, mock_zarr_dataset):
+def test_init(mocker, mock_anemoi_dataset):
     """Test AnemoiDatasetNodes initialization."""
-    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_zarr_dataset)
+    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset)
+
     node_builder = from_file.AnemoiDatasetNodes("anemoi-dataset", name="test_nodes")
 
     assert isinstance(node_builder, from_file.BaseNodeBuilder)
@@ -32,9 +33,10 @@ def test_fail():
         node_builder.update_graph(HeteroData())
 
 
-def test_register_nodes(mocker, mock_zarr_dataset):
+def test_register_nodes(mocker, mock_anemoi_dataset):
     """Test AnemoiDatasetNodes register correctly the nodes."""
-    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_zarr_dataset)
+    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset)
+
     node_builder = from_file.AnemoiDatasetNodes("dataset.zarr", name="test_nodes")
     graph = HeteroData()
 
@@ -42,7 +44,7 @@ def test_register_nodes(mocker, mock_zarr_dataset):
 
     assert graph["test_nodes"].x is not None
     assert isinstance(graph["test_nodes"].x, torch.Tensor)
-    assert graph["test_nodes"].x.shape == (mock_zarr_dataset.num_nodes, 2)
+    assert graph["test_nodes"].x.shape == (mock_anemoi_dataset.num_nodes, 2)
     assert graph["test_nodes"].node_type == "AnemoiDatasetNodes"
 
 
