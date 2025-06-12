@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.1...graphs-0.6.2) (2025-06-12)
+
+
+### Features
+
+* **graphs:** Add GridsMask node attribute builder ([#355](https://github.com/ecmwf/anemoi-core/issues/355)) ([c4db823](https://github.com/ecmwf/anemoi-core/commit/c4db8236374b245be17319caf3dc26911800da10))
+* **graphs:** Build nodes from xarray compatible data ([#330](https://github.com/ecmwf/anemoi-core/issues/330)) ([3edaabb](https://github.com/ecmwf/anemoi-core/commit/3edaabb7e68a9ec89eccd5a16b258fbbf941b166))
+
+
+### Bug Fixes
+
+* **graphs:** Move libraries to optional dependencies ([#338](https://github.com/ecmwf/anemoi-core/issues/338)) ([db215ce](https://github.com/ecmwf/anemoi-core/commit/db215ce4ec0b1835e02cf1418c71292904153547))
+
 ## [0.6.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.0...graphs-0.6.1) (2025-06-05)
 
 
