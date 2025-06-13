@@ -261,47 +261,6 @@ class GraphConvBaseBlock(BaseBlock):
 
 
 class GraphConvProcessorBlock(GraphConvBaseBlock):
-
-    def __ini__(
-        self,
-        *,
-        in_channels: int,
-        out_channels: int,
-        num_chunks: int,
-        mlp_extra_layers: int = 0,
-        update_src_nodes: bool = False,
-        layer_kernels: DotDict,
-        **kwargs,
-    ) -> None:
-        """Initialize Graph Processor Block.
-
-        Parameters
-        ----------
-        in_channels : int
-            Number of input channels.
-        out_channels : int
-            Number of output channels.
-        num_chunks : int
-            Number of chunks
-        mlp_extra_layers : int
-            Extra layers in MLP, by default 0
-        update_src_nodes : bool
-            Update src if src and dst nodes are given, by default False
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
-        kwargs : dict
-            Additional arguments for the base class.
-        """
-        super().__init__(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            layer_kernels=layer_kernels,
-            mlp_extra_layers=mlp_extra_layers,
-            update_src_nodes=update_src_nodes,
-            num_chunks=num_chunks,
-            **kwargs,
-        )
-
     def forward(
         self,
         x: OptPairTensor,
