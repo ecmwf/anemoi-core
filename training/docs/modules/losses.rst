@@ -67,6 +67,25 @@ deterministic:
       _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
       # loss function kwargs here
 
+************************
+ Spatial Loss Functions
+************************
+
+The following spatial loss functions are available:
+
+-  ``LogFFT2Distance``: log spectral distance from the 2D fast Fourier
+   transform.
+
+-  ``FourierCorrelationLoss``: Fourier correlation loss, also computed
+   from the 2D fast Fourier transform see `Yan et al. (2024)
+   <https://arxiv.org/pdf/2410.23159.pdf>`_.
+
+Both of these loss functions are defined in the
+``anemoi.training.losses.spatial`` module, and can be configured in the
+config file at ``config.training.training_loss`` in the same way as the
+deterministic loss functions with additional kwargs `x_dim` and `y_dim`
+specifying the field shape of the input tensors.
+
 *********
  Scalers
 *********
