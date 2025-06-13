@@ -70,6 +70,8 @@ def argsort_variablename_variablelevel(data: list[str], metadata_variables: dict
     ----------
     data : list[str]
         List of strings to sort.
+    metadata_variables : dict, optional
+        Dictionary of variable names and indices, by default None
 
     Returns
     -------
@@ -577,11 +579,13 @@ def plot_flat_sample(
     else:
         combined_data = np.concatenate((input_, truth, pred))
         # For 'errors', only persistence and increments need identical colorbar-limits
-        combined_error = np.concatenate(((pred - input_), (truth - input_)))
+
         norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
 
         norms[1] = norm
         norms[2] = norm
+
+    combined_error = np.concatenate(((pred - input_), (truth - input_)))
 
     if sum(input_) != 0:
         # prognostic fields: plot input and increment as well
