@@ -8,6 +8,8 @@ import einops
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from omegaconf import DictConfig
+
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
 from anemoi.training.diagnostics.callbacks.plot import BasePerBatchPlotCallback
@@ -16,20 +18,15 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
-from anemoi.training.diagnostics.plots import plot_power_spectrum
-from anemoi.training.losses.base import BaseLoss
-from omegaconf import DictConfig
-
 from anemoi.training.diagnostics.plots import plot_histogram
-from anemoi.training.diagnostics.plots import plot_loss
+from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_ensemble
-from anemoi.training.diagnostics.plots import plot_rank_histograms
-from anemoi.training.diagnostics.plots import plot_spread_skill
-from anemoi.training.diagnostics.plots import plot_spread_skill_bins
-#from aifs.diagnostics.metrics.ranks import RankHistogram
-#from aifs.diagnostics.metrics.spread import SpreadSkill
+
+# from aifs.diagnostics.metrics.ranks import RankHistogram
+# from aifs.diagnostics.metrics.spread import SpreadSkill
 
 LOGGER = logging.getLogger(__name__)
+
 
 class BasePerBatchEnsPlotCallback(BasePerBatchPlotCallback):
     """Base Callback for plotting at the end of each batch."""
@@ -63,6 +60,7 @@ class BasePerBatchEnsPlotCallback(BasePerBatchPlotCallback):
                 **kwargs,
             )
 
+
 class RolloutEvalEns(RolloutEval):
     """Evaluates the model performance over a (longer) rollout window."""
 
@@ -83,7 +81,9 @@ class RolloutEvalEns(RolloutEval):
         # NB! the batch is already normalized in-place - see pl_model.validation_step()
         metrics = {}
 
-        assert batch[0].shape[1] >= self.rollout + pl_module.multi_step, "Batch length not sufficient for requested rollout length!"
+        assert (
+            batch[0].shape[1] >= self.rollout + pl_module.multi_step
+        ), "Batch length not sufficient for requested rollout length!"
 
         with torch.no_grad():
             for loss_next, metrics_next, _, _ in pl_module.rollout_step(
@@ -148,7 +148,9 @@ class RolloutEvalEns(RolloutEval):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = torch.autocast(device_type=batch[0].device.type, dtype=dtype) if dtype is not None else nullcontext()
+            context = (
+                torch.autocast(device_type=batch[0].device.type, dtype=dtype) if dtype is not None else nullcontext()
+            )
 
             with context:
                 self._eval(pl_module, batch, outputs[-1])
@@ -408,7 +410,14 @@ class PlotEnsLoss(PlotLoss):
         batch_idx: int,
     ) -> None:
         if batch_idx % self.every_n_batches == 0 and pl_module.ens_comm_group_rank == 0:
-            self._plot(trainer, pl_module, outputs, batch[0][:, :, 0, :, :], batch_idx=None, epoch=trainer.current_epoch)
+            self._plot(
+                trainer,
+                pl_module,
+                outputs,
+                batch[0][:, :, 0, :, :],
+                batch_idx=None,
+                epoch=trainer.current_epoch,
+            )
 
 
 class PlotEnsembleInitialConditions(BasePerBatchEnsPlotCallback):
@@ -420,7 +429,14 @@ class PlotEnsembleInitialConditions(BasePerBatchEnsPlotCallback):
         self.accumulation_levels_plot = accumulation_levels_plot
         self.cmap_accumulation = cmap_accumulation
 
-    def _plot(self, trainer: pl.Trainer, pl_module: pl.LightningModule, ens_ic: torch.Tensor, batch_idx: int, epoch: int) -> None:
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        ens_ic: torch.Tensor,
+        batch_idx: int,
+        epoch: int,
+    ) -> None:
         # Build dictionary of inidicies and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
         plot_parameters_dict = {
@@ -489,9 +505,15 @@ class PlotEnsembleInitialConditions(BasePerBatchEnsPlotCallback):
         # gather all ICs (may contain duplicates)
         group_ens_ic = self._gather_group_initial_conditions(pl_module, outputs[-1])
         # remove duplicates
-        group_ens_ic = einops.rearrange(group_ens_ic, "bs s e latlon v -> bs s v latlon e")  # ensemble dim must come last
+        group_ens_ic = einops.rearrange(
+            group_ens_ic,
+            "bs s e latlon v -> bs s v latlon e",
+        )  # ensemble dim must come last
         group_ens_ic = group_ens_ic @ pl_module._gather_matrix
-        group_ens_ic = einops.rearrange(group_ens_ic, "bs s v latlon e -> bs s e latlon v")  # reshape back to what it was
+        group_ens_ic = einops.rearrange(
+            group_ens_ic,
+            "bs s v latlon e -> bs s e latlon v",
+        )  # reshape back to what it was
         # plotting happens only on ens_comm_group_rank == 0 (one device per group)
         # ens_comm_group_rank == 0 has gathered all initial conditions generated by its group
         if batch_idx % self.every_n_batches == 0 and pl_module.ens_comm_group_rank == 0:
@@ -535,12 +557,15 @@ class PlotEnsSample(PlotSample):
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-        data = self.post_processors(input_tensor, in_place=False).numpy()
+        data = self.post_processors(input_tensor)
 
         output_tensor = self.post_processors(
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
-        ).numpy()
+        )
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
+        data = data.numpy()
 
         for rollout_step in range(pl_module.rollout):
             fig = plot_predicted_ensemble(
@@ -615,7 +640,9 @@ class PlotEnsHistogram(PlotHistogram):
             pl_module.data_indices.data.output.full,
         ].cpu()
         data = input_tensor.numpy()
-        output_tensor = (torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1]))).numpy()
+        output_tensor = (
+            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1]))
+        ).numpy()
         for rollout_step in range(pl_module.rollout):
 
             # Build dictionary of indices and parameters to be plotted
@@ -673,6 +700,7 @@ class PlotEnsHistogram(PlotHistogram):
                 epoch=trainer.current_epoch,
                 **kwargs,
             )
+
 
 class LongEnsRolloutPlots(LongRolloutPlots):
     """Evaluates the model performance over a (longer) rollout window.
@@ -851,7 +879,9 @@ class LongEnsRolloutPlots(LongRolloutPlots):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = torch.autocast(device_type=batch[0].device.type, dtype=dtype) if dtype is not None else nullcontext()
+            context = (
+                torch.autocast(device_type=batch[0].device.type, dtype=dtype) if dtype is not None else nullcontext()
+            )
 
             if self.config.diagnostics.plot.asynchronous:
                 LOGGER.warning("Asynchronous plotting not supported for long rollout plots.")
