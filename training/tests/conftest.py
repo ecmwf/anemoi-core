@@ -18,6 +18,9 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.utils.testing import get_test_archive  # noqa: F401 [unused-import]
+from anemoi.utils.testing import get_test_data  # noqa: F401 [unused-import]
+from anemoi.utils.testing import temporary_directory_for_test_data  # noqa: F401 [unused-import]
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
