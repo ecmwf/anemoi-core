@@ -32,6 +32,28 @@ def cartesian_to_latlon_rad(xyz: np.ndarray) -> np.ndarray:
     return np.array((lat, lon), dtype=np.float32).transpose()
 
 
+def latlon_rad_to_cartesian_np(locations: np.ndarray, radius: float = 1) -> np.ndarray:
+    """Convert planar coordinates to 3D coordinates in a sphere.
+
+    Parameters
+    ----------
+    locations : np.ndarray of shape (N, 2)
+        The 2D coordinates of the points, in radians.
+    radius : float, optional
+        The radius of the sphere containing los points. Defaults to the unit sphere.
+
+    Returns
+    -------
+    np.ndarray of shape (N, 3)
+        3D coordinates of the points in the sphere.
+    """
+    latr, lonr = locations[..., 0], locations[..., 1]
+    x = radius * np.cos(latr) * np.cos(lonr)
+    y = radius * np.cos(latr) * np.sin(lonr)
+    z = radius * np.sin(latr)
+    return np.stack((x, y, z), axis=-1)
+
+
 def latlon_rad_to_cartesian(locations: torch.Tensor, radius: float = 1) -> torch.Tensor:
     """Convert planar coordinates to 3D coordinates in a sphere.
 
