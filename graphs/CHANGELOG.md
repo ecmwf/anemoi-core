@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.0...graphs-0.6.1) (2025-06-05)
+
+
+### Bug Fixes
+
+* **graphs:** Fix device mismatch error ([#339](https://github.com/ecmwf/anemoi-core/issues/339)) ([8712c2a](https://github.com/ecmwf/anemoi-core/commit/8712c2abdd823541834b17bcdb92bd13bac101ee))
+
 ## [0.6.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.5.2...graphs-0.6.0) (2025-05-16)
 
 

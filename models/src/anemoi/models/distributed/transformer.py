@@ -29,19 +29,21 @@ def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] =
     if comm_size == 1:
         return input_
 
+    myrank = dist.get_rank(group=group)
+
     # get input format
     input_format = get_memory_format(input_)
 
     input_list = [x.contiguous() for x in torch.tensor_split(input_, comm_size, dim=-3)]  # do we need contiguous?
 
-    input_shape = [x.shape for x in input_list]  # (b ... h n c)
+    input_shape = [x.shape for x in input_list]  # (b h n c)
     heads_per_rank = [x.shape[-3] for x in input_list]
     channels_per_rank = [x.shape[-1] for x in input_list]
     seq_per_rank = [x[0] for x in shapes]
 
     output_list = [
         torch.empty(
-            (*input_shape[rank][:-3], heads_per_rank[rank], seq_per_rank[rank], channels_per_rank[rank]),
+            (*input_shape[rank][:-3], heads_per_rank[myrank], seq_per_rank[rank], channels_per_rank[rank]),
             dtype=input_.dtype,
             layout=input_.layout,
             device=input_.device,
@@ -83,7 +85,7 @@ def _seqalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = N
 
 
 def shard_heads(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
-    """Sync tensor.
+    """Shards heads.
 
     Gathers e.g query, key or value tensor along sequence dimension via all to all communication
     and shards along head dimension for parallel self-attention computation.
@@ -107,7 +109,7 @@ def shard_heads(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
 
 
 def shard_sequence(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
-    """Sync tensor.
+    """Shards sequence.
 
     Gathers e.g query, key or value tensor along head dimension via all to all communication
     and shards along sequence dimension for parallel mlp and layernorm computation.
@@ -131,7 +133,7 @@ def shard_sequence(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor
 
 
 class _SplitHeadsParallelSection(torch.autograd.Function):
-    """Sync the input from parallel section."""
+    """Split heads for parallel section."""
 
     @staticmethod
     def forward(ctx, input_, shapes_, mgroup_):
@@ -153,7 +155,7 @@ class _SplitHeadsParallelSection(torch.autograd.Function):
 
 
 class _SplitSequenceParallelSection(torch.autograd.Function):
-    """Sync the input from parallel section."""
+    """Split sequence for parallel section."""
 
     @staticmethod
     def forward(ctx, input_, shapes_, mgroup_):

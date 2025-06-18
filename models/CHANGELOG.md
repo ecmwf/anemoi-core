@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/models-0.7.0...models-0.8.0) (2025-06-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models,training:** Remove multimapper ([#268](https://github.com/ecmwf/anemoi-core/issues/268))
+
+### Features
+
+* **models,training:** Remove multimapper ([#268](https://github.com/ecmwf/anemoi-core/issues/268)) ([0e8bb99](https://github.com/ecmwf/anemoi-core/commit/0e8bb998176bea2d653ca40772e4e6e1578551f7))
+
+
+### Bug Fixes
+
+* Dataset_order ([#334](https://github.com/ecmwf/anemoi-core/issues/334)) ([762227a](https://github.com/ecmwf/anemoi-core/commit/762227a5a25843dd4531eef1a9cbe86516eaffcd))
+* **training, models:** Update interpolator to work with new features ([#322](https://github.com/ecmwf/anemoi-core/issues/322)) ([cfdc99f](https://github.com/ecmwf/anemoi-core/commit/cfdc99f984f0038b16cb96d73d02a25284af717e))
+
 ## [0.7.0](https://github.com/ecmwf/anemoi-core/compare/models-0.6.0...models-0.7.0) (2025-05-30)
 
 
