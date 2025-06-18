@@ -9,6 +9,45 @@
 
 from __future__ import annotations
 
+import logging
+from functools import lru_cache
+from typing import Union
+
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
+
+from anemoi.transform.variables import Variable
+
+LOG = logging.getLogger(__name__)
+GROUP_SPEC = Union[str, list[str], bool]
+
+
+@lru_cache
+def _crack_variable_name(variable_name: str) -> tuple[str, str | None]:
+    """Attempt to crack the variable name into parameter name and level.
+
+    If cannot split, will return variable_name unchanged, and None
+
+    Parameters
+    ----------
+    variable_name : str
+        Name of the variable.
+
+    Returns
+    -------
+    parameter : str
+        Parameter reference which corresponds to the variable_name without the variable level.
+        If cannot be split, will be variable_name unchanged.
+    variable_level : str | None
+        Variable level, i.e. pressure level or model level.
+        If cannot be split, will be None.
+    """
+    split = variable_name.split("_")
+    if len(split) > 1 and split[-1].isdigit():
+        return variable_name[: -len(split[-1]) - 1], int(split[-1])
+
+    return variable_name, None
+
 
 class ExtractVariableGroupAndLevel:
     """Extract the group and level of a variable from dataset metadata and training-config file.
@@ -26,25 +65,122 @@ class ExtractVariableGroupAndLevel:
 
     def __init__(
         self,
-        variable_groups: dict,
-        metadata_variables: dict | None = None,
+        variable_groups: dict[str, GROUP_SPEC | dict[str, GROUP_SPEC]],
+        metadata_variables: dict[str, dict | Variable] | None = None,
     ) -> None:
-        self.variable_groups = variable_groups
-        # turn dictionary around
-        self.group_variables = {}
-        for group, variables in self.variable_groups.items():
-            if isinstance(variables, str):
-                variables = [variables]
-            for variable in variables:
-                self.group_variables[variable] = group
-        assert "default" in self.variable_groups, "Default group not defined in variable_groups"
-        self.default_group = self.variable_groups["default"]
-        self.metadata_variables = metadata_variables
 
-    def get_group_variables(self, group_name: str) -> list[str]:
+        if isinstance(variable_groups, DictConfig):
+            variable_groups = OmegaConf.to_container(variable_groups, resolve=True)
+
+        variable_groups = variable_groups.copy()
+
+        assert "default" in variable_groups, "Default group not defined in variable_groups"
+        self.default_group = variable_groups.pop("default")
+
+        self.variable_groups = variable_groups
+
+        self.metadata_variables: dict[str, Variable] = {
+            name: Variable.from_dict(name, val) if not isinstance(val, Variable) else val
+            for name, val in (metadata_variables or {}).items()
+        }
+
+    def get_group_specification(self, group_name: str) -> GROUP_SPEC | dict[str, GROUP_SPEC]:
+        """Get the specification of a group."""
         return self.variable_groups[group_name]
 
-    def get_group_and_level(self, variable_name: str) -> tuple[str, str, int]:
+    def get_group(self, variable_name: str) -> str:
+        """Get the group of a variable.
+
+        Parameters
+        ----------
+        variable_name : str
+            Name of the variable.
+
+        Returns
+        -------
+        group : str
+            Group of the variable
+        """
+        if variable_name not in self.metadata_variables and any(
+            isinstance(x, dict) for x in self.variable_groups.values()
+        ):
+            error_msg = (f"Variable {variable_name} not found in metadata and variable_groups are not simple lists.",)
+            raise ValueError(error_msg)
+
+        for group_name, group_spec in self.variable_groups.items():
+            if isinstance(group_spec, (list, str)):
+                # simple group
+                if self.get_param(variable_name) in (group_spec if isinstance(group_spec, list) else [group_spec]):
+                    LOG.debug(
+                        "Variable %r is in group %r",
+                        variable_name,
+                        group_name,
+                    )
+                    return group_name
+
+            elif isinstance(group_spec, dict):
+                # complex group
+                var_metadata = self.metadata_variables.get(variable_name)
+                if all(
+                    getattr(var_metadata, key) in (val if isinstance(val, list) else [val])
+                    for key, val in group_spec.items()
+                ):
+                    LOG.debug(
+                        "Variable %r is in group %r through specification : %r.",
+                        variable_name,
+                        group_name,
+                        group_spec,
+                    )
+                    return group_name
+
+        return self.default_group
+
+    def get_param(self, variable_name: str) -> str:
+        """Get the parameter from a variable_name.
+
+        Tries to use the metadata, but if not given
+        will attempt to crack the name. If cannot
+        crack will be the variable_name unchanged.
+
+        Parameters
+        ----------
+        variable_name : str
+            Name of the variable.
+
+        Returns
+        -------
+        param : str
+            Parameter of the variable.
+            Either from the metadata or cracked
+            name.
+        """
+        if variable_name in self.metadata_variables:
+            # if metadata is available: get variable name and level from metadata
+            return self.metadata_variables[variable_name].param
+
+        return _crack_variable_name(variable_name)[0]
+
+    def get_level(self, variable_name: str) -> str | None:
+        """Get the level of a variable.
+
+        Parameters
+        ----------
+        variable_name : str
+            Name of the variable.
+
+        Returns
+        -------
+        variable_level : str | None
+            Variable level, checks the variable metadata, or attempts
+            to crack the name, if not found None.
+        """
+        if variable_name in self.metadata_variables:
+            # if metadata is available: get variable name and level from metadata
+            return self.metadata_variables[variable_name].level
+
+        return _crack_variable_name(variable_name)[1]
+
+    def get_group_and_level(self, variable_name: str) -> tuple[str, str, int | None]:
         """Get the group and level of a variable.
 
         Parameters
@@ -56,28 +192,11 @@ class ExtractVariableGroupAndLevel:
         -------
         group : str
             Group of the variable given in the training-config file.
-        variable_name : str
-            Variable reference which corresponds to the variable name without the variable level
-        variable_level : str
-            Variable level, i.e. pressure level or model level
+        parameter : str
+            Parameter reference which corresponds to the variable_name without the variable level.
+            If cannot be split, will be variable_name unchanged.
+        variable_level : int | None
+            Variable level, i.e. pressure level or model level.
+            If variable_name cannot be split, will be None.
         """
-        variable_level = None
-        mars_metadata_available = (
-            self.metadata_variables
-            and variable_name in self.metadata_variables
-            and self.metadata_variables[variable_name].get("mars")
-        )
-        if mars_metadata_available and self.metadata_variables[variable_name]["mars"].get("param"):
-            # if metadata is available: get variable name and level from metadata
-            variable_level = self.metadata_variables[variable_name]["mars"].get("levelist")
-            variable_name = self.metadata_variables[variable_name]["mars"]["param"]
-        else:
-            # if metadata not available: split variable name into variable name and level
-            split = variable_name.split("_")
-            if len(split) > 1 and split[-1].isdigit():
-                variable_level = int(split[-1])
-                variable_name = variable_name[: -len(split[-1]) - 1]
-        if variable_name in self.group_variables:
-            return self.group_variables[variable_name], variable_name, variable_level
-
-        return self.default_group, variable_name, variable_level
+        return self.get_group(variable_name), self.get_param(variable_name), self.get_level(variable_name)
