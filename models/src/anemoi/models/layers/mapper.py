@@ -311,9 +311,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src, x_dst = x
         shapes_src, shapes_dst = shard_shapes
 
-        if x_src_is_sharded:
-            shapes_x_src = change_channels_in_shape(shapes_src, x_src.shape[-1])
-            x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group)
+        shapes_x_src = change_channels_in_shape(shapes_src, x_src.shape[-1])
+        # gather/scatter iff x_src is sharded, always reduce gradients in bwds
+        x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
         size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
         edge_attr, edge_index = self.prepare_edges(size_full_graph, batch_size, model_comm_group)
