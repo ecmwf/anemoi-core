@@ -340,6 +340,7 @@ class SphericalAreaWeights(BaseAreaWeights):
 
 
 class BaseLatWeightedAttribute(BaseAreaWeights, ABC):
+    """Base class for latitude-weigthed area weights."""
 
     @abstractmethod
     def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray: ...
