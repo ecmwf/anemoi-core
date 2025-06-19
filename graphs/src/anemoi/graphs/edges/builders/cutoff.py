@@ -180,3 +180,15 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             self.target_name,
         )
         return self.compute_edge_index(source_nodes=source_nodes, target_nodes=target_nodes)
+
+
+class ReversedCutOffEdges(CutOffEdges):
+    def get_cartesian_node_coordinates(
+        self, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        source_coords, target_coords = super().get_cartesian_node_coordinates(source_nodes, target_nodes)
+        return target_coords, source_coords
+    
+    def undo_masking(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
+        adj_matrix = adj_matrix.T
+        return super().undo_masking(adj_matrix, source_nodes, target_nodes)
