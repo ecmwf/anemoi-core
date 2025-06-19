@@ -65,17 +65,21 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
         self.num_nearest_neighbours = num_nearest_neighbours
 
-    def _compute_edge_index_pyg(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+    def _compute_adj_matrix_pyg(self, source_coords: NodeStorage, target_coords: NodeStorage) -> torch.Tensor:
         from torch_cluster.knn import knn
-
-        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+        from scipy.sparse import coo_matrix
 
         edge_index = knn(source_coords, target_coords, k=self.num_nearest_neighbours)
 
-        return torch.flip(edge_index, [0])
+        edge_index = torch.flip(edge_index, [0])
+        adj_matrix = coo_matrix(
+            (
+                torch.ones(edge_index.shape[1]), (edge_index[1], edge_index[0])
+            ), shape=(len(target_coords), len(source_coords))
+        )
+        return adj_matrix
 
-    def _compute_edge_index_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+    def _compute_adj_matrix_sklearn(self, source_coords: NodeStorage, target_coords: NodeStorage) -> torch.Tensor:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.kneighbors_graph(
@@ -83,10 +87,7 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
             n_neighbors=self.num_nearest_neighbours,
         ).tocoo()
 
-        # Post-process the adjacency matrix. Add masked nodes.
-        adj_matrix = self.undo_masking(adj_matrix, source_nodes, target_nodes)
-        edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
-        return edge_index
+        return adj_matrix
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices for the KNN method.
@@ -111,14 +112,20 @@ class KNNEdges(BaseEdgeBuilder, NodeMaskingMixin):
             self.target_name,
         )
 
+        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+
         if TORCH_CLUSTER_AVAILABLE:
-            edge_index = self._compute_edge_index_pyg(source_nodes, target_nodes)
+            adj_matrix = self._compute_adj_matrix_pyg(source_coords, target_coords)
         else:
             warnings.warn(
                 "The 'torch-cluster' library is not installed. Installing 'torch-cluster' can significantly improve "
                 "performance for graph creation. You can install it using 'pip install torch-cluster'.",
                 UserWarning,
             )
-            edge_index = self._compute_edge_index_sklearn(source_nodes, target_nodes)
+            adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
+
+        # Post-process the adjacency matrix. Add masked nodes.
+        adj_matrix = self.undo_masking(adj_matrix, source_nodes, target_nodes)
+        edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
 
         return edge_index
