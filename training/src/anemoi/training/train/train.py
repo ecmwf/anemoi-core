@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 import logging
 from functools import cached_property
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -25,6 +26,7 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging.version import Version
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
@@ -284,7 +286,7 @@ class AnemoiTrainer:
         return get_tensorboard_logger(self.config)
 
     @cached_property
-    def last_checkpoint(self) -> str | None:
+    def last_checkpoint(self) -> Path | None:
         """Path to the last checkpoint."""
         if not self.start_from_checkpoint:
             return None
@@ -295,8 +297,9 @@ class AnemoiTrainer:
             fork_id or self.lineage_run,
             self.config.hardware.files.warm_start or "last.ckpt",
         )
+
         # Check if the last checkpoint exists
-        if Path(checkpoint).exists():
+        if checkpoint.exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
             return checkpoint
 
@@ -501,11 +504,24 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
-        trainer.fit(
-            self.model,
-            datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-        )
+
+        try:
+            trainer.fit(
+                self.model,
+                datamodule=self.datamodule,
+                ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+            )
+        except RuntimeError as e:
+            if Version(version("torch")) < Version("2.6"):
+                help_msg = (
+                    "\n\ntorch < 2.6 may error when using checkpoints > 2 GB. "
+                    "Please try removing the metadata from the checkpoint using:\n"
+                    "  anemoi-utils remove-metadata --source source.ckpt --target target.ckpt"
+                )
+
+                raise type(e)(str(e) + help_msg) from e
+
+            raise
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
