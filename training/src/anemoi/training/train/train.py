@@ -519,9 +519,9 @@ class AnemoiTrainer:
                     "  anemoi-utils remove-metadata --input input.ckpt --output output.ckpt"
                 )
 
-                raise type(e)(f"{e}\n{help_msg}") from e
+                raise type(e)(str(e) + help_msg) from e
 
-            raise e
+            raise
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
