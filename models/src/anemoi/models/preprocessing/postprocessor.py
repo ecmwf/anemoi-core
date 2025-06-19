@@ -27,6 +27,7 @@ class Postprocessor(BasePreprocessor):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        apply_in_advance_input: bool = False,
     ) -> None:
         """Initialize the imputer.
 
@@ -38,8 +39,13 @@ class Postprocessor(BasePreprocessor):
             Data indices for input and output variables
         statistics : dict
             Data statistics dictionary
+        apply_in_advance_input : bool
+            Whether to apply the postprocessor in advancing the output to the input data.
+            Default is False.
         """
         super().__init__(config, data_indices, statistics)
+
+        self.apply_in_advance_input = apply_in_advance_input
 
         self._create_imputation_indices()
 
@@ -90,10 +96,16 @@ class Postprocessor(BasePreprocessor):
             elif method == "hardtanh":
                 self.postprocessorfunctions.append(torch.nn.functional.hardtanh)
 
-            LOGGER.info(f"Postprocessor: applying {method} to {name}")
+            LOGGER.info(
+                f"Postprocessor: applying {method} to {name}. Apply when advancing output to input: {self.apply_in_advance_input}."
+            )
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, in_advance_input=False) -> torch.Tensor:
         """Impute missing values in the input tensor."""
+
+        if in_advance_input and not self.apply_in_advance_input:
+            return x
+
         if not in_place:
             x = x.clone()
 
@@ -181,6 +193,7 @@ class NormalizedReluPostprocessor(Postprocessor):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        apply_in_advance_input: bool = False,
         normalizer: str = "none",
     ) -> None:
 
@@ -193,7 +206,7 @@ class NormalizedReluPostprocessor(Postprocessor):
                 "Normalizer must be one of: 'none', 'mean-std', 'min-max', 'max', 'std' in NormalizedReluBounding."
             )
 
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config, data_indices, statistics, apply_in_advance_input)
 
     def _create_imputation_indices(
         self,
@@ -242,7 +255,7 @@ class NormalizedReluPostprocessor(Postprocessor):
             self.postprocessorfunctions.append(CustomRelu(normalized_value))
 
             LOGGER.info(
-                f"NormalizedReluPostprocessor: applying NormalizedRelu with threshold {normalized_value} after {self.normalizer} normalization to {name}."
+                f"NormalizedReluPostprocessor: applying NormalizedRelu with threshold {normalized_value} after {self.normalizer} normalization to {name}. Apply when advancing output to input: {self.apply_in_advance_input}."
             )
 
 
@@ -270,8 +283,9 @@ class ConditionalZeroPostprocessor(Postprocessor):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
+        apply_in_advance_input: bool = False,
     ) -> None:
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config, data_indices, statistics, apply_in_advance_input)
 
         self._create_imputation_indices()
 
@@ -311,7 +325,7 @@ class ConditionalZeroPostprocessor(Postprocessor):
             self.postprocessorfunctions.append(method)
 
             LOGGER.info(
-                f"ConditionalZeroPostprocessor: replacing valus in {name} with value {self.postprocessorfunctions[-1]} if {self.masking_variable} is zero."
+                f"ConditionalZeroPostprocessor: replacing valus in {name} with value {self.postprocessorfunctions[-1]} if {self.masking_variable} is zero. Apply when advancing output to input: {self.apply_in_advance_input}."
             )
 
     def _expand_subset_mask(self, x: torch.Tensor, mask: torch.tensor) -> torch.Tensor:
@@ -330,8 +344,11 @@ class ConditionalZeroPostprocessor(Postprocessor):
                 x[..., idx_dst][self._expand_subset_mask(x, fill_mask)] = value
         return x
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, in_advance_input=False) -> torch.Tensor:
         """Set values in the output tensor."""
+        if in_advance_input and not self.apply_in_advance_input:
+            return x
+
         if not in_place:
             x = x.clone()
 

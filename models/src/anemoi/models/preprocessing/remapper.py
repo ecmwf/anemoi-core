@@ -114,7 +114,13 @@ class Remapper(BasePreprocessor):
             else:
                 raise KeyError(f"Unknown remapping method for {name}: {method}")
 
-    def transform(self, x, in_place: bool = True) -> torch.Tensor:
+    def transform(self, x, in_place: bool = True, in_advance_input: bool = False) -> torch.Tensor:
+
+        if in_advance_input:
+            # In rollout training, we do not remap the input data
+            # as it is already remapped in the training phase.
+            return x
+
         if not in_place:
             x = x.clone()
         if x.shape[-1] == self.num_training_input_vars:
@@ -131,7 +137,13 @@ class Remapper(BasePreprocessor):
                 x[..., i] = remapper(x[..., i])
         return x
 
-    def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x, in_place: bool = True, in_advance_input: bool = False) -> torch.Tensor:
+
+        if in_advance_input:
+            # In rollout training, we do not remap the output data
+            # as it is already remapped in the training phase.
+            return x
+
         if not in_place:
             x = x.clone()
         if x.shape[-1] == self.num_training_output_vars:
