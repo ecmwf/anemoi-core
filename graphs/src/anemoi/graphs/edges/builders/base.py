@@ -15,12 +15,13 @@ from abc import ABC
 from abc import abstractmethod
 from importlib.util import find_spec
 
+import numpy as np
 import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
+
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
-import numpy as np
 from anemoi.graphs.utils import concat_edges
 from anemoi.utils.config import DotDict
 

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 
 import numpy as np
 import torch
@@ -20,7 +19,6 @@ from torch_geometric.data.storage import NodeStorage
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 
 LOGGER = logging.getLogger(__name__)
-
 
 
 class KNNEdges(BaseDistanceEdgeBuilders):
@@ -70,16 +68,15 @@ class KNNEdges(BaseDistanceEdgeBuilders):
         )
 
     def _compute_adj_matrix_pyg(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray:
-        from torch_cluster.knn import knn
         from scipy.sparse import coo_matrix
+        from torch_cluster.knn import knn
 
         edge_index = knn(source_coords, target_coords, k=self.num_nearest_neighbours)
 
         edge_index = torch.flip(edge_index, [0])
         adj_matrix = coo_matrix(
-            (
-                torch.ones(edge_index.shape[1]), (edge_index[1], edge_index[0])
-            ), shape=(len(target_coords), len(source_coords))
+            (torch.ones(edge_index.shape[1]), (edge_index[1], edge_index[0])),
+            shape=(len(target_coords), len(source_coords)),
         )
         return adj_matrix
 

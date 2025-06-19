@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from importlib.util import find_spec
 
 import numpy as np
@@ -118,9 +117,8 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         edge_index = torch.flip(edge_index, [0])
 
         adj_matrix = coo_matrix(
-            (
-                torch.ones(edge_index.shape[1]), (edge_index[1], edge_index[0])
-            ), shape=(len(target_coords), len(source_coords))
+            (torch.ones(edge_index.shape[1]), (edge_index[1], edge_index[0])),
+            shape=(len(target_coords), len(source_coords)),
         )
         return adj_matrix
 
