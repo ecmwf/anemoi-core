@@ -13,16 +13,20 @@ import logging
 import time
 from abc import ABC
 from abc import abstractmethod
+from importlib.util import find_spec
 
 import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
-
+from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
+import numpy as np
 from anemoi.graphs.utils import concat_edges
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 
 
 class BaseEdgeBuilder(ABC):
@@ -137,3 +141,43 @@ class BaseEdgeBuilder(ABC):
             LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         return graph
+
+
+class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
+    @abstractmethod
+    def _compute_adj_matrix_pyg(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
+
+    @abstractmethod
+    def _compute_adj_matrix_sklearn(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
+
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        """Compute the edge indices.
+
+        Parameters
+        ----------
+        source_nodes : NodeStorage
+            The source nodes.
+        target_nodes : NodeStorage
+            The target nodes.
+
+        Returns
+        -------
+        torch.Tensor of shape (2, num_edges)
+            Indices of source and target nodes connected by an edge.
+        """
+        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+
+        if TORCH_CLUSTER_AVAILABLE:
+            adj_matrix = self._compute_adj_matrix_pyg(source_coords, target_coords)
+        else:
+            LOGGER.warning(
+                "The 'torch-cluster' library is not installed. Installing 'torch-cluster' can significantly improve "
+                "performance for graph creation. You can install it using 'pip install torch-cluster'."
+            )
+            adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
+
+        # Post-process the adjacency matrix. Add masked nodes.
+        adj_matrix = self.undo_masking(adj_matrix, source_nodes, target_nodes)
+        edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+
+        return edge_index

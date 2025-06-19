@@ -21,8 +21,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
-from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
+from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import get_grid_reference_distance
 
 TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
@@ -31,7 +30,7 @@ TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 LOGGER = logging.getLogger(__name__)
 
 
-class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
+class CutOffEdges(BaseDistanceEdgeBuilders):
     """Computes cut-off based edges and adds them to the graph.
 
     Attributes
@@ -116,8 +115,14 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
 
         edge_index = radius(source_coords, target_coords, r=self.radius, max_num_neighbors=self.max_num_neighbours)
+        edge_index = torch.flip(edge_index, [0])
 
-        return torch.flip(edge_index, [0])
+        adj_matrix = coo_matrix(
+            (
+                torch.ones(edge_index.shape[1]), (edge_index[1], edge_index[0])
+            ), shape=(len(target_coords), len(source_coords))
+        )
+        return adj_matrix
 
     def _crop_to_max_num_neighbours(self, adjmat):
         """Remove neighbors exceeding the maximum allowed limit."""
@@ -144,7 +149,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         # Define the new sparse matrix
         return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
 
-    def _compute_edge_index_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+    def _compute_adj_matrix_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
@@ -153,10 +158,7 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
         ).tocoo()
 
         adj_matrix = self._crop_to_max_num_neighbours(adj_matrix)
-        adj_matrix = self.undo_masking(adj_matrix, source_nodes, target_nodes)
-        edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
-
-        return edge_index
+        return adj_matrix
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Get the adjacency matrix for the cut-off method.
@@ -179,16 +181,4 @@ class CutOffEdges(BaseEdgeBuilder, NodeMaskingMixin):
             self.source_name,
             self.target_name,
         )
-
-        if TORCH_CLUSTER_AVAILABLE:
-            edge_index = self._compute_edge_index_pyg(source_nodes, target_nodes)
-        else:
-            warnings.warn(
-                "The 'torch-cluster' library is not installed. Installing 'torch-cluster' can significantly improve "
-                "performance for graph creation. You can install it using 'pip install torch-cluster'.",
-                UserWarning,
-            )
-
-            edge_index = self._compute_edge_index_sklearn(source_nodes, target_nodes)
-
-        return edge_index
+        return self.compute_edge_index(source_nodes=source_nodes, target_nodes=target_nodes)
