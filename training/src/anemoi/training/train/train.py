@@ -516,7 +516,7 @@ class AnemoiTrainer:
                 help_msg = (
                     "\ntorch < 2.6 may error when using checkpoints > 2 GB. "
                     "Please try removing the metadata from the checkpoint using:\n"
-                    "  anemoi-utils remove-metadata --input filename.ckpt --output filename_nometadata.ckpt"
+                    "  anemoi-utils remove-metadata --input input.ckpt --output output.ckpt"
                 )
 
                 raise type(e)(f"{e}\n{help_msg}") from e
