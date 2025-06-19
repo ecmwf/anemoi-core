@@ -13,11 +13,10 @@ from __future__ import annotations
 import datetime
 import logging
 from functools import cached_property
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
-from importlib.metadata import version
-from packaging.version import Version
 
 import hydra
 import numpy as np
@@ -27,6 +26,7 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging.version import Version
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
@@ -518,7 +518,7 @@ class AnemoiTrainer:
                     "Please try removing the metadata from the checkpoint using:\n"
                     "  anemoi-utils remove-metadata --input filename.ckpt --output filename_nometadata.ckpt"
                 )
-                
+
                 raise type(e)(f"{e}\n{help_msg}") from e
 
             raise e
