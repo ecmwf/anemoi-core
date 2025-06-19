@@ -514,9 +514,9 @@ class AnemoiTrainer:
         except RuntimeError as e:
             if Version(version("torch")) < Version("2.6"):
                 help_msg = (
-                    "\ntorch < 2.6 may error when using checkpoints > 2 GB. "
+                    "\n\ntorch < 2.6 may error when using checkpoints > 2 GB. "
                     "Please try removing the metadata from the checkpoint using:\n"
-                    "  anemoi-utils remove-metadata --input input.ckpt --output output.ckpt"
+                    "  anemoi-utils remove-metadata --source source.ckpt --target target.ckpt"
                 )
 
                 raise type(e)(str(e) + help_msg) from e
