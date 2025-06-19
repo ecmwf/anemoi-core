@@ -18,8 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> None:
-    """
-    Log the final variable scaling for each variable in the model.
+    """Log the final variable scaling for each variable in the model.
 
     Parameters
     ----------
@@ -30,6 +29,6 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> Non
     """
     variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).squeeze()
     log_text = "Final Variable Scaling: "
-    for idx, name in enumerate(data_indices.internal_model.output.name_to_index.keys()):
+    for idx, name in enumerate(data_indices.model.output.name_to_index.keys()):
         log_text += f"{name}: {variable_scaling[idx]:.4g}, "
     LOGGER.debug(log_text)

@@ -24,8 +24,10 @@ from anemoi.utils.schemas import BaseModel
 
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
+from .decoder import TransformerDecoderSchema  # noqa: TC001
 from .encoder import GNNEncoderSchema  # noqa: TC001
 from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
+from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
@@ -158,10 +160,10 @@ OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
+    keep_batch_sharded: bool = Field(default=True)
+    "Keep the input batch and the output of the model sharded"
     model: Model = Field(default_factory=Model)
     "Model schema."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
-    "Settings related to custom kernels for encoder processor and decoder blocks"
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
     bounding: list[Bounding]
@@ -177,9 +179,15 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN processor schema."
-    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema] = Field(..., discriminator="target_")
+    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema] = Field(
+        ...,
+        discriminator="target_",
+    )
     "GNN encoder schema."
-    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema] = Field(..., discriminator="target_")
+    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema, TransformerDecoderSchema] = Field(
+        ...,
+        discriminator="target_",
+    )
     "GNN decoder schema."
 
 
@@ -194,6 +202,8 @@ class NoiseInjectorSchema(BaseModel):
     "Hidden dimension of the MLP used to process the noise."
     inject_noise: bool = Field(default=True)
     "Whether to inject noise or not."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
 class EnsModelSchema(BaseModelSchema):

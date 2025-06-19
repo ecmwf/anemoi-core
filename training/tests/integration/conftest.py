@@ -17,6 +17,7 @@ from hydra import initialize
 from omegaconf import OmegaConf
 
 from anemoi.utils.testing import get_test_archive
+from anemoi.utils.testing import get_test_data
 
 
 @pytest.fixture(autouse=True)
@@ -136,6 +137,51 @@ def lam_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> Omeg
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = dataset
     use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+@pytest.fixture
+def lam_config_with_data_and_graph(lam_config_with_data: OmegaConf) -> OmegaConf:
+    existing_graph_config = OmegaConf.load(Path.cwd() / "training/src/anemoi/training/config/graph/existing.yaml")
+    lam_config_with_data.graph = existing_graph_config
+
+    url_graph = lam_config_with_data.hardware.files["graph"]
+    tmp_path_graph = get_test_data(url_graph)
+    lam_config_with_data.hardware.paths.graph = Path(tmp_path_graph).parent
+    lam_config_with_data.hardware.files.graph = Path(tmp_path_graph).name
+
+    return lam_config_with_data
+
+
+@pytest.fixture
+def ensemble_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+@pytest.fixture
+def ensemble_config_with_data(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+
+    tmp_dir, rel_paths = _download_datasets(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)

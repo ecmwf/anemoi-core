@@ -55,6 +55,13 @@ class CutOutMaskSchema(BaseModel):
     "Implementation of the cutout mask from anemoi.graphs.nodes.attributes."
 
 
+class GridsMaskSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.GridsMask"] = Field(..., alias="_target_")
+    "Implementation of the grids mask from anemoi.graphs.nodes.attributes."
+    grids: Union[list[int], int] = Field(examples=[0, [0]])
+    "Position of the grids to consider as True."
+
+
 class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable"] = Field(..., alias="_target_")
     (
@@ -70,6 +77,7 @@ SingleAttributeSchema = Union[
     MaskedPlanarAreaWeightsSchema,
     SphericalAreaWeightSchema,
     CutOutMaskSchema,
+    GridsMaskSchema,
     NonmissingAnemoiDatasetVariableSchema,
 ]
 
