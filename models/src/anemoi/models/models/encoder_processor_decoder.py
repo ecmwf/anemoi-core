@@ -104,7 +104,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            shard_strategy=model_config.model.encoder.shard_strategy,  # TODO: add to config/schemas + support for GNNMapers
+            shard_strategy=model_config.model.encoder.shard_strategy,
         )
 
         self.encoder_num_chunks = model_config.model.encoder.get("num_chunks", 1)

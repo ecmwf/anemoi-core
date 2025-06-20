@@ -73,6 +73,12 @@ optional-dependencies.hex = [ "h3>=3.7.7,<4" ]
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
 
 optional-dependencies.tri = [ "trimesh>=4.1" ]
+
+optional-dependencies.xarray = [
+  "xarray",
+  "zarr<3",
+]
+
 urls.Documentation = "https://anemoi-graphs.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-graphs/"
 urls.Issues = "https://github.com/ecmwf/anemoi-graphs/issues"

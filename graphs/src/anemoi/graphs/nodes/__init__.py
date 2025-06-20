@@ -11,6 +11,7 @@ from .builders.from_file import AnemoiDatasetNodes
 from .builders.from_file import LimitedAreaNPZFileNodes
 from .builders.from_file import NPZFileNodes
 from .builders.from_file import TextNodes
+from .builders.from_file import XArrayNodes
 from .builders.from_file import ZarrDatasetNodes
 from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
@@ -43,4 +44,5 @@ __all__ = [
     "ICONCellGridNodes",
     "ICONNodes",
     "TextNodes",
+    "XArrayNodes",
 ]

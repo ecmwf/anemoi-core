@@ -209,7 +209,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
-        shard_strategy: str = "heads",
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
 
@@ -247,7 +247,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -314,9 +314,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src, x_dst = x
         shapes_src, shapes_dst = shard_shapes
 
-        if x_src_is_sharded:
-            shapes_x_src = change_channels_in_shape(shapes_src, x_src.shape[-1])
-            x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group)
+        shapes_x_src = change_channels_in_shape(shapes_src, x_src.shape[-1])
+        # gather/scatter iff x_src is sharded, always reduce gradients in bwds
+        x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
         size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
         edge_attr, edge_index = self.prepare_edges(size_full_graph, batch_size, model_comm_group)
@@ -511,7 +511,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
-        shard_strategy: str = "heads",
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
 
@@ -548,7 +548,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
         shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -609,7 +609,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
-        shard_strategy: str = "heads",
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
 
@@ -649,7 +649,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
