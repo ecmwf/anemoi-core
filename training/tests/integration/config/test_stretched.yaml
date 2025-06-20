@@ -25,7 +25,6 @@ data:
   - "sin_local_time"
   diagnostic:
   - tp
-  remapped:
   normalizer:
     default: "mean-std"
     std:

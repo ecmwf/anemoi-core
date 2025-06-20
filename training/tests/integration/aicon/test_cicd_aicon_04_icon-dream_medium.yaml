@@ -159,7 +159,6 @@ data:
   num_features: null
   format: zarr
   diagnostic: []
-  remapped:
   remapper:
     default: "none"
 
@@ -170,6 +169,8 @@ model:
 
   model:
     _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+
+  keep_batch_sharded: True
 
   num_channels: 5 # reduced for CI/CD test. original value 512
   processor:

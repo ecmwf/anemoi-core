@@ -17,7 +17,8 @@ from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.shapes import get_shape_shards
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -51,32 +52,27 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             num_channels=self.num_channels,
         )
 
-    def _calculate_input_dim(self, model_config):
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        input_dim += self.num_input_channels_prognostic
-        input_dim += 1
-        return input_dim
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        super()._calculate_shapes_and_indices(data_indices)
+        self.input_dim += self.num_input_channels_prognostic
+        self.input_dim += 1
 
-    def _assemble_input(self, x, fcstep, bse):
+    def _assemble_input(self, x, fcstep, bse, grid_shard_shapes=None, model_comm_group=None):
         x_skip = x[:, -1, :, :, self._internal_input_idx]
         x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
+        x_skip = self._apply_truncation(x_skip, grid_shard_shapes, model_comm_group)
 
-        # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
-        # hence we check that they are on the correct device ; copy should only happen in the first forward run
-        # todo -> parallelize this
-        if self.A_down is not None:
-            self.A_down = self.A_down.to(x.device)
-            x_skip = self._truncate_fields(x_skip, self.A_down)  # to coarse resolution
-        if self.A_up is not None:
-            self.A_up = self.A_up.to(x.device)
-            x_skip = self._truncate_fields(x_skip, self.A_up)  # back to high resolution
+        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
+        if grid_shard_shapes is not None:
+            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
-                self.node_attributes(self._graph_name_data, batch_size=bse),
+                node_attributes_data,
             ),
             dim=-1,  # feature dimension
         )
@@ -84,8 +80,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             (x_data_latent, torch.ones(x_data_latent.shape[:-1], device=x_data_latent.device).unsqueeze(-1) * fcstep),
             dim=-1,
         )
+        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
-        return x_data_latent, x_skip
+        return x_data_latent, x_skip, shard_shapes_data
 
     def _assemble_output(self, x_out, x_skip, batch_size, bse, dtype):
         x_out = einops.rearrange(x_out, "(bse n) f -> bse n f", bse=bse)
@@ -104,7 +101,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         return x_out
 
     def forward(
-        self, x: torch.Tensor, *, fcstep: int, model_comm_group: Optional[ProcessGroup] = None, **kwargs
+        self,
+        x: torch.Tensor,
+        *,
+        fcstep: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[tuple] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """Forward operator.
 
@@ -115,19 +118,28 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 Forecast step
             model_comm_group: Optional[ProcessGroup], optional
                 Model communication group
+            grid_shard_shapes : list, optional
+                Shard shapes of the grid, by default None
+            **kwargs: Additional keyword arguments
+
         Returns:
             Output tensor
         """
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
+        in_out_sharded = grid_shard_shapes is not None
+
+        assert not (
+            in_out_sharded and model_comm_group is None
+        ), "If input is sharded, model_comm_group must be provided."
 
         fcstep = min(1, fcstep)
 
-        x_data_latent, x_skip = self._assemble_input(x, fcstep, bse)
+        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
+            x, fcstep, bse, grid_shard_shapes, model_comm_group
+        )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=bse)
-
-        shard_shapes_data = get_shape_shards(x_data_latent, 0, model_comm_group)
-        shard_shapes_hidden = get_shape_shards(x_hidden_latent, 0, model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
@@ -135,6 +147,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             batch_size=bse,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
             model_comm_group=model_comm_group,
+            x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+            x_dst_is_sharded=False,  # x_latent does not come sharded
+            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
 
         x_latent_proc, latent_noise = self.noise_injector(
@@ -162,6 +177,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             batch_size=bse,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
             model_comm_group=model_comm_group,
+            x_src_is_sharded=True,  # x_latent always comes sharded
+            x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+            keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
         )
 
         x_out = self._assemble_output(x_out, x_skip, batch_size, bse, x.dtype)

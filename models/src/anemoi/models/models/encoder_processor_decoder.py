@@ -21,7 +21,11 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.shapes import get_shape_shards
+from anemoi.models.distributed.graph import gather_channels
+from anemoi.models.distributed.graph import shard_channels
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.utils.config import DotDict
 
@@ -74,8 +78,6 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self._truncation_data = truncation_data
 
-        self.input_dim = self._calculate_input_dim(model_config)
-
         # we can't register these as buffers because DDP does not support sparse tensors
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
         self.A_down, self.A_up = None, None
@@ -85,6 +87,8 @@ class AnemoiModelEncProcDec(nn.Module):
         if "up" in self._truncation_data:
             self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
+
+        self.supports_sharded_input = True
 
         # Encoder data -> hidden
         self.encoder = instantiate(
@@ -126,7 +130,7 @@ class AnemoiModelEncProcDec(nn.Module):
             [
                 instantiate(
                     cfg,
-                    name_to_index=self.data_indices.internal_model.output.name_to_index,
+                    name_to_index=self.data_indices.model.output.name_to_index,
                     statistics=self.statistics,
                     name_to_index_stats=self.data_indices.data.input.name_to_index,
                 )
@@ -145,44 +149,65 @@ class AnemoiModelEncProcDec(nn.Module):
     def _multiply_sparse(self, x, A):
         return torch.sparse.mm(A, x)
 
-    def _truncate_fields(self, x, A, batch_size=None, grad_checkpoint=False):
+    def _truncate_fields(self, x, A, batch_size=None, auto_cast=False):
         if not batch_size:
             batch_size = x.shape[0]
         out = []
-        with torch.amp.autocast(device_type="cuda", enabled=False):
+        with torch.amp.autocast(device_type="cuda", enabled=auto_cast):
             for i in range(batch_size):
-                if grad_checkpoint:
-                    out.append(torch.utils.checkpoint(self.multiply_sparse, x[i, ...], A, use_reentrant=False))
-                else:
-                    out.append(self._multiply_sparse(x[i, ...], A))
+                out.append(self._multiply_sparse(x[i, ...], A))
         return torch.stack(out)
 
-    def _assemble_input(self, x, batch_size):
+    def _get_shard_shapes(self, x, dim=0, shard_shapes_dim=None, model_comm_group=None):
+        if shard_shapes_dim is None:
+            return get_shard_shapes(x, dim, model_comm_group)
+        else:
+            return apply_shard_shapes(x, dim, shard_shapes_dim)
+
+    def _apply_truncation(self, x, grid_shard_shapes=None, model_comm_group=None):
+        if self.A_down is not None or self.A_up is not None:
+            if grid_shard_shapes is not None:
+                shard_shapes = self._get_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
+                # grid-sharded input: reshard to channel-shards to apply truncation
+                x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
+
+            # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
+            # hence we check that they are on the correct device ; copy should only happen in the first forward run
+            if self.A_down is not None:
+                self.A_down = self.A_down.to(x.device)
+                x = self._truncate_fields(x, self.A_down)  # to coarse resolution
+            if self.A_up is not None:
+                self.A_up = self.A_up.to(x.device)
+                x = self._truncate_fields(x, self.A_up)  # back to high resolution
+
+            if grid_shard_shapes is not None:
+                # back to grid-sharding as before
+                x = gather_channels(x, shard_shapes, model_comm_group)
+
+        return x
+
+    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
+        x_skip = x[:, -1, ...]
+        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
+        x_skip = self._apply_truncation(x_skip, grid_shard_shapes, model_comm_group)
+        x_skip = einops.rearrange(x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size)
+
+        node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
+        if grid_shard_shapes is not None:
+            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
+
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                self.node_attributes(self._graph_name_data, batch_size=batch_size),
+                node_attributes_data,
             ),
             dim=-1,  # feature dimension
         )
+        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
-        x_skip = x[:, -1, ...]
-        if self.A_down is not None or self.A_up is not None:
-            x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-            # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
-            # hence we check that they are on the correct device ; copy should only happen in the first forward run
-            if self.A_down is not None:
-                self.A_down = self.A_down.to(x_skip.device)
-                x_skip = self._truncate_fields(x_skip, self.A_down)  # to coarse resolution
-            if self.A_up is not None:
-                self.A_up = self.A_up.to(x_skip.device)
-                x_skip = self._truncate_fields(x_skip, self.A_up)  # back to high resolution
-            x_skip = einops.rearrange(
-                x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size
-            )
-
-        return x_data_latent, x_skip
+        return x_data_latent, x_skip, shard_shapes_data
 
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         x_out = (
@@ -204,31 +229,28 @@ class AnemoiModelEncProcDec(nn.Module):
             x_out = bounding(x_out)
         return x_out
 
-    def _calculate_input_dim(self, model_config):
-        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        self.num_input_channels = len(data_indices.internal_model.input)
-        self.num_output_channels = len(data_indices.internal_model.output)
+        self.num_input_channels = len(data_indices.model.input)
+        self.num_output_channels = len(data_indices.model.output)
         self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
-        self._internal_input_idx = data_indices.internal_model.input.prognostic
-        self._internal_output_idx = data_indices.internal_model.output.prognostic
+        self._internal_input_idx = data_indices.model.input.prognostic
+        self._internal_output_idx = data_indices.model.output.prognostic
         self.input_dim = (
             self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
         )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
 
-        assert len(self._internal_output_idx) == len(data_indices.internal_model.output.full) - len(
-            data_indices.internal_model.output.diagnostic
+        assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
+            data_indices.model.output.diagnostic
         ), (
             f"Mismatch between the internal data indices ({len(self._internal_output_idx)}) and "
-            f"the internal output indices excluding diagnostic variables "
-            f"({len(data_indices.internal_model.output.full) - len(data_indices.internal_model.output.diagnostic)})",
+            f"the output indices excluding diagnostic variables "
+            f"({len(data_indices.model.output.full) - len(data_indices.model.output.diagnostic)})",
         )
         assert len(self._internal_input_idx) == len(
             self._internal_output_idx,
-        ), f"Internal model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
+        ), f"Model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
 
     def _run_mapper(
         self,
@@ -237,6 +259,9 @@ class AnemoiModelEncProcDec(nn.Module):
         batch_size: int,
         shard_shapes: tuple[tuple[int, int], tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
         use_reentrant: bool = False,
     ) -> Tensor:
         """Run mapper with activation checkpoint.
@@ -268,18 +293,50 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=shard_shapes,
             model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+            keep_x_dst_sharded=keep_x_dst_sharded,
             use_reentrant=use_reentrant,
         )
 
-    def forward(self, x: Tensor, *, model_comm_group: Optional[ProcessGroup] = None, **kwargs) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        *,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
+        **kwargs,
+    ) -> Tensor:
+        """Forward pass of the model.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input data
+        model_comm_group : Optional[ProcessGroup], optional
+            Model communication group, by default None
+        grid_shard_shapes : list, optional
+            Shard shapes of the grid, by default None
+
+        Returns
+        -------
+        Tensor
+            Output of the model, with the same shape as the input (sharded if input is sharded)
+        """
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
+        in_out_sharded = grid_shard_shapes is not None
 
-        x_data_latent, x_skip = self._assemble_input(x, batch_size)
+        assert not (
+            in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
+        ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
+
+        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
+            x, batch_size, grid_shard_shapes, model_comm_group
+        )
+
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-
-        shard_shapes_data = get_shape_shards(x_data_latent, 0, model_comm_group)
-        shard_shapes_hidden = get_shape_shards(x_hidden_latent, 0, model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
@@ -287,6 +344,9 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
             model_comm_group=model_comm_group,
+            x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+            x_dst_is_sharded=False,  # x_latent does not come sharded
+            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
 
         x_latent_proc = self.processor(
@@ -304,6 +364,9 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
             model_comm_group=model_comm_group,
+            x_src_is_sharded=True,  # x_latent always comes sharded
+            x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+            keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
         )
 
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)

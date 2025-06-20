@@ -87,8 +87,8 @@ def get_loss_function(
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
             raise ValueError(error_msg)
         if key in ["stdev_tendency", "var_tendency"]:
-            for var_key, idx in data_indices.internal_model.output.name_to_index.items():
-                if idx in data_indices.internal_model.output.prognostic and data_indices.data.output.name_to_index.get(
+            for var_key, idx in data_indices.model.output.name_to_index.items():
+                if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
                     var_key,
                 ):
                     scaling = scalers[key][1][idx]
@@ -126,20 +126,13 @@ def get_metric_ranges(
     metadata_variables: dict | None = None,
 ) -> tuple[METRIC_RANGE_DTYPE, METRIC_RANGE_DTYPE]:
 
-    metric_ranges = defaultdict(list)
-    metric_ranges_validation = defaultdict(list)
     variable_groups = config.training.variable_groups
     metrics_to_log = config.training.metrics or []
 
     extract_variable_group_and_level = ExtractVariableGroupAndLevel(variable_groups, metadata_variables)
-    metric_ranges = _get_metric_ranges(
-        extract_variable_group_and_level,
-        data_indices.internal_model.output,
-        metrics_to_log,
-    )
-    metric_ranges_validation = _get_metric_ranges(
+
+    return _get_metric_ranges(
         extract_variable_group_and_level,
         data_indices.model.output,
         metrics_to_log,
     )
-    return metric_ranges, metric_ranges_validation

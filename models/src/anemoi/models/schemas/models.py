@@ -160,6 +160,8 @@ OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
+    keep_batch_sharded: bool = Field(default=True)
+    "Keep the input batch and the output of the model sharded"
     model: Model = Field(default_factory=Model)
     "Model schema."
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)

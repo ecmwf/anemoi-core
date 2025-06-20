@@ -81,7 +81,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         ...
 
     def get_scaling_values(self, **_kwargs) -> np.ndarray:
-        variable_level_scaling = np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32)
+        variable_level_scaling = np.ones((len(self.data_indices.data.output.full),), dtype=np.float32)
 
         LOGGER.info(
             "Variable Level Scaling: Applying %s scaling to %s variables (%s)",
@@ -91,7 +91,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         )
         LOGGER.info("with slope = %s and y-intercept/minimum = %s.", self.slope, self.y_intercept)
 
-        for variable_name, idx in self.data_indices.internal_model.output.name_to_index.items():
+        for variable_name, idx in self.data_indices.model.output.name_to_index.items():
             variable_group, _, variable_level = self.variable_metadata_extractor.get_group_and_level(variable_name)
             if variable_group != self.scaling_group:
                 continue
