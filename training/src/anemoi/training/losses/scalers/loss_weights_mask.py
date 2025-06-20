@@ -25,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 
 class NaNMaskScaler(BaseUpdatingScaler):
 
-    scale_dims: tuple[TensorDim] = (TensorDim.GRID, TensorDim.VARIABLE)
+    scale_dims: tuple[TensorDim] = (TensorDim.BATCH_SIZE, TensorDim.GRID, TensorDim.VARIABLE)
 
     def on_training_start(self, model: AnemoiModelInterface) -> np.ndarray:
         """Get loss scaling.
@@ -35,7 +35,7 @@ class NaNMaskScaler(BaseUpdatingScaler):
         When calling the imputer for the first time, the NaN positions are available.
         Before first application of loss function, the mask is replaced.
         """
-        loss_weights_mask = np.ones((1, 1))
+        loss_weights_mask = np.ones((1, 1, 1))
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processor in model.pre_processors.processors.values():
             if hasattr(pre_processor, "loss_mask_training"):
