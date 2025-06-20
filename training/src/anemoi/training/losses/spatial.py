@@ -47,7 +47,9 @@ def get_spectra(
 
 
 def log_rfft2_distance(
-    predicted_output: torch.Tensor, real_output: torch.Tensor, dims: tuple[int, int],
+    predicted_output: torch.Tensor,
+    real_output: torch.Tensor,
+    dims: tuple[int, int],
 ) -> torch.Tensor:
     r"""Calculate the log spectral distance between two fields."""
     power_spectra_real, power_spectra_pred = get_spectra(predicted_output, real_output, dims)
