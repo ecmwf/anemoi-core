@@ -60,12 +60,6 @@ class AnemoiModelEncProcDec(nn.Module):
         self._graph_data = graph_data
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
-
-        self.multi_step = model_config.training.multistep_input
-        self.num_channels = model_config.model.num_channels
-
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
-
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self.data_indices = data_indices
