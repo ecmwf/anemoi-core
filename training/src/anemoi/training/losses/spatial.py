@@ -36,15 +36,19 @@ def get_spectra(
     real_output: torch.Tensor,
     dims: tuple[int, int],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    assert dims[0] * dims[1] == real_output.shape[2], ("The product of dims must match the spatial dims of the output."
-    "Please use x_dim and y_dim such that field_shape=(x_dim, y_dim).")
+    assert dims[0] * dims[1] == real_output.shape[2], (
+        "The product of dims must match the spatial dims of the output."
+        "Please use x_dim and y_dim such that field_shape=(x_dim, y_dim)."
+    )
     dims_total = (*real_output.shape[:2], *dims, real_output.shape[-1])
     power_spectra_real = torch.fft.rfft2(real_output.reshape(dims_total), dim=(-2, -3))
     power_spectra_pred = torch.fft.rfft2(predicted_output.reshape(dims_total), dim=(-2, -3))
     return power_spectra_real, power_spectra_pred
 
 
-def log_rfft2_distance(predicted_output: torch.Tensor, real_output: torch.Tensor, dims: tuple[int, int]) -> torch.Tensor:
+def log_rfft2_distance(
+    predicted_output: torch.Tensor, real_output: torch.Tensor, dims: tuple[int, int],
+) -> torch.Tensor:
     r"""Calculate the log spectral distance between two fields."""
     power_spectra_real, power_spectra_pred = get_spectra(predicted_output, real_output, dims)
     epsilon = torch.finfo(real_output.dtype).eps  # Small epsilon to avoid division by zero
