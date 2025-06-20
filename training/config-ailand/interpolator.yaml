@@ -1,0 +1,40 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- datamodule: single
+- diagnostics: evaluation
+- hardware: example
+- graph: multi_scale
+- model: graphtransformer
+- training: default
+- _self_
+
+config_validation: True
+
+data:
+  frequency: 1h
+  resolution: o96
+
+#dataloader:
+  # model_run_info: #Add for non-analysis training
+  #  start: 2020-02-05T12:00:00
+  #  length: 18 #in number of dates (* frequency for actual time)
+
+model:
+  model:
+    _target_: anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator
+  latent_skip: False # True/False for skip connection on latent mesh
+  grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
+
+training:
+  model_task: anemoi.training.train.forecaster.GraphInterpolator
+
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+  explicit_times:
+    input: [0,6]
+    target: [1,2,3,4,5]
+
+  target_forcing: #forcing parameters for the target time to include as input
+    data: #of which come from the dataset
+      - "insolation"
+    time_fraction: True

@@ -1,0 +1,40 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- datamodule: single
+- diagnostics: evaluation
+- hardware: example
+- graph: multi_scale
+- model: gnn
+- training: default
+- _self_
+
+config_validation: True
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# hardware:
+#   num_gpus_per_node: 1
+
+diagnostics:
+  plot:
+    callbacks: []
+hardware:
+  files:
+    graph: ???
+  accelerator: auto
+  num_gpus_per_node: 1
+  num_nodes: 1
+  num_gpus_per_model: 1
+
+
+model:
+  num_channels: 128
+dataloader:
+  limit_batches:
+    training: 100
+    validation: 100
+training:
+  max_epochs: 5

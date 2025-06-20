@@ -1,0 +1,120 @@
+format: zarr
+resolution: o96  # n320
+# Time frequency requested from dataset
+frequency: 6h
+# Time step of model (must be multiple of frequency)
+timestep: 6h
+
+# features that are not part of the forecast state
+# but are used as forcing to generate the forecast state
+forcing:
+- "insolation"
+- "lsm"
+- "sdor"
+- "slor"
+- "z"
+- "t_850"
+- "u_850"
+- "v_850"
+- "q_850"
+- "z_850"
+- "sp"
+- "cvh"
+- "cvl"
+- "tvh"
+- "tvl"
+- "lai_lv"
+- "lai_hv"
+- "cl"
+- "glacier_mask"
+- "slt"
+- "ssrd"
+- "strd"
+- "sf"
+- "tp"
+- "cp"
+
+# features that are only part of the forecast state
+# but are not used as the input to the model
+diagnostic:
+# - skt
+# - 2t
+# - 2d
+# - 10u
+# - 10v
+- snowc
+- ro
+
+normalizer:
+  default: "mean-std"
+  remap:
+    cp: tp
+    sf: tp
+  std:
+  - "tp"
+  - "cp"
+  - "sf"
+  - "q_850"
+  - "ro"
+  min-max:
+  max:
+  - "sdor"
+  - "slor"
+  - "z"
+  - "tvl"
+  - "tvh"
+  - "slt"
+  none:
+  - "insolation"
+  - "lsm"
+  - "cvh"
+  - "cvl"
+  - "cl"
+  - "glacier_mask"
+  - "swvl1"
+  - "swvl2"
+  - "swvl3"
+  - "snowc"
+  - "sd"
+
+imputer:
+  default: "none"
+  minimum:
+    - "swvl1"
+    - "swvl2"
+    - "swvl3"
+    - "ro"
+    - "snowc"
+    - "sd"
+    - "cvh"
+    - "cvl"
+    - "tvh"
+    - "tvl"
+    - "slt"
+    - "lai_lv"
+    - "lai_hv"
+    - "cl"
+    - "glacier_mask"
+  mean:
+    - "stl1"
+    - "stl2"
+    - "stl3"
+    - "ssrd"
+    - "strd"
+    - "sf"
+
+remapper:
+  default: "none"
+
+# processors including imputers and normalizers are applied in order of definition
+processors:
+  imputer:
+    _target_: anemoi.models.preprocessing.imputer.InputImputer
+    _convert_: all
+    config: ${data.imputer}
+  normalizer:
+    _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+    config: ${data.normalizer}
+
+# Values set in the code
+num_features: null # number of features in the forecast state

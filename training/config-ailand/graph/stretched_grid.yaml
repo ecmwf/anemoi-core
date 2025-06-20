@@ -1,0 +1,80 @@
+# Stretched grid graph config intended to be used with a cutout dataset.
+# The stretched mesh resolution used here is intended for o96 global resolution with 10km
+# limited area resolution.
+overwrite: True
+
+data: "data"
+hidden: "hidden"
+
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.training.dataset}
+    attributes: ${graph.attributes.nodes}
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.StretchedTriNodes
+      lam_resolution: 8
+      global_resolution: 5
+      reference_node_name: ${graph.data}
+      mask_attr_name: cutout_mask
+      margin_radius_km: 11
+
+edges:
+# Encoder
+- source_name: ${graph.data}
+  target_name: ${graph.hidden}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 12
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+# Processor
+- source_name: ${graph.hidden}
+  target_name: ${graph.hidden}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.nodes.hidden.node_builder.lam_resolution}
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+# Decoder
+- source_name: ${graph.hidden}
+  target_name: ${graph.data}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+attributes:
+  nodes:
+    # Attributes for data nodes
+    cutout_mask:
+      _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    boundary_mask:
+      _target_: anemoi.graphs.nodes.attributes.BooleanNot
+      masks:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max
+      fill_value: 0
+    lam_area_weight:
+      _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights
+      mask_node_attr_name: cutout_mask
+      norm: unit-max
+
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-max
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []

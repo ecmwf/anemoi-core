@@ -125,8 +125,8 @@ class BaseImputer(BasePreprocessor, ABC):
             x = x.clone()
 
         # Reset NaN locations outside of training for validation and inference.
-        if not self.training:
-            self.nan_locations = None
+        # if not self.training:
+        #     self.nan_locations = None
 
         # Initialise mask if not cached.
         if self.nan_locations is None:
