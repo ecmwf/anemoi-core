@@ -146,7 +146,7 @@ class BaseEdgeBuilder(ABC):
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     @abstractmethod
-    def _compute_adj_matrix_pyg(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
+    def _compute_edge_index_pyg(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
 
     @abstractmethod
     def _compute_adj_matrix_sklearn(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
@@ -169,16 +169,15 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
 
         if TORCH_CLUSTER_AVAILABLE:
-            adj_matrix = self._compute_adj_matrix_pyg(source_coords, target_coords)
+            edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
+            edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         else:
             LOGGER.warning(
                 "The 'torch-cluster' library is not installed. Installing 'torch-cluster' can significantly improve "
                 "performance for graph creation. You can install it using 'pip install torch-cluster'."
             )
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
-
-        # Post-process the adjacency matrix. Add masked nodes.
-        adj_matrix = self.undo_masking(adj_matrix, source_nodes, target_nodes)
-        edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+            adj_matrix = self.undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
+            edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
 
         return edge_index

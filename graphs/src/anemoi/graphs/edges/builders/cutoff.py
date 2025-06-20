@@ -108,17 +108,13 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self.radius = self.get_cutoff_radius(graph)
         return super().prepare_node_data(graph)
 
-    def _compute_adj_matrix_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         from torch_cluster.radius import radius
 
         edge_index = radius(source_coords, target_coords, r=self.radius, max_num_neighbors=self.max_num_neighbours)
         edge_index = torch.flip(edge_index, [0])
 
-        adj_matrix = coo_matrix(
-            (torch.ones(edge_index.shape[1]), (edge_index[1], edge_index[0])),
-            shape=(len(target_coords), len(source_coords)),
-        )
-        return adj_matrix
+        return edge_index
 
     def _crop_to_max_num_neighbours(self, adjmat):
         """Remove neighbors exceeding the maximum allowed limit."""
@@ -186,6 +182,10 @@ class ReversedCutOffEdges(CutOffEdges):
         source_coords, target_coords = super().get_cartesian_node_coordinates(source_nodes, target_nodes)
         return target_coords, source_coords
 
-    def undo_masking(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
+    def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         adj_matrix = adj_matrix.T
-        return super().undo_masking(adj_matrix, source_nodes, target_nodes)
+        return super().undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
+
+    def undo_masking_edge_index(self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        edge_index = torch.flip(edge_index, [0])
+        return super().undo_masking_edge_index(edge_index, source_nodes, target_nodes)

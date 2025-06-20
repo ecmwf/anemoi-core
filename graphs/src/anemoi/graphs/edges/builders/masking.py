@@ -46,7 +46,7 @@ class NodeMaskingMixin:
         target_coords = latlon_rad_to_cartesian(target_coords)
         return source_coords, target_coords
 
-    def undo_masking(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
+    def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         if self.target_mask_attr_name is not None:
             target_mask = target_nodes[self.target_mask_attr_name].squeeze().cpu()
             assert adj_matrix.shape[0] == target_mask.sum()
@@ -64,3 +64,38 @@ class NodeMaskingMixin:
             adj_matrix = coo_matrix((adj_matrix.data, (adj_matrix.row, adj_matrix.col)), shape=true_shape)
 
         return adj_matrix
+
+    def undo_masking_edge_index(self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        """
+        Undo masking for edge_index matrix, remapping indices to original node indices.
+
+        Arguments
+        ---------
+        edge_index : torch.Tensor
+            2 x N tensor of edge indices (target, source).
+        source_nodes : NodeStorage
+            Source node storage.
+        target_nodes : NodeStorage
+            Target node storage.
+
+        Returns
+        -------
+        torch.Tensor
+            Remapped edge_index with original node indices.
+        """
+        # Remap target indices (row 0)
+        if self.target_mask_attr_name is not None:
+            target_mask = target_nodes[self.target_mask_attr_name].squeeze().cpu().numpy()
+            assert edge_index.shape[0] == 2
+            masked_target_indices = np.where(target_mask)[0]
+            target_mapper = dict(zip(range(len(masked_target_indices)), masked_target_indices))
+            edge_index[0] = torch.from_numpy(np.vectorize(target_mapper.get)(edge_index[0].cpu().numpy())).to(edge_index.device)
+
+        # Remap source indices (row 1)
+        if self.source_mask_attr_name is not None:
+            source_mask = source_nodes[self.source_mask_attr_name].squeeze().cpu().numpy()
+            masked_source_indices = np.where(source_mask)[0]
+            source_mapper = dict(zip(range(len(masked_source_indices)), masked_source_indices))
+            edge_index[1] = torch.from_numpy(np.vectorize(source_mapper.get)(edge_index[1].cpu().numpy())).to(edge_index.device)
+
+        return edge_index
