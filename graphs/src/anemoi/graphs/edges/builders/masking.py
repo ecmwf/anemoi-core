@@ -65,9 +65,10 @@ class NodeMaskingMixin:
 
         return adj_matrix
 
-    def undo_masking_edge_index(self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        """
-        Undo masking for edge_index matrix, remapping indices to original node indices.
+    def undo_masking_edge_index(
+        self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> torch.Tensor:
+        """Undo masking for edge_index matrix, remapping indices to original node indices.
 
         Arguments
         ---------
@@ -89,13 +90,17 @@ class NodeMaskingMixin:
             assert edge_index.shape[0] == 2
             masked_target_indices = np.where(target_mask)[0]
             target_mapper = dict(zip(range(len(masked_target_indices)), masked_target_indices))
-            edge_index[0] = torch.from_numpy(np.vectorize(target_mapper.get)(edge_index[0].cpu().numpy())).to(edge_index.device)
+            edge_index[0] = torch.from_numpy(np.vectorize(target_mapper.get)(edge_index[0].cpu().numpy())).to(
+                edge_index.device
+            )
 
         # Remap source indices (row 1)
         if self.source_mask_attr_name is not None:
             source_mask = source_nodes[self.source_mask_attr_name].squeeze().cpu().numpy()
             masked_source_indices = np.where(source_mask)[0]
             source_mapper = dict(zip(range(len(masked_source_indices)), masked_source_indices))
-            edge_index[1] = torch.from_numpy(np.vectorize(source_mapper.get)(edge_index[1].cpu().numpy())).to(edge_index.device)
+            edge_index[1] = torch.from_numpy(np.vectorize(source_mapper.get)(edge_index[1].cpu().numpy())).to(
+                edge_index.device
+            )
 
         return edge_index

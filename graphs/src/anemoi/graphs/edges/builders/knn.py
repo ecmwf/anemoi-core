@@ -97,6 +97,8 @@ class ReversedKNNEdges(KNNEdges):
         adj_matrix = adj_matrix.T
         return super().undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
 
-    def undo_masking_edge_index(self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+    def undo_masking_edge_index(
+        self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> torch.Tensor:
         edge_index = torch.flip(edge_index, [0])
         return super().undo_masking_edge_index(edge_index, source_nodes, target_nodes)
