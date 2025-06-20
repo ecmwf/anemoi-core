@@ -631,7 +631,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         qk_norm: bool = False,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
-        shard_strategy: str = "heads",
+        shard_strategy: str = "edges",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -659,7 +659,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        shard_strategy: str, by default "heads"
+        shard_strategy: str, by default "edges"
             Strategy to shard tensors
         """
 

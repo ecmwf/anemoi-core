@@ -208,7 +208,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
-        shard_strategy: str = "heads",
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
 
@@ -246,7 +246,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -433,7 +433,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
-        shard_strategy: str = "heads",
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
 
@@ -470,7 +470,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
         shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -531,7 +531,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
-        shard_strategy: str = "heads",
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
 
@@ -571,7 +571,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
