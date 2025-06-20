@@ -176,7 +176,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             self.source_name,
             self.target_name,
         )
-        return self.compute_edge_index(source_nodes=source_nodes, target_nodes=target_nodes)
+        return super().compute_edge_index(source_nodes=source_nodes, target_nodes=target_nodes)
 
 
 class ReversedCutOffEdges(CutOffEdges):
