@@ -108,7 +108,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self.radius = self.get_cutoff_radius(graph)
         return super().prepare_node_data(graph)
 
-    def _compute_edge_index_pyg(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+    def _compute_adj_matrix_pyg(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         from torch_cluster.radius import radius
 
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
