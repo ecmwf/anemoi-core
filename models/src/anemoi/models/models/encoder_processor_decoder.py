@@ -234,7 +234,6 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
-
         assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
             data_indices.model.output.diagnostic
         ), (
