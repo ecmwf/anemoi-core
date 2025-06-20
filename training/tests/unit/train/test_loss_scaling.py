@@ -8,6 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Any
+
+import numpy as np
 import pytest
 import torch
 from _pytest.fixtures import SubRequest
@@ -18,6 +21,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -254,3 +258,38 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     }
 
     assert metric_range == expected_metric_range
+
+
+@pytest.fixture
+def mock_updating_scalar() -> type[BaseUpdatingScaler]:
+    class UpdatingScalar(BaseUpdatingScaler):
+        """Mock updating scalar for testing."""
+
+        scale_dims = (TensorDim.VARIABLE,)
+
+        def on_training_start(self, model: Any) -> np.ndarray:  # noqa: ARG002
+            return np.array([2.0])
+
+        def on_train_epoch_end(self, model: Any) -> np.ndarray:  # noqa: ARG002
+            return np.array([3.0])
+
+    return UpdatingScalar
+
+
+def test_updating_scalars(mock_updating_scalar: type[BaseUpdatingScaler]) -> None:
+    """Test that the updating scalar returns the correct values."""
+    scalar = mock_updating_scalar()
+
+    assert scalar.initial_scaling_values() is not None
+    assert isinstance(scalar.initial_scaling_values(), np.ndarray)
+
+    assert scalar.get_scaling() is not None
+    assert scalar.get_scaling()[1][0] == 1.0, "Scalar values should be from the initial scaling values."
+
+    assert scalar.on_training_start(None) == np.array([2.0])
+    scalar.get_callback_scaling_values(callback="on_training_start", model=None)
+    assert scalar.get_scaling()[1][0] == 2.0, "Scalar values should be updated after on_training_start."
+
+    assert scalar.on_train_epoch_end(None) == np.array([3.0])
+    scalar.get_callback_scaling_values(callback="on_train_epoch_end", model=None)
+    assert scalar.get_scaling()[1][0] == 3.0, "Scalar values should be updated after on_train_epoch_end."

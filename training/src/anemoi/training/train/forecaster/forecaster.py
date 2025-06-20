@@ -27,6 +27,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -104,7 +105,7 @@ class GraphForecaster(pl.LightningModule):
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
         # Instantiate all scalers with the training configuration
-        self.scalers, self.delayed_scaler_builders = create_scalers(
+        self.scalers, self.updating_scalars = create_scalers(
             config.model_dump(by_alias=True).training.scalers,
             group_config=config.model_dump(by_alias=True).training.variable_groups,
             data_indices=data_indices,
@@ -229,10 +230,10 @@ class GraphForecaster(pl.LightningModule):
     def on_load_checkpoint(self, checkpoint: torch.nn.module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
-    def define_delayed_scalers(self) -> None:
+    def update_scalars(self, callback: AvailableCallbacks) -> None:
         """Update delayed scalers such as the loss weights mask for imputed variables."""
-        for name, scaler_builder in self.delayed_scaler_builders.items():
-            self.scalers[name] = scaler_builder.get_delayed_scaling(model=self.model)
+        for name, scaler_builder in self.updating_scalars.items():
+            self.scalers[name] = scaler_builder.get_callback_scaling_values(callback, model=self.model)
             self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
 
     def set_model_comm_group(
@@ -371,8 +372,16 @@ class GraphForecaster(pl.LightningModule):
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
-            self.define_delayed_scalers()
+            self.update_scalars(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
+
+        self.update_scalars(
+            callback=(
+                AvailableCallbacks.ON_TRAIN_BATCH_START
+                if not validation_mode
+                else AvailableCallbacks.ON_VALID_BATCH_START
+            ),
+        )
 
         # start rollout of preprocessed batch
         x = batch[
@@ -406,6 +415,12 @@ class GraphForecaster(pl.LightningModule):
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
+
+        self.update_scalars(
+            callback=(
+                AvailableCallbacks.ON_TRAIN_BATCH_END if not validation_mode else AvailableCallbacks.ON_VALID_BATCH_END
+            ),
+        )
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -574,11 +589,15 @@ class GraphForecaster(pl.LightningModule):
         del metric
         scheduler.step(epoch=self.trainer.global_step)
 
+    def on_train_epoch_start(self) -> None:
+        self.update_scalars(callback=AvailableCallbacks.ON_TRAIN_EPOCH_START)
+
     def on_train_epoch_end(self) -> None:
         if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
             self.rollout += 1
             LOGGER.debug("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
+        self.update_scalars(callback=AvailableCallbacks.ON_TRAIN_EPOCH_END)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
         """Calculate the loss over a validation batch using the training loss function.
