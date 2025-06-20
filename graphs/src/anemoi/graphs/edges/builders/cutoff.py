@@ -108,10 +108,8 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self.radius = self.get_cutoff_radius(graph)
         return super().prepare_node_data(graph)
 
-    def _compute_adj_matrix_pyg(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+    def _compute_adj_matrix_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         from torch_cluster.radius import radius
-
-        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
 
         edge_index = radius(source_coords, target_coords, r=self.radius, max_num_neighbors=self.max_num_neighbours)
         edge_index = torch.flip(edge_index, [0])
@@ -147,8 +145,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         # Define the new sparse matrix
         return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
 
-    def _compute_adj_matrix_sklearn(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.radius_neighbors_graph(

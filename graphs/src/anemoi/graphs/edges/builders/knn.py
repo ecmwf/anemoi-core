@@ -67,7 +67,7 @@ class KNNEdges(BaseDistanceEdgeBuilders):
             self.target_name,
         )
 
-    def _compute_adj_matrix_pyg(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray:
+    def _compute_adj_matrix_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> np.ndarray:
         from scipy.sparse import coo_matrix
         from torch_cluster.knn import knn
 
@@ -80,7 +80,7 @@ class KNNEdges(BaseDistanceEdgeBuilders):
         )
         return adj_matrix
 
-    def _compute_adj_matrix_sklearn(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray:
+    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> np.ndarray:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.kneighbors_graph(
