@@ -59,8 +59,7 @@ def log_rfft2_distance(
     def log10(x: torch.Tensor) -> torch.Tensor:
         return torch.log(x) / torch.log(torch.tensor(10.0, device=x.device, dtype=x.dtype))
 
-    log_10 = (10 * log10(ratio)) ** 2
-    return log_10
+    return (10 * log10(ratio)) ** 2
 
 
 class LogFFT2Distance(FunctionalLoss):
