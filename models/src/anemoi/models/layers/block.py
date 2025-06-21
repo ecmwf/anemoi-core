@@ -631,6 +631,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         qk_norm: bool = False,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -658,7 +659,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy: str, by default "edges"
+            Strategy to shard tensors
         """
+
         super().__init__(
             in_channels=in_channels,
             hidden_dim=hidden_dim,
@@ -690,6 +694,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             self.layer_norm_mlp_src = nn.Identity()
             self.node_src_mlp = nn.Identity()
 
+        self.shard_strategy = shard_strategy
+
     def run_node_src_mlp(self, x, **layer_kwargs):
         return self.node_src_mlp(self.layer_norm_mlp_src(x, **layer_kwargs))
 
@@ -715,7 +721,21 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
-        query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
+        if self.shard_strategy == "heads":
+            query, key, value, edges = self.shard_qkve_heads(
+                query, key, value, edges, shapes, batch_size, model_comm_group
+            )
+        else:
+            query, key, value, edges = (
+                einops.rearrange(
+                    t,
+                    "(batch grid) (heads vars) -> (batch grid) heads vars",
+                    heads=self.num_heads,
+                    vars=self.out_channels_conv,
+                    batch=batch_size,
+                )
+                for t in (query, key, value, edges)
+            )
 
         if self.qk_norm:
             query = self.q_norm(query)
@@ -725,7 +745,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
 
-        out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
+        if self.shard_strategy == "heads":
+            out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
+        else:
+            out = einops.rearrange(out, "(batch grid) heads vars -> (batch grid) (heads vars)", batch=batch_size)
 
         # out = self.projection(out + x_r) in chunks:
         out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)

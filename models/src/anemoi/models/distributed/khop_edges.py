@@ -22,7 +22,11 @@ from torch_geometric.utils import mask_to_index
 
 
 def get_k_hop_edges(
-    nodes: Tensor, edge_attr: Tensor, edge_index: Adj, num_hops: int = 1, num_nodes: Optional[int] = None
+    nodes: Tensor,
+    edge_attr: Tensor,
+    edge_index: Adj,
+    num_hops: int = 1,
+    num_nodes: Optional[int] = None,
 ) -> tuple[Adj, Tensor]:
     """Return 1 hop subgraph.
 
@@ -43,7 +47,11 @@ def get_k_hop_edges(
         K-hop subgraph of edge index and edge attributes
     """
     _, edge_index_k, _, edge_mask_k = k_hop_subgraph(
-        node_idx=nodes, num_hops=num_hops, edge_index=edge_index, directed=True, num_nodes=num_nodes
+        node_idx=nodes,
+        num_hops=num_hops,
+        edge_index=edge_index,
+        directed=True,
+        num_nodes=num_nodes,
     )
 
     return edge_attr[mask_to_index(edge_mask_k)], edge_index_k
@@ -54,6 +62,7 @@ def sort_edges_1hop_sharding(
     edge_attr: Tensor,
     edge_index: Adj,
     mgroup: Optional[ProcessGroup] = None,
+    relabel_dst_nodes: bool = False,
 ) -> tuple[Adj, Tensor, list, list]:
     """Rearanges edges into 1 hop neighbourhoods for sharding across GPUs.
 
@@ -67,6 +76,8 @@ def sort_edges_1hop_sharding(
         edge index
     mgroup : ProcessGroup
         model communication group
+    relabel_dst_nodes : bool, optional
+        whether to relabel destination nodes to be contiguous, by default False
 
     Returns
     -------
@@ -77,7 +88,9 @@ def sort_edges_1hop_sharding(
     if mgroup:
         num_chunks = dist.get_world_size(group=mgroup)
 
-        edge_attr_list, edge_index_list = sort_edges_1hop_chunks(num_nodes, edge_attr, edge_index, num_chunks)
+        edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
+            num_nodes, edge_attr, edge_index, num_chunks, relabel_dst_nodes=relabel_dst_nodes
+        )
 
         edge_index_shapes = [x.shape for x in edge_index_list]
         edge_attr_shapes = [x.shape for x in edge_attr_list]
@@ -88,7 +101,11 @@ def sort_edges_1hop_sharding(
 
 
 def sort_edges_1hop_chunks(
-    num_nodes: Union[int, tuple[int, int]], edge_attr: Tensor, edge_index: Adj, num_chunks: int
+    num_nodes: Union[int, tuple[int, int]],
+    edge_attr: Tensor,
+    edge_index: Adj,
+    num_chunks: int,
+    relabel_dst_nodes: bool = False,
 ) -> tuple[list[Tensor], list[Adj]]:
     """Rearanges edges into 1 hop neighbourhood chunks.
 
@@ -102,6 +119,8 @@ def sort_edges_1hop_chunks(
         edge index
     num_chunks : int
         number of chunks used if mgroup is None
+    relabel_dst_nodes : bool, optional
+        whether to relabel nodes in the subgraph, by default False
 
     Returns
     -------
@@ -126,7 +145,43 @@ def sort_edges_1hop_chunks(
                 edge_attr,
                 size=(num_nodes[0], num_nodes[1]),
             )
+
+        if relabel_dst_nodes:  # relabel dst nodes to be contiguous
+            edge_index_chunk[1] -= node_chunk[0]  # shift dst nodes to start from 0
+
         edge_index_list.append(edge_index_chunk)
         edge_attr_list.append(edge_attr_chunk)
 
     return edge_attr_list, edge_index_list
+
+
+def drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, num_nodes: tuple[int, int]) -> tuple[Tensor, Adj]:
+    """Drop unconnected nodes from x_src and relabel edges.
+
+    Parameters
+    ----------
+    x_src : Tensor
+        source node features
+    edge_attr : Tensor
+        edge attributes
+    edge_index : Adj
+        edge index
+    num_nodes : tuple[int, int]
+        number of nodes in graph (src, dst)
+
+    Returns
+    -------
+    tuple[Tensor, Adj]
+        reduced node features, relabeled edge index (contiguous, starting from 0)
+    """
+    connected_src_nodes = torch.unique(edge_index[0])
+    dst_nodes = torch.arange(num_nodes[1], device=x_src.device)
+
+    edge_index_new, _ = bipartite_subgraph(
+        (connected_src_nodes, dst_nodes),
+        edge_index,
+        size=num_nodes,
+        relabel_nodes=True,
+    )
+
+    return x_src[connected_src_nodes], edge_index_new
