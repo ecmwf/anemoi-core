@@ -15,7 +15,7 @@ data:
   frequency: 1h
   resolution: o96
 
-  diagnostics: []
+  diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields
 
 #dataloader:
   # model_run_info: #Add for non-analysis training
