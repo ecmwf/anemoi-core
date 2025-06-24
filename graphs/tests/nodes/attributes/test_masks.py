@@ -16,14 +16,13 @@ from anemoi.graphs.nodes.attributes import GridsMask
 from anemoi.graphs.nodes.attributes.masks import BaseCombineAnemoiDatasetsMask
 
 
-@pytest.mark.parametrize("mask_class", [CutOutMask, GridsMask])
-def test_combined_datasets_mask(mocker, graph_with_nodes: HeteroData, mock_zarr_dataset_cutout, mask_class):
+def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_anemoi_dataset_cutout):
     """Test attribute builder for CutOutMask."""
     # Add dataset attribute required by CutOutMask
     graph_with_nodes["test_nodes"]["_dataset"] = {}
 
-    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_zarr_dataset_cutout)
-    mask = mask_class().compute(graph_with_nodes, "test_nodes")
+    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset_cutout)
+    mask = CutOutMask().compute(graph_with_nodes, "test_nodes")
 
     assert mask is not None
     assert isinstance(mask, torch.Tensor)

@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.1](https://github.com/ecmwf/anemoi-core/compare/training-0.5.0...training-0.5.1) (2025-06-17)
+
+
+### Features
+
+* **models,training:** Shard everything ([#121](https://github.com/ecmwf/anemoi-core/issues/121)) ([06dde94](https://github.com/ecmwf/anemoi-core/commit/06dde94219119746215b767b846542ee31bbff63))
+
+
+### Bug Fixes
+
+* Config validator checks for conflict with bounding and graphtran… ([#352](https://github.com/ecmwf/anemoi-core/issues/352)) ([f97313e](https://github.com/ecmwf/anemoi-core/commit/f97313e608f0ce2eebd46bad8e5300edebe6eec1))
+* **training, losses:** NaN handling for crps ([#358](https://github.com/ecmwf/anemoi-core/issues/358)) ([daf9ddd](https://github.com/ecmwf/anemoi-core/commit/daf9dddda8ff8755b59f0559666d6539d525ba3b))
+
 ## [0.5.0](https://github.com/ecmwf/anemoi-core/compare/training-0.4.0...training-0.5.0) (2025-06-05)
 
 

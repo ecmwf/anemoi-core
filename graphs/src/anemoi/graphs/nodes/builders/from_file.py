@@ -126,7 +126,13 @@ class NPZFileNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, npz_file: str, name: str, lat_key: str = "latitudes", lon_key: str = "longitudes") -> None:
+    def __init__(
+        self,
+        npz_file: str,
+        name: str,
+        lat_key: str = "latitudes",
+        lon_key: str = "longitudes",
+    ) -> None:
         """Initialize the NPZFileNodes builder.
 
         The builder suppose the grids are stored in files with the name `grid-{resolution}.npz`.
@@ -191,7 +197,57 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         )
         area_mask = self.area_mask_builder.get_mask(coords)
 
-        LOGGER.info("Dropping %d nodes from the processor mesh.", len(area_mask) - area_mask.sum())
+        LOGGER.info(
+            "Dropping %d nodes from the processor mesh.",
+            len(area_mask) - area_mask.sum(),
+        )
         coords = coords[area_mask]
 
         return coords
+
+
+class XArrayNodes(BaseNodeBuilder):
+    """Class for creating graph nodes based on a xarray-compatible file format.
+
+    Parameters
+    ----------
+    dataset : str
+        Path to xarray compatible file (e.g., NetCDF or zarr) containing latitude and longitude variables.
+    name : str
+        Identifier to use for the nodes within the graph.
+    lat_key : str, optional
+        Variable name for latitude in the dataset (default: "lat").
+    lon_key : str, optional
+        Variable name for longitude in the dataset (default: "lon").
+
+    Methods
+    -------
+    get_coordinates()
+        Get the lat-lon coordinates of the nodes.
+    register_nodes(graph, name)
+        Register the nodes in the graph.
+    register_attributes(graph, name, config)
+        Register the attributes in the nodes of the graph specified.
+    update_graph(graph, name, attrs_config)
+        Update the graph with new nodes and attributes.
+    """
+
+    def __init__(self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon") -> None:
+
+        super().__init__(name)
+        self.dataset = dataset
+        self.lat_key = lat_key
+        self.lon_key = lon_key
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
+
+    def get_coordinates(self) -> torch.Tensor:
+        import xarray as xr
+
+        ds = xr.open_dataset(self.dataset)
+
+        for var in [self.lat_key, self.lon_key]:
+            assert var in ds, f"Variable '{var}' not found in dataset."
+
+        lat = ds[self.lat_key].values.flatten()
+        lon = ds[self.lon_key].values.flatten()
+        return self.reshape_coords(lat, lon)
