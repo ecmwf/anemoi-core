@@ -13,7 +13,6 @@ from __future__ import annotations
 import datetime
 import logging
 from functools import cached_property
-from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -26,7 +25,6 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from packaging.version import Version
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz

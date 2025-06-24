@@ -42,19 +42,20 @@ isolate issues related to data or parallelization.
 1. Error when opening checkpoints > 2 GB
 ========================================
 
-If you're using a version of PyTorch < 2.6 with checkpoint files > 2 GB you may encounter an error such as
+If you're using a version of PyTorch < 2.6 with checkpoint files > 2 GB
+you may encounter an error such as
 
 .. code:: python
 
    RuntimeError: PytorchStreamReader failed reading zip archive: invalid header or archive is corrupted
 
-This is due to a limitation with the zip implementation. If you're unable to move to a more recent version of PyTorch
-you can try to remove the metadata stored in the checkpoint using
+This is due to a limitation with the zip implementation. If you're
+unable to move to a more recent version of PyTorch you can try to remove
+the metadata stored in the checkpoint using
 
 .. code:: bash
 
    anemoi-utils metadata checkpoint.ckpt --remove --output-checkpoint output.ckpt
-
 
 ***********************************
  PyTorch Lightning Debugging Tools
