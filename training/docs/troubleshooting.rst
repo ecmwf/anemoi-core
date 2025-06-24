@@ -55,7 +55,7 @@ the metadata stored in the checkpoint using
 
 .. code:: bash
 
-   anemoi-utils metadata checkpoint.ckpt --remove --output-checkpoint output.ckpt
+   anemoi-utils metadata checkpoint.ckpt --remove --output output.ckpt
 
 ***********************************
  PyTorch Lightning Debugging Tools
