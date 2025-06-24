@@ -505,23 +505,11 @@ class AnemoiTrainer:
 
         LOGGER.debug("Starting training..")
 
-        try:
-            trainer.fit(
-                self.model,
-                datamodule=self.datamodule,
-                ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-            )
-        except RuntimeError as e:
-            if Version(version("torch")) < Version("2.6"):
-                help_msg = (
-                    "\n\ntorch < 2.6 may error when using checkpoints > 2 GB. "
-                    "Please try removing the metadata from the checkpoint using:\n"
-                    "  anemoi-utils remove-metadata --source source.ckpt --target target.ckpt"
-                )
-
-                raise type(e)(str(e) + help_msg) from e
-
-            raise
+        trainer.fit(
+            self.model,
+            datamodule=self.datamodule,
+            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+        )
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
