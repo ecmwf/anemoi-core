@@ -9,6 +9,7 @@
 
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -222,3 +223,18 @@ def gnn_config_with_data(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg
+
+
+@pytest.fixture
+def gnn_config_with_checkpoint(gnn_config_with_data: OmegaConf) -> OmegaConf:
+    existing_ckpt = get_test_data("anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-Jun-24.ckpt")
+    checkpoint_dir = Path(gnn_config_with_data.hardware.paths.output + "checkpoint/dummy_id")
+    Path.mkdir(checkpoint_dir, exist_ok=True)
+    shutil.copy(
+        existing_ckpt,
+        checkpoint_dir / "last.ckpt",
+    )
+
+    gnn_config_with_data.training.run_id = "dummy_id"
+    gnn_config_with_data.training.max_epochs = 3
+    return gnn_config_with_data
