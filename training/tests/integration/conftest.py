@@ -16,6 +16,10 @@ from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
 
+from anemoi.utils.testing import import_fixtures
+
+fixtures = import_fixtures()
+
 
 @pytest.fixture(autouse=True)
 def set_working_directory() -> None:
@@ -143,17 +147,17 @@ def get_tmp_paths(temporary_directory_for_test_data: callable) -> callable:
         for dataset in list_datasets:
             url_archive = config.hardware.files[dataset] + ".tgz"
             name_dataset = Path(config.hardware.files[dataset]).name
-            tmp_path_dataset = temporary_directory_for_test_data(url_archive)
+            tmp_path_dataset = temporary_directory_for_test_data(url_archive, archive=True)
 
             tmp_paths.append(tmp_path_dataset)
             dataset_names.append(name_dataset)
             archive_urls.append(url_archive)
 
         if len(list_datasets) == 1:
-            return tmp_paths[0] + ".extracted", dataset_names, archive_urls
+            return tmp_paths[0], dataset_names, archive_urls
 
         tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
-        rel_paths = [Path(path).name + ".extracted/" + name for (name, path) in zip(dataset_names, tmp_paths)]
+        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths)]
         return tmp_dir, rel_paths, archive_urls
 
     return _get_tmp_paths
