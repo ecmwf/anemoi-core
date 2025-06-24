@@ -71,7 +71,8 @@ deterministic:
  Spatial Loss Functions
 ************************
 
-The following spatial loss functions are available:
+The following spatial loss functions are available (**to be used only
+with 2D fields**):
 
 -  ``LogFFT2Distance``: log spectral distance from the 2D fast Fourier
    transform.
