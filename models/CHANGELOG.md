@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/models-0.8.0...models-0.8.1) (2025-06-17)
+
+
+### Features
+
+* **models,training:** Shard everything ([#121](https://github.com/ecmwf/anemoi-core/issues/121)) ([06dde94](https://github.com/ecmwf/anemoi-core/commit/06dde94219119746215b767b846542ee31bbff63))
+
+
+### Bug Fixes
+
+* Do not inherit from a concrete class ([#359](https://github.com/ecmwf/anemoi-core/issues/359)) ([ca79375](https://github.com/ecmwf/anemoi-core/commit/ca7937590311c412b90dffad48fd8f25230fe5eb))
+* Revert PR 359 ([#365](https://github.com/ecmwf/anemoi-core/issues/365)) ([fcebea4](https://github.com/ecmwf/anemoi-core/commit/fcebea484080c5333e8e213784372d1b13dab4c8))
+
 ## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/models-0.7.0...models-0.8.0) (2025-06-05)
 
 
