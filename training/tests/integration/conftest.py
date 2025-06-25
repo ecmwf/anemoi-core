@@ -16,10 +16,6 @@ from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
 
-from anemoi.utils.testing import import_fixtures
-
-fixtures = import_fixtures()
-
 
 @pytest.fixture(autouse=True)
 def set_working_directory() -> None:
