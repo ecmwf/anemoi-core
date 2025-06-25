@@ -14,6 +14,7 @@ on:
       - reopened
       - labeled
       - unlabeled
+      - synchronize
 
 permissions:
   pull-requests: read
@@ -22,6 +23,17 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - name: Get PR author
+        id: pr-author
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.setOutput('author', context.payload.pull_request.user.login);
+      - name: Check author
+        if: steps.pr-author.outputs.author == 'gmertes'
+        run: |
+          echo "Author is gmertes, skipping ATS label check."
+          exit 0
       - name: Get PR labels
         uses: actions/github-script@v7
         id: check-labels
