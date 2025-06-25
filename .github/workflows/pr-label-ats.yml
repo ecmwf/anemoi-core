@@ -39,7 +39,8 @@ jobs:
         run: |
           LABELS=$(echo '${{ steps.check-labels.outputs.labels }}' | jq -r '.[]')
           echo "Labels found:"
-          echo "$LABELS"
+          echo -e "$LABELS\n"
+          echo "Result:"
           if echo "$LABELS" | grep -qi "ATS approval not needed"; then
             echo "ATS approval not needed. Passing."
             exit 0
