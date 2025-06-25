@@ -69,7 +69,7 @@ def get_loss_function(
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
     # related to spatial losses
-    if config.get("x_dim", None) is not None and config.get("y_dim", None) is not None:
+    if loss_config.get("x_dim", None) is not None and loss_config.get("y_dim", None) is not None:
         kwargs["x_dim"] = config.x_dim
         kwargs["y_dim"] = config.y_dim
 

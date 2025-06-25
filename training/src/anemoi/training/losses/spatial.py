@@ -16,6 +16,7 @@ import torch
 import torch.fft
 
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,11 +37,11 @@ def get_spectra(
     real_output: torch.Tensor,
     dims: tuple[int, int],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    assert dims[0] * dims[1] == real_output.shape[2], (
+    assert dims[0] * dims[1] == real_output.shape[TensorDim.GRID], (
         "The product of dims must match the spatial dims of the output."
         "Please use x_dim and y_dim such that field_shape=(x_dim, y_dim)."
     )
-    dims_total = (*real_output.shape[:2], *dims, real_output.shape[-1])
+    dims_total = (*real_output.shape[: TensorDim.GRID], *dims, real_output.shape[TensorDim.VARIABLE])
     power_spectra_real = torch.fft.rfft2(real_output.reshape(dims_total), dim=(-2, -3))
     power_spectra_pred = torch.fft.rfft2(predicted_output.reshape(dims_total), dim=(-2, -3))
     return power_spectra_real, power_spectra_pred
