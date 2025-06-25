@@ -229,7 +229,7 @@ def gnn_config_with_data(
 def gnn_config_with_checkpoint(gnn_config_with_data: OmegaConf) -> OmegaConf:
     existing_ckpt = get_test_data("anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-Jun-24.ckpt")
     checkpoint_dir = Path(gnn_config_with_data.hardware.paths.output + "checkpoint/dummy_id")
-    Path.mkdir(checkpoint_dir, exist_ok=True)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(
         existing_ckpt,
         checkpoint_dir / "last.ckpt",
