@@ -42,8 +42,8 @@ def get_spectra(
         "Please use x_dim and y_dim such that field_shape=(x_dim, y_dim)."
     )
     dims_total = (*real_output.shape[: TensorDim.GRID], *dims, real_output.shape[TensorDim.VARIABLE])
-    power_spectra_real = torch.fft.rfft2(real_output.reshape(dims_total), dim=(-2, -3))
-    power_spectra_pred = torch.fft.rfft2(predicted_output.reshape(dims_total), dim=(-2, -3))
+    power_spectra_real = torch.fft.fft2(real_output.reshape(dims_total), dim=(-2, -3))
+    power_spectra_pred = torch.fft.fft2(predicted_output.reshape(dims_total), dim=(-2, -3))
     return power_spectra_real, power_spectra_pred
 
 
@@ -88,7 +88,8 @@ class LogFFT2Distance(FunctionalLoss):
         self.y_dim = y_dim
 
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return log_rfft2_distance(pred, target, dims=(self.x_dim, self.y_dim))
+        dist = log_rfft2_distance(pred, target, dims=(self.x_dim, self.y_dim))
+        return dist.reshape(pred.shape)
 
     def forward(
         self,
@@ -126,7 +127,8 @@ class FourierCorrelationLoss(FunctionalLoss):
         power_spectra_real, power_spectra_pred = get_spectra(pred, target, dims=(self.x_dim, self.y_dim))
         self.power_spectra_real = power_spectra_real
         self.power_spectra_pred = power_spectra_pred
-        return get_power_spectra_scalar_product(power_spectra_real, power_spectra_pred).real
+        dist = get_power_spectra_scalar_product(power_spectra_real, power_spectra_pred).real
+        return dist.reshape(pred.shape)
 
     def forward(
         self,
