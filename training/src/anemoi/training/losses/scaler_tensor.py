@@ -18,6 +18,8 @@ from typing import Union
 import torch
 from torch import nn
 
+from anemoi.training.utils.enums import TensorDim
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from collections.abc import Sequence
@@ -169,7 +171,7 @@ class ScaleTensor:
             dimension = [dimension]
 
         for scaler_dim, dim in enumerate(dimension):
-            if dim not in self or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1:
+            if dim not in self or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1 or dim == TensorDim.BATCH_SIZE:
                 continue
 
             if self.shape[dim] != scaler.shape[scaler_dim]:

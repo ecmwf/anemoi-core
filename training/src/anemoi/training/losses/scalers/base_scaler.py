@@ -40,7 +40,7 @@ class BaseScaler(ABC):
 
     scale_dims: tuple[TensorDim] = None
 
-    def __init__(self, norm: str | None = None) -> None:
+    def __init__(self, norm: str | None = None, **kwargs) -> None:
         """Initialise BaseScaler.
 
         Parameters
@@ -48,6 +48,7 @@ class BaseScaler(ABC):
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
+        del kwargs  # Unused, but kept for compatibility with subclasses
         self.norm = norm
         assert norm in [
             None,

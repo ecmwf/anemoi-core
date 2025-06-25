@@ -440,6 +440,7 @@ class LongRolloutPlots(BasePlotCallback):
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
+        # TODO(sara): fails because post_processors expects a tensor of batch_size
         data_0 = self.post_processors(input_tensor_0).numpy()
 
         if self.video_rollout:
@@ -518,8 +519,10 @@ class LongRolloutPlots(BasePlotCallback):
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
+        # TODO(sara): fails because post_processors expects a tensor of batch_size
         data_rollout_step = self.post_processors(input_tensor_rollout_step).numpy()
         # predicted output tensor
+        # TODO(sara): fails because post_processors expects a tensor of batch_size
         output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
 
         fig = plot_predicted_multilevel_flat_sample(
@@ -550,6 +553,7 @@ class LongRolloutPlots(BasePlotCallback):
     ) -> tuple[list, np.ndarray, np.ndarray]:
         """Store the data for each frame of the video."""
         # prepare predicted output tensors for video
+        # TODO(sara): fails because post_processors expects a tensor of batch_size
         output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
         data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
         # update min and max values for each variable for the colorbar
@@ -974,17 +978,18 @@ class PlotSample(BasePerBatchPlotCallback):
         local_rank = pl_module.local_rank
 
         input_tensor = batch[
-            self.sample_idx,
+            :,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-        data = self.post_processors(input_tensor)
+        # TODO(sara): how much more expensive is this that applying postprocessor to selected sample?
+        data = self.post_processors(input_tensor)[self.sample_idx]
 
         output_tensor = self.post_processors(
-            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
+            torch.cat(tuple(x[:, ...].cpu() for x in outputs[1])),
             in_place=False,
-        )
+        )[self.sample_idx : self.sample_idx + 1]
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
@@ -1037,6 +1042,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             pl_module.data_indices.data.output.full,
         ].cpu()
 
+        # TODO(sara): fails because post_processors expects a tensor of batch_size
         data = self.post_processors(input_tensor)
         output_tensor = self.post_processors(
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
