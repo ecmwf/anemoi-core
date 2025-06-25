@@ -14,13 +14,13 @@ from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
 
-from anemoi.models.migrations import MIGRATION_PATH
-
+from .. import __version__ as version_anemoi_models
+from ..migrations import MIGRATION_PATH
 from . import Command
 
 
 def _get_migration_name(name: str) -> str:
-    name = name.replace("-", "_").replace(" ", "_")
+    name = name.lower().replace("-", "_").replace(" ", "_")
     now = int(datetime.now().timestamp())
     return f"{now}_{name}.py"
 
@@ -51,18 +51,28 @@ class CreateMigration(Command):
         with open(args.path / name, "w") as f:
             f.write(
                 dedent(
-                    """
+                    f"""
                     from anemoi.models.migrations import CkptType
+                    from anemoi.models.migrations import Versions
 
-                    version = "1.0.0"
+                    versions: Versions = {{
+                        "migration": "1.0.0",
+                        "anemoi-models": "{version_anemoi_models}",
+                    }}
 
 
-                    def migrate(ckpt: CkptType) -> CkptType:
-                        # Migrate the checkpoint
+                    def upgrade(ckpt: CkptType) -> CkptType:
+                        \"\"\"Migrate the model\"\"\"
                         print(ckpt)
+                        return ckpt
+
+
+                    def downgrade(ckpt: CkptType) -> CkptType:
+                        \"\"\"Cancels the upgrade function\"\"\"
                         return ckpt
                 """
                 ).strip()
+                + "\n"
             )
         print(f"Created migration {name} in {args.path}")
 
