@@ -7,9 +7,11 @@ from typing import Any
 from typing import Callable
 from typing import List
 from typing import MutableMapping
+from typing import Optional
 from typing import Sequence
 from typing import Tuple
 from typing import TypeAlias
+from typing import TypedDict
 from typing import Union
 
 from anemoi.utils.cli import importlib
@@ -29,12 +31,23 @@ class MissingMigrationException(BaseException):
 CkptType: TypeAlias = MutableMapping[str, Any]
 MigrationCallback: TypeAlias = Callable[[CkptType], CkptType]
 
+# migration is the version of the migration module to allow future update of
+# the script and keep backward compatibility
+Versions = TypedDict("Versions", {"migration": str, "anemoi-models": str})
+
 
 @dataclass
 class Migration:
+    """Represent a migration"""
+
     name: str
-    callback: MigrationCallback
-    version: str
+    """ Name of the migration """
+    upgrade: MigrationCallback
+    """ Callback to perform when upgrading the migration """
+    downgrade: MigrationCallback
+    """ Callback to perform when downgrading the migration """
+    versions: Versions
+    """ Tracked versions """
 
 
 def get_missing_migrations(
@@ -87,17 +100,21 @@ def _add_migration_to_ckpt(ckpt: CkptType, migration: Migration) -> CkptType:
 
 
 def migrate_ckpt(
-    ckpt: CkptType,
-    migrations: Sequence[Migration],
+    ckpt: CkptType, migrations: Sequence[Migration], steps: Optional[int] = None, target: Optional[str] = None
 ) -> Tuple[CkptType, Sequence[Migration]]:
     """Migrate checkpoint using provided migrations
 
     Parameters
     ----------
     ckpt : CkptType
-        The checkpoint to migrate
+        The checkpoint to migrate.
     migrations : Sequence[Migration]
-        The list of migrations to perform
+        The list of migrations to perform.
+    steps : Optional[int], default None
+        Number of migration step to execute. Defaults to all missing migrations.
+    target : Optional[str], default None
+        Target version of anemoi-models. Will upgrade or downgrade accordingly.
+        Defaults to latest.
 
     Returns
     -------
@@ -107,8 +124,10 @@ def migrate_ckpt(
     """
     ckpt = deepcopy(ckpt)
     missing_migrations = get_missing_migrations(ckpt, migrations)
+    if steps is not None:
+        missing_migrations = missing_migrations[:steps]
     for migration in missing_migrations:
-        ckpt = migration.callback(ckpt)
+        ckpt = migration.upgrade(ckpt)
         ckpt = _add_migration_to_ckpt(ckpt, migration)
     return ckpt, missing_migrations
 
@@ -143,7 +162,14 @@ def migrations_from_path(location: Union[str, PathLike], package: str) -> Tuple[
             failed_migration_imports.append(file.name)
             continue
 
-        migrations.append(Migration(name=file.stem, callback=migration.migrate, version=migration.version))
+        migrations.append(
+            Migration(
+                name=file.stem,
+                upgrade=migration.upgrade,
+                downgrade=migration.downgrade,
+                versions=migration.versions,
+            )
+        )
     return migrations, failed_migration_imports
 
 
