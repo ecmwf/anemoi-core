@@ -56,6 +56,17 @@ class TextNodeSchema(BaseModel):
     "The index of the latitude in the dataset."
 
 
+class XArrayNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.XArrayNodes"] = Field(..., alias="_target_")
+    "Nodes from xarray dataset class implementation from anemoi.graphs.nodes."
+    dataset: Union[str, Path]
+    "The path to xarray dataset containing the coordinates of the nodes."
+    lon_key: str
+    "The key name of the longitude field."
+    lat_key: str
+    "The key name of the latitude field."
+
+
 class ReducedGaussianGridNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.ReducedGaussianGridNodes"] = Field(..., alias="_target_")
     "Nodes from NPZ grids class implementation from anemoi.graphs.nodes."
@@ -77,7 +88,10 @@ class ICONNodeSchema(BaseModel):
 
 
 class ICONMeshNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.ICONMultimeshNodes", "anemoi.graphs.nodes.ICONCellGridNodes"] = Field(
+    target_: Literal[
+        "anemoi.graphs.nodes.ICONMultimeshNodes",
+        "anemoi.graphs.nodes.ICONCellGridNodes",
+    ] = Field(
         ...,
         alias="_target_",
     )

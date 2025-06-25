@@ -15,9 +15,11 @@ from .boolean_op import BooleanAndMask
 from .boolean_op import BooleanNot
 from .boolean_op import BooleanOrMask
 from .masks import CutOutMask
+from .masks import GridsMask
 from .masks import NonmissingAnemoiDatasetVariable
 
 __all__ = [
+    "GridsMask",
     "SphericalAreaWeights",
     "PlanarAreaWeights",
     "UniformWeights",

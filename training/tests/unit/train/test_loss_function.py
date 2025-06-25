@@ -422,3 +422,51 @@ def test_combined_loss_seperate_scalers() -> None:
     assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scaler
     assert "test2" in loss.losses[1].scaler
+
+
+def test_logfft2dist_loss() -> None:
+    """Test that loss function can be instantiated."""
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spatial.LogFFT2Distance",
+                "x_dim": 710,
+                "y_dim": 640,
+                "scalers": [],
+            },
+        ),
+    )
+    assert isinstance(loss, FunctionalLoss)
+    assert hasattr(loss, "x_dim")
+    assert hasattr(loss, "y_dim")
+
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
+    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
+    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    with pytest.raises(AssertionError):
+        loss.calculate_difference(*wrong_shaped_pred_output_pair)
+
+
+def test_fcl_loss() -> None:
+    """Test that loss function can be instantiated and behaves as expected."""
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spatial.FourierCorrelationLoss",
+                "x_dim": 710,
+                "y_dim": 640,
+                "scalers": [],
+            },
+        ),
+    )
+    assert isinstance(loss, FunctionalLoss)
+    assert hasattr(loss, "x_dim")
+    assert hasattr(loss, "y_dim")
+
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
+    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
+    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    with pytest.raises(AssertionError):
+        loss.calculate_difference(*wrong_shaped_pred_output_pair)
