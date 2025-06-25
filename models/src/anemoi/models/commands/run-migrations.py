@@ -46,11 +46,14 @@ class RunMigration(Command):
         migrations, failed_loading = load_migrations()
         if len(failed_loading):
             LOGGER.warning("Some migrations could not be loaded: %s", ", ".join(failed_loading))
-        new_ckpt, done_migrations = migrate_ckpt(
+        new_ckpt, done_migrations, done_rollbacks = migrate_ckpt(
             torch.load(args.ckpt, map_location="cpu", weights_only=False), migrations
         )
         torch.save(new_ckpt, args.export_path)
-        LOGGER.info("Executed %s migrations: %s", len(done_migrations), done_migrations)
+        if len(done_migrations):
+            LOGGER.info("Executed %s migrations: %s", len(done_migrations), done_migrations)
+        if len(done_rollbacks):
+            LOGGER.info("Executed %s migration rollbacks: %s", len(done_rollbacks), done_rollbacks)
 
 
 command = RunMigration
