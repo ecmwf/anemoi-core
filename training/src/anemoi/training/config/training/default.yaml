@@ -88,12 +88,31 @@ validation_metrics:
     # other kwargs
     ignore_nans: True
 
-# Variable groups definition for scaling by variable level.
+# Variable groups definition for scaling
 # The variable level scaling methods are defined under training/scalers
 # A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
+# Variables are assigned to a group by their param if contained in the metadata, else by their name.
+
+# If more complex grouping is required, groups can be defined as a dictionary, such that all
+# keys must be evaluate to True.
+# .e.g.:
+#   variable_groups:
+#     default: sfc
+#     pl:
+#        is_pressure_level: True
+# See `anemoi.transform.variables.Variable` for the available metadata.
+# Note that the former formulation of
+# :
+# variable_groups:
+#  default: sfc
+#  pl: [q, t, u, v, w, z]
+#
+# still works
+
 variable_groups:
   default: sfc
-  pl: [q, t, u, v, w, z]
+  pl:
+     param: [q, t, u, v, w, z]
 
 metrics:
 - z_500
