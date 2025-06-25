@@ -54,8 +54,8 @@ jobs:
             echo "ATS Approved. Passing."
             exit 0
           elif echo "$LABELS" | grep -qi "ATS approval needed"; then
-              echo "ATS Approval Needed. Failing."
-              exit 1
+            echo "ATS Approval Needed. Failing."
+            exit 1
           else
             echo "No ATS approval labels found. Failing."
             exit 1
