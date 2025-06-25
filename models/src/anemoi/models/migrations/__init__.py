@@ -1,5 +1,7 @@
+import logging
 from copy import deepcopy
 from dataclasses import dataclass
+from os import PathLike
 from pathlib import Path
 from typing import Any
 from typing import Callable
@@ -8,12 +10,16 @@ from typing import MutableMapping
 from typing import Sequence
 from typing import Tuple
 from typing import TypeAlias
+from typing import Union
 
 from anemoi.utils.cli import importlib
 
 MIGRATION_PATH = Path(__file__).parent
 
 _ckpt_migration_key = "migrations"
+
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel("DEBUG")
 
 
 class MissingMigrationException(BaseException):
@@ -36,8 +42,7 @@ def get_missing_migrations(
     migrations: Sequence[Migration],
     raise_missing_migrations: bool = True,
 ) -> Sequence[Migration]:
-    """
-    Get missing migrations from a checkpoint
+    """Get missing migrations from a checkpoint
 
     Parameters
     ----------
@@ -63,11 +68,10 @@ def get_missing_migrations(
     for k, mig in reversed(list(enumerate(migrations))):
         if mig.name in done_migrations:
             key_rest_migration = k + 1
-    done_migration_names = [migration.name for migration in done_migrations]
 
     if raise_missing_migrations:
         for migration in migrations[:key_rest_migration]:
-            if not migration.name not in done_migration_names:
+            if migration.name not in done_migrations:
                 raise MissingMigrationException(
                     f"{migration.name} is not part of the checkpoint but cannot be executed (out of order)."
                 )
@@ -109,9 +113,15 @@ def migrate_ckpt(
     return ckpt, missing_migrations
 
 
-def load_migrations() -> Tuple[List[Migration], List[str]]:
-    """
-    Load the migrations from this folder
+def migrations_from_path(location: Union[str, PathLike], package: str) -> Tuple[List[Migration], List[str]]:
+    """Load the migrations from a given folder
+
+    Parameters
+    ----------
+    location : Union[str, PathLike]
+        Path to the migration folder
+    package : str
+        Reference package for the import of the migrations
 
     Returns
     -------
@@ -122,17 +132,31 @@ def load_migrations() -> Tuple[List[Migration], List[str]]:
     migrations: List[Migration] = []
     failed_migration_imports: List[str] = []
 
-    for file in sorted(MIGRATION_PATH.iterdir()):
+    for file in sorted(Path(location).iterdir()):
         if not file.is_file() and file.suffix != ".py" or file.name == "__init__.py":
             continue
+        LOGGER.debug("Loading migration .%s from %s", file.stem, package)
         try:
-            migration = importlib.import_module(f".{file.stem}", __name__)
-        except ImportError:
+            migration = importlib.import_module(f".{file.stem}", package)
+        except ImportError as e:
+            LOGGER.debug("Error loading %s: %s", file.name, str(e))
             failed_migration_imports.append(file.name)
             continue
 
         migrations.append(Migration(name=file.stem, callback=migration.migrate, version=migration.version))
     return migrations, failed_migration_imports
+
+
+def load_migrations() -> Tuple[List[Migration], List[str]]:
+    """Load the migrations from this folder
+
+    Returns
+    -------
+    Tuple[List[Migration], List[str]]
+        * The list of migrations to execute from this module
+        * The list of migrations that failed to load
+    """
+    return migrations_from_path(MIGRATION_PATH, __name__)
 
 
 __all__ = [
@@ -141,5 +165,6 @@ __all__ = [
     "Migration",
     "get_missing_migrations",
     "migrate_ckpt",
+    "migrations_from_path",
     "load_migrations",
 ]

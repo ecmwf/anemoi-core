@@ -11,6 +11,7 @@
 from argparse import ArgumentParser
 from argparse import Namespace
 from datetime import datetime
+from pathlib import Path
 from textwrap import dedent
 
 from anemoi.models.migrations import MIGRATION_PATH
@@ -36,6 +37,7 @@ class CreateMigration(Command):
             The argument parser to which the arguments will be added.
         """
         command_parser.add_argument("name", help="Name of the migration")
+        command_parser.add_argument("--path", type=Path, default=MIGRATION_PATH, help="Path to the migration folder")
 
     def run(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
@@ -46,7 +48,7 @@ class CreateMigration(Command):
             The arguments passed to the command.
         """
         name = _get_migration_name(args.name)
-        with open(MIGRATION_PATH / name, "w") as f:
+        with open(args.path / name, "w") as f:
             f.write(
                 dedent(
                     """
@@ -62,7 +64,7 @@ class CreateMigration(Command):
                 """
                 ).strip()
             )
-        print(f"Created migration {name} in {MIGRATION_PATH}")
+        print(f"Created migration {name} in {args.path}")
 
 
 command = CreateMigration
