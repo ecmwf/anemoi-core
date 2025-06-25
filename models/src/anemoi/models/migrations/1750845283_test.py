@@ -9,12 +9,10 @@ versions: Versions = {
 
 def upgrade(ckpt: CkptType) -> CkptType:
     """Migrate the model"""
-    assert "foo" not in ckpt
-    ckpt["foo"] = "foo"
+    print(ckpt)
     return ckpt
 
 
 def downgrade(ckpt: CkptType) -> CkptType:
     """Cancels the upgrade function"""
-    del ckpt["foo"]
     return ckpt
