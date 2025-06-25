@@ -13,18 +13,19 @@ from anemoi.models.migrations import Versions
 
 versions: Versions = {
     "migration": "1.0.0",
-    "anemoi-models": "0.8.1",
+    "anemoi-models": "0.9.0",
 }
 
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint"""
-    assert "foo" not in ckpt
-    ckpt["foo"] = "foo"
+    ckpt["test"] = ckpt["baz"]
+    del ckpt["baz"]
     return ckpt
 
 
 def rollback(ckpt: CkptType) -> CkptType:
-    """Rollbacks the migration"""
-    del ckpt["foo"]
+    """Rollback the migration"""
+    ckpt["baz"] = ckpt["test"]
+    del ckpt["test"]
     return ckpt
