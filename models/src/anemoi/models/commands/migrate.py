@@ -79,7 +79,7 @@ class Migrate(Command):
         new_ckpt, done_migrations, done_rollbacks = Migrator().sync(
             ckpt, steps=args.steps, n_migrations=args.n_migrations, target=args.target
         )
-        if len(done_migrations):
+        if len(done_migrations) or len(done_rollbacks):
             version = len(registered_migrations(ckpt))
             ckpt_path = Path(args.ckpt)
             new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
@@ -87,9 +87,15 @@ class Migrate(Command):
             LOGGER.info("Saved previous checkpoint here: %s", str(new_path.resolve()))
             torch.save(new_ckpt, ckpt_path)
         if len(done_migrations):
-            LOGGER.info("Executed %s migrations: %s", len(done_migrations), done_migrations)
+            LOGGER.info(
+                "Executed %s migrations: %s", len(done_migrations), [migration.name for migration in done_migrations]
+            )
         if len(done_rollbacks):
-            LOGGER.info("Executed %s migration rollbacks: %s", len(done_rollbacks), done_rollbacks)
+            LOGGER.info(
+                "Executed %s migration rollbacks: %s",
+                len(done_rollbacks),
+                [migration.name for migration in done_rollbacks],
+            )
 
 
 command = Migrate

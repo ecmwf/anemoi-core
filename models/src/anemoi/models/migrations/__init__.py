@@ -359,9 +359,12 @@ class Migrator:
         if steps is None:
             steps = len(ckpt[_ckpt_migration_key])
         for _ in range(steps):
-            last_migration = ckpt[_ckpt_migration_key].pop()
+            migration_name = ckpt[_ckpt_migration_key].pop()["name"]
+            last_migration = self._migration_map.get(migration_name, None)
+            if last_migration is None:
+                raise MissingMigrationException(f"Migration {migration_name} does not exist anymore. Cannot rollback.")
             rollbacks = [last_migration] + rollbacks
-            ckpt = self._migration_map[last_migration["name"]].rollback(ckpt)
+            ckpt = last_migration.rollback(ckpt)
         return ckpt, rollbacks
 
     def register_migrations(self, ckpt: CkptType) -> CkptType:
