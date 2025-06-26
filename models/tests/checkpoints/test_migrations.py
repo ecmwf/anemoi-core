@@ -25,6 +25,7 @@ def test_run_all_migrations():
     assert len(migrated_model["migrations"]) == 4
     assert "foo" in migrated_model and migrated_model["foo"] == "foo"
     assert "bar" in migrated_model and migrated_model["bar"] == "bar"
+    assert "baz" not in migrated_model
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
