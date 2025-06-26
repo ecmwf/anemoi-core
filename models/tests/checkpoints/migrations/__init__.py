@@ -1,15 +1,16 @@
 from pathlib import Path
-from typing import List
-from typing import Tuple
 
-from anemoi.models.migrations import Migration
-from anemoi.models.migrations import migrations_from_path
-
-here = Path(__file__)
+from anemoi.models.migrations import Migrator
 
 
-def load_test_migrations() -> Tuple[List[Migration], List[str]]:
-    return migrations_from_path(here.parent, __name__)
+def get_test_migrator() -> Migrator:
+    """Load the test migrator with migrations from this folder.
+
+    Returns
+    -------
+    A Migrator instance
+    """
+    return Migrator.from_path(Path(__file__).parent, __name__)
 
 
-__all__ = ["load_test_migrations"]
+__all__ = ["get_test_migrator"]
