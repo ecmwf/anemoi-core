@@ -11,11 +11,12 @@
 import logging
 from argparse import ArgumentParser
 from argparse import Namespace
+from pathlib import Path
 
 import torch
 
-from ..migrations import load_migrations
-from ..migrations import migrate_ckpt
+from ..migrations import Migrator
+from ..migrations import registered_migrations
 from . import Command
 
 LOGGER = logging.getLogger(__name__)
@@ -33,7 +34,38 @@ class RunMigration(Command):
             The argument parser to which the arguments will be added.
         """
         command_parser.add_argument("ckpt", help="Path to the checkpoint to migrate")
-        command_parser.add_argument("export_path", help="Where to export the new checkpoint")
+        command_parser.add_argument(
+            "--steps",
+            default=None,
+            type=int,
+            help=(
+                "Relative number of steps to execute. Positive migrates, negative rollbacks. "
+                "Defaults to execute all migrations."
+                "Mutually exclusive with --n_migrations and --target"
+            ),
+        )
+        command_parser.add_argument(
+            "--n_migrations",
+            default=None,
+            type=int,
+            help=(
+                "Absolute number of migrations to be executed. "
+                "Will migrate or rollback to have exactly this number of migrations executed. "
+                "Cannot be negative."
+                "Defaults to all migrations. "
+                "Mutually exclusive with --steps and --target"
+            ),
+        )
+        command_parser.add_argument(
+            "--target",
+            default=None,
+            type=str,
+            help=(
+                "Target version of anemoi-models. Will migrate or rollback accordingly. "
+                "Defaults to latest version. "
+                "Mutually exclusive with --steps and --n_migrations."
+            ),
+        )
 
     def run(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
@@ -43,13 +75,17 @@ class RunMigration(Command):
         args : Namespace
             The arguments passed to the command.
         """
-        migrations, failed_loading = load_migrations()
-        if len(failed_loading):
-            LOGGER.warning("Some migrations could not be loaded: %s", ", ".join(failed_loading))
-        new_ckpt, done_migrations, done_rollbacks = migrate_ckpt(
-            torch.load(args.ckpt, map_location="cpu", weights_only=False), migrations
+        ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+        new_ckpt, done_migrations, done_rollbacks = Migrator().sync(
+            ckpt, steps=args.steps, n_migrations=args.n_migrations, target=args.target
         )
-        torch.save(new_ckpt, args.export_path)
+        if len(done_migrations):
+            version = len(registered_migrations(ckpt))
+            ckpt_path = Path(args.ckpt)
+            new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
+            torch.save(ckpt, new_path)
+            LOGGER.info("Saved previous checkpoint here: %s", str(new_path.resolve()))
+            torch.save(new_ckpt, ckpt_path)
         if len(done_migrations):
             LOGGER.info("Executed %s migrations: %s", len(done_migrations), done_migrations)
         if len(done_rollbacks):

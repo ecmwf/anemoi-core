@@ -21,8 +21,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.models.migrations import load_migrations
-from anemoi.models.migrations import register_migrations_to_ckpt
+from anemoi.models.migrations import Migrator
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.utils.checkpoints import save_metadata
 
@@ -144,9 +143,7 @@ class RegisterMigrations(Callback):
     """Callback that register all existing migrations to a checkpoint before storing it"""
 
     def __init__(self):
-        self.migrations, failed_loaded = load_migrations()
-        if len(failed_loaded):
-            LOGGER.warning("Could not load %s migrations: %s", len(failed_loaded), ", ".join(failed_loaded))
+        self.migrator = Migrator()
 
     def on_save_checkpoint(self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any]):
-        register_migrations_to_ckpt(checkpoint, self.migrations)
+        self.migrator.register_migrations(checkpoint)
