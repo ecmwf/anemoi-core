@@ -19,13 +19,13 @@ versions: Versions = {
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint"""
-    ckpt["test"] = ckpt["baz"]
-    del ckpt["baz"]
+    assert "baz" in ckpt
+    ckpt["test"] = ckpt.pop("baz")
     return ckpt
 
 
 def rollback(ckpt: CkptType) -> CkptType:
     """Rollback the migration"""
-    ckpt["baz"] = ckpt["test"]
-    del ckpt["test"]
+    assert "test" in ckpt
+    ckpt["baz"] = ckpt.pop("test")
     return ckpt
