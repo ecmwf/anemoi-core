@@ -182,13 +182,12 @@ def gnn_config(
 @pytest.fixture
 def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -> OmegaConf:
     cfg, dataset_url = gnn_config
-    existing_ckpt = get_test_data("anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-Jun-24.ckpt")
+    existing_ckpt = get_test_data(
+        "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-06-24.ckpt",
+    )
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(
-        existing_ckpt,
-        checkpoint_dir / "last.ckpt",
-    )
+    shutil.copy(existing_ckpt, checkpoint_dir / "last.ckpt")
 
     cfg.training.run_id = "dummy_id"
     cfg.training.max_epochs = 3
