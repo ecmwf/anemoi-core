@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import importlib
 import logging
 from copy import deepcopy
 from dataclasses import dataclass
@@ -27,8 +28,6 @@ from typing import TypedDict
 from typing import Union
 
 import semver
-
-from anemoi.utils.cli import importlib
 
 MIGRATION_PATH = Path(__file__).parent
 
