@@ -22,7 +22,7 @@ from . import Command
 LOGGER = logging.getLogger(__name__)
 
 
-class RunMigration(Command):
+class Migrate(Command):
     """Migrate a checkpoint"""
 
     def add_arguments(self, command_parser: ArgumentParser) -> None:
@@ -92,4 +92,4 @@ class RunMigration(Command):
             LOGGER.info("Executed %s migration rollbacks: %s", len(done_rollbacks), done_rollbacks)
 
 
-command = RunMigration
+command = Migrate
