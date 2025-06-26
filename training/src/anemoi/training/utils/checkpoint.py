@@ -12,11 +12,18 @@ import io
 import logging
 import pickle
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
+from pytorch_lightning import Callback
+from pytorch_lightning import LightningModule
+from pytorch_lightning import Trainer
 
 from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.models.migrations import load_migrations
+from anemoi.models.migrations import register_migrations_to_ckpt
+from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
@@ -72,7 +79,6 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
-
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
 
@@ -132,3 +138,15 @@ def check_classes(model: torch.nn.Module) -> None:
     pickle.dump(model, buffer)
     buffer.seek(0)
     _ = LoggingUnpickler(buffer).load()
+
+
+class RegisterMigrations(Callback):
+    """Callback that register all existing migrations to a checkpoint before storing it"""
+
+    def __init__(self):
+        self.migrations, failed_loaded = load_migrations()
+        if len(failed_loaded):
+            LOGGER.warning("Could not load %s migrations: %s", len(failed_loaded), ", ".join(failed_loaded))
+
+    def on_save_checkpoint(self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any]):
+        register_migrations_to_ckpt(checkpoint, self.migrations)
