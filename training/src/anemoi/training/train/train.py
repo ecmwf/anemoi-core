@@ -323,7 +323,7 @@ class AnemoiTrainer:
         return checkpoint
 
     @cached_property
-    def last_checkpoint(self) -> str | None:
+    def last_checkpoint(self) -> Path | None:
         """Path to the last checkpoint."""
         if not self.start_from_checkpoint:
             return None
@@ -332,7 +332,7 @@ class AnemoiTrainer:
         checkpoint = self.get_checkpoint(fork_id)
 
         # Check if the last checkpoint exists
-        if Path(checkpoint).exists():
+        if checkpoint.exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
             return checkpoint
 
@@ -537,6 +537,7 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
+
         trainer.fit(
             self.model,
             datamodule=self.datamodule,
