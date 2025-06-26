@@ -256,6 +256,30 @@ def load_migrations() -> Tuple[List[Migration], List[str]]:
     return migrations_from_path(MIGRATION_PATH, __name__)
 
 
+def register_migrations_to_ckpt(ckpt: CkptType, migrations: Sequence[Migration]) -> CkptType:
+    """Registers a list of migration to the checkpoint.
+    Note: this does not execute any migration. It only registers them in the migration
+    key of the checkpoint.
+
+    Parameters
+    ----------
+    ckpt : CkptType
+        The checkpoint
+    migrations : Sequence[Migration]
+        Sequence of migrations to add to the checkpoint migration key
+
+    Returns
+    -------
+    CkptType
+        Checkpoint with registered migrations
+    """
+    if _ckpt_migration_key not in ckpt:
+        ckpt[_ckpt_migration_key] = []
+    for migration in migrations:
+        ckpt[_ckpt_migration_key].append(migration.serialize())
+    return ckpt
+
+
 __all__ = [
     "MIGRATION_PATH",
     "CkptType",
@@ -264,4 +288,5 @@ __all__ = [
     "migrate_ckpt",
     "migrations_from_path",
     "load_migrations",
+    "register_migrations_to_ckpt",
 ]
