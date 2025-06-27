@@ -132,3 +132,11 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     AnemoiTrainer(cfg).train()
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+
+
+@skip_if_offline
+@pytest.mark.longtests
+def test_restart_from_existing_checkpoint(gnn_config_with_checkpoint: DictConfig, get_test_archive: callable) -> None:
+    cfg, url = gnn_config_with_checkpoint
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
