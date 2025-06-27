@@ -146,6 +146,6 @@ class RegisterMigrations(Callback):
         self.migrator = Migrator()
 
     def on_save_checkpoint(
-        self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any]
-    ) -> None:  # noqa: ARG002
+        self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any],
+    ) -> None:
         self.migrator.register_migrations(checkpoint)
