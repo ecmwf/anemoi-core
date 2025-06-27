@@ -11,11 +11,14 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
+from pydantic import RootModel
 from pydantic import ValidationError
+from pydantic import field_validator
 from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
@@ -47,12 +50,52 @@ class ImputerSchema(BaseModel):
     "Variables not to be imputed."
 
 
-class ConstantImputerSchema(BaseModel):
-    default: Union[str, float] = Field(default=None)
-    "ConstantImputer default method to apply."
-    # TODO(how): float possible
-    none: Union[list[str], None] = Field(default_factory=list)
-    "Variables not to be imputed."
+class ConstantImputerSchema(RootModel[dict[Any, Any]]):
+    """Schema for constant imputer.
+
+    Expects the config to have keys corresponding to available statistics
+    and values as lists of variables to impute.:
+    ```
+    default: "none"
+    1:
+        - y
+    5.0:
+        - x
+    3.14:
+        - q
+    none:
+        - z
+        - other
+    ```
+    """
+
+    @field_validator("root")
+    @classmethod
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
+
+        for k, v in values.items():
+            if k == "default":
+                if not isinstance(v, (int, float)):
+                    if v is None or v == "none" or v == "None":
+                        continue
+                    msg = f'"default" must map to a float or None, got {type(v).__name__}'
+                    raise TypeError(msg)
+            elif k == "none":
+                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                    msg = f'"none" must map to a list of strings, got {v}'
+                    raise TypeError(msg)
+
+            elif isinstance(k, (int, float)):
+                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                    msg = f'Key "{k}" must map to a list of strings, got {v}'
+                    raise TypeError(msg)
+
+            # Reject all other keys
+            else:
+                msg = f'Key "{k}" must be either a number, "none" or "default", got {type(k).__name__}'
+                raise TypeError(msg)
+
+        return values
 
 
 class PostprocessorSchema(BaseModel):
