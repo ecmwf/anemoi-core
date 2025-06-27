@@ -47,6 +47,43 @@ class ImputerSchema(BaseModel):
     "Variables not to be imputed."
 
 
+class ConstantImputerSchema(BaseModel):
+    default: Union[str, float] = Field(default=None)
+    "ConstantImputer default method to apply."
+    # TODO(how): float possible
+    none: Union[list[str], None] = Field(default_factory=list)
+    "Variables not to be imputed."
+
+
+class PostprocessorSchema(BaseModel):
+    default: str = Field(literals=["none", "relu", "hardtanh"])
+    "Postprocessor default method to apply."
+    relu: Union[list[str], None] = Field(default_factory=list)
+    "Variables to postprocess with relu."
+    hardtanh: Union[list[str], None] = Field(default_factory=list)
+    "Variables to postprocess with hardtanh."
+    none: Union[list[str], None] = Field(default_factory=list)
+    "Variables not to be postprocessed."
+
+
+class NormalizedReluPostprocessorSchema(BaseModel):
+    default: Union[str, float] = Field(default=None)
+    "Postprocessor default method to apply."
+    # TODO(how): float possible
+    none: Union[list[str], None] = Field(default_factory=list)
+    "Variables not to be postprocessed."
+
+
+class ConditionalZeroPostprocessorSchema(BaseModel):
+    default: Union[str, float] = Field(default=None)
+    "Postprocessor default method to apply."
+    remap: str
+    "Variable to be used as conditional."
+    # TODO(how): float possible
+    none: Union[list[str], None] = Field(default_factory=list)
+    "Variables not to be postprocessed."
+
+
 class RemapperSchema(BaseModel):
     default: str = Field(literals=["none", "log1p", "sqrt", "boxcox"])
     "Remapper default method to apply."
@@ -57,21 +94,39 @@ class RemapperSchema(BaseModel):
 class PreprocessorTarget(str, Enum):
     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
+    const_imputer = "anemoi.models.preprocessing.imputer.ConstantImputer"
     remapper = "anemoi.models.preprocessing.remapper.Remapper"
+    postprocessor = "anemoi.models.preprocessing.postprocessor.Postprocessor"
+    conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
+    normalized_relu_postprocessor = "anemoi.models.preprocessing.postprocessor.NormalizedReluPostprocessor"
 
 
 target_to_schema = {
     PreprocessorTarget.normalizer: NormalizerSchema,
     PreprocessorTarget.imputer: ImputerSchema,
+    PreprocessorTarget.const_imputer: ConstantImputerSchema,
     PreprocessorTarget.remapper: RemapperSchema,
+    PreprocessorTarget.postprocessor: PostprocessorSchema,
+    PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
+    PreprocessorTarget.normalized_relu_postprocessor: NormalizedReluPostprocessorSchema,
 }
 
 
 class PreprocessorSchema(BaseModel):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
-    config: Union[NormalizerSchema, ImputerSchema, RemapperSchema]
+    config: Union[
+        NormalizerSchema,
+        ImputerSchema,
+        ConstantImputerSchema,
+        RemapperSchema,
+        PostprocessorSchema,
+        ConditionalZeroPostprocessorSchema,
+        NormalizedReluPostprocessorSchema,
+    ]
     "Target schema containing processor methods."
+    normalizer: Union[str, None] = Field(default=None, literals=["none", "mean-std", "std", "min-max", "max"])
+    "Normalizer method to apply before normalized relu."
 
     @model_validator(mode="after")
     def schema_consistent_with_target(self) -> PreprocessorSchema:
