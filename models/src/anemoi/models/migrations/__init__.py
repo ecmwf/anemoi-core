@@ -172,7 +172,7 @@ class Migrator:
                 Missing migrations from the checkpoint to execute
         """
         if _ckpt_migration_key not in ckpt:
-            return list(self._migration_map.values())
+            return self._migrations
         done_migrations = ckpt[_ckpt_migration_key]
         # Migration should be done in order, we look for the the last done migration and
         # execute the rest. This is to allow havind removed migrations in a checkpoint and
