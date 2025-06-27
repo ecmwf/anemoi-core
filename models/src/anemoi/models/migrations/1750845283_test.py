@@ -19,7 +19,6 @@ versions: Versions = {
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint"""
-    print(ckpt)
     return ckpt
 
 
