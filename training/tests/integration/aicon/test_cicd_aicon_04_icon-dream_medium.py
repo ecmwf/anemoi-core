@@ -29,6 +29,7 @@ from typeguard import typechecked
 import anemoi.training
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.utils.testing import skip_slow_tests
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
 os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
@@ -99,7 +100,7 @@ def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
     BaseSchema(**aicon_config_with_tmp_dir)
 
 
-@pytest.mark.longtests
+@skip_slow_tests
 @typechecked
 def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     """Test for presence of metadata required for inference.
@@ -134,7 +135,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     assert trainer.model.model.model.decoder.proc.num_chunks == aicon_config_with_grid.model.decoder.num_chunks
 
 
-@pytest.mark.longtests
+@skip_slow_tests
 @typechecked
 def test_aicon_training(trained_aicon: tuple) -> None:
     trainer, initial_sum, final_sum = trained_aicon

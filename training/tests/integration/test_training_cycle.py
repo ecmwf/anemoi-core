@@ -11,12 +11,12 @@ import logging
 import os
 from pathlib import Path
 
-import pytest
 from omegaconf import DictConfig
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import skip_if_offline
+from anemoi.utils.testing import skip_slow_tests
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -25,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@skip_slow_tests
 def test_training_cycle_architecture_configs(
     architecture_config: tuple[DictConfig, str],
     get_test_archive: callable,
@@ -41,7 +41,7 @@ def test_config_validation_architecture_configs(architecture_config: tuple[DictC
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@skip_slow_tests
 def test_training_cycle_without_config_validation(
     gnn_config: tuple[DictConfig, str],
     get_test_archive: callable,
@@ -55,7 +55,7 @@ def test_training_cycle_without_config_validation(
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@skip_slow_tests
 def test_training_cycle_stretched(stretched_config: tuple[DictConfig, list[str]], get_test_archive: callable) -> None:
     cfg, urls = stretched_config
     for url in urls:
@@ -69,7 +69,7 @@ def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[st
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@skip_slow_tests
 def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_archive: callable) -> None:
     cfg, urls = lam_config
     for url in urls:
@@ -78,7 +78,7 @@ def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_a
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@skip_slow_tests
 def test_training_cycle_lam_with_existing_graph(
     lam_config_with_graph: tuple[DictConfig, list[str]],
     get_test_archive: callable,
@@ -95,7 +95,7 @@ def test_config_validation_lam(lam_config: DictConfig) -> None:
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@skip_slow_tests
 def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
     cfg, url = ensemble_config
     get_test_archive(url)
@@ -108,7 +108,7 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@skip_slow_tests
 def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
     cfg, url = gnn_config
     get_test_archive(url)
