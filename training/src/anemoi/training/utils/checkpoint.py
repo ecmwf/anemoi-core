@@ -140,10 +140,12 @@ def check_classes(model: torch.nn.Module) -> None:
 
 
 class RegisterMigrations(Callback):
-    """Callback that register all existing migrations to a checkpoint before storing it"""
+    """Callback that register all existing migrations to a checkpoint before storing it."""
 
     def __init__(self):
         self.migrator = Migrator()
 
-    def on_save_checkpoint(self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any]):
+    def on_save_checkpoint(
+        self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any]
+    ) -> None:  # noqa: ARG002
         self.migrator.register_migrations(checkpoint)
