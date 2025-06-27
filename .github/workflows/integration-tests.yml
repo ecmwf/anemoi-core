@@ -1,5 +1,9 @@
 name: nightly-ci-integration-tests
 on:
+  # Need to revert this before merging to main, just for purposes of testing
+  # the workflow.
+  pull_request:
+    types: [opened, synchronize, reopened]
   schedule:
     - cron: "0 23 * * *"  # every day at 22pm on default(main) branch
   workflow_dispatch:
@@ -8,14 +12,14 @@ jobs:
   integration_tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: ecmwf/reusable-workflows/nightly-pytest@main
+      - uses: ecmwf/reusable-workflows/nightly-pytest@feat/add-env-vars-to-nightly-python-action
         with:
           repository: ${{github.repository}}
           ref: ${{github.ref}}
           python-version: '3.10'
           install-package: "-e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests]"
           test-directory: "training/tests/integration"
-          pytest-options: "--longtests"
+          env-vars: "SLOW_TESTS=1"
           manual: ${{github.event_name == 'workflow_dispatch' && 'true' || 'false'}}
 
   notify-team:
