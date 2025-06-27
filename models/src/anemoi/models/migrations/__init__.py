@@ -38,7 +38,7 @@ class MissingMigrationException(BaseException):
     pass
 
 
-class CkptType(MutableMapping[str, Any]): ...
+CkptType = MutableMapping[str, Any]
 
 
 # migration is the version of the migration module to allow future update of
