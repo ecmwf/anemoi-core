@@ -244,7 +244,7 @@ available, then from the top-level directory of anemoi-core run:
 
 .. code:: bash
 
-   pytest training/tests/integration --longtests
+   SLOW_TESTS=1 pytest training/tests/integration
 
 *********************************************
  Configuration handling in integration tests
