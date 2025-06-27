@@ -45,7 +45,7 @@ class Migrate(Command):
             ),
         )
         command_parser.add_argument(
-            "--n_migrations",
+            "--n-migrations",
             default=None,
             type=int,
             help=(
