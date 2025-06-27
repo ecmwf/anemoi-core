@@ -120,10 +120,12 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
 
 
 class RegisterMigrations(Callback):
-    """Callback that register all existing migrations to a checkpoint before storing it"""
+    """Callback that register all existing migrations to a checkpoint before storing it."""
 
     def __init__(self):
         self.migrator = Migrator()
 
-    def on_save_checkpoint(self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any]):
+    def on_save_checkpoint(
+        self, trainer: Trainer, pl_module: LightningModule, checkpoint: dict[str, Any]
+    ) -> None:  # noqa: ARG002
         self.migrator.register_migrations(checkpoint)
