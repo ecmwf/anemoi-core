@@ -9,11 +9,9 @@
 
 import logging
 import os
-from pathlib import Path
 
 from omegaconf import DictConfig
 
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import skip_if_offline
 from anemoi.utils.testing import skip_slow_tests
