@@ -113,7 +113,7 @@ class PostprocessorSchema(BaseModel):
     "Variables not to be postprocessed."
 
 
-class NormalizedReluPostprocessorSchema(BaseModel):
+class NormalizedReluPostprocessorSchema(RootModel[dict[Any, Any]]):
     """Schema for the NormalizedReluPostProcessor.
 
     Expects the config to have keys corresponding to customizable thresholds and lists of variables
@@ -129,9 +129,10 @@ class NormalizedReluPostprocessorSchema(BaseModel):
     ```
     """
 
-    @model_validator(mode="after")
-    def validate_entries(self) -> dict[Any, Any]:
-        values = self.__dict__
+    @field_validator("root")
+    @classmethod
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
+
         for k, v in values.items():
 
             if k == "normalizer":
@@ -142,8 +143,12 @@ class NormalizedReluPostprocessorSchema(BaseModel):
                     msg = f'"normalizer" must be one of "none", "mean-std", "std", "min-max", "max", got {v}'
                     raise ValueError(msg)
 
+            # Accept numeric keys as int or float
             elif isinstance(k, (int, float)):
-                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                if not isinstance(v, Iterable) or isinstance(v, (str, bytes)):
+                    msg = f'Key "{k}" must map to a list of strings, got {v}'
+                    raise TypeError(msg)
+                if not all(isinstance(i, str) for i in v):
                     msg = f'Key "{k}" must map to a list of strings, got {v}'
                     raise TypeError(msg)
 
@@ -155,7 +160,7 @@ class NormalizedReluPostprocessorSchema(BaseModel):
         return values
 
 
-class ConditionalZeroPostprocessorSchema(BaseModel):
+class ConditionalZeroPostprocessorSchema(RootModel[dict[Any, Any]]):
     """Schema for ConditionalZeroPostProcessor.
 
     Expects the config to have keys corresponding to customizable values and lists of variables
@@ -175,9 +180,10 @@ class ConditionalZeroPostprocessorSchema(BaseModel):
     If "x" is zero, "y" will be postprocessed with 0, "x" with 5.0 and "q" with 3.14.
     """
 
-    @model_validator(mode="after")
-    def validate_entries(self) -> dict[Any, Any]:
-        values = self.__dict__
+    @field_validator("root")
+    @classmethod
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
+
         for k, v in values.items():
             if k == "default":
                 if not isinstance(v, (int, float)):
@@ -190,8 +196,12 @@ class ConditionalZeroPostprocessorSchema(BaseModel):
                     msg = f'"remap" must map to a strings, got {v}'
                     raise TypeError(msg)
 
+            # Accept numeric keys as int or float
             elif isinstance(k, (int, float)):
-                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                if not isinstance(v, Iterable) or isinstance(v, (str, bytes)):
+                    msg = f'Key "{k}" must map to a list of strings, got {v}'
+                    raise TypeError(msg)
+                if not all(isinstance(i, str) for i in v):
                     msg = f'Key "{k}" must map to a list of strings, got {v}'
                     raise TypeError(msg)
 
@@ -249,8 +259,6 @@ class PreprocessorSchema(BaseModel):
         # If it's a RootModel (like ConstantImputerSchema), extract the root dict
         if hasattr(validated, "root"):
             self.config = validated.root
-        elif hasattr(validated, "model_dump"):
-            self.config = validated.model_dump()
         else:
             self.config = validated
         return self
