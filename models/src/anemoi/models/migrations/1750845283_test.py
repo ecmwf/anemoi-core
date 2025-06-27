@@ -9,12 +9,14 @@
 
 
 from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import Versions
+from anemoi.models.migrations import Metadata
 
-versions: Versions = {
-    "migration": "1.0.0",
-    "anemoi-models": "0.8.1.post1",
-}
+metadata = Metadata(
+    versions={
+        "migration": "1.0.0",
+        "anemoi-models": "0.8.1.post1",
+    }
+)
 
 
 def migrate(ckpt: CkptType) -> CkptType:

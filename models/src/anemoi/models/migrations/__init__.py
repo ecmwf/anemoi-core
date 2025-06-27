@@ -47,6 +47,11 @@ Versions = TypedDict("Versions", {"migration": str, "anemoi-models": str})
 
 
 @dataclass
+class Metadata:
+    versions: Versions
+
+
+@dataclass
 class Migration:
     """Represents a migration"""
 
@@ -56,8 +61,8 @@ class Migration:
     """Callback to execute the migration"""
     rollback: Callable[[CkptType], CkptType]
     """Callback to execute a migration rollback"""
-    versions: Versions
-    """Tracked versions"""
+    metadata: Metadata
+    """Tracked metadata"""
 
     def serialize(self) -> str:
         return self.name
@@ -109,10 +114,7 @@ def _migrations_from_path(location: Union[str, PathLike], package: str) -> List[
 
         migrations.append(
             Migration(
-                name=file.stem,
-                migrate=migration.migrate,
-                rollback=migration.rollback,
-                versions=migration.versions,
+                name=file.stem, migrate=migration.migrate, rollback=migration.rollback, metadata=migration.metadata
             )
         )
     return migrations
@@ -211,7 +213,7 @@ class Migrator:
         if not len(done_migrations):
             current_version = "0.0.0"
         else:
-            current_version = self._migration_map[done_migrations[-1]].versions["anemoi-models"]
+            current_version = self._migration_map[done_migrations[-1]].metadata.versions["anemoi-models"]
         current = semver.Version.parse(current_version)
         target = semver.Version.parse(target_version)
         steps = 0
@@ -221,7 +223,7 @@ class Migrator:
                 migration = self._migration_map.get(migration_name, None)
                 if migration is None:
                     raise MissingMigrationException(f"{migration_name} does not exist anymore.")
-                if semver.Version.parse(migration.versions["anemoi-models"]) <= target_version:
+                if semver.Version.parse(migration.metadata.versions["anemoi-models"]) <= target_version:
                     return steps
                 steps -= 1
         else:
@@ -229,7 +231,7 @@ class Migrator:
             for migration in self._migrations:
                 if migration.name in done_migrations:
                     continue
-                if semver.Version.parse(migration.versions["anemoi-models"]) > target_version:
+                if semver.Version.parse(migration.metadata.versions["anemoi-models"]) > target_version:
                     return steps
                 steps += 1
         return steps

@@ -63,12 +63,16 @@ class CreateMigration(Command):
 
 
                     from anemoi.models.migrations import CkptType
-                    from anemoi.models.migrations import Versions
+                    from anemoi.models.migrations import Metadata
 
-                    versions: Versions = {{
-                        "migration": "1.0.0",
-                        "anemoi-models": "{version_anemoi_models}",
-                    }}
+                    from anemoi.models.migrations import Metadata
+
+                    metadata = Metadata(
+                        versions={{
+                            "migration": "1.0.0",
+                            "anemoi-models": "{version_anemoi_models}",
+                        }}
+                    )
 
 
                     def migrate(ckpt: CkptType) -> CkptType:
