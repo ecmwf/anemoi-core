@@ -14,14 +14,14 @@ from typing import Optional
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.preprocessing import BasePreprocessor
 from anemoi.models.layers.activations import CustomRelu
+from anemoi.models.preprocessing import BasePreprocessor
 
 LOGGER = logging.getLogger(__name__)
 
 
 class Postprocessor(BasePreprocessor):
-    """Base class for Imputers."""
+    """Class for Basic Postprocessors."""
 
     def __init__(
         self,
@@ -29,7 +29,7 @@ class Postprocessor(BasePreprocessor):
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
     ) -> None:
-        """Initialize the imputer.
+        """Initialize the Postprocessor.
 
         Parameters
         ----------
@@ -42,7 +42,7 @@ class Postprocessor(BasePreprocessor):
         """
         super().__init__(config, data_indices, statistics)
 
-        self._create_imputation_indices()
+        self._create_postprocessing_indices()
 
         self._validate_indices()
 
@@ -50,14 +50,12 @@ class Postprocessor(BasePreprocessor):
         assert (
             len(self.index_training_output) == len(self.index_inference_output) <= len(self.postprocessorfunctions)
         ), (
-            f"Error creating imputation indices {len(self.index_training_output)}, "
+            f"Error creating postprocessing indices {len(self.index_training_output)}, "
             f"{len(self.index_inference_output)}, {len(self.postprocessorfunctions)}"
         )
 
-    def _create_imputation_indices(
-        self,
-    ):
-        """Create the indices for imputation."""
+    def _create_postprocessing_indices(self):
+        """Create the indices for postprocessing."""
         name_to_index_training_output = self.data_indices.data.output.name_to_index
         name_to_index_inference_output = self.data_indices.model.output.name_to_index
 
@@ -70,31 +68,38 @@ class Postprocessor(BasePreprocessor):
             self.postprocessorfunctions,
         ) = ([], [], [])
 
-        # Create indices for imputation
+        # Create indices for postprocessing
         for name in name_to_index_training_output:
 
             method = self.methods.get(name, self.default)
             if method == "none":
                 LOGGER.debug(f"Postprocessor: skipping {name} as no postprocessing method is specified")
                 continue
-
             assert name in name_to_index_inference_output, (
                 f"Postprocessor: {name} not found in inference output indices. "
-                f"Postprocessors cannot be applied to foorcing variables."
+                f"Postprocessors cannot be applied to forcing variables."
             )
 
-            self.index_training_output.append(name_to_index_training_output.get(name, None))
-            self.index_inference_output.append(name_to_index_inference_output.get(name, None))
+            self.index_training_output.append(self._get_index(name_to_index_training_output, name))
+            self.index_inference_output.append(self._get_index(name_to_index_inference_output, name))
+            self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
 
-            if method == "relu":
-                self.postprocessorfunctions.append(torch.nn.functional.relu)
-            elif method == "hardtanh":
-                self.postprocessorfunctions.append(torch.nn.functional.hardtanh)
+    def _get_index(self, name_to_index_dict, name):
+        return name_to_index_dict.get(name, None)
 
-            LOGGER.info(f"Postprocessor: applying {method} to {name}")
+    def _get_postprocessor_function(self, method, name):
+        if method == "relu":
+            postprocessor_function = torch.nn.functional.relu
+        elif method == "hardtanh":
+            postprocessor_function = torch.nn.functional.hardtanh
+        else:
+            raise ValueError(f"Unknown postprocessing method: {method}")
+
+        LOGGER.info(f"Postprocessor: applying {method} to {name}")
+        return postprocessor_function
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
+        """Postprocess model output tensor."""
         if not in_place:
             x = x.clone()
 
@@ -115,14 +120,12 @@ class Postprocessor(BasePreprocessor):
         return x
 
 
-
-
 class NormalizedReluPostprocessor(Postprocessor):
     """Postprocess with a ReLU activation and customizable thresholds.
 
-    Expects the config to have keys corresponding to customizable thresholds as lists of variables to impute.:
+    Expects the config to have keys corresponding to customizable thresholds and lists of variables to postprocess and a normalizer to apply to thresholds.:
     ```
-    nornmalizer: 'mean-std'
+    normalizer: 'mean-std'
     1:
         - y
     0:
@@ -130,7 +133,7 @@ class NormalizedReluPostprocessor(Postprocessor):
     3.14:
         - q
     ```
-    Thresholds are in un-normalized space. If normalizer is specified, the threshold values are not normalized.
+    Thresholds are in un-normalized space. If normalizer is specified, the threshold values are normalized.
     This is necessary if in config file the normalizer is specified before the postprocessor, e.g.:
     ```
     data:
@@ -168,62 +171,37 @@ class NormalizedReluPostprocessor(Postprocessor):
 
         super().__init__(config, data_indices, statistics)
 
-    def _create_imputation_indices(
-        self,
-    ):
-        """Create the indices for imputation."""
-        name_to_index_training_output = self.data_indices.data.output.name_to_index
-        name_to_index_inference_output = self.data_indices.model.output.name_to_index
+    def _get_postprocessor_function(self, method: float, name: str) -> CustomRelu:
+        """Get the relu function class for the specified threshold and name."""
+        stat_index = self.data_indices.data.input.name_to_index[name]
+        normalized_value = method
+        if self.normalizer == "mean-std":
+            mean = self.statistics["mean"][stat_index]
+            std = self.statistics["stdev"][stat_index]
+            normalized_value = (method - mean) / std
+        elif self.normalizer == "min-max":
+            min_stat = self.statistics["minimum"][stat_index]
+            max_stat = self.statistics["maximum"][stat_index]
+            normalized_value = (method - min_stat) / (max_stat - min_stat)
+        elif self.normalizer == "max":
+            max_stat = self.statistics["maximum"][stat_index]
+            normalized_value = method / max_stat
+        elif self.normalizer == "std":
+            std = self.statistics["stdev"][stat_index]
+            normalized_value = method / std
+        postprocessor_function = CustomRelu(normalized_value)
 
-        self.num_training_output_vars = len(name_to_index_training_output)
-        self.num_inference_output_vars = len(name_to_index_inference_output)
-
-        (
-            self.index_training_output,
-            self.index_inference_output,
-            self.postprocessorfunctions,
-        ) = ([], [], [])
-
-        # Create indices for imputation
-        for name in name_to_index_training_output:
-
-            method = self.methods.get(name, self.default)
-            if method == "none":
-                LOGGER.debug(f"CustomReluPostprocessor: skipping {name} as no postprocessing method is specified")
-                continue
-
-            self.index_training_output.append(name_to_index_training_output.get(name, None))
-            self.index_inference_output.append(name_to_index_inference_output.get(name, None))
-
-            stat_index = self.data_indices.data.input.name_to_index[name]
-            normalized_value = method
-            if self.normalizer == "mean-std":
-                mean = self.statistics["mean"][stat_index]
-                std = self.statistics["stdev"][stat_index]
-                normalized_value = (method - mean) / std
-            elif self.normalizer == "min-max":
-                min_stat = self.statistics["minimum"][stat_index]
-                max_stat = self.statistics["maximum"][stat_index]
-                normalized_value = (method - min_stat) / (max_stat - min_stat)
-            elif self.normalizer == "max":
-                max_stat = self.statistics["maximum"][stat_index]
-                normalized_value = method / max_stat
-            elif self.normalizer == "std":
-                std = self.statistics["stdev"][stat_index]
-                normalized_value = method / std
-
-            self.postprocessorfunctions.append(CustomRelu(normalized_value))
-
-            LOGGER.info(
-                f"NormalizedReluPostprocessor: applying NormalizedRelu with threshold {normalized_value} after {self.normalizer} normalization to {name}."
-            )
+        LOGGER.info(
+            f"NormalizedReluPostprocessor: applying NormalizedRelu with threshold {normalized_value} after {self.normalizer} normalization to {name}."
+        )
+        return postprocessor_function
 
 
 class ConditionalZeroPostprocessor(Postprocessor):
     """Sets values to specified value where another variable is zero.
 
-    Expects the config to have keys corresponding to available statistics
-    and values as lists of variables to impute.:
+    Expects the config to have keys corresponding to customizable values and lists of variables to postprocess and a variable to use for postprocessing.:
+
     ```
     default: "none"
     remap: "x"
@@ -235,7 +213,7 @@ class ConditionalZeroPostprocessor(Postprocessor):
         - q
     ```
 
-    If "x" is zero, "y" will be imputed with 0, "x" with 5.0 and "q" with 3.14.
+    If "x" is zero, "y" will be postprocessed with 0, "x" with 5.0 and "q" with 3.14.
     """
 
     def __init__(
@@ -246,14 +224,10 @@ class ConditionalZeroPostprocessor(Postprocessor):
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
-        self._create_imputation_indices()
-
-        self._validate_indices()
-
-    def _create_imputation_indices(
+    def _create_postprocessing_indices(
         self,
     ):
-        """Create the indices for imputation."""
+        """Create the indices for postprocessing and retrieve index of masking variable."""
         name_to_index_training_output = self.data_indices.data.output.name_to_index
         name_to_index_inference_output = self.data_indices.model.output.name_to_index
 
@@ -270,34 +244,42 @@ class ConditionalZeroPostprocessor(Postprocessor):
             self.postprocessorfunctions,
         ) = ([], [], [])
 
-        # Create indices for imputation
+        # Create indices for postprocessing
         for name in name_to_index_training_output:
 
             method = self.methods.get(name, self.default)
             if method == "none":
-                LOGGER.debug(f"ConditionalZeroPostprocessor: skipping {name} as no method is specified.")
+                LOGGER.debug(f"Postprocessor: skipping {name} as no postprocessing method is specified")
                 continue
-
-            self.index_training_output.append(name_to_index_training_output.get(name, None))
-            self.index_inference_output.append(name_to_index_inference_output.get(name, None))
-
-            self.postprocessorfunctions.append(method)
-
-            LOGGER.info(
-                f"ConditionalZeroPostprocessor: replacing valus in {name} with value {self.postprocessorfunctions[-1]} if {self.masking_variable} is zero."
+            assert name in name_to_index_inference_output, (
+                f"Postprocessor: {name} not found in inference output indices. "
+                f"Postprocessors cannot be applied to forcing variables."
             )
+
+            self.index_training_output.append(self._get_index(name_to_index_training_output, name))
+            self.index_inference_output.append(self._get_index(name_to_index_inference_output, name))
+            self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
+
+    def _get_postprocessor_function(self, method: float, name: str):
+        """For ConditionalZeroPostprocessor, the 'method' is the constant value to fill
+        when the masking variable is zero. This function simply returns the value.
+        """
+        LOGGER.info(
+            f"ConditionalZeroPostprocessor: replacing valus in {name} with value {method} if {self.masking_variable} is zero."
+        )
+        return method
 
     def _expand_subset_mask(self, x: torch.Tensor, mask: torch.tensor) -> torch.Tensor:
         """Expand the subset of the mask to the correct shape."""
         return mask.expand(*x.shape[:-2], -1)
 
     def get_zeros(self, x: torch.Tensor) -> torch.Tensor:
-        """get zero mask from data"""
+        """Get zero mask from data"""
         # The mask is only saved for the last dimension (grid)
         idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
         return (x[idx] == 0).squeeze()
 
-    def fill_with_value(self, x, index, fill_mask):
+    def fill_with_value(self, x: torch.Tensor, index: list[int], fill_mask: torch.tensor):
         for idx_dst, value in zip(index, self.postprocessorfunctions):
             if idx_dst is not None:
                 x[..., idx_dst][self._expand_subset_mask(x, fill_mask)] = value
@@ -308,7 +290,7 @@ class ConditionalZeroPostprocessor(Postprocessor):
         if not in_place:
             x = x.clone()
 
-        # Replace original nans with nan again
+        # Replace with value if masking variable is zero
         if x.shape[-1] == self.num_training_output_vars:
             index = self.index_training_output
             masking_variable = self.masking_variable_training_output
