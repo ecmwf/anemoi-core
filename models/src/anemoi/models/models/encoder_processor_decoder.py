@@ -147,7 +147,13 @@ class AnemoiModelEncProcDec(nn.Module):
         return A_
 
     def _multiply_sparse(self, x, A):
-        return torch.sparse.mm(A, x)
+        if torch.cuda.is_available():
+            with torch.amp.autocast(device_type="cuda", enabled=False):
+                out = torch.sparse.mm(A, x)
+        else:
+            with torch.amp.autocast(device_type="cpu", enabled=False):
+                out = torch.sparse.mm(A, x)
+        return out
 
     def _truncate_fields(self, x, A, batch_size=None, auto_cast=False):
         if not batch_size:
