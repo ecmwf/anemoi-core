@@ -18,7 +18,6 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import List
-from typing import Mapping
 from typing import MutableMapping
 from typing import Optional
 from typing import Sequence
@@ -61,8 +60,8 @@ class Migration:
     versions: Versions
     """Tracked versions"""
 
-    def serialize(self) -> Dict[str, Any]:
-        return {"name": self.name, "versions": self.versions}
+    def serialize(self) -> str:
+        return self.name
 
 
 def registered_migrations(ckpt: CkptType) -> List[Dict[str, Any]]:
@@ -171,37 +170,37 @@ class Migrator:
         Returns
         -------
         Sequence[Migration]
-            Missing migrations from the checkpoint to execute
+                Missing migrations from the checkpoint to execute
         """
         if _ckpt_migration_key not in ckpt:
-            return self._migrations
+            return list(self._migration_map.values())
         done_migrations = ckpt[_ckpt_migration_key]
-        done_migration_names = [migration["name"] for migration in done_migrations]
         # Migration should be done in order, we look for the the last done migration and
         # execute the rest. This is to allow havind removed migrations in a checkpoint and
         # not complain.
         key_rest_migration = 0
-        for k, mig in reversed(list(enumerate(self._migrations))):
-            if mig.name in done_migration_names:
-                key_rest_migration = k + 1
+        num_migrations = len(self._migrations)
+        for k, mig in enumerate(reversed(self._migrations)):
+            if mig.name in done_migrations:
+                key_rest_migration = num_migrations - k
 
         if self._raise_missing_migrations:
             for migration in self._migrations[:key_rest_migration]:
-                if migration.name not in done_migration_names:
+                if migration.name not in done_migrations:
                     raise MissingMigrationException(
                         f"{migration.name} is not part of the checkpoint but cannot be executed (out of order)."
                     )
         return self._migrations[key_rest_migration:]
 
-    def _get_steps_from_target(self, done_migrations: Sequence[Mapping[str, Any]], target_version: str) -> int:
+    def _get_steps_from_target(self, done_migrations: Sequence[str], target_version: str) -> int:
         """Returns the number of migration steps to execute given a target version
 
         Parameters
         ----------
         migrations : Sequence[Migration]
             All possible migrations
-        done_migrations : Sequence[Mapping[str, Any]]
-            Already done migrations
+        done_migrations : Sequence[str]
+            Names of already done migrations in the checkpoint
         target_version : str
             The target version
 
@@ -213,21 +212,23 @@ class Migrator:
         if not len(done_migrations):
             current_version = "0.0.0"
         else:
-            current_version = done_migrations[-1]["versions"]["anemoi-models"]
+            current_version = self._migration_map[done_migrations[-1]].versions["anemoi-models"]
         current = semver.Version.parse(current_version)
         target = semver.Version.parse(target_version)
-        done_migration_names = [migration["name"] for migration in done_migrations]
         steps = 0
         if current > target:
             # rollback
-            for migration in reversed(done_migrations):
-                if semver.Version.parse(migration["versions"]["anemoi-models"]) <= target_version:
+            for migration_name in reversed(done_migrations):
+                migration = self._migration_map.get(migration_name, None)
+                if migration is None:
+                    raise MissingMigrationException(f"{migration_name} does not exist anymore.")
+                if semver.Version.parse(migration.versions["anemoi-models"]) <= target_version:
                     return steps
                 steps -= 1
         else:
             # migrate
             for migration in self._migrations:
-                if migration.name in done_migration_names:
+                if migration.name in done_migrations:
                     continue
                 if semver.Version.parse(migration.versions["anemoi-models"]) > target_version:
                     return steps
@@ -359,7 +360,7 @@ class Migrator:
         if steps is None:
             steps = len(ckpt[_ckpt_migration_key])
         for _ in range(steps):
-            migration_name = ckpt[_ckpt_migration_key].pop()["name"]
+            migration_name = ckpt[_ckpt_migration_key].pop()
             last_migration = self._migration_map.get(migration_name, None)
             if last_migration is None:
                 raise MissingMigrationException(f"Migration {migration_name} does not exist anymore. Cannot rollback.")

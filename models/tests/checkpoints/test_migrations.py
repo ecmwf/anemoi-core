@@ -32,7 +32,7 @@ def test_run_all_migrations():
 def test_run_last_migration():
     dummy_model = {
         "foo": "foo",
-        "migrations": [{"name": "1750840837_add_foo", "versions": {"migration": "1.0.0", "anemoi-models": "0.8.1"}}],
+        "migrations": ["1750840837_add_foo"],
     }
 
     migrator = get_test_migrator()
@@ -48,7 +48,7 @@ def test_run_last_migration():
 def test_wrong_order():
     dummy_model = {
         "bar": "bar",
-        "migrations": [{"name": "1750841219_add_bar", "versions": {"migration": "1.0.0", "anemoi-models": "0.8.1"}}],
+        "migrations": ["1750841219_add_bar"],
     }
     migrator = get_test_migrator()
 
@@ -57,7 +57,7 @@ def test_wrong_order():
 
 
 def test_extra_migration():
-    dummy_model = {"migrations": [{"name": "dummy", "versions": {"migration": "1.0.0", "anemoi-models": "0.8.1"}}]}
+    dummy_model = {"migrations": ["dummy"]}
 
     migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model)
@@ -79,7 +79,7 @@ def test_migrate_step():
     assert len(done_migrations) == 1
     assert len(done_rollbacks) == 0
     assert len(migrated_model["migrations"]) == 1
-    assert migrated_model["migrations"][0]["name"] == "1750840837_add_foo"
+    assert migrated_model["migrations"][0] == "1750840837_add_foo"
     assert "foo" in migrated_model and migrated_model["foo"] == "foo"
     assert "bar" not in migrated_model
     assert "baz" not in migrated_model
@@ -101,7 +101,7 @@ def test_migrate_no_step():
 def test_run_migration_step():
     dummy_model = {
         "foo": "foo",
-        "migrations": [{"name": "1750840837_add_foo", "versions": {"migration": "1.0.0", "anemoi-models": "0.8.1"}}],
+        "migrations": ["1750840837_add_foo"],
     }
 
     migrator = get_test_migrator()
