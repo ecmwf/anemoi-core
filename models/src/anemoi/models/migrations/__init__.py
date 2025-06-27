@@ -22,7 +22,6 @@ from typing import MutableMapping
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
-from typing import TypeAlias
 from typing import TypedDict
 from typing import Union
 
@@ -39,8 +38,8 @@ class MissingMigrationException(BaseException):
     pass
 
 
-CkptType: TypeAlias = MutableMapping[str, Any]
-MigrationCallback: TypeAlias = Callable[[CkptType], CkptType]
+class CkptType(MutableMapping[str, Any]): ...
+
 
 # migration is the version of the migration module to allow future update of
 # the script and keep backward compatibility
@@ -53,9 +52,9 @@ class Migration:
 
     name: str
     """Name of the migration"""
-    migrate: MigrationCallback
+    migrate: Callable[[CkptType], CkptType]
     """Callback to execute the migration"""
-    rollback: MigrationCallback
+    rollback: Callable[[CkptType], CkptType]
     """Callback to execute a migration rollback"""
     versions: Versions
     """Tracked versions"""
