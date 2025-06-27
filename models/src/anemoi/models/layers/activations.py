@@ -43,6 +43,35 @@ def leaky_hardtanh(
     result = torch.where(above_max, max_val + positive_slope * (input - max_val), result)
     return result
 
+class CustomRelu(nn.Module):
+    """Custom ReLU activation function with a specified threshold."""
+
+    def __init__(self, threshold: float = 0.0) -> None:
+        """Initialize the CustomReLU with a specified threshold.
+
+        Parameters
+        ----------
+        threshold : float
+            The threshold for the ReLU activation.
+        """
+        super().__init__()
+        self.threshold = threshold
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the ReLU activation with the specified threshold.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            The input tensor to process.
+
+        Returns
+        -------
+        torch.Tensor
+            The processed tensor with ReLU applied.
+        """
+        return torch.nn.functional.relu(x - self.threshold) + self.threshold
+
 
 class GLU(nn.Module):
     """Gated Linear Unit (GLU) layer.

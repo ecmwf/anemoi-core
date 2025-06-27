@@ -15,6 +15,7 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.layers.activations import CustomRelu
 
 LOGGER = logging.getLogger(__name__)
 
@@ -114,34 +115,6 @@ class Postprocessor(BasePreprocessor):
         return x
 
 
-class CustomRelu(torch.nn.Module):
-    """Custom ReLU activation function with a specified threshold."""
-
-    def __init__(self, threshold: float = 0.0) -> None:
-        """Initialize the CustomReLU with a specified threshold.
-
-        Parameters
-        ----------
-        threshold : float
-            The threshold for the ReLU activation.
-        """
-        super().__init__()
-        self.threshold = threshold
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply the ReLU activation with the specified threshold.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            The input tensor to process.
-
-        Returns
-        -------
-        torch.Tensor
-            The processed tensor with ReLU applied.
-        """
-        return torch.nn.functional.relu(x - self.threshold) + self.threshold
 
 
 class NormalizedReluPostprocessor(Postprocessor):
