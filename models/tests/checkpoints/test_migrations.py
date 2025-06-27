@@ -8,10 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 
+from pathlib import Path
+
 import pytest
 
+from anemoi.models.migrations import Migrator
 from anemoi.models.migrations import MissingMigrationException
-from tests.checkpoints.migrations import get_test_migrator
+
+
+def get_test_migrator() -> Migrator:
+    """Load the test migrator with migrations from this folder.
+
+    Returns
+    -------
+    A Migrator instance
+    """
+    return Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
 
 
 def test_run_all_migrations():
