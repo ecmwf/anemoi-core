@@ -51,7 +51,7 @@ class ImputerSchema(BaseModel):
 
 
 class ConstantImputerSchema(RootModel[dict[Any, Any]]):
-    """Schema for constant imputer.
+    """Schema for ConstantImputer.
 
     Expects the config to have keys corresponding to available statistics
     and values as lists of variables to impute.:
@@ -110,21 +110,95 @@ class PostprocessorSchema(BaseModel):
 
 
 class NormalizedReluPostprocessorSchema(BaseModel):
-    default: Union[str, float] = Field(default=None)
-    "Postprocessor default method to apply."
-    # TODO(how): float possible
-    none: Union[list[str], None] = Field(default_factory=list)
-    "Variables not to be postprocessed."
+    """Schema for the NormalizedReluPostProcessor.
+
+    Expects the config to have keys corresponding to customizable thresholds and lists of variables
+    to postprocess and a normalizer to apply to thresholds.:
+    ```
+    normalizer: 'mean-std'
+    1:
+        - y
+    0:
+        - x
+    3.14:
+        - q
+    ```
+    """
+
+    @field_validator("root")
+    @classmethod
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
+
+        for k, v in values.items():
+
+            if k == "normalizer":
+                if not isinstance(v, str):  #
+                    msg = f'"normalizer" must map to a string, got {v}'
+                    raise TypeError(msg)
+                if v not in ["none", "mean-std", "std", "min-max", "max"]:
+                    msg = f'"normalizer" must be one of "none", "mean-std", "std", "min-max", "max", got {v}'
+                    raise ValueError(msg)
+
+            elif isinstance(k, (int, float)):
+                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                    msg = f'Key "{k}" must map to a list of strings, got {v}'
+                    raise TypeError(msg)
+
+            # Reject all other keys
+            else:
+                msg = f'Key "{k}" must be either a number, "normalizer", got {type(k).__name__}'
+                raise TypeError(msg)
+
+        return values
 
 
 class ConditionalZeroPostprocessorSchema(BaseModel):
-    default: Union[str, float] = Field(default=None)
-    "Postprocessor default method to apply."
-    remap: str
-    "Variable to be used as conditional."
-    # TODO(how): float possible
-    none: Union[list[str], None] = Field(default_factory=list)
-    "Variables not to be postprocessed."
+    """Schema for ConditionalZeroPostProcessor.
+
+    Expects the config to have keys corresponding to customizable values and lists of variables
+    to postprocess and a variable to use for postprocessing.:
+
+    ```
+    default: "none"
+    remap: "x"
+    0:
+        - y
+    5.0:
+        - x
+    3.14:
+        - q
+    ```
+
+    If "x" is zero, "y" will be postprocessed with 0, "x" with 5.0 and "q" with 3.14.
+    """
+
+    @field_validator("root")
+    @classmethod
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
+
+        for k, v in values.items():
+            if k == "default":
+                if not isinstance(v, (int, float)):
+                    if v is None or v == "none" or v == "None":
+                        continue
+                    msg = f'"default" must map to a float or None, got {type(v).__name__}'
+                    raise TypeError(msg)
+            elif k == "remap":
+                if not isinstance(v, str):
+                    msg = f'"remap" must map to a strings, got {v}'
+                    raise TypeError(msg)
+
+            elif isinstance(k, (int, float)):
+                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                    msg = f'Key "{k}" must map to a list of strings, got {v}'
+                    raise TypeError(msg)
+
+            # Reject all other keys
+            else:
+                msg = f'Key "{k}" must be either a number, "none" or "default", got {type(k).__name__}'
+                raise TypeError(msg)
+
+        return values
 
 
 class RemapperSchema(BaseModel):
