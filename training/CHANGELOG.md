@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.5.2](https://github.com/ecmwf/anemoi-core/compare/training-0.5.1...training-0.5.2) (2025-06-27)
+
+
+### Features
+
+* Add metadata back to pl checkpoint. ([#303](https://github.com/ecmwf/anemoi-core/issues/303)) ([0193b28](https://github.com/ecmwf/anemoi-core/commit/0193b280230d36acf94bcd1a1c7f587a7bf1abb7))
+* Log FTT2 loss + Fourier Correlation loss  ([#148](https://github.com/ecmwf/anemoi-core/issues/148)) ([345b0ab](https://github.com/ecmwf/anemoi-core/commit/345b0ab9a03c80e3944dc6e63a2e8a38123f18a3))
+
+
+### Bug Fixes
+
+* Plotting error when precip related params are not diagnostic  ([#369](https://github.com/ecmwf/anemoi-core/issues/369)) ([010cfa3](https://github.com/ecmwf/anemoi-core/commit/010cfa3f131ed4378236e5864b6f4d3922028b46))
+* Use transforms: Variable for ExtractVariableGroupAndLevel ([#321](https://github.com/ecmwf/anemoi-core/issues/321)) ([7649f4f](https://github.com/ecmwf/anemoi-core/commit/7649f4fb283ca6d26f79b7e07046680fcb10fd23))
+
 ## [0.5.1](https://github.com/ecmwf/anemoi-core/compare/training-0.5.0...training-0.5.1) (2025-06-17)
 
 
