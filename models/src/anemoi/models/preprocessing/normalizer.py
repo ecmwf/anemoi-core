@@ -132,7 +132,11 @@ class InputNormalizer(BasePreprocessor):
             ], f"{method} is not a valid normalisation method"
 
     def transform(
-        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        data_index: Optional[torch.Tensor] = None,
+        in_advance_input: bool = False,
     ) -> torch.Tensor:
         """Normalizes an input tensor x of shape [..., nvars].
 
@@ -155,6 +159,12 @@ class InputNormalizer(BasePreprocessor):
         torch.Tensor
             _description_
         """
+
+        if in_advance_input:
+            # In rollout training, we do not normalize the input data
+            # as it is already normalized in the training phase.
+            return x
+
         if not in_place:
             x = x.clone()
 
@@ -168,7 +178,11 @@ class InputNormalizer(BasePreprocessor):
         return x
 
     def inverse_transform(
-        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        data_index: Optional[torch.Tensor] = None,
+        in_advance_input: bool = False,
     ) -> torch.Tensor:
         """Denormalizes an input tensor x of shape [..., nvars | nvars_pred].
 
@@ -191,6 +205,12 @@ class InputNormalizer(BasePreprocessor):
         torch.Tensor
             Denormalized data
         """
+
+        if in_advance_input:
+            # In rollout training, we do not denormalize the input data
+            # as it is already normalized in the training phase.
+            return x
+
         if not in_place:
             x = x.clone()
 
