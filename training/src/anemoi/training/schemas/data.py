@@ -10,18 +10,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any
 from typing import Union
 
-from pydantic import BaseModel as PydanticBaseModel
+from pydantic import BaseModel
 from pydantic import Field
 from pydantic import RootModel
+from pydantic import TypeAdapter
 from pydantic import ValidationError
 from pydantic import field_validator
 from pydantic import model_validator
-
-from anemoi.utils.schemas import BaseModel
 
 
 class NormalizerSchema(BaseModel):
@@ -85,8 +85,12 @@ class ConstantImputerSchema(RootModel[dict[Any, Any]]):
                     msg = f'"none" must map to a list of strings, got {v}'
                     raise TypeError(msg)
 
+            # Accept numeric keys as int or float
             elif isinstance(k, (int, float)):
-                if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+                if not isinstance(v, Iterable) or isinstance(v, (str, bytes)):
+                    msg = f'Key "{k}" must map to a list of strings, got {v}'
+                    raise TypeError(msg)
+                if not all(isinstance(i, str) for i in v):
                     msg = f'Key "{k}" must map to a list of strings, got {v}'
                     raise TypeError(msg)
 
@@ -125,10 +129,9 @@ class NormalizedReluPostprocessorSchema(BaseModel):
     ```
     """
 
-    @field_validator("root")
-    @classmethod
-    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
-
+    @model_validator(mode="after")
+    def validate_entries(self) -> dict[Any, Any]:
+        values = self.__dict__
         for k, v in values.items():
 
             if k == "normalizer":
@@ -172,10 +175,9 @@ class ConditionalZeroPostprocessorSchema(BaseModel):
     If "x" is zero, "y" will be postprocessed with 0, "x" with 5.0 and "q" with 3.14.
     """
 
-    @field_validator("root")
-    @classmethod
-    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
-
+    @model_validator(mode="after")
+    def validate_entries(self) -> dict[Any, Any]:
+        values = self.__dict__
         for k, v in values.items():
             if k == "default":
                 if not isinstance(v, (int, float)):
@@ -232,28 +234,29 @@ target_to_schema = {
 class PreprocessorSchema(BaseModel):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
-    config: Union[
-        NormalizerSchema,
-        ImputerSchema,
-        ConstantImputerSchema,
-        RemapperSchema,
-        PostprocessorSchema,
-        ConditionalZeroPostprocessorSchema,
-        NormalizedReluPostprocessorSchema,
-    ]
+    config: dict
     "Target schema containing processor methods."
     normalizer: Union[str, None] = Field(default=None, literals=["none", "mean-std", "std", "min-max", "max"])
     "Normalizer method to apply before normalized relu."
 
     @model_validator(mode="after")
     def schema_consistent_with_target(self) -> PreprocessorSchema:
-        if self.target_ not in target_to_schema or target_to_schema[self.target_] != self.config.__class__:
-            error_msg = f"Schema {self.config.__class__} does not match target {self.target_}"
+        schema_cls = target_to_schema.get(self.target_)
+        if schema_cls is None:
+            error_msg = f"Unknown target: {self.target_}"
             raise ValidationError(error_msg)
+        validated = TypeAdapter(schema_cls).validate_python(self.config)
+        # If it's a RootModel (like ConstantImputerSchema), extract the root dict
+        if hasattr(validated, "root"):
+            self.config = validated.root
+        elif hasattr(validated, "model_dump"):
+            self.config = validated.model_dump()
+        else:
+            self.config = validated
         return self
 
 
-class DataSchema(PydanticBaseModel):
+class DataSchema(BaseModel):
     """A class used to represent the overall configuration of the dataset.
 
     Attributes
