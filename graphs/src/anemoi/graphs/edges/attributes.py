@@ -169,3 +169,21 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     """Copy an attribute of the target node to the edge."""
 
     nodes_axis = NodesAxis.TARGET
+
+
+class GaussianWeights(EdgeLength):
+    """Gaussian weights."""
+    def __init__(self, sigma: float = 1.0) -> None:
+        self.sigma = sigma
+        super().__init__()
+    
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        dists = super().compute(x_i, x_j)
+        gaussian_weights = torch.exp(-dists**2 / (2 * self.sigma**2))
+        return gaussian_weights
+    
+    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+        # L2 normalization per target node
+        weights_sum = torch.zeros(dim_size, device=edge_features.device, dtype=edge_features.dtype)
+        weights_sum.index_add_(0, index, edge_features.squeeze())
+        return edge_features / weights_sum[index]
