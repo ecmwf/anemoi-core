@@ -18,6 +18,8 @@ from typing import Union
 import torch
 from torch import nn
 
+from anemoi.training.utils.enums import TensorDim
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from collections.abc import Sequence
@@ -514,6 +516,53 @@ class ScaleTensor:
             resolved_scalers[name] = (dims, scaler)
 
         return ScaleTensor(**resolved_scalers)
+
+    def apply_scalers_iteratively(
+        self,
+        x: torch.Tensor,
+        subset_indices: tuple[int, ...] | None = None,
+        *,
+        grid_shard_slice: slice | None = None,
+    ) -> None:
+        """Apply the scalers iteratively to the input tensor.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor to scale
+        subset_indices : tuple[int, ...] | None, optional
+            Indices to subset the input tensor, by default None
+        grid_shard_slice : slice | None, optional
+            Slice to apply to the grid dimension, by default None
+        """
+        res = None
+        x_subset = x[subset_indices] if subset_indices is not None else x
+        ndim = x.ndim
+        tensors = self.resolve(ndim).tensors
+
+        for dims, scaler in tensors.values():
+            if TensorDim.GRID in dims and grid_shard_slice is not None:
+                grid_index = dims.index(TensorDim.GRID)
+                if scaler.shape[grid_index] > 1:
+                    slices = [slice(None)] * len(dims)
+                    slices[grid_index] = grid_shard_slice
+                    scaler = scaler[tuple(slices)]
+
+            missing_dims = [d for d in range(ndim) if d not in dims]
+            reshape = [1] * len(missing_dims)
+            reshape.extend(scaler.shape)
+
+            reshaped_scaler = scaler.reshape(reshape).to(x.device)
+            reshaped_scaler = torch.moveaxis(reshaped_scaler, list(range(ndim)), (*missing_dims, *dims))
+
+            reshaped_scaler = reshaped_scaler.expand_as(x)
+
+            if subset_indices is not None:
+                reshaped_scaler = reshaped_scaler[subset_indices]
+
+            res = x_subset * reshaped_scaler if res is None else res * reshaped_scaler
+
+        return res
 
     def scale(self, tensor: torch.Tensor) -> torch.Tensor:
         """Scale a given tensor by the scalers.
