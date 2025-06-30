@@ -173,8 +173,9 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
 
 class GaussianWeights(EdgeLength):
     """Gaussian weights."""
-    def __init__(self, sigma: float = 1.0) -> None:
+    def __init__(self, sigma: float = 1.0, **kwargs) -> None:
         self.sigma = sigma
+        assert kwargs.get("norm", None) == None, f"{self.__class__.__name__} does not support custom normalisation."
         super().__init__()
     
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
