@@ -11,7 +11,7 @@ hardware:
 
 data:
   frequency: 6h
-  timestep: 18h
+  timestep: 12h
 
 dataloader:
   training:
@@ -23,5 +23,5 @@ training:
 
 # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
-    input: [0,3]
-    target: [1,2]
+    input: [0,2]
+    target: [1]
