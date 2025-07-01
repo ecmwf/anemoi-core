@@ -36,19 +36,19 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-import numpy as np
-import torch
-import einops
 import logging
 
-from torch.nn import Parameter, Module
+import einops
+import numpy as np
+import torch
+from torch.nn import Module
+from torch.nn import Parameter
 
 LOGGER = logging.getLogger(__name__)
 
 
 def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
-    r"""
-    Helper routine which returns the Legendre-Gauss nodes and weights
+    r"""Helper routine which returns the Legendre-Gauss nodes and weights
     on the interval [a, b].
     """
 
@@ -60,8 +60,7 @@ def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarra
 
 
 def clenshaw_curtiss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
-    r"""
-    Computation of the Clenshaw-Curtis quadrature nodes and weights.
+    r"""Computation of the Clenshaw-Curtis quadrature nodes and weights.
 
     This implementation follows
     [1] Joerg Waldvogel, Fast Construction of the Fejer and Clenshaw-Curtis Quadrature Rules; BIT Numerical Mathematics, Vol. 43, No. 1, pp. 001-018.
@@ -81,12 +80,12 @@ def clenshaw_curtiss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndar
         m = n1 - l
 
         v = np.concatenate([2 / N / (N - 2), 1 / N[-1:], np.zeros(m)])
-        v = 0 - v[:-1] - v[-1: 0: -1]
+        v = 0 - v[:-1] - v[-1:0:-1]
 
         g0 = (-1) * np.ones(n1)
         g0[l] = g0[l] + n1
         g0[m] = g0[m] + n1
-        g = g0 / (n1 ** 2 - 1 + (n1 % 2))
+        g = g0 / (n1**2 - 1 + (n1 % 2))
         wcc = np.fft.ifft(v + g).real
         wcc = np.concatenate((wcc, wcc[:1]))
 
@@ -105,8 +104,7 @@ def legpoly(
     inverse: bool = False,
     csphase: bool = True,
 ) -> np.ndarray:
-    r"""
-    Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
+    r"""Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
     The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
     can be turned off optionally.
 
@@ -119,9 +117,9 @@ def legpoly(
     # Compute the tensor P^m_n:
     nmax = max(mmax, lmax)
     vdm = np.zeros((nmax, nmax, len(x)), dtype=np.float64)
-        
-    norm_factor = 1. if norm == "ortho" else np.sqrt(4 * np.pi)
-    norm_factor = 1. / norm_factor if inverse else norm_factor
+
+    norm_factor = 1.0 if norm == "ortho" else np.sqrt(4 * np.pi)
+    norm_factor = 1.0 / norm_factor if inverse else norm_factor
 
     # Initial values to start the recursion
     vdm[0, 0, :] = norm_factor / np.sqrt(4 * np.pi)
@@ -135,7 +133,7 @@ def legpoly(
     for l in range(2, nmax):
         for m in range(0, l - 1):
             vdm[m, l, :] = (
-                + x * np.sqrt((2 * l - 1) / (l - m) * (2 * l + 1) / (l + m)) * vdm[m, l - 1, :]
+                +x * np.sqrt((2 * l - 1) / (l - m) * (2 * l + 1) / (l + m)) * vdm[m, l - 1, :]
                 - np.sqrt((l + m - 1) / (l - m) * (2 * l + 1) / (2 * l - 3) * (l - m - 1) / (l + m)) * vdm[m, l - 2, :]
             )
 
@@ -163,8 +161,7 @@ def precompute_legpoly(
     inverse: bool = False,
     csphase: bool = True,
 ) -> np.ndarray:
-    r"""
-    Computes the values of (-1)^m c^l_m P^l_m(\cos \theta) at the positions specified by t (theta).
+    r"""Computes the values of (-1)^m c^l_m P^l_m(\cos \theta) at the positions specified by t (theta).
     The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
     can be turned off optionally.
 
@@ -183,7 +180,7 @@ class IdentityResidual(Module):
 
         super().__init__()
         self._internal_input_idx = internal_input_idx
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         return x[..., self._internal_input_idx]
@@ -223,7 +220,7 @@ class InverseRealSHT(Module):
         x[..., 0].imag = 0.0
         if (self.nlon % 2 == 0) and (self.nlon // 2 < self.mmax):
             x[..., self.nlon // 2].imag = 0.0
-        
+
         x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
 
         return x
@@ -242,9 +239,9 @@ class OrnsteinResidual(Module):
         forcings_input_idx: dict[str, int] = {},
         regressors: list[str] = [],
     ) -> None:
-        
+
         super().__init__()
-        
+
         weight = torch.zeros(len(regressors) + 2, len(internal_input_idx), lmax, lmax, 2)
         weight[0, :, 0, 0, 0] = -10
 
@@ -261,10 +258,7 @@ class OrnsteinResidual(Module):
         weight = einops.rearrange(weight, f"param var lat lon -> param ({self.node_order}) var")
 
         return (
-            + (1 - torch.sigmoid(weight[0, ...])) * x[..., self._internal_input_idx]
+            +(1 - torch.sigmoid(weight[0, ...])) * x[..., self._internal_input_idx]
             + weight[1, ...]
-            + sum(
-                weight[i + 2, ...] * x[..., k].unsqueeze(-1)
-                for i, k in enumerate(self._forcings_input_idx)
-            )
+            + sum(weight[i + 2, ...] * x[..., k].unsqueeze(-1) for i, k in enumerate(self._forcings_input_idx))
         )
