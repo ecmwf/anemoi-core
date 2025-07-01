@@ -32,11 +32,11 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
     """Base class for edge attribute builders."""
 
     node_attr_name: str = None
+    norm_by_group: bool = False
 
-    def __init__(self, norm: str | None = None, dtype: str = "float32", norm_by_group: bool = False) -> None:
+    def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
         self.norm = norm.lower()
-        self.norm_by_group = norm_by_group
         self.dtype = dtype
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if self.node_attr_name is None:
@@ -175,9 +175,11 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
 class GaussianDistanceWeights(EdgeLength):
     """Gaussian weights."""
 
+    norm_by_group: bool = True  # normalise the gaussian weights by target node
+
     def __init__(self, sigma: float = 1.0, norm: str = "l2", **kwargs) -> None:
         self.sigma = sigma
-        super().__init__(norm=norm, norm_by_group=True)
+        super().__init__(norm=norm)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         dists = super().compute(x_i, x_j)
