@@ -383,3 +383,50 @@ def diffusion_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls[0]
+
+
+@pytest.fixture
+def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -> OmegaConf:
+    cfg, dataset_url = gnn_config
+    existing_ckpt = get_test_data(
+        "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-06-24.ckpt",
+    )
+    checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(existing_ckpt, checkpoint_dir / "last.ckpt")
+
+    cfg.training.run_id = "dummy_id"
+    cfg.training.max_epochs = 3
+    return cfg, dataset_url
+
+
+@pytest.fixture
+def interpolator_config(
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, str]:
+    """Compose a runnable configuration for the temporal-interpolation model.
+
+    It is based on `interpolator.yaml` and only patches paths pointing to the
+    sample dataset that the tests download locally.
+    """
+    # No model override here - the template already sets the dedicated
+    # interpolator model + GraphInterpolator Lightning task.
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_interpolator",
+    ):
+        template = compose(config_name="interpolator")
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_interpolator.yaml",
+    )
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, dataset_urls[0]

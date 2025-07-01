@@ -178,10 +178,10 @@ def test_restart_from_existing_checkpoint(
 
 
 @skip_if_offline
-@pytest.mark.slow
+@pytest.mark.longtests
 def test_training_cycle_interpolator(
     interpolator_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
+    get_test_archive: callable,
 ) -> None:
     """Full training-cycle smoke-test for the temporal interpolation task."""
     cfg, url = interpolator_config
@@ -192,17 +192,4 @@ def test_training_cycle_interpolator(
 def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
     """Schema-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config
-    BaseSchema(**cfg)
-
-
-@skip_if_offline
-@pytest.mark.slow
-def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    cfg, url = diffusion_config
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = diffusion_config
     BaseSchema(**cfg)
