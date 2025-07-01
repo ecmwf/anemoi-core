@@ -173,7 +173,7 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
 
 
 class GaussianDistanceWeights(EdgeLength):
-    """Gaussian weights."""
+    """Gaussian distance weights."""
 
     norm_by_group: bool = True  # normalise the gaussian weights by target node
 
