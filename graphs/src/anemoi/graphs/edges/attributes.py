@@ -138,7 +138,7 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
     """Base class for boolean edge attributes."""
 
     def __init__(self) -> None:
-        super().__init__(norm=None, dtype="bool")
+        super().__init__(norm=None, dtype="bool", norm_by_group=False)
 
 
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
@@ -175,10 +175,9 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
 class GaussianDistanceWeights(EdgeLength):
     """Gaussian weights."""
 
-    def __init__(self, sigma: float = 1.0, **kwargs) -> None:
+    def __init__(self, sigma: float = 1.0, norm: str = "l2", **kwargs) -> None:
         self.sigma = sigma
-        assert kwargs.get("norm", None) is None, f"{self.__class__.__name__} does not support custom normalisation."
-        super().__init__()
+        super().__init__(norm=norm, norm_by_group=True)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         dists = super().compute(x_i, x_j)
