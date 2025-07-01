@@ -4,7 +4,7 @@ hardware:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
     truncation: null
   files:
-    dataset: anemoi-integration-tests/regional-use-cases/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
     truncation: null
     truncation_inv: null
     graph: null
