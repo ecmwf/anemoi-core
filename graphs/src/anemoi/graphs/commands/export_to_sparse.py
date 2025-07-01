@@ -7,16 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
 from anemoi.graphs.export import GraphExporter
 
-import argparse
 from . import Command
 
 
 class ExportToSparse(Command):
     """
     Export a graph edges to a sparse format.
-    
+
     Example usage specifying an edge attribute:
     ```
     anemoi-graphs export-to-sparse graph.pt output_path --edge_attribute_name edge_attr
@@ -34,17 +34,13 @@ class ExportToSparse(Command):
     def add_arguments(self, command_parser):
         command_parser.add_argument("graph", help="Path to the graph (a .PT file) or a config file defining the graph.")
         command_parser.add_argument("output_path", help="Path to store the inspection results.")
-        command_parser.add_argument(
-            "--edge_attribute_name", 
-            default=None,
-            help="Name of the edge attribute to export."
-        )
+        command_parser.add_argument("--edge_attribute_name", default=None, help="Name of the edge attribute to export.")
         command_parser.add_argument(
             "--edges-name",
             nargs=2,
-            action='append',
-            metavar=('NODE1', 'NODE2'),
-            help="Specify an edge by its two node names. Can be used multiple times."
+            action="append",
+            metavar=("NODE1", "NODE2"),
+            help="Specify an edge by its two node names. Can be used multiple times.",
         )
 
     def run(self, args):

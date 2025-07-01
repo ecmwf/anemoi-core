@@ -9,12 +9,14 @@
 
 import os
 from pathlib import Path
+from typing import Iterable
 from typing import Tuple
-from typing import Union, Iterable
+from typing import Union
 
-import torch
-from anemoi.graphs.create import GraphCreator
 import scipy.sparse as sp
+import torch
+
+from anemoi.graphs.create import GraphCreator
 
 
 class GraphExporter:
@@ -33,7 +35,7 @@ class GraphExporter:
                 self.graph = torch.load(graph, weights_only=False, map_location="cpu")
             elif not graph.endswith(".yaml"):
                 raise ValueError("The argument graph must be an actual graph (.pt) or a recipe to build one (.yaml).")
-                
+
         self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
 
         self.edges_name = self.graph.edge_types if edges_name is None else edges_name
@@ -47,12 +49,13 @@ class GraphExporter:
         if self.edge_attribute_name is None:
             edge_attribute = torch.ones(edge_index.shape[1])
         else:
-            assert self.edge_attribute_name in self.graph[(source_name, "to", target_name)], f"Edge attribute {self.edge_attribute_name} not found in graph edges from {source_name} to {target_name}"
+            assert (
+                self.edge_attribute_name in self.graph[(source_name, "to", target_name)]
+            ), f"Edge attribute {self.edge_attribute_name} not found in graph edges from {source_name} to {target_name}"
             edge_attribute = self.graph[(source_name, "to", target_name)][self.edge_attribute_name].squeeze()
 
         assert edge_attribute.ndim == 1, f"Edge attribute {self.edge_attribute_name} should be 1D."
         return edge_index, edge_attribute
-    
 
     def get_nodes_info(self, source_name: str, target_name: str) -> Tuple[int, int]:
         """Get the nodes info from the graph."""
@@ -64,10 +67,7 @@ class GraphExporter:
     def get_sparse_matrix(edge_index, edge_attribute, num_source_nodes, num_target_nodes):
         # Create sparse matrix
         A = torch.sparse_coo_tensor(
-            edge_index, 
-            edge_attribute,
-            (num_source_nodes, num_target_nodes),
-            device=edge_index.device
+            edge_index, edge_attribute, (num_source_nodes, num_target_nodes), device=edge_index.device
         )
         return A.coalesce()
 
@@ -75,7 +75,7 @@ class GraphExporter:
     def convert_to_scipy_sparse(A):
         """
         Convert PyTorch sparse tensor to SciPy sparse matrix and save.
-        
+
         Args:
             A: PyTorch sparse COO tensor
             filename: Output filename (.npz extension)
@@ -84,7 +84,7 @@ class GraphExporter:
         indices = A.indices().cpu().numpy()
         values = A.values().cpu().numpy()
         shape = A.shape
-        
+
         # Create SciPy sparse matrix (COO format)
         scipy_sparse = sp.coo_matrix((values, (indices[0], indices[1])), shape=shape)
         return scipy_sparse

@@ -173,16 +173,17 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
 
 class GaussianWeights(EdgeLength):
     """Gaussian weights."""
+
     def __init__(self, sigma: float = 1.0, **kwargs) -> None:
         self.sigma = sigma
         assert kwargs.get("norm", None) == None, f"{self.__class__.__name__} does not support custom normalisation."
         super().__init__()
-    
+
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         dists = super().compute(x_i, x_j)
-        gaussian_weights = torch.exp(-dists**2 / (2 * self.sigma**2))
+        gaussian_weights = torch.exp(-(dists**2) / (2 * self.sigma**2))
         return gaussian_weights
-    
+
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
         # L2 normalization per target node
         weights_sum = torch.zeros(dim_size, 1, device=edge_features.device, dtype=edge_features.dtype)
