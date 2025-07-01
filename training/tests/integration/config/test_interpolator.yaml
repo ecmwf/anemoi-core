@@ -11,10 +11,17 @@ hardware:
 
 data:
   frequency: 6h
-  timestep: 36h
+  timestep: 18h
 
 dataloader:
   training:
     end: 2017-01-08 12:00:00
   validation:
     start: 2017-01-08 18:00:00
+
+training:
+
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+  explicit_times:
+    input: [0,3]
+    target: [1,2]
