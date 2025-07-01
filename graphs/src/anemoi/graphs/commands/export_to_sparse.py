@@ -14,8 +14,7 @@ from . import Command
 
 
 class ExportToSparse(Command):
-    """
-    Export a graph edges to a sparse format.
+    """Export a graph edges to a sparse format.
 
     Example usage specifying an edge attribute:
     ```
