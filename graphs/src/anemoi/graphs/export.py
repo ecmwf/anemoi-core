@@ -73,8 +73,7 @@ class GraphExporter:
 
     @staticmethod
     def convert_to_scipy_sparse(A):
-        """
-        Convert PyTorch sparse tensor to SciPy sparse matrix and save.
+        """Convert PyTorch sparse tensor to SciPy sparse matrix and save.
 
         Args:
             A: PyTorch sparse COO tensor
