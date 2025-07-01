@@ -28,7 +28,7 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
     norm_by_group: bool = False
 
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
-        self.norm = norm.lower()
+        self.norm = norm
         self.dtype = getattr(torch, dtype)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 

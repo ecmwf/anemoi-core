@@ -36,7 +36,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
-        self.norm = norm.lower()
+        self.norm = norm
         self.dtype = dtype
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if self.node_attr_name is None:
