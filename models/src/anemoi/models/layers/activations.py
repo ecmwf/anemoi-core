@@ -43,6 +43,7 @@ def leaky_hardtanh(
     result = torch.where(above_max, max_val + positive_slope * (input - max_val), result)
     return result
 
+
 class CustomRelu(nn.Module):
     """Custom ReLU activation function with a specified threshold."""
 
