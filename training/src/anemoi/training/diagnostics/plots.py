@@ -70,6 +70,8 @@ def argsort_variablename_variablelevel(data: list[str], metadata_variables: dict
     ----------
     data : list[str]
         List of strings to sort.
+    metadata_variables : dict, optional
+        Dictionary of variable names and indices, by default None
 
     Returns
     -------
@@ -577,7 +579,7 @@ def plot_flat_sample(
     else:
         combined_data = np.concatenate((input_, truth, pred))
         # For 'errors', only persistence and increments need identical colorbar-limits
-        combined_error = np.concatenate(((pred - input_), (truth - input_)))
+
         norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
 
         norms[1] = norm
@@ -588,6 +590,7 @@ def plot_flat_sample(
         data[0] = input_
         data[4] = pred - input_
         data[5] = truth - input_
+        combined_error = np.concatenate(((pred - input_), (truth - input_)))
         # ensure vcenter is between minimum and maximum error
         norm_error = TwoSlopeNorm(
             vmin=min(-0.00001, np.nanmin(combined_error)),
