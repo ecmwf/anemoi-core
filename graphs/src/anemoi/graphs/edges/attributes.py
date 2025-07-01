@@ -185,6 +185,6 @@ class GaussianWeights(EdgeLength):
     
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
         # L2 normalization per target node
-        weights_sum = torch.zeros(dim_size, device=edge_features.device, dtype=edge_features.dtype)
-        weights_sum.index_add_(0, index, edge_features.squeeze())
+        weights_sum = torch.zeros(dim_size, 1, device=edge_features.device, dtype=edge_features.dtype)
+        weights_sum.index_add_(0, index, edge_features)
         return edge_features / weights_sum[index]
