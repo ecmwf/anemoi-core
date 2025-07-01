@@ -26,7 +26,8 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
     """Base class for the weights of the nodes."""
 
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
-        self.norm = norm
+        self.norm = norm.lower()
+        self.norm_by_group = False
         self.dtype = getattr(torch, dtype)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 

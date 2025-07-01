@@ -33,9 +33,10 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
     node_attr_name: str = None
 
-    def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
+    def __init__(self, norm: str | None = None, dtype: str = "float32", norm_by_group: bool = False) -> None:
         super().__init__()
-        self.norm = norm
+        self.norm = norm.lower()
+        self.norm_by_group = norm_by_group
         self.dtype = dtype
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if self.node_attr_name is None:
@@ -72,8 +73,8 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
         return edge_features
 
-    def aggregate(self, edge_features: torch.Tensor) -> torch.Tensor:
-        return self.normalise(edge_features)
+    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+        return self.normalise(edge_features, index, num_groups=dim_size)
 
 
 class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
@@ -171,7 +172,7 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     nodes_axis = NodesAxis.TARGET
 
 
-class GaussianWeights(EdgeLength):
+class GaussianDistanceWeights(EdgeLength):
     """Gaussian weights."""
 
     def __init__(self, sigma: float = 1.0, **kwargs) -> None:
@@ -183,9 +184,3 @@ class GaussianWeights(EdgeLength):
         dists = super().compute(x_i, x_j)
         gaussian_weights = torch.exp(-(dists**2) / (2 * self.sigma**2))
         return gaussian_weights
-
-    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
-        # L2 normalization per target node
-        weights_sum = torch.zeros(dim_size, 1, device=edge_features.device, dtype=edge_features.dtype)
-        weights_sum.index_add_(0, index, edge_features)
-        return edge_features / weights_sum[index]

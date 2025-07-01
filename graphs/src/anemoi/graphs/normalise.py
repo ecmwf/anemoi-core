@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import Tuple
 
 import torch
 
@@ -15,9 +16,80 @@ LOGGER = logging.getLogger(__name__)
 
 
 class NormaliserMixin:
-    """Mixin class for normalising attributes."""
+    """Mixin class for normalising values.
 
-    def normalise(self, values: torch.Tensor) -> torch.Tensor:
+    This class provides a method to normalise values within each group specified by an index tensor.
+    Supported normalisation methods: None, 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std'.
+    """
+
+    def compute_nongrouped_statistics(self, values: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+        if self.norm == "l1":
+            return (torch.sum(values),)
+
+        elif self.norm == "l2":
+            return (torch.norm(values),)
+
+        elif self.norm == "unit-max":
+            return (torch.amax(values),)
+
+        elif self.norm == "unit-range":
+            return torch.amin(values), torch.amax(values)
+
+        elif self.norm == "unit-std":
+            std = torch.std(values)
+            if std == 0:
+                LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalisation is skipped.")
+                return (1,)
+            return (std,)
+
+    def compute_grouped_statistics(
+        self, values: torch.Tensor, index: torch.Tensor, num_groups: int, dtype, device
+    ) -> Tuple[torch.Tensor, ...]:
+        if self.norm == "l1":
+            group_sum = torch.zeros(num_groups, 1, dtype=dtype, device=device)
+            group_sum = group_sum.index_add(0, index, values)
+            return (group_sum[index],)
+
+        elif self.norm == "l2":
+            group_sq = torch.zeros(num_groups, 1, dtype=dtype, device=device)
+            group_sq = group_sq.index_add(0, index, values**2)
+            group_norm = torch.sqrt(group_sq)
+            return (group_norm[index],)
+
+        elif self.norm == "unit-max":
+            group_max = torch.full((num_groups,), float("-inf"), dtype=dtype, device=device)
+            group_max = group_max.index_reduce(0, index, values, reduce="amax")
+            return (group_max[index],)
+
+        elif self.norm == "unit-range":
+            group_min = torch.full((num_groups,), float("inf"), dtype=dtype, device=device)
+            group_max = torch.full((num_groups,), float("-inf"), dtype=dtype, device=device)
+            group_min = group_min.index_reduce(0, index, values, reduce="amin")
+            group_max = group_max.index_reduce(0, index, values, reduce="amax")
+            denom = group_max - group_min
+            denom[denom == 0] = 1  # avoid division by zero
+            return group_min[index], denom[index]
+
+        elif self.norm == "unit-std":
+            # Compute mean
+            group_sum = torch.zeros(num_groups, 1, dtype=dtype, device=device)
+            group_count = torch.zeros(num_groups, 1, dtype=dtype, device=device)
+            ones = torch.ones_like(values)
+            group_sum = group_sum.index_add(0, index, values)
+            group_count = group_count.index_add(0, index, ones)
+            group_mean = group_sum / group_count.clamp(min=1)
+            # Compute variance
+            mean_expanded = group_mean[index]
+            sq_diff = (values - mean_expanded) ** 2
+            group_var = torch.zeros_like(group_sum)
+            group_var = group_var.index_add(0, index, sq_diff)
+            group_var = group_var / group_count.clamp(min=1)
+            group_std = torch.sqrt(group_var)
+            # Avoid division by zero
+            group_std[group_std == 0] = 1
+            return (group_std[index],)
+
+    def normalise(self, values: torch.Tensor, index: torch.Tensor, num_groups: int) -> torch.Tensor:
         """Normalise the given values.
 
         It supports different normalisation methods: None, 'l1',
@@ -25,31 +97,39 @@ class NormaliserMixin:
 
         Parameters
         ----------
-        values : np.ndarray of shape (N, M)
+        values : torch.Tensor of shape (N, M)
             Values to normalise.
+        index : torch.Tensor of shape (N, )
+            Index of the groups of each value, only needed if `self.norm_by_group` is True.
+        num_groups : int
+            Number of total groups.
 
         Returns
         -------
-        np.ndarray
+        torch.Tensor
             Normalised values.
         """
+        assert self.norm in {
+            None,
+            "l1",
+            "l2",
+            "unit-std",
+            "unit-max",
+            "unit-range",
+        }, f"Attribute normalisation '{self.norm}' is not valid. Options are: 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std'."
+
         if self.norm is None:
             LOGGER.debug(f"{self.__class__.__name__} values are not normalised.")
             return values
-        if self.norm == "l1":
-            return values / torch.sum(values)
-        if self.norm == "l2":
-            return values / torch.norm(values)
-        if self.norm == "unit-max":
-            return values / torch.amax(values)
+
+        if self.norm_by_group:
+            statistics = self.compute_grouped_statistics(
+                values, index, num_groups, device=values.device, dtype=values.dtype
+            )
+        else:
+            statistics = self.compute_nongrouped_statistics(values)
+
         if self.norm == "unit-range":
-            return (values - torch.amin(values)) / (torch.amax(values) - torch.amin(values))
-        if self.norm == "unit-std":
-            std = torch.std(values)
-            if std == 0:
-                LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalisation is skipped.")
-                return values
-            return values / std
-        raise ValueError(
-            f"Attribute normalisation \"{self.norm}\" is not valid. Options are: 'l1', 'l2', 'unit-max' or 'unit-std'."
-        )
+            values = values - statistics[0]
+
+        return values / statistics[0]
