@@ -10,8 +10,8 @@ hardware:
     graph: null
 
 data:
-  frequency: 36h
-  timestep: 6h
+  frequency: 6h
+  timestep: 36h
 
 dataloader:
   training:
