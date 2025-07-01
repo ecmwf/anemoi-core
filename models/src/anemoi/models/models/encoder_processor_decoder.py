@@ -71,11 +71,6 @@ class AnemoiModelEncProcDec(nn.Module):
         self.data_indices = data_indices
         self.statistics = statistics
 
-        self.multi_step = model_config.training.multistep_input
-        self.num_channels = model_config.model.num_channels
-
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
-
         self._truncation_data = truncation_data
 
         # we can't register these as buffers because DDP does not support sparse tensors
