@@ -14,7 +14,19 @@ from . import Command
 
 
 class ExportToSparse(Command):
-    """Export a graph edges to a sparse format."""
+    """
+    Export a graph edges to a sparse format.
+    
+    Example usage specifying an edge attribute:
+    ```
+    anemoi-graphs export-to-sparse graph.pt output_path --edge_attribute_name edge_attr
+    ```
+
+    Example usage specifying a subset of edges:
+    ```
+    anemoi-graphs export-to-sparse graph.pt output_path --edges-name data down --edges-name down data
+    ```
+    """
 
     internal = True
     timestamp = True
