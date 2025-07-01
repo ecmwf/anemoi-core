@@ -74,7 +74,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         return edge_features
 
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
-        return self.normalise(edge_features, index, num_groups=dim_size)
+        return self.normalise(edge_features, index, dim_size)
 
 
 class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
@@ -138,7 +138,7 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
     """Base class for boolean edge attributes."""
 
     def __init__(self) -> None:
-        super().__init__(norm=None, dtype="bool", norm_by_group=False)
+        super().__init__(norm=None, dtype="bool")
 
 
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):

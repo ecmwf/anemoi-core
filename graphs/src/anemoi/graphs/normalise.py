@@ -22,7 +22,7 @@ class NormaliserMixin:
     Supported normalisation methods: None, 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std'.
     """
 
-    def compute_nongrouped_statistics(self, values: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+    def compute_nongrouped_statistics(self, values: torch.Tensor, *_args) -> Tuple[torch.Tensor, ...]:
         if self.norm == "l1":
             return (torch.sum(values),)
 
@@ -46,24 +46,24 @@ class NormaliserMixin:
         self, values: torch.Tensor, index: torch.Tensor, num_groups: int, dtype, device
     ) -> Tuple[torch.Tensor, ...]:
         if self.norm == "l1":
-            group_sum = torch.zeros(num_groups, 1, dtype=dtype, device=device)
+            group_sum = torch.zeros(num_groups, values.shape[1], dtype=dtype, device=device)
             group_sum = group_sum.index_add(0, index, values)
             return (group_sum[index],)
 
         elif self.norm == "l2":
-            group_sq = torch.zeros(num_groups, 1, dtype=dtype, device=device)
+            group_sq = torch.zeros(num_groups, values.shape[1], dtype=dtype, device=device)
             group_sq = group_sq.index_add(0, index, values**2)
             group_norm = torch.sqrt(group_sq)
             return (group_norm[index],)
 
         elif self.norm == "unit-max":
-            group_max = torch.full((num_groups,), float("-inf"), dtype=dtype, device=device)
+            group_max = torch.full((num_groups, values.shape[1]), float("-inf"), dtype=dtype, device=device)
             group_max = group_max.index_reduce(0, index, values, reduce="amax")
             return (group_max[index],)
 
         elif self.norm == "unit-range":
-            group_min = torch.full((num_groups,), float("inf"), dtype=dtype, device=device)
-            group_max = torch.full((num_groups,), float("-inf"), dtype=dtype, device=device)
+            group_min = torch.full((num_groups, values.shape[1]), float("inf"), dtype=dtype, device=device)
+            group_max = torch.full((num_groups, values.shape[1]), float("-inf"), dtype=dtype, device=device)
             group_min = group_min.index_reduce(0, index, values, reduce="amin")
             group_max = group_max.index_reduce(0, index, values, reduce="amax")
             denom = group_max - group_min
@@ -72,8 +72,8 @@ class NormaliserMixin:
 
         elif self.norm == "unit-std":
             # Compute mean
-            group_sum = torch.zeros(num_groups, 1, dtype=dtype, device=device)
-            group_count = torch.zeros(num_groups, 1, dtype=dtype, device=device)
+            group_sum = torch.zeros(num_groups, values.shape[1], dtype=dtype, device=device)
+            group_count = torch.zeros(num_groups, values.shape[1], dtype=dtype, device=device)
             ones = torch.ones_like(values)
             group_sum = group_sum.index_add(0, index, values)
             group_count = group_count.index_add(0, index, ones)
@@ -89,7 +89,7 @@ class NormaliserMixin:
             group_std[group_std == 0] = 1
             return (group_std[index],)
 
-    def normalise(self, values: torch.Tensor, index: torch.Tensor, num_groups: int) -> torch.Tensor:
+    def normalise(self, values: torch.Tensor, *args) -> torch.Tensor:
         """Normalise the given values.
 
         It supports different normalisation methods: None, 'l1',
@@ -99,10 +99,6 @@ class NormaliserMixin:
         ----------
         values : torch.Tensor of shape (N, M)
             Values to normalise.
-        index : torch.Tensor of shape (N, )
-            Index of the groups of each value, only needed if `self.norm_by_group` is True.
-        num_groups : int
-            Number of total groups.
 
         Returns
         -------
@@ -123,11 +119,9 @@ class NormaliserMixin:
             return values
 
         if self.norm_by_group:
-            statistics = self.compute_grouped_statistics(
-                values, index, num_groups, device=values.device, dtype=values.dtype
-            )
+            statistics = self.compute_grouped_statistics(values, *args, device=values.device, dtype=values.dtype)
         else:
-            statistics = self.compute_nongrouped_statistics(values)
+            statistics = self.compute_nongrouped_statistics(values, *args)
 
         if self.norm == "unit-range":
             values = values - statistics[0]

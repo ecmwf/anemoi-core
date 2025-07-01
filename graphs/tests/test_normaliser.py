@@ -65,7 +65,7 @@ def test_normaliser_wrong_norm(norm: str):
         def __call__(self, data):
             return self.normalise(data)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(AssertionError):
         normaliser = Normaliser(norm=norm)
         data = torch.rand(10, 5)
         normaliser(data)
