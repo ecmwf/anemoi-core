@@ -627,8 +627,8 @@ class LongRolloutPlots(BasePlotCallback):
             output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
 
             precision_mapping = {
-                "16-mixed": torch.float16,
-                "bf16-mixed": torch.bfloat16,
+                "16-true": torch.float16,
+                "bf16-true": torch.bfloat16,
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)

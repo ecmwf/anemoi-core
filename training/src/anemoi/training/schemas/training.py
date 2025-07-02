@@ -310,7 +310,7 @@ class BaseTrainingSchema(BaseModel):
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
-    precision: str = Field(default="16-mixed")
+    precision: str = Field(default="16-true")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
