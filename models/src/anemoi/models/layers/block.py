@@ -699,6 +699,25 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
     def run_node_src_mlp(self, x, **layer_kwargs):
         return self.node_src_mlp(self.layer_norm_mlp_src(x, **layer_kwargs))
 
+    def prepare_qkve_edge_sharding(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        batch_size: int,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        return (
+            einops.rearrange(
+                t,
+                "(batch grid) (heads vars) -> (batch grid) heads vars",
+                heads=self.num_heads,
+                vars=self.out_channels_conv,
+                batch=batch_size,
+            )
+            for t in (query, key, value, edges)
+        )
+
     def forward(
         self,
         x: OptPairTensor,
@@ -726,16 +745,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
                 query, key, value, edges, shapes, batch_size, model_comm_group
             )
         else:
-            query, key, value, edges = (
-                einops.rearrange(
-                    t,
-                    "(batch grid) (heads vars) -> (batch grid) heads vars",
-                    heads=self.num_heads,
-                    vars=self.out_channels_conv,
-                    batch=batch_size,
-                )
-                for t in (query, key, value, edges)
-            )
+            query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges, batch_size)
 
         if self.qk_norm:
             query = self.q_norm(query)

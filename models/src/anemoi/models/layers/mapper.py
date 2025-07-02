@@ -312,7 +312,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         shapes_src, shapes_dst = shard_shapes
 
         shapes_x_src = change_channels_in_shape(shapes_src, x_src.shape[-1])
-        # gather/scatter iff x_src is sharded, always reduce gradients in bwds
+        # gather/scatter if x_src is sharded, always reduce gradients in bwds
         x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
         size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
@@ -690,7 +690,12 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
 
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
-    def prepare_edges(self, size, batch_size, model_comm_group=None):
+    def prepare_edges(
+        self,
+        size: tuple[int, int],
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> tuple[Tensor, Adj]:
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
