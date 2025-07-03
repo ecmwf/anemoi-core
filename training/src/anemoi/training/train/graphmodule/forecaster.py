@@ -6,19 +6,24 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from .base_graphmodule import BaseGraphModule
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
+
 import torch
 from torch.utils.checkpoint import checkpoint
-from typing import TYPE_CHECKING
-from collections.abc import Mapping
-from anemoi.training.schemas.base_schema import BaseSchema
+
+from .base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from torch_geometric.data import HeteroData
-    from anemoi.models.data_indices.collection import IndexCollection
+    from collections.abc import Mapping
 
+    from torch_geometric.data import HeteroData
+
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 

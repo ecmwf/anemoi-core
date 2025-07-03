@@ -29,7 +29,7 @@ data:
 
 # Changes in training
 training:
-  model_task: anemoi.training.train.forecaster.GraphEnsForecaster
+  model_task: anemoi.training.train.graphmodule.GraphEnsForecaster
   ensemble_size_per_device: 4
   max_epochs: 20
 

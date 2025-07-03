@@ -7,8 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 from __future__ import annotations
-from abc import ABC, abstractmethod
+
 import logging
+from abc import ABC
+from abc import abstractmethod
 from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
@@ -44,7 +46,85 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseGraphModule(pl.LightningModule, ABC):
-    """Base Graph Module to instantiate multiple tasks implemented for PyTorch Lightning."""
+    """
+    Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
+
+    This class encapsulates the shared functionality for distributed training, 
+    scaling, and evaluation of graph-based neural network models across multiple GPUs and nodes.
+    It provides hooks for defining losses, metrics, optimizers, and distributed sharding strategies.
+
+    Key Features
+    ------------
+    - Supports model and data parallelism through model and reader process groups.
+    - Handles graph data via `torch_geometric.data.HeteroData` format.
+    - Supports sharded input batches and reconstruction via `allgather`.
+    - Integrates modular loss and metric functions with support for variable scaling.
+    - Enables deferred creation of variable scalers post-model instantiation.
+    - Fully compatible with PyTorch Lightning training and validation loops.
+
+    Subclass Responsibilities
+    -------------------------
+    Child classes must implement the `_step` method, which defines the forward and loss computation 
+    for training and validation steps.
+
+    Parameters
+    ----------
+    config : BaseSchema
+        Configuration object defining all parameters.
+    graph_data : HeteroData
+        Graph-structured input data containing node and edge features.
+    truncation_data : dict
+        Information for input/output truncation masks.
+    statistics : dict
+        Dictionary of training statistics (mean, std, etc.) used for normalization.
+    statistics_tendencies : dict
+        Statistics related to tendencies (if used).
+    data_indices : IndexCollection
+        Maps feature names to index ranges used for training and loss functions.
+    metadata : dict
+        Dictionary with metadata such as dataset provenance and variable descriptions.
+    supporting_arrays : dict
+        Numpy arrays (e.g., topography, masks) needed during inference and stored in checkpoints.
+
+    Attributes
+    ----------
+    model : AnemoiModelInterface
+        Wrapper for the underlying GNN model and its pre/post-processing logic.
+    loss : BaseLoss
+        Training loss function, optionally supporting variable scaling and sharding.
+    metrics : dict[str, BaseLoss | Callable]
+        Dictionary of validation metrics (often loss-style) computed during evaluation.
+    scalers : dict
+        Variable-wise scaling functions (e.g., standardization).
+    val_metric_ranges : dict
+        Mapping of variable groups for which to calculate validation metrics.
+    output_mask : nn.Module
+        Masking module that filters outputs during inference.
+    multi_step : bool
+        Flag to enable autoregressive rollouts (used in multi-step forecasting).
+    keep_batch_sharded : bool
+        Whether to keep input batches split across GPUs instead of gathering them.
+
+    Distributed Training
+    --------------------
+    The module can be configured to work in multi-node, multi-GPU environments with support for:
+    - Custom communication groups for model and reader parallelism
+    - Sharded input and output tensors
+    - Support for `ZeroRedundancyOptimizer` and learning rate warmup
+
+    Notes
+    -----
+    - This class should not be used directly. Subclass it and override `_step`.
+
+    See Also
+    --------
+    - `AnemoiModelInterface`
+    - `BaseLoss`
+    - `IndexCollection`
+    - `CosineLRScheduler`
+    - `create_scalers`, `grad_scaler`
+
+    """
 
     def __init__(
         self,
@@ -251,7 +331,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.reader_group_id = reader_group_id
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
-       
+
     def compute_loss_metrics(
         self,
         y_pred: torch.Tensor,

@@ -19,7 +19,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
-from .base_graphmodule import BaseGraphModule
+from .base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
