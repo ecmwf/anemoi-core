@@ -15,7 +15,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from anemoi.training.train.graphmodule.base import BaseGraphModule
+from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)

@@ -11,7 +11,7 @@ around three key components:
    models, encapsulating shared logic for training, evaluation, and
    distributed execution.
 
--  **GraphModules**: Task-specific subclasses that implement models for
+-  **Tasks**: Task-specific subclasses that implement models for
    deterministic forecasting, interpolation, ensemble learning, etc.
 
 -  ``AnemoiTrainer``: The training orchestrator responsible for running
@@ -78,19 +78,18 @@ from statistics.
  Available Tasks
 *****************
 
-Anemoi supports multiple task-specific models, referred to as
-**graphmodules**. These are high-level subclasses of
-:class:`~anemoi.graphmodules.BaseGraphModule` and provide working
-implementations for key scientific workflows.
+Anemoi supports multiple task-specific models, which are high-level
+subclasses of :class:`~anemoi.graphmodules.BaseGraphModule` and provide
+working implementations for key scientific workflows.
 
 Current supported graphmodules include:
 
 #. **Deterministic Forecasting** —
-   :class:`~anemoi.training.train.graphmodule.forecaster.GraphForecaster`
+   :class:`~anemoi.training.train.tasks.forecaster.GraphForecaster`
 #. **Ensemble Forecasting** —
-   :class:`~anemoi.training.train.graphmodule.ensforecaster.GraphEnsForecaster`
+   :class:`~anemoi.training.train.tasks.ensforecaster.GraphEnsForecaster`
 #. **Time Interpolation** —
-   :class:`~anemoi.training.train.graphmodule.interpolator.GraphInterpolator`
+   :class:`~anemoi.training.train.tasks.interpolator.GraphInterpolator`
 
 Each of these implements the ``__init__`` and ``_step`` methods to
 define task-specific model behavior. They support full Lightning
@@ -104,17 +103,17 @@ Key methods to override when adapting or extending a model:
 -  ``_step``: Implements the forward pass and loss/metric computation
    for a single batch.
 
-.. automodule:: anemoi.training.train.graphmodule.forecaster
+.. automodule:: anemoi.training.train.tasks.forecaster
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.train.graphmodule.ensforecaster
+.. automodule:: anemoi.training.train.tasks.ensforecaster
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.train.graphmodule.interpolator
+.. automodule:: anemoi.training.train.tasks.interpolator
    :members:
    :no-undoc-members:
    :show-inheritance:

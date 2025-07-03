@@ -29,7 +29,7 @@ model:
   grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
 
 training:
-  model_task: anemoi.training.train.graphmodule.GraphInterpolator
+  model_task: anemoi.training.train.tasks.GraphInterpolator
 
 # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:

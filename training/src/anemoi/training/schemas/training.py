@@ -349,14 +349,14 @@ class BaseTrainingSchema(BaseModel):
 
 
 class ForecasterSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.graphmodule.GraphForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.tasks.GraphForecaster",] = Field(..., alias="model_task")
     "Training objective."
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
 
 
 class ForecasterEnsSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.graphmodule.GraphEnsForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
@@ -365,7 +365,7 @@ class ForecasterEnsSchema(BaseTrainingSchema):
 
 
 class InterpolationSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.graphmodule.GraphInterpolator"] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
