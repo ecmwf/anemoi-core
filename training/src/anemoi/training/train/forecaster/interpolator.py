@@ -18,12 +18,12 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.train.forecaster import GraphForecaster
+from .base_graphmodule import BaseGraphModule
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphInterpolator(GraphForecaster):
+class GraphInterpolator(BaseGraphModule):
     """Graph neural network interpolator for PyTorch Lightning."""
 
     def __init__(
@@ -81,7 +81,7 @@ class GraphInterpolator(GraphForecaster):
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
-
+    
     def _step(
         self,
         batch: torch.Tensor,
