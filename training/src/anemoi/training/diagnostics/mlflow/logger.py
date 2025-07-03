@@ -468,9 +468,9 @@ class AnemoiMLflowLogger(MLFlowLogger):
         from mlflow.system_metrics.metrics.network_monitor import NetworkMonitor
         from mlflow.system_metrics.system_metrics_monitor import SystemMetricsMonitor
 
-        from anemoi.utils.mlflow.system_metrics.cpu_monitor import CPUMonitor
-        from anemoi.utils.mlflow.system_metrics.gpu_monitor import GreenGPUMonitor
-        from anemoi.utils.mlflow.system_metrics.gpu_monitor import RedGPUMonitor
+        from anemoi.training.diagnostics.mlflow.system_metrics.cpu_monitor import CPUMonitor
+        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import GreenGPUMonitor
+        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import RedGPUMonitor
 
         class CustomSystemMetricsMonitor(SystemMetricsMonitor):
             def __init__(self, run_id: str, resume_logging: bool = False):
