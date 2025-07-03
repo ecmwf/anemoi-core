@@ -18,6 +18,7 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
@@ -343,13 +344,21 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
     ) -> PairTensor:
-        x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst = self.pre_process_edge_sharding_wrapper(
-            x, shard_shapes, batch_size, model_comm_group, x_src_is_sharded, x_dst_is_sharded
+        x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst = checkpoint(
+            self.pre_process_edge_sharding_wrapper,
+            x,
+            shard_shapes,
+            batch_size,
+            model_comm_group,
+            x_src_is_sharded,
+            x_dst_is_sharded,
+            use_reentrant=False,
         )
 
         size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
 
-        (x_src, x_dst), edge_attr = self.proc(
+        (x_src, x_dst), edge_attr = checkpoint(
+            self.proc,
             x=(x_src, x_dst),
             edge_attr=edge_attr,
             edge_index=edge_index,
@@ -357,9 +366,17 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            use_reentrant=False,
         )
 
-        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded)
+        x_dst = checkpoint(
+            self.post_process,
+            x_dst,
+            shapes_dst,
+            model_comm_group,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+            use_reentrant=False,
+        )
 
         return x_dst
 
