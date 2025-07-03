@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import numpy as np
+import torch
 
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
@@ -27,7 +27,7 @@ class NaNMaskScaler(BaseUpdatingScaler):
 
     scale_dims: tuple[TensorDim] = (TensorDim.GRID, TensorDim.VARIABLE)
 
-    def on_training_start(self, model: AnemoiModelInterface) -> np.ndarray:
+    def on_training_start(self, model: AnemoiModelInterface) -> torch.Tensor:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.
@@ -35,10 +35,10 @@ class NaNMaskScaler(BaseUpdatingScaler):
         When calling the imputer for the first time, the NaN positions are available.
         Before first application of loss function, the mask is replaced.
         """
-        loss_weights_mask = np.ones((1, 1))
+        loss_weights_mask = torch.ones((1, 1))
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processor in model.pre_processors.processors.values():
             if hasattr(pre_processor, "loss_mask_training"):
-                loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training.cpu().numpy()
-
+                loss_weights_mask = loss_weights_mask.to(pre_processor.loss_mask_training)
+                loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
         return loss_weights_mask

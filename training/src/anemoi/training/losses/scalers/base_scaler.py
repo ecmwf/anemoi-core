@@ -14,13 +14,15 @@ import sys
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+from typing import Optional
 
-import numpy as np
+import torch
 
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from anemoi.models.interface import AnemoiModelInterface
+    from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 
 if sys.version_info < (3, 11):
     from enum import Enum
@@ -32,7 +34,6 @@ else:
     from enum import StrEnum
 
 LOGGER = logging.getLogger(__name__)
-SCALER_DTYPE = tuple[tuple[int], np.ndarray]
 
 
 class BaseScaler(ABC):
@@ -60,25 +61,25 @@ class BaseScaler(ABC):
             self.scale_dims = (self.scale_dims,)
 
     @abstractmethod
-    def get_scaling_values(self, **kwargs) -> np.ndarray:
+    def get_scaling_values(self, **kwargs) -> torch.Tensor:
         """Abstract method to get loss scaling."""
         ...
 
-    def normalise(self, values: np.ndarray) -> np.ndarray:
+    def normalise(self, values: torch.Tensor) -> torch.Tensor:
         """Normalise the scaler values."""
         if self.norm is None:
             return values
 
         if self.norm.lower() in ["l1", "unit-sum"]:
-            return values / np.sum(values)
+            return values / torch.sum(values)
 
         if self.norm.lower() == "unit-mean":
-            return values / np.mean(values)
+            return values / torch.mean(values)
 
         error_msg = f"{self.norm} must be one of: None, unit-sum, l1, unit-mean."
         raise ValueError(error_msg)
 
-    def get_scaling(self) -> SCALER_DTYPE:
+    def get_scaling(self) -> TENSOR_SPEC:
         """Get scaler.
 
         Returns
@@ -120,53 +121,53 @@ class BaseUpdatingScaler(BaseScaler):
     The default implementation returns an array of ones.
     """
 
-    _cached_scaling_values: np.ndarray | None = None
+    _cached_scaling_values: Optional[torch.Tensor] = None
 
-    def initial_scaling_values(self) -> np.ndarray | None:
+    def initial_scaling_values(self) -> Optional[torch.Tensor]:
         """Get initial scaling values.
 
         Returns
         -------
-        np.ndarray
+        torch.Tensor
             Initial scaling values, default is an array of ones.
         """
-        return np.ones(tuple([1] * len(self.scale_dims)))
+        return torch.ones(tuple([1] * len(self.scale_dims)))
 
-    def on_training_start(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
+    def on_training_start(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the start of training."""
         LOGGER.debug("%s.on_training_start called.", self.__class__.__name__)
 
-    def on_train_epoch_start(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
+    def on_train_epoch_start(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the start of each epoch."""
         LOGGER.debug("%s.on_train_epoch_start called.", self.__class__.__name__)
 
-    def on_train_epoch_end(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
+    def on_train_epoch_end(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the end of each epoch."""
         LOGGER.debug("%s.on_train_epoch_end called.", self.__class__.__name__)
 
-    def on_train_batch_start(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
+    def on_train_batch_start(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the start of each batch."""
         LOGGER.debug("%s.on_train_batch_start called.", self.__class__.__name__)
 
-    def on_train_batch_end(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
+    def on_train_batch_end(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the end of each batch."""
         LOGGER.debug("%s.on_train_batch_end called.", self.__class__.__name__)
 
-    def on_valid_batch_start(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
+    def on_valid_batch_start(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the start of each validation batch."""
         LOGGER.debug("%s.on_valid_batch_start called.", self.__class__.__name__)
 
-    def on_valid_batch_end(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
+    def on_valid_batch_end(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the end of each validation batch."""
         LOGGER.debug("%s.on_valid_batch_end called.", self.__class__.__name__)
 
-    def get_scaling_values(self) -> np.ndarray:
+    def get_scaling_values(self) -> torch.Tensor:
         """Get scaling values based on the initial scaling values callback or cache if set.
 
         Returns
         -------
-        np.ndarray
-            Scaling values as a numpy array.
+        torch.Tensor
+            Scaling values as a torch tensor.
         """
         if self._cached_scaling_values is not None:
             LOGGER.debug("Using cached scaling values for %s.", self.__class__.__name__)
@@ -174,7 +175,7 @@ class BaseUpdatingScaler(BaseScaler):
 
         return self.initial_scaling_values()
 
-    def get_scaling(self) -> SCALER_DTYPE:
+    def get_scaling(self) -> TENSOR_SPEC:
         """Get scaling values based on the initial scaling values callback."""
         if self._cached_scaling_values is None:
             self._cached_scaling_values = self.initial_scaling_values()
@@ -185,7 +186,7 @@ class BaseUpdatingScaler(BaseScaler):
         scale_dims = tuple(x.value for x in self.scale_dims)
         return scale_dims, scalar_values
 
-    def get_callback_scaling_values(self, callback: AvailableCallbacks, **kwargs) -> SCALER_DTYPE:
+    def get_callback_scaling_values(self, callback: AvailableCallbacks, **kwargs) -> TENSOR_SPEC:
         """Get scaling values based on the callback.
 
         Will update the cached scaling values if the callback returns a value.
@@ -200,7 +201,7 @@ class BaseUpdatingScaler(BaseScaler):
 
         Returns
         -------
-        SCALER_DTYPE
+        TENSOR_SPEC
             A tuple containing the scale dimensions and the scaler values.
         """
         if not hasattr(self, callback):

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import numpy as np
+import torch
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
@@ -89,13 +89,13 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         self.weights = weights
         del kwargs
 
-    def get_scaling_values(self, **_kwargs) -> np.ndarray:
+    def get_scaling_values(self, **_kwargs) -> torch.Tensor:
         """Get loss scaling.
 
         Retrieve the loss scaling for each variable from the config file.
         """
         variable_loss_scaling = (
-            np.ones((len(self.data_indices.data.output.full),), dtype=np.float32) * self.weights.default
+            torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32) * self.weights.default
         )
 
         for variable_name, idx in self.data_indices.model.output.name_to_index.items():

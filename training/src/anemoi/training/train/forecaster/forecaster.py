@@ -233,8 +233,9 @@ class GraphForecaster(pl.LightningModule):
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update delayed scalers such as the loss weights mask for imputed variables."""
         for name, scaler_builder in self.updating_scalars.items():
-            self.scalers[name] = scaler_builder.get_callback_scaling_values(callback, model=self.model)
-            self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
+            if name in self.loss.scaler:
+                self.scalers[name] = scaler_builder.get_callback_scaling_values(callback, model=self.model)
+                self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
 
     def set_model_comm_group(
         self,
@@ -429,8 +430,6 @@ class GraphForecaster(pl.LightningModule):
         ----------
         batch : torch.Tensor
             Batch to transfer
-        dataloader_idx : int
-            Dataloader index
 
         Returns
         -------

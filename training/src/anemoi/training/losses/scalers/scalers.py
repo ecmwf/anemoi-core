@@ -17,14 +17,13 @@ from hydra.utils import instantiate
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 
 if TYPE_CHECKING:
-
-    from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
+    from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
     from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-def create_scalers(scalers_config: DotDict, **kwargs) -> tuple[dict[str, SCALER_DTYPE], dict[str, BaseUpdatingScaler]]:
+def create_scalers(scalers_config: DotDict, **kwargs) -> tuple[dict[str, TENSOR_SPEC], dict[str, BaseUpdatingScaler]]:
     scalers, updating_scalars = {}, {}
     for name, config in scalers_config.items():
         scaler_builder = instantiate(config, **kwargs)
