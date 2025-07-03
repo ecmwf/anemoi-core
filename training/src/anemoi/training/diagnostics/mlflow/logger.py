@@ -29,10 +29,10 @@ from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from anemoi.training.diagnostics.mlflow.auth import TokenAuth
-from anemoi.training.diagnostics.mlflow.utils import clean_config_params
-from anemoi.training.diagnostics.mlflow.utils import expand_iterables
-from anemoi.training.diagnostics.mlflow.utils import health_check
+from anemoi.utils.mlflow.auth import TokenAuth
+from anemoi.utils.mlflow.utils import clean_config_params
+from anemoi.utils.mlflow.utils import expand_iterables
+from anemoi.utils.mlflow.utils import health_check
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -468,9 +468,9 @@ class AnemoiMLflowLogger(MLFlowLogger):
         from mlflow.system_metrics.metrics.network_monitor import NetworkMonitor
         from mlflow.system_metrics.system_metrics_monitor import SystemMetricsMonitor
 
-        from anemoi.training.diagnostics.mlflow.system_metrics.cpu_monitor import CPUMonitor
-        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import GreenGPUMonitor
-        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import RedGPUMonitor
+        from anemoi.utils.mlflow.system_metrics.cpu_monitor import CPUMonitor
+        from anemoi.utils.mlflow.system_metrics.gpu_monitor import GreenGPUMonitor
+        from anemoi.utils.mlflow.system_metrics.gpu_monitor import RedGPUMonitor
 
         class CustomSystemMetricsMonitor(SystemMetricsMonitor):
             def __init__(self, run_id: str, resume_logging: bool = False):
