@@ -25,20 +25,26 @@ LOGGER = logging.getLogger(__name__)
 
 class NaNMaskScaler(BaseUpdatingScaler):
 
-    scale_dims: tuple[TensorDim] = (TensorDim.GRID, TensorDim.VARIABLE)
+    scale_dims: tuple[TensorDim] = (TensorDim.BATCH_SIZE, TensorDim.GRID, TensorDim.VARIABLE)
 
-    def on_training_start(self, model: AnemoiModelInterface) -> torch.Tensor:
-        """Get loss scaling.
+    def on_train_batch_start(self, model: AnemoiModelInterface) -> None:
+        """Update loss scaling.
 
         Get  mask multiplying NaN locations with zero.
         At this stage, returns a loss slicing mask with all values set to 1.
-        When calling the imputer for the first time, the NaN positions are available.
-        Before first application of loss function, the mask is replaced.
+        Always when calling the imputer, the NaN positions are updated.
+        Before every application of training loss function, the mask is replaced.
         """
-        loss_weights_mask = torch.ones((1, 1))
+        # TODO(sara): there must be a nicer way to get the device of the model? any ideas?
+        device = next(model.model.parameters()).device
+        loss_weights_mask = torch.ones(tuple([1] * len(self.scale_dims)), device=device)
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processor in model.pre_processors.processors.values():
             if hasattr(pre_processor, "loss_mask_training"):
-                loss_weights_mask = loss_weights_mask.to(pre_processor.loss_mask_training)
                 loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
+
         return loss_weights_mask
+
+    def on_valid_batch_start(self, model: AnemoiModelInterface) -> None:
+        """Update loss scaling for validation batch."""
+        return self.on_train_batch_start(model)
