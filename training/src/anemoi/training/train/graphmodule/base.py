@@ -46,10 +46,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseGraphModule(pl.LightningModule, ABC):
-    """
-    Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
+    """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
-    This class encapsulates the shared functionality for distributed training, 
+    This class encapsulates the shared functionality for distributed training,
     scaling, and evaluation of graph-based neural network models across multiple GPUs and nodes.
     It provides hooks for defining losses, metrics, optimizers, and distributed sharding strategies.
 
@@ -64,7 +63,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     Subclass Responsibilities
     -------------------------
-    Child classes must implement the `_step` method, which defines the forward and loss computation 
+    Child classes must implement the `_step` method, which defines the forward and loss computation
     for training and validation steps.
 
     Parameters

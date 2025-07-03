@@ -362,7 +362,7 @@ class ForecasterEnsSchema(BaseTrainingSchema):
     "Rollout configuration."
     ensemble_size_per_device: PositiveInt = Field(example=1)
     "Number of ensemble member per device"
-    
+
 
 class InterpolationSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.graphmodule.GraphInterpolator"] = Field(..., alias="model_task")
