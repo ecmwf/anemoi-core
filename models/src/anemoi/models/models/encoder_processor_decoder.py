@@ -28,6 +28,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -304,8 +305,8 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Mapped data
         """
-        if mapper.shard_strategy == "edges":
-            return mapper(
+        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
+            return mapper(  # finer grained checkpointing inside GTM with edge sharding
                 data,
                 batch_size=batch_size,
                 shard_shapes=shard_shapes,
@@ -314,18 +315,18 @@ class AnemoiModelEncProcDec(nn.Module):
                 x_dst_is_sharded=x_dst_is_sharded,
                 keep_x_dst_sharded=keep_x_dst_sharded,
             )
-        else:
-            return checkpoint(
-                mapper,
-                data,
-                batch_size=batch_size,
-                shard_shapes=shard_shapes,
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=x_src_is_sharded,
-                x_dst_is_sharded=x_dst_is_sharded,
-                keep_x_dst_sharded=keep_x_dst_sharded,
-                use_reentrant=use_reentrant,
-            )
+
+        return checkpoint(
+            mapper,
+            data,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes,
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+            use_reentrant=use_reentrant,
+        )
 
     def forward(
         self,

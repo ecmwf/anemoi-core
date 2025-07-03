@@ -18,6 +18,7 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
@@ -290,7 +291,12 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             f"Supported strategies are 'heads' and 'edges'."
         )
 
-    def prepare_edges(self, size, batch_size, model_comm_group=None):
+    def prepare_edges(
+        self,
+        size: tuple[int, int],
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> tuple[Tensor, Adj]:
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -315,7 +321,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         shapes_src, shapes_dst = shard_shapes
 
         shapes_x_src = change_channels_in_shape(shapes_src, x_src.shape[-1])
-        # gather/scatter iff x_src is sharded, always reduce gradients in bwds
+        # gather/scatter if x_src is sharded, always reduce gradients in bwds
         x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
         size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
@@ -711,6 +717,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         dst_grid_size: int,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GNNBaseMapper.
 
@@ -745,6 +752,8 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         layer_kernels : DotDict, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy : str, optional
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -768,7 +777,19 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
 
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
-    def prepare_edges(self, size, batch_size, model_comm_group=None):
+        self.shard_strategy = shard_strategy
+
+        assert shard_strategy in ["edges"], (
+            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
+            f"Only supported strategy is 'edges'."
+        )
+
+    def prepare_edges(
+        self,
+        size: tuple[int, int],
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> tuple[Tensor, Adj]:
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -832,6 +853,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         dst_grid_size: int,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GNNForwardMapper.
 
@@ -864,6 +886,8 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy : str, optional
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -879,6 +903,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
             layer_kernels=layer_kernels,
+            shard_strategy=shard_strategy,
         )
 
         self.proc = GraphConvMapperBlock(
@@ -928,6 +953,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         dst_grid_size: int,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
     ) -> None:
         """Initialize GNNBackwardMapper.
 
@@ -960,6 +986,8 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy : str, optional
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -975,6 +1003,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
             layer_kernels=layer_kernels,
+            shard_strategy=shard_strategy,
         )
 
         self.proc = GraphConvMapperBlock(
@@ -1045,6 +1074,7 @@ class TransformerBaseMapper(BaseMapper):
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "heads",
     ) -> None:
         """Initialize TransformerBaseMapper.
 
@@ -1078,6 +1108,8 @@ class TransformerBaseMapper(BaseMapper):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy : str, optional
+            Strategy to shard tensors, by default "heads"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1106,6 +1138,13 @@ class TransformerBaseMapper(BaseMapper):
         self.offload_layers(cpu_offload)
 
         self.emb_nodes_dst = nn.Linear(self.in_channels_dst, self.hidden_dim)
+
+        self.shard_strategy = shard_strategy
+
+        assert shard_strategy in ["heads"], (
+            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
+            f"Only supported strategy is 'heads'."
+        )
 
     def forward(
         self,
@@ -1156,6 +1195,7 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "heads",
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerForwardMapper.
@@ -1190,6 +1230,8 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy : str, optional
+            Strategy to shard tensors, by default "heads"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1208,6 +1250,7 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            shard_strategy=shard_strategy,
         )
 
         self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
@@ -1250,6 +1293,7 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "heads",
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerBackwardMapper.
@@ -1284,6 +1328,8 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy : str, optional
+            Strategy to shard tensors, by default "heads"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1302,6 +1348,7 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            shard_strategy=shard_strategy,
         )
 
         self.node_data_extractor = nn.Sequential(
