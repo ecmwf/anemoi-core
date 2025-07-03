@@ -396,6 +396,7 @@ def plot_predicted_multilevel_flat_sample(
     x: np.ndarray,
     y_true: np.ndarray,
     y_pred: np.ndarray,
+    extra: np.ndarray,
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
     colormaps: dict[str, Colormap] | None = None,
@@ -421,6 +422,8 @@ def plot_predicted_multilevel_flat_sample(
         Expected data of shape (lat*lon, nvar*level)
     y_pred : np.ndarray
         Predicted data of shape (lat*lon, nvar*level)
+    extra : np.ndarray
+        Extra data of shape (lat*lon, nvar*level)
     datashader: bool, optional
         Scatter plot, by default False
     precip_and_related_fields : list, optional
@@ -447,6 +450,7 @@ def plot_predicted_multilevel_flat_sample(
         xt = x[..., variable_idx].squeeze() * int(output_only)
         yt = y_true[..., variable_idx].squeeze()
         yp = y_pred[..., variable_idx].squeeze()
+        ye = extra[..., variable_idx].squeeze()
 
         # get the colormap for the variable as defined in config file
         cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
@@ -464,6 +468,7 @@ def plot_predicted_multilevel_flat_sample(
                 xt,
                 yt,
                 yp,
+                ye,
                 variable_name,
                 clevels,
                 datashader,
@@ -480,6 +485,7 @@ def plot_predicted_multilevel_flat_sample(
                 xt,
                 yt,
                 yp,
+                ye,
                 variable_name,
                 clevels,
                 datashader,
@@ -499,6 +505,7 @@ def plot_flat_sample(
     input_: np.ndarray,
     truth: np.ndarray,
     pred: np.ndarray,
+    extra: np.ndarray,
     vname: str,
     clevels: float,
     datashader: bool = False,
@@ -526,6 +533,8 @@ def plot_flat_sample(
         Expected data of shape (lat*lon,)
     pred : np.ndarray
         Predicted data of shape (lat*lon,)
+    extra : np.ndarray
+        Predicted data of shape (lat*lon,)
     vname : str
         Variable name
     clevels : float
@@ -548,11 +557,13 @@ def plot_flat_sample(
         # converting to mm from m
         truth *= 1000.0
         pred *= 1000.0
+        extra *= 1000.0
         if sum(input_) != 0:
             input_ *= 1000.0
-    data = [None for _ in range(6)]
+    data = [None for _ in range(7)]
     # truth, prediction and prediction error always plotted
     data[1:4] = [truth, pred, truth - pred]
+    data[6] = extra
     # default titles for 6 plots
     titles = [
         f"{vname} input",
@@ -561,11 +572,12 @@ def plot_flat_sample(
         f"{vname} pred err",
         f"{vname} increment [pred - input]",
         f"{vname} persist err",
+        f"{vname} extra",
     ]
     # colormaps
-    cmaps = [cmap] * 3 + [error_cmap] * 3
+    cmaps = [cmap] * 3 + [error_cmap] * 3 + [cmap]
     # normalizations for significant colormaps
-    norms = [None for _ in range(6)]
+    norms = [None for _ in range(7)]
     norms[3:6] = [TwoSlopeNorm(vcenter=0.0)] * 3  # center the error colormaps at 0
 
     if vname in precip_and_related_fields:
@@ -590,19 +602,21 @@ def plot_flat_sample(
         data[0] = input_
         data[4] = pred - input_
         data[5] = truth - input_
+        data[6] = extra  # - input_
         combined_error = np.concatenate(((pred - input_), (truth - input_)))
         norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=0.0, vmax=np.nanmax(combined_error))
         norms[0] = norm
         norms[4] = norm_error
         norms[5] = norm_error
-
+        norms[6] = None
     else:
         # diagnostic fields: omit input and increment plots
         ax[0].axis("off")
         ax[4].axis("off")
         ax[5].axis("off")
+        ax[6].axis("off")
 
-    for ii in range(6):
+    for ii in range(7):
         if data[ii] is not None:
             single_plot(
                 fig,

@@ -192,3 +192,97 @@ def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -
     cfg.training.run_id = "dummy_id"
     cfg.training.max_epochs = 3
     return cfg, dataset_url
+
+
+@pytest.fixture
+def diffusion_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
+        template = compose(config_name="config", overrides=["model=transformer_diffusion"])
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+@pytest.fixture
+def diffusion_config_with_data(
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, str]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
+        template = compose(config_name="config", overrides=["model=transformer_diffusion"])
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, dataset_urls[0]
+
+
+@pytest.fixture
+def diffusion_tend_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion_tend"):
+        template = compose(config_name="config", overrides=["model=transformer_diffusiontend"])
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion_tend.yaml")
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+@pytest.fixture
+def diffusion_tend_config_with_data(
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, str]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion_tend"):
+        template = compose(config_name="config", overrides=["model=transformer_diffusiontend"])
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion_tend.yaml")
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, dataset_urls[0]
+
+
+@pytest.fixture
+def graphtransformer_diffusion_config(testing_modifications_with_temp_dir: OmegaConf) -> OmegaConf:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_gt_diffusion"):
+        template = compose(config_name="config", overrides=["graph=multi_scale", "model=graphtransformer_diffusion"])
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_graphtransformer_diffusion.yaml",
+    )
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+@pytest.fixture
+def graphtransformer_diffusion_config_with_data(
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, str]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_gt_diffusion"):
+        template = compose(config_name="config", overrides=["graph=multi_scale", "model=graphtransformer_diffusion"])
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_graphtransformer_diffusion.yaml",
+    )
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, dataset_urls[0]

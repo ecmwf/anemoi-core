@@ -1,0 +1,59 @@
+# Modifications for the basic template "config.yaml" for diffusion model testing
+hardware:
+  files:
+    dataset: anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+
+# Use short training period for integration tests
+dataloader:
+  training:
+    end: 1979-01-08 12:00:00
+  validation:
+    start: 1979-01-08 18:00:00
+  batch_size:
+    training: 2  # Small batch size for testing
+    validation: 2
+    test: 2
+  limit_batches:
+    training: 5  # Limit batches for faster testing
+    validation: 3
+
+# Training configuration for diffusion
+training:
+  model_task: anemoi.training.train.forecaster.GraphDiffusionForecaster
+  max_epochs: 1  # Single epoch for integration testing
+  max_steps: 10  # Very few steps for fast testing
+  multistep_input: 2
+
+  # Learning rate configuration
+  lr:
+    warmup: 2  # Minimal warmup for testing
+    rate: 1e-4  # Smaller learning rate for stability
+    iterations: 100
+    min: 0.0
+
+  # Minimal rollout for testing
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
+
+  # Fast precision for testing
+  precision: bf16-mixed
+
+
+# Minimal diagnostics for testing
+diagnostics:
+  enable_checkpointing: false  # Disable checkpointing for tests
+  enable_progress_bar: false   # Disable progress bar for cleaner test output
+  print_memory_summary: false
+
+  log:
+    interval: 1
+    wandb:
+      entity: null  # Disable wandb for tests
+    mlflow:
+      enabled: false  # Disable mlflow for tests
+
+  profiler: false

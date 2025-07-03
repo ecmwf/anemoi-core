@@ -901,7 +901,7 @@ class PlotSample(BasePerBatchPlotCallback):
         accumulation_levels_plot: list[float],
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str, Colormap] | None = None,
-        per_sample: int = 6,
+        per_sample: int = 7,
         every_n_batches: int | None = None,
         **kwargs: Any,
     ) -> None:
@@ -985,7 +985,14 @@ class PlotSample(BasePerBatchPlotCallback):
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )
+
+        extra_tensor = self.post_processors(
+            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[2])),
+            in_place=False,
+        )
+
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
+        extra_tensor = pl_module.output_mask.apply(extra_tensor, dim=1, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
@@ -998,6 +1005,7 @@ class PlotSample(BasePerBatchPlotCallback):
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
+                extra_tensor[rollout_step, ...],
                 datashader=self.datashader_plotting,
                 precip_and_related_fields=self.precip_and_related_fields,
                 colormaps=self.colormaps,

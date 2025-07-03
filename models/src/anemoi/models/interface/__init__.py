@@ -15,10 +15,6 @@ from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
 
@@ -41,6 +37,8 @@ class AnemoiModelInterface(torch.nn.Module):
         Graph data for the model.
     statistics : dict
         Statistics for the data.
+    statistics_tendencies : dict
+        Statistics for the tendencies of the data.
     metadata : dict
         Metadata for the model.
     supporting_arrays : dict
@@ -61,6 +59,7 @@ class AnemoiModelInterface(torch.nn.Module):
         config: DotDict,
         graph_data: HeteroData,
         statistics: dict,
+        statistics_tendencies: dict = None,
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict = None,
@@ -72,6 +71,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.multi_step = self.config.training.multistep_input
         self.graph_data = graph_data
         self.statistics = statistics
+        self.statistics_tendencies = statistics_tendencies
         self.truncation_data = truncation_data
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
@@ -90,9 +90,24 @@ class AnemoiModelInterface(torch.nn.Module):
         self.pre_processors = Processors(processors)
         self.post_processors = Processors(processors, inverse=True)
 
+        # If tendencies statistics are provided, instantiate the tendencies processors
+        if self.statistics_tendencies is not None:
+            processors = [
+                [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics_tendencies)]
+                for name, processor in self.config.data.processors.items()
+            ]
+            # Assign the processor list pre- and post-processors
+            self.pre_processors_tendencies = Processors(processors)
+            self.post_processors_tendencies = Processors(processors, inverse=True)
+
         # Instantiate the model
+        # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
+        model_instantiate_config = {
+            "_target_": self.config.model.model._target_,
+            "_convert_": getattr(self.config.model.model, "_convert_", "all"),
+        }
         self.model = instantiate(
-            self.config.model.model,
+            model_instantiate_config,
             model_config=self.config,
             data_indices=self.data_indices,
             statistics=self.statistics,
@@ -123,28 +138,20 @@ class AnemoiModelInterface(torch.nn.Module):
         torch.Tensor
             Predicted data.
         """
-        batch = self.pre_processors(batch, in_place=False)
+        # Prepare kwargs for model's predict_step
+        predict_kwargs = {
+            "batch": batch,
+            "pre_processors": self.pre_processors,
+            "post_processors": self.post_processors,
+            "multi_step": self.multi_step,
+            "model_comm_group": model_comm_group,
+        }
 
-        with torch.no_grad():
+        # Add tendency processors if they exist
+        if hasattr(self, "pre_processors_tendencies"):
+            predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
+        if hasattr(self, "post_processors_tendencies"):
+            predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
 
-            assert (
-                len(batch.shape) == 4
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
-            # Dimensions are
-            # batch, timesteps, horizonal space, variables
-            x = batch[:, 0 : self.multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
-
-            grid_shard_shapes = None
-            if model_comm_group is not None:
-                shard_shapes = get_shard_shapes(x, -2, model_comm_group)
-                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-
-            y_hat = self(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
-
-            y_hat = self.post_processors(y_hat, in_place=False)
-
-            if gather_out and model_comm_group is not None:
-                y_hat = gather_tensor(y_hat, -2, apply_shard_shapes(y_hat, -2, grid_shard_shapes), model_comm_group)
-
-        return y_hat
+        # Delegate to the model's predict_step implementation with processors
+        return self.model.predict_step(**predict_kwargs, **kwargs)

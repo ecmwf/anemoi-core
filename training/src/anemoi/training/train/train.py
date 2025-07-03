@@ -206,7 +206,7 @@ class AnemoiTrainer:
             "truncation_data": self.truncation_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
-            "statistics_tendencies": self.datamodule.statistics_tendencies,
+            "statistics_tendencies": self.datamodule.statistics_tendencies,  # should depend on config
             "supporting_arrays": self.supporting_arrays,
         }
 

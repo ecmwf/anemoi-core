@@ -228,7 +228,7 @@ def test_variable_loss_scaling_vals(
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 
-    assert torch.allclose(torch.tensor(final_variable_scaling), expected_scaling)
+    assert torch.allclose(final_variable_scaling, expected_scaling)
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])

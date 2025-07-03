@@ -86,6 +86,7 @@ class GraphForecaster(pl.LightningModule):
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
@@ -364,7 +365,7 @@ class GraphForecaster(pl.LightningModule):
         Yields
         ------
         Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
-            Loss value, metrics, and predictions (per step)
+            Loss value, metrics, and predictions, extra (per step)
 
         """
         batch = self.model.pre_processors(batch)  # normalized in-place
@@ -405,7 +406,7 @@ class GraphForecaster(pl.LightningModule):
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            yield loss, metrics_next, y_pred
+            yield loss, metrics_next, y_pred, torch.zeros_like(y_pred)
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -442,8 +443,9 @@ class GraphForecaster(pl.LightningModule):
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
+        y_extra = []
 
-        for loss_next, metrics_next, y_preds_next in self.rollout_step(
+        for loss_next, metrics_next, y_preds_next, y_extra_next in self.rollout_step(
             batch,
             rollout=self.rollout,
             training_mode=True,
@@ -452,9 +454,10 @@ class GraphForecaster(pl.LightningModule):
             loss += loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
+            y_extra.append(y_extra_next)
 
         loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds
+        return loss, metrics, y_preds, y_extra
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
@@ -539,7 +542,7 @@ class GraphForecaster(pl.LightningModule):
         return metrics
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _ = self._step(batch, batch_idx)
+        train_loss, _, _, _ = self._step(batch, batch_idx)
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
@@ -592,7 +595,7 @@ class GraphForecaster(pl.LightningModule):
 
         """
         with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
+            val_loss, metrics, y_preds, y_extra = self._step(batch, batch_idx, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
@@ -617,7 +620,7 @@ class GraphForecaster(pl.LightningModule):
                 sync_dist=True,
             )
 
-        return val_loss, y_preds
+        return val_loss, y_preds, y_extra
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
         """Configure the optimizers and learning rate scheduler.

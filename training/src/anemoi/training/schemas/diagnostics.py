@@ -359,3 +359,5 @@ class DiagnosticsSchema(BaseModel):
     "Allow model to save checkpoints."
     checkpoint: dict[str, CheckpointSchema] = Field(default_factory=dict)
     "Checkpoint schema for defined frequency (every_n_minutes, every_n_epochs, ...)."
+    check_val_every_n_epoch: PositiveInt = Field(default=1, example=1)
+    "Run validation every n epochs."

@@ -22,6 +22,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_channels
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -78,6 +79,9 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self._truncation_data = truncation_data
 
+        self.input_dim = self._calculate_input_dim(model_config)
+        self.input_dim_latent = self._calculate_input_dim_latent(model_config)
+
         # we can't register these as buffers because DDP does not support sparse tensors
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
         self.A_down, self.A_up = None, None
@@ -95,7 +99,7 @@ class AnemoiModelEncProcDec(nn.Module):
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.input_dim,
-            in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
+            in_channels_dst=self.input_dim_latent,
             hidden_dim=self.num_channels,
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -229,15 +233,18 @@ class AnemoiModelEncProcDec(nn.Module):
             x_out = bounding(x_out)
         return x_out
 
+    def _calculate_input_dim(self, model_config):
+        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+
+    def _calculate_input_dim_latent(self, model_config):
+        return self.node_attributes.attr_ndims[self._graph_name_hidden]
+
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.model.input)
         self.num_output_channels = len(data_indices.model.output)
         self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
         self._internal_input_idx = data_indices.model.input.prognostic
         self._internal_output_idx = data_indices.model.output.prognostic
-        self.input_dim = (
-            self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
 
@@ -263,6 +270,7 @@ class AnemoiModelEncProcDec(nn.Module):
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
         use_reentrant: bool = False,
+        **kwargs,
     ) -> Tensor:
         """Run mapper with activation checkpoint.
 
@@ -297,6 +305,7 @@ class AnemoiModelEncProcDec(nn.Module):
             x_dst_is_sharded=x_dst_is_sharded,
             keep_x_dst_sharded=keep_x_dst_sharded,
             use_reentrant=use_reentrant,
+            **kwargs,
         )
 
     def forward(
@@ -372,3 +381,69 @@ class AnemoiModelEncProcDec(nn.Module):
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
+
+    def predict_step(
+        self,
+        batch: torch.Tensor,
+        pre_processors: nn.Module,
+        post_processors: nn.Module,
+        multi_step: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        gather_out: bool = True,
+        **kwargs,
+    ) -> Tensor:
+        """Prediction step for the model.
+
+        Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
+        Subclasses can override this for different behavior (e.g., sampling for diffusion models).
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Input batched data (before pre-processing)
+        pre_processors : nn.Module,
+            Pre-processing module
+        post_processors : nn.Module,
+            Post-processing module
+        multi_step : int,
+            Number of input timesteps
+        model_comm_group : Optional[ProcessGroup]
+            Process group for distributed training
+        gather_out : bool
+            Whether to gather output tensors across distributed processes
+        **kwargs
+            Additional arguments
+
+        Returns
+        -------
+        Tensor
+            Model output (after post-processing)
+        """
+        batch = pre_processors(batch, in_place=False)
+
+        with torch.no_grad():
+            assert (
+                len(batch.shape) == 4
+            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
+            # Dimensions are
+            # batch, timesteps, grid, variables
+            x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+
+            # Handle distributed processing
+            grid_shard_shapes = None
+            if model_comm_group is not None:
+                shard_shapes = get_shard_shapes(x, -2, model_comm_group)
+                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
+                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+
+            # Perform forward pass
+            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
+
+            # Apply post-processing
+            y_hat = post_processors(y_hat, in_place=False)
+
+            # Gather output if needed
+            if gather_out and model_comm_group is not None:
+                y_hat = gather_tensor(y_hat, -2, apply_shard_shapes(y_hat, -2, grid_shard_shapes), model_comm_group)
+
+        return y_hat
