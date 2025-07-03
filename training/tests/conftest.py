@@ -19,6 +19,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
+pytest_plugins = "anemoi.utils.testing"
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
