@@ -591,7 +591,12 @@ def plot_flat_sample(
         data[4] = pred - input_
         data[5] = truth - input_
         combined_error = np.concatenate(((pred - input_), (truth - input_)))
-        norm_error = TwoSlopeNorm(vmin=np.nanmin(combined_error), vcenter=0.0, vmax=np.nanmax(combined_error))
+        # ensure vcenter is between minimum and maximum error
+        norm_error = TwoSlopeNorm(
+            vmin=min(-0.00001, np.nanmin(combined_error)),
+            vcenter=0.0,
+            vmax=max(0.00001, np.nanmax(combined_error)),
+        )
         norms[0] = norm
         norms[4] = norm_error
         norms[5] = norm_error
