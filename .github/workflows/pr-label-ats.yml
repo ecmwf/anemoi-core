@@ -49,14 +49,17 @@ jobs:
           echo "Result:"
           if echo "$LABELS" | grep -qi "ATS approval not needed"; then
             echo "ATS approval not needed. Passing."
-            exit 0
+            EXIT_CODE=0
           elif echo "$LABELS" | grep -qi "ATS approved"; then
             echo "ATS Approved. Passing."
-            exit 0
+            EXIT_CODE=0
           elif echo "$LABELS" | grep -qi "ATS approval needed"; then
             echo "ATS Approval Needed. Failing."
-            exit 1
+            EXIT_CODE=1
           else
-            echo "No ATS approval labels found. Failing."
-            exit 1
+            echo "No ATS approval labels found. Please assign the appropriate ATS label. Failing."
+            EXIT_CODE=1
           fi
+          echo -e "\nFor more information on ATS labels, see:"
+          echo "https://anemoi.readthedocs.io/en/latest/contributing/guidelines.html#labelling-guidelines"
+          exit $EXIT_CODE
