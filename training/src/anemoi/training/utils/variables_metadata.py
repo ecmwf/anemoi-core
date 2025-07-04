@@ -160,7 +160,7 @@ class ExtractVariableGroupAndLevel:
 
         return _crack_variable_name(variable_name)[0]
 
-    def get_level(self, variable_name: str) -> str | None:
+    def get_level(self, variable_name: str) -> int | None:
         """Get the level of a variable.
 
         Parameters
@@ -170,13 +170,19 @@ class ExtractVariableGroupAndLevel:
 
         Returns
         -------
-        variable_level : str | None
+        variable_level : int | None
             Variable level, checks the variable metadata, or attempts
             to crack the name, if not found None.
         """
         if variable_name in self.metadata_variables:
-            # if metadata is available: get variable name and level from metadata
-            return self.metadata_variables[variable_name].level
+            # if metadata is available: get level from metadata
+            level = self.metadata_variables[variable_name].level
+            is_surface_level = self.metadata_variables[variable_name].is_surface_level
+
+            if level is not None and not is_surface_level:
+                return level
+            if level is None and is_surface_level:
+                return level
 
         return _crack_variable_name(variable_name)[1]
 

@@ -149,3 +149,27 @@ def test_group_matching_raises_error(
         assert (
             ExtractVariableGroupAndLevel(groups, mocked_variable_lacking_metadata).get_group(variable) == expected_group
         )
+
+
+@pytest.mark.parametrize(
+    ("variable", "metadata", "expected_level"),
+    [
+        # Pressure level variables
+        ("q_100", {"param": "q"}, 100),  # Missing levelist, but variable name has level
+        ("q_100", {"param": "q", "levtype": "sfc", "levelist": "204"}, 100),  # Incorrect levelist
+        (
+            "q_100",
+            {"param": "q", "levtype": "pl"},
+            100,
+        ),  # If no levelist, and levtype is pl, return level from variable name
+        ("q_127", {"param": "q", "levtype": "pl", "levelist": 200}, 200),  # Trust correctly formatted metadata
+        # Surface variables
+        ("2t", {"param": "2t"}, None),  # Surface var
+        ("2t", {"param": "2t", "levtype": "sfc"}, None),  # Surface var
+        ("2t", {"param": "2t", "levtype": "sfc", "levelist": 200}, None),  # Surface var, but malformed with levelist
+    ],
+)
+def test_failover_to_crack_in_malformed_data(variable: str, metadata: dict, expected_level: int | None) -> None:
+    extractor = ExtractVariableGroupAndLevel({"default": "default"}, {variable: {"mars": metadata}})
+    level = extractor.get_level(variable)
+    assert level == expected_level, f"Expected level {expected_level} for variable {variable}, but got {level}"
