@@ -30,6 +30,7 @@ from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
+from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 
 LOGGER = logging.getLogger(__name__)
@@ -38,6 +39,8 @@ LOGGER = logging.getLogger(__name__)
 class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
     ANEMOI_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDec"
+    ANEMOI_MODEL_PROC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelProc"
+    ANEMOI_MODEL_PROC_SHORT = "anemoi.models.models.AnemoiModelProc"
     ANEMOI_ENS_MODEL_ENC_PROC_DEC = "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec"
     ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_ENC_HIERPROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
@@ -174,7 +177,9 @@ class BaseModelSchema(PydanticBaseModel):
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
     grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
     "Index of grid residual connection, or use none. Currently only in interpolator."
-    processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
+    processor: Union[
+        GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema, PointWiseMLPProcessorSchema
+    ] = Field(
         ...,
         discriminator="target_",
     )

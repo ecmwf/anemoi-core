@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import PointWiseModelComponent
 from .common_components import TransformerModelComponent
 
 
@@ -45,7 +46,6 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
 
 
 class TransformerProcessorSchema(TransformerModelComponent):
-
     target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(..., alias="_target_")
     "Transformer processor object from anemoi.models.layers.processor."
     num_layers: NonNegativeInt = Field(example=16)
@@ -79,3 +79,14 @@ class TransformerProcessorSchema(TransformerModelComponent):
                 raise ValidationError(msg)
 
         return self
+
+
+class PointWiseMLPProcessorSchema(PointWiseModelComponent):
+    target_: Literal["anemoi.models.layers.processor.PointWiseMLPProcessor"] = Field(..., alias="_target_")
+    "Transformer processor object from anemoi.models.layers.processor."
+    num_layers: NonNegativeInt = Field(example=16)
+    "Number of layers of Transformer processor."
+    num_channels: NonNegativeInt = Field(example=128)
+    "Number of channels."
+    dropout_p: NonNegativeFloat = Field(example=0.1)
+    "Dropout probability used for multi-head self attention, default 0.0"
