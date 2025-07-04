@@ -44,8 +44,8 @@ class BaseVariableLossScaler(BaseScaler):
         ----------
         data_indices : IndexCollection
             Collection of data indices.
-        metadata_variables : dict, optional
-            Dictionary with variable names as keys and metadata as values, by default None
+        metadata_extractor : ExtractVariableGroupAndLevel
+            Metadata extractor for variable groups and levels.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
