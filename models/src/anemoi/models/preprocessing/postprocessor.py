@@ -23,7 +23,8 @@ LOGGER = logging.getLogger(__name__)
 class Postprocessor(BasePreprocessor):
     """Class for Basic Postprocessors.
 
-    For Postprocessors just the inverse_transform method is implemented. transform is not needed and corresponds to the identity function.
+    For Postprocessors just the inverse_transform method is implemented.
+    transform is not needed and corresponds to the identity function.
     """
 
     def __init__(
@@ -228,8 +229,8 @@ class ConditionalZeroPostprocessor(Postprocessor):
 
     def _prepare_postprocessing_indices_list(self):
         """Prepare the postprocessor indices list."""
-        self.num_training_output_vars = len(self.data_indices.data.output.name_to_index)
-        self.num_inference_output_vars = len(self.data_indices.model.output.name_to_index)
+
+        super()._prepare_postprocessing_indices_list()
 
         # retrieve index of masking variable
         self.masking_variable = self.remap
@@ -239,12 +240,6 @@ class ConditionalZeroPostprocessor(Postprocessor):
         self.masking_variable_inference_output = self.data_indices.model.output.name_to_index.get(
             self.masking_variable, None
         )
-
-        (
-            self.index_training_output,
-            self.index_inference_output,
-            self.postprocessorfunctions,
-        ) = ([], [], [])
 
     def _get_postprocessor_function(self, method: float, name: str):
         """For ConditionalZeroPostprocessor, the 'method' is the constant value to fill
