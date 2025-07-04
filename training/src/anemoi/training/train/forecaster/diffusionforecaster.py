@@ -105,7 +105,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             :,
             0 : self.multi_step,
             ...,
-            self.data_indices.internal_data.input.full,
+            self.data_indices.data.input.full,
         ]  # (bs, multi_step, ens, latlon, nvar)
         msg = (
             "Batch length not sufficient for requested multi_step length!"
@@ -125,7 +125,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             )
 
             # get targets and noised targets
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
+            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             y_noised = self._noise_target(y, sigma)
 
             # prediction
@@ -279,7 +279,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             :,
             0 : self.multi_step,
             ...,
-            self.data_indices.internal_data.input.full,
+            self.data_indices.data.input.full,
         ]  # (bs, multi_step, ens, latlon, nvar)
 
         msg = (

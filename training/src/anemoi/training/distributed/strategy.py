@@ -528,6 +528,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
         -> these are still divided by the total number of GPUs in DDP as if each rank would see a full set of inputs
         note: the trainable parameters are added before the split across GPUs and are therefore not rescaled.
         """
+        # SL TODO: check hooks!
         for name, param in self.model.named_parameters():
             if param.requires_grad is True and "trainable" not in name:
                 param.register_hook(lambda grad: grad * float(self.model_comm_group_size))

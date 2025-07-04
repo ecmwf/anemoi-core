@@ -1,8 +1,10 @@
 num_channels: 1024
 cpu_offload: False
 
+keep_batch_sharded: True
+
 model:
-  _target_: anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec
+  _target_: anemoi.models.models.AnemoiDiffusionTendModelEncProcDec
   # Diffusion noise parameters
   diffusion:
     noise:
@@ -44,7 +46,6 @@ processor:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
 
-
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
@@ -72,7 +73,6 @@ decoder:
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
-
 trainable_parameters:
   data: 8
   hidden: 8
@@ -88,35 +88,4 @@ attributes:
   nodes: []
 
 # Bounding configuration
-bounding: #These are applied in order
-
-  # Bound tp (total precipitation) with a Relu bounding layer
-  # ensuring a range of [0, infinity) to avoid negative precipitation values.
-  - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
-    variables:
-    - tp
-
-  # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
-  # This guarantees that cp is physically consistent with tp by restricting cp
-  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
-  # NOTE: If this bounding strategy is used, the normalization of cp must be
-  # changed to "std" normalization, and the "cp" statistics should be remapped
-  # to those of tp to ensure consistency.
-
-  # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
-  #   variables:
-  #   - cp
-  #   min_val: 0
-  #   max_val: 1
-  #   total_var: tp
-
-  # [OPTIONAL] NormalizedReluBounding
-  # This is an extension of the Relu bounding in case the thrshold to be used
-  # is not 0. For example, in case of the sea surface temperature we don't use
-  # [0, infinity), buth rather [-2C, infinity). We do not want the water
-  # temperature to be below the freezing temperature.
-
-  # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
-  #   variables: [sst]
-  #   min_val: [-2]
-  #   normalizer: ['mean-std']
+bounding: []

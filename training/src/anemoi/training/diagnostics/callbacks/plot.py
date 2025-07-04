@@ -261,8 +261,12 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         if batch_idx % self.every_n_batches == 0:
             # gather tensors if necessary
             batch = pl_module.allgather_batch(batch)
-            # output: [loss, [pred1, pred2, ...]], gather predictions for plotting
-            output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
+            # output: [loss, [pred1, pred2, ...], [extra1, extra2, ...]], gather predictions for plotting
+            output = [
+                output[0],
+                [pl_module.allgather_batch(pred) for pred in output[1]],
+                [pl_module.allgather_batch(extra) for extra in output[2]],
+            ]
 
             self.plot(
                 trainer,
@@ -624,7 +628,11 @@ class LongRolloutPlots(BasePlotCallback):
     ) -> None:
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
             batch = pl_module.allgather_batch(batch)
-            output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
+            output = [
+                output[0],
+                [pl_module.allgather_batch(pred) for pred in output[1]],
+                [pl_module.allgather_batch(extra) for extra in output[2]],
+            ]
 
             precision_mapping = {
                 "16-mixed": torch.float16,
