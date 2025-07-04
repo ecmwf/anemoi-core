@@ -94,6 +94,12 @@ def open_log_file(filename):
                 
 
 #@skip_if_offline
+#add flag to save snapshot
+#add multi-gpu support
+#read from database on the s3 bucket, of a csv
+#complain if any of the values differ by more than 10%
+# can skip multi-gpu
+# add compute/nccl/memory breakdown from pytorch profiler
 @pytest.mark.longtests
 def test_benchmark_training_cycle(benchmark_config_with_data: DictConfig) -> None:
     reset_peak_memory_stats()
@@ -104,7 +110,6 @@ def test_benchmark_training_cycle(benchmark_config_with_data: DictConfig) -> Non
     peak_active_mem_mb=stats['active_bytes.all.peak']/1024/1024 
     av_training_throughput = open_log_file("speed_profiler.csv")
     av_training_batch_time_s = open_log_file("time_profiler.csv")
-    
     
     print(f"Peak memory: {peak_active_mem_mb:.2f}MB")
     print(f"Av. training batch time: {av_training_batch_time_s}s")

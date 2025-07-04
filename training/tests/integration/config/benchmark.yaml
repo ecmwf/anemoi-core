@@ -22,6 +22,8 @@ diagnostics:
       verbose: true
     model_summary:
       enabled: false
+    snapshot:
+      enabled: true
   log:
     mlflow:
       enabled: true
