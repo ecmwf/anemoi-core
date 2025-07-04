@@ -162,7 +162,7 @@ class GraphCreator:
             torch.save(graph, save_path)
             LOGGER.info(f"Graph saved at {save_path}.")
         else:
-            LOGGER.info("Graph already exists. Use overwrite=True to overwrite.")
+            raise ValueError(f"Graph already exists at {save_path}. Use overwrite=True to overwrite.")
 
     def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
         """Create the graph and save it to the output path.
