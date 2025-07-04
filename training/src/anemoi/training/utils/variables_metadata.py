@@ -135,6 +135,32 @@ class ExtractVariableGroupAndLevel:
 
         return self.default_group
 
+    def _is_metadata_trusted(self, variable_name: str) -> bool:
+        """Check if the metadata for a variable is trusted.
+
+        This checks if the variable has metadata and checks
+        for valid relations.
+
+        Parameters
+        ----------
+        variable_name : str
+            Name of the variable.
+
+        Returns
+        -------
+        bool
+            True if the metadata is trusted, False otherwise.
+        """
+        if variable_name not in self.metadata_variables:
+            return False
+
+        level = self.metadata_variables[variable_name].level
+        is_vertical_level = not self.metadata_variables[variable_name].is_surface_level
+
+        # If level is not None and is not a surface level, True
+        # If level is None and is a surface level, True
+        return is_vertical_level ^ (level is None)
+
     def get_param(self, variable_name: str) -> str:
         """Get the parameter from a variable_name.
 
@@ -154,13 +180,13 @@ class ExtractVariableGroupAndLevel:
             Either from the metadata or cracked
             name.
         """
-        if variable_name in self.metadata_variables:
-            # if metadata is available: get variable name and level from metadata
+        if self._is_metadata_trusted(variable_name):
+            # if metadata is available: get param from metadata
             return self.metadata_variables[variable_name].param
 
         return _crack_variable_name(variable_name)[0]
 
-    def get_level(self, variable_name: str) -> str | None:
+    def get_level(self, variable_name: str) -> int | None:
         """Get the level of a variable.
 
         Parameters
@@ -170,12 +196,12 @@ class ExtractVariableGroupAndLevel:
 
         Returns
         -------
-        variable_level : str | None
+        variable_level : int | None
             Variable level, checks the variable metadata, or attempts
             to crack the name, if not found None.
         """
-        if variable_name in self.metadata_variables:
-            # if metadata is available: get variable name and level from metadata
+        if self._is_metadata_trusted(variable_name):
+            # if metadata is available: get level from metadata
             return self.metadata_variables[variable_name].level
 
         return _crack_variable_name(variable_name)[1]
