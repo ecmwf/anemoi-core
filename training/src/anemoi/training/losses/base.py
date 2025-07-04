@@ -123,14 +123,11 @@ class BaseLoss(nn.Module, ABC):
             else:
                 scale_tensor = self.scaler.without_by_dim(without_scalers)
 
-        scaler = scale_tensor.get_scaler(x.ndim)
-
-        if grid_shard_slice is not None:
-            scaler = scaler[:, :, grid_shard_slice, :]
-
-        scaler = scaler.expand_as(x)
-
-        return x[subset_indices] * scaler[subset_indices]
+        return scale_tensor.apply_scalers_iteratively(
+            x,
+            subset_indices=subset_indices,
+            grid_shard_slice=grid_shard_slice,
+        )
 
     def reduce(
         self,
