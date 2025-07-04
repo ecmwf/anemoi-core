@@ -19,7 +19,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
-from .forecaster import GraphForecaster
+from .base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphEnsForecaster(GraphForecaster):
+class GraphEnsForecaster(BaseGraphModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
     def __init__(
@@ -69,6 +69,14 @@ class GraphEnsForecaster(GraphForecaster):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
+
+        self.rollout = config.training.rollout.start
+        self.rollout_epoch_increment = config.training.rollout.epoch_increment
+        self.rollout_max = config.training.rollout.max
+
+        LOGGER.debug("Rollout window length: %d", self.rollout)
+        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
+        LOGGER.debug("Rollout max : %d", self.rollout_max)
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
         self.model_comm_group_size = config.hardware.num_gpus_per_model
