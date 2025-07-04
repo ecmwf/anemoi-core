@@ -350,6 +350,40 @@ class BaseTrainingSchema(BaseModel):
     "List of metrics"
 
 
+class DiffusionNoiseSchema(BaseModel):
+    """Diffusion noise configuration."""
+
+    rho: NonNegativeFloat = Field(example=7)
+    "Noise distribution parameter rho."
+    sigma_max: NonNegativeFloat = Field(example=100.0)
+    "Maximum noise level."
+    sigma_min: NonNegativeFloat = Field(example=0.02)
+    "Minimum noise level."
+    sigma_data: NonNegativeFloat = Field(example=1.0)
+    "Data noise scaling."
+    noise_channels: PositiveInt = Field(example=32)
+    "Number of noise channels."
+    noise_cond_dim: PositiveInt = Field(example=16)
+    "Noise conditioning dimension."
+
+
+class DiffusionSchema(BaseModel):
+    """Diffusion model configuration."""
+
+    noise: DiffusionNoiseSchema
+    "Noise configuration for diffusion models."
+
+
+class PressureLevelScalerSchema(BaseModel):
+    """Pressure level scaler configuration."""
+
+    target_: Literal["anemoi.training.data.scaling.ReluPressureLevelScaler"] = Field(..., alias="_target_")
+    minimum: NonNegativeFloat = Field(example=0.2)
+    "Minimum pressure level scaling value."
+    slope: NonNegativeFloat = Field(example=0.001)
+    "Slope of pressure level scaling."
+
+
 class ForecasterSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.forecaster.GraphForecaster",] = Field(..., alias="model_task")
     "Training objective."
@@ -362,6 +396,61 @@ class ForecasterEnsSchema(BaseTrainingSchema):
     "Number of ensemble member per device"
 
 
+class DiffusionForecasterSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.forecaster.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+    "Training objective for diffusion models."
+    diffusion: DiffusionSchema = Field(
+        default_factory=lambda: DiffusionSchema(
+            noise=DiffusionNoiseSchema(
+                rho=7,
+                sigma_max=100.0,
+                sigma_min=0.02,
+                sigma_data=1.0,
+                noise_channels=32,
+                noise_cond_dim=16,
+            ),
+        ),
+    )
+    "Diffusion model configuration."
+    pressure_level_scaler: PressureLevelScalerSchema = Field(
+        default_factory=lambda: PressureLevelScalerSchema(
+            _target_="anemoi.training.data.scaling.ReluPressureLevelScaler",
+            minimum=0.2,
+            slope=0.001,
+        ),
+    )
+    "Pressure level scaler configuration."
+
+
+class DiffusionTendForecasterSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.forecaster.GraphDiffusionTendForecaster"] = Field(
+        ...,
+        alias="model_task",
+    )
+    "Training objective for diffusion tendency models."
+    diffusion: DiffusionSchema = Field(
+        default_factory=lambda: DiffusionSchema(
+            noise=DiffusionNoiseSchema(
+                rho=7,
+                sigma_max=100.0,
+                sigma_min=0.02,
+                sigma_data=1.0,
+                noise_channels=32,
+                noise_cond_dim=16,
+            ),
+        ),
+    )
+    "Diffusion model configuration."
+    pressure_level_scaler: PressureLevelScalerSchema = Field(
+        default_factory=lambda: PressureLevelScalerSchema(
+            _target_="anemoi.training.data.scaling.ReluPressureLevelScaler",
+            minimum=0.2,
+            slope=0.001,
+        ),
+    )
+    "Pressure level scaler configuration."
+
+
 class InterpolationSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.forecaster.GraphInterpolator"] = Field(..., alias="model_task")
     "Training objective."
@@ -371,4 +460,10 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
-TrainingSchema = Union[ForecasterSchema, ForecasterEnsSchema, InterpolationSchema]
+TrainingSchema = Union[
+    ForecasterSchema,
+    ForecasterEnsSchema,
+    DiffusionForecasterSchema,
+    DiffusionTendForecasterSchema,
+    InterpolationSchema,
+]
