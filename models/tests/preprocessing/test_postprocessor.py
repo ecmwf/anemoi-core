@@ -57,7 +57,7 @@ def normmrelupostprocessor():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "normmrelupostprocessor": {"default": "none", 0: ["q"], -1.5: ["x"]},
+                "normmrelupostprocessor": {"default": "none", 0: ["q"], -1.5: ["x"], "normalizer": "none"},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -71,12 +71,11 @@ def normmrelupostprocessor():
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
     }
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
-    normalizer = "none"
+
     return NormalizedReluPostprocessor(
         config=config.data.normmrelupostprocessor,
         data_indices=data_indices,
         statistics=statistics,
-        normalizer=normalizer,
     )
 
 
@@ -176,8 +175,8 @@ def input_normalizer_postprocessor():
                     "none": ["z", "other"],
                     "mean-std": ["q"],
                 },
-                "normmrelupostprocessor_ms": {"default": "none", 0: ["q"]},
-                "normmrelupostprocessor_mm": {"default": "none", -1.5: ["x"]},
+                "normmrelupostprocessor_ms": {"default": "none", 0: ["q"], "normalizer": "mean-std"},
+                "normmrelupostprocessor_mm": {"default": "none", -1.5: ["x"], "normalizer": "min-max"},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -197,13 +196,11 @@ def input_normalizer_postprocessor():
             config=config.data.normmrelupostprocessor_ms,
             data_indices=data_indices,
             statistics=statistics,
-            normalizer="mean-std",
         ),
         NormalizedReluPostprocessor(
             config=config.data.normmrelupostprocessor_mm,
             data_indices=data_indices,
             statistics=statistics,
-            normalizer="min-max",
         ),
     )
 

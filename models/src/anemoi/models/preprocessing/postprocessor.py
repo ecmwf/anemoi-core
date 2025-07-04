@@ -21,7 +21,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class Postprocessor(BasePreprocessor):
-    """Class for Basic Postprocessors."""
+    """Class for Basic Postprocessors.
+
+    For Postprocessors just the inverse_transform method is implemented. transform is not needed and corresponds to the identity function.
+    """
 
     def __init__(
         self,
@@ -42,6 +45,7 @@ class Postprocessor(BasePreprocessor):
         """
         super().__init__(config, data_indices, statistics)
 
+        self._prepare_postprocessing_indices_list()
         self._create_postprocessing_indices()
 
         self._validate_indices()
@@ -54,13 +58,10 @@ class Postprocessor(BasePreprocessor):
             f"{len(self.index_inference_output)}, {len(self.postprocessorfunctions)}"
         )
 
-    def _create_postprocessing_indices(self):
-        """Create the indices for postprocessing."""
-        name_to_index_training_output = self.data_indices.data.output.name_to_index
-        name_to_index_inference_output = self.data_indices.model.output.name_to_index
-
-        self.num_training_output_vars = len(name_to_index_training_output)
-        self.num_inference_output_vars = len(name_to_index_inference_output)
+    def _prepare_postprocessing_indices_list(self):
+        """Prepare the postprocessor indices list."""
+        self.num_training_output_vars = len(self.data_indices.data.output.name_to_index)
+        self.num_inference_output_vars = len(self.data_indices.model.output.name_to_index)
 
         (
             self.index_training_output,
@@ -68,20 +69,23 @@ class Postprocessor(BasePreprocessor):
             self.postprocessorfunctions,
         ) = ([], [], [])
 
+    def _create_postprocessing_indices(self):
+        """Create the indices for postprocessing."""
+
         # Create indices for postprocessing
-        for name in name_to_index_training_output:
+        for name in self.data_indices.data.output.name_to_index:
 
             method = self.methods.get(name, self.default)
             if method == "none":
                 LOGGER.debug(f"Postprocessor: skipping {name} as no postprocessing method is specified")
                 continue
-            assert name in name_to_index_inference_output, (
+            assert name in self.data_indices.model.output.name_to_index, (
                 f"Postprocessor: {name} not found in inference output indices. "
                 f"Postprocessors cannot be applied to forcing variables."
             )
 
-            self.index_training_output.append(self._get_index(name_to_index_training_output, name))
-            self.index_inference_output.append(self._get_index(name_to_index_inference_output, name))
+            self.index_training_output.append(self._get_index(self.data_indices.data.output.name_to_index, name))
+            self.index_inference_output.append(self._get_index(self.data_indices.model.output.name_to_index, name))
             self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
 
     def _get_index(self, name_to_index_dict, name):
@@ -149,7 +153,7 @@ class NormalizedReluPostprocessor(Postprocessor):
               - x1
               0:
               - x2
-            normalizer: 'mean-std'
+              normalizer: 'mean-std'
     """
 
     def __init__(
@@ -157,19 +161,17 @@ class NormalizedReluPostprocessor(Postprocessor):
         config=None,
         data_indices: Optional[IndexCollection] = None,
         statistics: Optional[dict] = None,
-        normalizer: str = "none",
     ) -> None:
 
-        self.normalizer = normalizer
         self.statistics = statistics
+
+        super().__init__(config, data_indices, statistics)
 
         # Validate normalizer input
         if self.normalizer not in {"none", "mean-std", "min-max", "max", "std"}:
             raise ValueError(
                 "Normalizer must be one of: 'none', 'mean-std', 'min-max', 'max', 'std' in NormalizedReluBounding."
             )
-
-        super().__init__(config, data_indices, statistics)
 
     def _get_postprocessor_function(self, method: float, name: str) -> CustomRelu:
         """Get the relu function class for the specified threshold and name."""
@@ -224,41 +226,25 @@ class ConditionalZeroPostprocessor(Postprocessor):
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
-    def _create_postprocessing_indices(
-        self,
-    ):
-        """Create the indices for postprocessing and retrieve index of masking variable."""
-        name_to_index_training_output = self.data_indices.data.output.name_to_index
-        name_to_index_inference_output = self.data_indices.model.output.name_to_index
+    def _prepare_postprocessing_indices_list(self):
+        """Prepare the postprocessor indices list."""
+        self.num_training_output_vars = len(self.data_indices.data.output.name_to_index)
+        self.num_inference_output_vars = len(self.data_indices.model.output.name_to_index)
 
-        self.num_training_output_vars = len(name_to_index_training_output)
-        self.num_inference_output_vars = len(name_to_index_inference_output)
-
+        # retrieve index of masking variable
         self.masking_variable = self.remap
-        self.masking_variable_training_output = name_to_index_training_output.get(self.masking_variable, None)
-        self.masking_variable_inference_output = name_to_index_inference_output.get(self.masking_variable, None)
+        self.masking_variable_training_output = self.data_indices.data.output.name_to_index.get(
+            self.masking_variable, None
+        )
+        self.masking_variable_inference_output = self.data_indices.model.output.name_to_index.get(
+            self.masking_variable, None
+        )
 
         (
             self.index_training_output,
             self.index_inference_output,
             self.postprocessorfunctions,
         ) = ([], [], [])
-
-        # Create indices for postprocessing
-        for name in name_to_index_training_output:
-
-            method = self.methods.get(name, self.default)
-            if method == "none":
-                LOGGER.debug(f"Postprocessor: skipping {name} as no postprocessing method is specified")
-                continue
-            assert name in name_to_index_inference_output, (
-                f"Postprocessor: {name} not found in inference output indices. "
-                f"Postprocessors cannot be applied to forcing variables."
-            )
-
-            self.index_training_output.append(self._get_index(name_to_index_training_output, name))
-            self.index_inference_output.append(self._get_index(name_to_index_inference_output, name))
-            self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
 
     def _get_postprocessor_function(self, method: float, name: str):
         """For ConditionalZeroPostprocessor, the 'method' is the constant value to fill

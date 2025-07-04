@@ -246,8 +246,6 @@ class PreprocessorSchema(BaseModel):
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
     config: dict
     "Target schema containing processor methods."
-    normalizer: Union[str, None] = Field(default=None, literals=["none", "mean-std", "std", "min-max", "max"])
-    "Normalizer method to apply before normalized relu."
 
     @model_validator(mode="after")
     def schema_consistent_with_target(self) -> PreprocessorSchema:
