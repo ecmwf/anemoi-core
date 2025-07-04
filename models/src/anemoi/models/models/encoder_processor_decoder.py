@@ -27,6 +27,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            shard_strategy=model_config.model.encoder.shard_strategy,
         )
 
         # Processor hidden -> hidden
@@ -117,6 +119,7 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            shard_strategy=model_config.model.decoder.shard_strategy,
         )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -280,6 +283,17 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Mapped data
         """
+        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
+            return mapper(  # finer grained checkpointing inside GTM with edge sharding
+                data,
+                batch_size=batch_size,
+                shard_shapes=shard_shapes,
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=x_src_is_sharded,
+                x_dst_is_sharded=x_dst_is_sharded,
+                keep_x_dst_sharded=keep_x_dst_sharded,
+            )
+
         return checkpoint(
             mapper,
             data,
