@@ -20,6 +20,7 @@ def test_normaliser(norm: str):
     class Normaliser(NormaliserMixin):
         def __init__(self, norm):
             self.norm = norm
+            self.norm_by_group = False
 
         def __call__(self, data):
             return self.normalise(data)
@@ -31,6 +32,27 @@ def test_normaliser(norm: str):
     assert normalised_data.shape == data.shape
 
 
+@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std"])
+def test_grouped_normaliser(norm: str):
+    """Test NormaliserMixin normalise method."""
+
+    class Normaliser(NormaliserMixin):
+        def __init__(self, norm):
+            self.norm = norm
+            self.norm_by_group = True
+
+        def __call__(self, data, index, num_groups):
+            return self.normalise(data, index, num_groups)
+
+    normaliser = Normaliser(norm=norm)
+    data = torch.rand(10, 5)
+    index = torch.tensor([0, 1, 2, 3, 4, 0, 1, 2, 3, 4])
+    num_groups = 5
+    normalised_data = normaliser(data, index, num_groups)
+    assert isinstance(normalised_data, torch.Tensor)
+    assert normalised_data.shape == data.shape
+
+
 @pytest.mark.parametrize("norm", ["l3", "invalid"])
 def test_normaliser_wrong_norm(norm: str):
     """Test NormaliserMixin normalise method."""
@@ -38,11 +60,12 @@ def test_normaliser_wrong_norm(norm: str):
     class Normaliser(NormaliserMixin):
         def __init__(self, norm: str):
             self.norm = norm
+            self.norm_by_group = False
 
         def __call__(self, data):
             return self.normalise(data)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(AssertionError):
         normaliser = Normaliser(norm=norm)
         data = torch.rand(10, 5)
         normaliser(data)
