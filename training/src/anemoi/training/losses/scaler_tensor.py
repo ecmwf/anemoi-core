@@ -311,11 +311,11 @@ class ScaleTensor:
 
         dimension = self.tensors[name][0]
 
-        if not override:
-            self.validate_scaler(dimension, scaler)
-
         original_scaler = self.tensors.pop(name)
         original_dimension = self._specified_dimensions.pop(name)
+
+        if not override:
+            self.validate_scaler(dimension, scaler)
 
         try:
             self.add_scaler(dimension, scaler, name=name)
