@@ -5,7 +5,7 @@ defaults:
 - datamodule: single
 - hardware: example
 - graph: multi_scale
-- model: gnn
+- model: graphtransformer
 - training: default
 - _self_
 

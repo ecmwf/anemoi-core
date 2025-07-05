@@ -42,6 +42,9 @@ training:
   # Fast precision for testing
   precision: bf16-mixed
 
+# Model configuration overrides
+model:
+  bounding: []
 
 # Minimal diagnostics for testing
 diagnostics:
