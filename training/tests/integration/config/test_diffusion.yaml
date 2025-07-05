@@ -1,16 +1,16 @@
 # Modifications for the basic template "config.yaml" for diffusion model testing
 hardware:
   files:
-    dataset: anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
 
 # Use short training period for integration tests
 dataloader:
   training:
-    end: 1979-01-08 12:00:00
+    end: 2017-01-08 12:00:00
   validation:
-    start: 1979-01-08 18:00:00
+    start: 2017-01-08 18:00:00
   batch_size:
     training: 2  # Small batch size for testing
     validation: 2
