@@ -72,15 +72,12 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         )
 
     def _calculate_input_dim(self, model_config):
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        input_dim += self.num_output_channels  # noised targets
-        input_dim += self.noise_cond_dim
-        return input_dim
+        base_input_dim = super()._calculate_input_dim(model_config)
+        return base_input_dim + self.num_output_channels + self.noise_cond_dim
 
     def _calculate_input_dim_latent(self, model_config):
-        input_dim_latent = self.node_attributes.attr_ndims[self._graph_name_hidden]
-        input_dim_latent += self.noise_cond_dim
-        return input_dim_latent
+        base_input_dim = super()._calculate_input_dim_latent(model_config)
+        return base_input_dim + self.noise_cond_dim
 
     def _assemble_input(self, x, y_noised, c_data, c_hidden, bse):
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
