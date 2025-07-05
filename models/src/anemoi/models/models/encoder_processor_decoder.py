@@ -70,11 +70,11 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
-        self.input_dim = self._calculate_input_dim(model_config)
-        self.input_dim_latent = self._calculate_input_dim_latent(model_config)
-
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
+
+        self.input_dim = self._calculate_input_dim(model_config)
+        self.input_dim_latent = self._calculate_input_dim_latent(model_config)
 
         # we can't register these as buffers because DDP does not support sparse tensors
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
