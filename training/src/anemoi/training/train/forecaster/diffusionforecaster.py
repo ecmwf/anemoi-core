@@ -370,7 +370,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             batch_trunc[:, self.multi_step - 1 : self.multi_step + self.rollout - 1, ...],
             self.model.pre_processors,
             pre_processors_tendencies,
-        )  # SL TODO: possible to do this in-place? check that gradiet flow works for out of place
+        )  # SL TODO: possible to do this in-place? double check that gradient flow works for out of place
 
         # Delayed scalers need to be initialized after the pre-processors once,
         # compute_tendency does run pre-processors
@@ -432,7 +432,8 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             y_norm = None
             y_noised = None
             if validation_mode:
-                # calculate_val_metrics and plotting expects normalised states
+                # metrics calculation and plotting expects normalised states
+                # SL TODO: some could be in-place
                 y_pred_norm = self.model.pre_processors(
                     y_pred,
                     in_place=False,
