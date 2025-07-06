@@ -139,8 +139,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             Loss value, metrics, and predictions (per step)
 
         """
-        # for validation not normalized in-place because remappers cannot be applied in-place
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)  # SL TODO: do we still need that?
+        batch = self.model.pre_processors(batch)  # normalized in-place
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
