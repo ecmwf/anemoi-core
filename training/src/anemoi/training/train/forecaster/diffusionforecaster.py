@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import einops
 import torch
+from torch.utils.checkpoint import checkpoint
 
 from .forecaster import GraphForecaster
 
@@ -59,7 +60,53 @@ class GraphDiffusionForecaster(GraphForecaster):
         self.rho = config.model.model.diffusion.noise.rho
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-        return self.model(x, y_noised, sigma, self.model_comm_group)
+        return self.model.model.fwd_with_preconditioning(
+            x,
+            y_noised,
+            sigma,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
+
+    def _compute_loss(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        weights: torch.Tensor = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Compute the diffusion loss with noise weighting.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+        weights : torch.Tensor
+            Noise weights for diffusion loss computation
+        **_kwargs
+            Additional arguments
+
+        Returns
+        -------
+        torch.Tensor
+            Computed loss with noise weighting applied
+        """
+        msg = "Diffusion loss requires 'weights' parameter"
+        if weights is None:
+            raise ValueError(msg)
+
+        fact = weights**0.5  # factor for mse loss
+        return self.loss(
+            y_pred * fact,
+            y * fact,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
+        )
 
     def rollout_step(
         self,
@@ -128,39 +175,28 @@ class GraphDiffusionForecaster(GraphForecaster):
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
             y_noised = self._noise_target(y, sigma)
 
-            # prediction
-            y_pred = self.model.model.fwd_with_preconditioning(
+            # prediction, fwd_with_preconditioning
+            y_pred = self(
                 x,
                 y_noised,
                 sigma,
-                model_comm_group=self.model_comm_group,
             )  # shape is (bs, ens, latlon, nvar)
 
-            loss = (
-                self._calculate_loss(
-                    pred=y_pred,
-                    target=y,
-                    weights=noise_weights,
-                )
-                if training_mode
-                else None
+            # Use checkpoint for compute_loss_metrics
+            loss, metrics_next = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                rollout_step,
+                training_mode,
+                validation_mode,
+                weights=noise_weights,
+                use_reentrant=False,
             )
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred,
-                    y,
-                    rollout_step,
-                )
             yield loss, metrics_next, y_pred, y_noised
-
-    def _calculate_loss(self, pred: torch.Tensor, target: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
-        """Calculate the loss."""
-        fact = weights**0.5  # factor for mse loss
-        return self.loss(pred * fact, target * fact)
 
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Add noise to the state."""
@@ -209,6 +245,75 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
+
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int,
+        training_mode: bool = True,
+        validation_mode: bool = False,
+        y_pred_state: torch.Tensor = None,
+        y_state: torch.Tensor = None,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        """Compute loss on tendencies and metrics on states.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted tendencies
+        y : torch.Tensor
+            Target tendencies
+        rollout_step : int
+            Current rollout step
+        training_mode : bool
+            Whether to compute training loss
+        validation_mode : bool
+            Whether to compute validation metrics
+        y_pred_state : torch.Tensor, optional
+            Predicted states (for validation metrics)
+        y_state : torch.Tensor, optional
+            Target states (for validation metrics)
+        **kwargs
+            Additional arguments (including weights for diffusion)
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
+            Loss (if training_mode) and metrics dictionary (if validation_mode)
+        """
+        # Prepare tendencies for loss computation
+        tendency_pred_full, tendency_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            training_mode,
+            validation_mode,
+        )
+
+        # Compute loss on tendencies if in training mode
+        loss = None
+        if training_mode:
+            loss = self._compute_loss(tendency_pred_full, tendency_full, grid_shard_slice, **kwargs)
+
+        # Compute metrics on states if in validation mode
+        metrics_next = {}
+        if validation_mode and y_pred_state is not None and y_state is not None:
+            # Prepare states for metrics computation
+            y_pred_state_full, y_state_full, grid_shard_slice_metrics = self._prepare_tensors_for_loss(
+                y_pred_state,
+                y_state,
+                False,
+                validation_mode,
+            )
+            metrics_next = self._compute_metrics(
+                y_pred_state_full,
+                y_state_full,
+                rollout_step,
+                grid_shard_slice_metrics,
+            )
+
+        return loss, metrics_next
 
     def rollout_step(
         self,
@@ -288,7 +393,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         )
         assert batch.shape[1] >= rollout + self.multi_step, msg
 
-        y_noised = None
         for rollout_step in range(rollout or self.rollout):
 
             # target tendency
@@ -309,23 +413,12 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             # add noise to tendency
             tendency_target_noised = self._noise_target(tendency_target, sigma)
 
-            # prediction
-            tendency_pred = self.model.model.fwd_with_preconditioning(
+            # prediction, fwd_with_preconditioning
+            tendency_pred = self(
                 x_norm,
                 tendency_target_noised,
                 sigma,
-                model_comm_group=self.model_comm_group,
             )  # shape is (bs, ens, latlon, nvar)
-
-            loss = (
-                self._calculate_loss(
-                    pred=tendency_pred,
-                    target=tendency_target,
-                    weights=noise_weights,
-                )
-                if training_mode
-                else None
-            )
 
             # re-construct predicted state
             y_pred = self.model.model.add_tendency_to_state(
@@ -335,17 +428,21 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 self.model.post_processors_tendencies,
             )
 
-            # advance input using non-processed x, y_pred and batch
-            x = self.advance_input(x, y_pred, batch, rollout_step)
-
-            metrics_next = {}
+            # Prepare states for validation if needed
+            y_pred_norm = None
+            y_norm = None
+            y_noised = None
             if validation_mode:
-                # calculate_val_metrices and plotting expects normalised states
-                y_pred = self.model.pre_processors(
+                # calculate_val_metrics and plotting expects normalised states
+                y_pred_norm = self.model.pre_processors(
                     y_pred,
                     in_place=False,
                     data_index=self.data_indices.data.output.full,
                 )
+                y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
+                y_norm = self.model.pre_processors(y, in_place=False, data_index=self.data_indices.data.output.full)
+
+                # Compute noised state for visualization
                 y_noised = self.model.model.add_tendency_to_state(
                     x_norm[:, -1, ...],
                     tendency_target_noised,
@@ -357,12 +454,22 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                     in_place=False,
                     data_index=self.data_indices.data.output.full,
                 )
-                y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
-                y = self.model.pre_processors(y, in_place=False, data_index=self.data_indices.data.output.full)
 
-                metrics_next = self.calculate_val_metrics(
-                    y_pred,
-                    y,
-                    rollout_step,
-                )
-            yield loss, metrics_next, y_pred, y_noised
+            # Use checkpoint for compute_loss_metrics
+            loss, metrics_next = checkpoint(
+                self.compute_loss_metrics,
+                tendency_pred,  # predicted tendencies
+                tendency_target,  # target tendencies
+                rollout_step,
+                training_mode,
+                validation_mode,
+                y_pred_norm,  # predicted states for metrics
+                y_norm,  # target states for metrics
+                weights=noise_weights,  # noise weights for loss
+                use_reentrant=False,
+            )
+
+            # advance input using non-processed x, y_pred and batch
+            x = self.advance_input(x, y_pred, batch, rollout_step)
+
+            yield loss, metrics_next, y_pred_norm, y_noised

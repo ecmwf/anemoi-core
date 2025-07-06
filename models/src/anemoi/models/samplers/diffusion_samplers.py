@@ -94,6 +94,7 @@ def edm_heun_sampler(
     sigmas: torch.Tensor,
     denoising_fn: Callable,
     model_comm_group: Optional[ProcessGroup] = None,
+    grid_shard_shapes: Optional[list] = None,
     S_churn: float = 0.0,
     S_min: float = 0.0,
     S_max: float = float("inf"),
@@ -155,6 +156,7 @@ def edm_heun_sampler(
             y.to(dtype=x.dtype),
             sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(x.dtype),
             model_comm_group,
+            grid_shard_shapes,
         ).to(dtype)
 
         d = (y - D1) / (sigma_effective + eps_prec)
@@ -167,6 +169,7 @@ def edm_heun_sampler(
                 y_next.to(dtype=x.dtype),
                 sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype=x.dtype),
                 model_comm_group,
+                grid_shard_shapes,
             ).to(dtype)
             d_prime = (y_next - D2) / (sigma_next + eps_prec)
             y = y + (sigma_next - sigma_effective) * (d + d_prime) / 2
@@ -182,6 +185,7 @@ def dpmpp_2m_sampler(
     sigmas: torch.Tensor,
     denoising_fn: Callable,
     model_comm_group: Optional[ProcessGroup] = None,
+    grid_shard_shapes: Optional[list] = None,
 ) -> torch.Tensor:
     """DPM++ 2M sampler (DPM-Solver++ with 2nd order multistep).
 
@@ -215,7 +219,7 @@ def dpmpp_2m_sampler(
         sigma_next = sigmas[i + 1]
 
         sigma_expanded = sigma.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1)
-        denoised = denoising_fn(x, y, sigma_expanded, model_comm_group)
+        denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
 
         if sigma_next == 0:
             y = denoised
