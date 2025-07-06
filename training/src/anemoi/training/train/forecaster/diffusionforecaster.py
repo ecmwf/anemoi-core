@@ -31,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GraphDiffusionForecaster(GraphForecaster):
-    """Graph neural network forecaster for flow / diffusion for PyTorch Lightning."""
+    """Graph neural network forecaster for diffusion."""
 
     def __init__(
         self,
@@ -140,7 +140,7 @@ class GraphDiffusionForecaster(GraphForecaster):
 
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
+        batch = self.model.pre_processors(batch, in_place=not validation_mode)  # SL TODO: do we still need that?
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
@@ -220,7 +220,7 @@ class GraphDiffusionForecaster(GraphForecaster):
 
 
 class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
-    """Graph neural network forecaster for flow / diffusion tendency prediction for PyTorch Lightning."""
+    """Graph neural network forecaster for diffusion tendency prediction."""
 
     def __init__(
         self,
@@ -371,7 +371,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             batch_trunc[:, self.multi_step - 1 : self.multi_step + self.rollout - 1, ...],
             self.model.pre_processors,
             pre_processors_tendencies,
-        )
+        )  # SL TODO: possible to do this in-place? check that gradiet flow works for out of place
 
         # Delayed scalers need to be initialized after the pre-processors once,
         # compute_tendency does run pre-processors
@@ -426,7 +426,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 tendency_pred,
                 self.model.post_processors,
                 self.model.post_processors_tendencies,
-            )
+            )  # SL TODO: make explicit that this is not in-place
 
             # Prepare states for validation if needed
             y_pred_norm = None
