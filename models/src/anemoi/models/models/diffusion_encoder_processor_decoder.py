@@ -65,11 +65,10 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
         self.noise_embedder = SinusoidalEmbeddings(num_channels=self.noise_channels, max_period=1000)
 
-        self.noise_cond_mlp = nn.Sequential(
-            nn.Linear(self.noise_channels, self.noise_channels),
-            nn.SiLU(),
-            nn.Linear(self.noise_channels, self.noise_cond_dim),
-        )
+        self.noise_cond_mlp = nn.Sequential()
+        self.noise_cond_mlp.add_module("linear1_no_gradscaling", nn.Linear(self.noise_channels, self.noise_channels))
+        self.noise_cond_mlp.add_module("activation", nn.SiLU())
+        self.noise_cond_mlp.add_module("linear2_no_gradscaling", nn.Linear(self.noise_channels, self.noise_cond_dim))
 
     def _calculate_input_dim(self, model_config):
         base_input_dim = super()._calculate_input_dim(model_config)
@@ -273,8 +272,6 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
-        sigma_max: Optional[float] = None,
-        sigma_min: Optional[float] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Prediction step for flow/diffusion models - performs sampling.
@@ -293,12 +290,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Process group for distributed training
         gather_out : bool
             Whether to gather output tensors across distributed processes
-        sigma_max : Optional[float]
-            Maximum noise level (defaults to self.sigma_max if not provided)
-        sigma_min : Optional[float]
-            Minimum noise level (defaults to self.sigma_min if not provided)
         **kwargs
-            Sampling parameters (sampler, num_steps, schedule_type, etc.)
+            Sampling parameters (sampler, num_steps, schedule_type, sigma_max, sigma_min, rho, etc.)
 
         Returns
         -------
@@ -315,19 +308,18 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             # Dimensions are batch, timesteps, grid, variables
             x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
-            # Handle distributed processing
             grid_shard_shapes = None
             if model_comm_group is not None:
                 shard_shapes = get_shard_shapes(x, -2, model_comm_group)
                 grid_shard_shapes = [shape[-2] for shape in shard_shapes]
                 x = shard_tensor(x, -2, shard_shapes, model_comm_group)
 
-            # SL TODO: make this configurable for inference
-            sigma_max = 90
-            sigma_min = 0.03
-            rho = 7.0
-            num_steps = 20
-            sampler = "heun"
+            sigma_max = kwargs.get("sigma_max", self.sigma_max)
+            sigma_min = kwargs.get("sigma_min", self.sigma_min)
+            rho = kwargs.get("rho", 7.0)
+            num_steps = kwargs.get("num_steps", 20)
+            sampler = kwargs.get("sampler", "heun")
+            schedule_type = kwargs.get("schedule_type", "karras")
 
             out = self.sample(
                 x,
@@ -337,7 +329,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
                 sigma_min=sigma_min,
                 rho=rho,
                 num_steps=num_steps,
-                schedule_type="karras",  # or "linear", "cosine", "exponential"
+                schedule_type=schedule_type,
                 sampler=sampler,
                 **kwargs,
             ).to(x.dtype)
@@ -360,8 +352,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         num_steps: int = 50,
         schedule_type: str = "karras",
         rho: float = 7.0,
-        sigma_max: Optional[float] = None,
-        sigma_min: Optional[float] = None,
+        sigma_max: float = None,
+        sigma_min: float = None,
         **kwargs,
     ) -> torch.Tensor:
         """Sample from the diffusion model.
@@ -380,10 +372,10 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Type of noise schedule
         rho : float
             Time discretization parameter
-        sigma_max : Optional[float]
-            Maximum noise level (defaults to self.sigma_max if not provided)
-        sigma_min : Optional[float]
-            Minimum noise level (defaults to self.sigma_min if not provided)
+        sigma_max : float
+            Maximum noise level
+        sigma_min : float
+            Minimum noise level
         **kwargs
             Additional sampler-specific arguments
 
@@ -392,11 +384,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         torch.Tensor
             Sampled output with shape (batch, ensemble, grid, vars)
         """
-        # Use provided sigma values or defaults
-        sigma_max = sigma_max if sigma_max is not None else self.sigma_max
-        sigma_min = sigma_min if sigma_min is not None else self.sigma_min
 
         # Generate noise schedule
+        assert sigma_max is not None and sigma_min is not None, "sigma_max and sigma_min are required."
         sigmas = self.get_noise_schedule(
             num_steps=num_steps,
             sigma_max=sigma_max,

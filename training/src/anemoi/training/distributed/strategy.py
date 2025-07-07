@@ -25,6 +25,38 @@ from anemoi.training.utils.seeding import get_base_seed
 LOGGER = logging.getLogger(__name__)
 
 
+def register_gradient_scaling_hooks(
+    model: torch.nn.Module,
+    model_comm_group_size: float,
+    skip_grad_scaling: list[str] | None = None,
+) -> None:
+    """Register parameter hooks for gradient reduction.
+
+    Here, we rescale parameters that only see a subset of the input on each rank
+    -> these are still divided by the total number of GPUs in DDP as if each rank would see a full set of inputs
+    note: the trainable parameters are added before the split across GPUs and are therefore not rescaled.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to register hooks on.
+    model_comm_group_size : float
+        The size of the model communication group for scaling.
+    skip_grad_scaling : list[str] | None
+        List of parameter name patterns to skip gradient scaling.
+        Defaults to ["trainable", "no_gradscaling"].
+    """
+    if skip_grad_scaling is None:
+        skip_grad_scaling = ["trainable", "no_gradscaling"]
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if any(skip_name in name for skip_name in skip_grad_scaling):
+            continue
+        param.register_hook(lambda grad: grad * float(model_comm_group_size))
+
+
 def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     """Seed the random number generators for the rank."""
     base_seed = get_base_seed()
@@ -258,15 +290,8 @@ class DDPGroupStrategy(DDPStrategy):
         return dataloader
 
     def register_parameter_hooks(self) -> None:
-        """Register parameter hooks for gradient reduction.
-
-        Here, we rescale parameters that only see a subset of the input on each rank
-        -> these are still divided by the total number of GPUs in DDP as if each rank would see a full set of inputs
-        note: the trainable parameters are added before the split across GPUs and are therefore not rescaled.
-        """
-        for name, param in self.model.named_parameters():
-            if param.requires_grad is True and "trainable" not in name:
-                param.register_hook(lambda grad: grad * float(self.model_comm_group_size))
+        """Register parameter hooks for gradient reduction."""
+        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
 
 
 class DDPEnsGroupStrategy(DDPStrategy):
@@ -522,13 +547,5 @@ class DDPEnsGroupStrategy(DDPStrategy):
         return dataloader
 
     def register_parameter_hooks(self) -> None:
-        """Register parameter hooks for gradient reduction.
-
-        Here, we rescale parameters that only see a subset of the input on each rank
-        -> these are still divided by the total number of GPUs in DDP as if each rank would see a full set of inputs
-        note: the trainable parameters are added before the split across GPUs and are therefore not rescaled.
-        """
-        # SL TODO: check hooks!
-        for name, param in self.model.named_parameters():
-            if param.requires_grad is True and "trainable" not in name:
-                param.register_hook(lambda grad: grad * float(self.model_comm_group_size))
+        """Register parameter hooks for gradient reduction."""
+        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
