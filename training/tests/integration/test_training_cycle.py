@@ -144,44 +144,25 @@ def test_restart_from_existing_checkpoint(gnn_config_with_checkpoint: DictConfig
 
 @skip_if_offline
 @pytest.mark.longtests
-def test_training_cycle_diffusion(
-    diffusion_config_with_data: tuple[DictConfig, str],
-    get_test_archive: callable,
-) -> None:
-    cfg, url = diffusion_config_with_data
+def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = diffusion_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_diffusion(diffusion_config: DictConfig) -> None:
-    BaseSchema(**diffusion_config)
+def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = diffusion_config
+    BaseSchema(**cfg)
 
 
 @skip_if_offline
 @pytest.mark.longtests
-def test_training_cycle_diffusion_tend(
-    diffusion_tend_config_with_data: tuple[DictConfig, str],
-    get_test_archive: callable,
-) -> None:
-    cfg, url = diffusion_tend_config_with_data
+def test_training_cycle_diffusiontend(diffusiontend_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = diffusiontend_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_diffusion_tend(diffusion_tend_config: DictConfig) -> None:
-    BaseSchema(**diffusion_tend_config)
-
-
-@skip_if_offline
-@pytest.mark.longtests
-def test_training_cycle_graphtransformer_diffusion(
-    graphtransformer_diffusion_config_with_data: tuple[DictConfig, str],
-    get_test_archive: callable,
-) -> None:
-    cfg, url = graphtransformer_diffusion_config_with_data
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-def test_config_validation_graphtransformer_diffusion(graphtransformer_diffusion_config: DictConfig) -> None:
-    BaseSchema(**graphtransformer_diffusion_config)
+def test_config_validation_diffusiontend(diffusiontend_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = diffusiontend_config
+    BaseSchema(**cfg)

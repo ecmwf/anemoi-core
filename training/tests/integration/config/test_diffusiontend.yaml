@@ -10,7 +10,7 @@ hardware:
     graph: null
 
 training:
-  model_task: anemoi.training.train.forecaster.GraphDiffusionForecaster
+  model_task: anemoi.training.train.forecaster.GraphDiffusionTendForecaster
 
 dataloader:
   training:
