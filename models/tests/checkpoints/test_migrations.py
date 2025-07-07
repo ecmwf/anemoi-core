@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from anemoi.models.migrations import FinalMigrationException
 from anemoi.models.migrations import Migrator
 from anemoi.models.migrations import MissingMigrationException
 
@@ -192,18 +193,9 @@ def test_migrate_with_target():
     assert len(migrated_model["migrations"]) == 2
 
 
-def test_migrate_with_target_latest():
+def test_migrate_with_target_latest_before_final():
     migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync({}, target="0.9.0")
-
-    assert len(done_migrations) == 4
-    assert len(done_rollbacks) == 0
-    assert len(migrated_model["migrations"]) == 4
-
-
-def test_migrate_with_target_future():
-    migrator = get_test_migrator()
-    migrated_model, done_migrations, done_rollbacks = migrator.sync({}, target="0.10.0")
 
     assert len(done_migrations) == 4
     assert len(done_rollbacks) == 0
@@ -240,7 +232,7 @@ def test_no_rollback_with_target_latest():
     assert len(rollbacked_model["migrations"]) == 4
 
 
-def test_no_rollback_with_target_too_old():
+def test_no_rollback_with_target_overshoot():
     migrator = get_test_migrator()
     migrated_model, _, _ = migrator.sync({})
     rollbacked_model, done_migrations, done_rollbacks = migrator.sync(migrated_model, target="0.1.0")
@@ -248,3 +240,53 @@ def test_no_rollback_with_target_too_old():
     assert len(done_migrations) == 0
     assert len(done_rollbacks) == 4
     assert len(rollbacked_model["migrations"]) == 0
+
+
+def test_error_migration_past_final():
+    migrator = get_test_migrator()
+    with pytest.raises(FinalMigrationException):
+        migrator.sync({}, steps=5)
+
+
+def _make_recent_ckpt(migrator: Migrator):
+    migrated_model, _, _ = migrator.sync({})
+    migrated_model["migrations"].append("1751895180_final")
+    return migrated_model
+
+
+def test_migrate_recent_model():
+    migrator = get_test_migrator()
+    model = _make_recent_ckpt(migrator)
+    migrated_model, done_migrations, done_rollbacks = migrator.sync(model)
+
+    assert len(done_migrations) == 1
+    assert len(done_rollbacks) == 0
+    assert len(migrated_model["migrations"]) == 6
+    assert migrated_model.get("after", None) == "after"
+
+
+def test_stop_rollback_to_prev_final():
+    migrator = get_test_migrator()
+    model, _, _ = migrator.sync(_make_recent_ckpt(migrator))
+    assert model.get("after", None) == "after"
+    rollbacked_model, done_rollbacks = migrator.rollback(model)
+
+    assert len(done_rollbacks) == 1
+    assert len(rollbacked_model["migrations"]) == 5
+    assert "after" not in rollbacked_model
+
+
+def test_error_rollback_to_old():
+    migrator = get_test_migrator()
+    model, _, _ = migrator.sync(_make_recent_ckpt(migrator))
+    with pytest.raises(FinalMigrationException):
+        migrator.rollback(model, steps=2)
+
+
+def test_migrate_with_target_future():
+    migrator = get_test_migrator()
+    migrated_model, done_migrations, done_rollbacks = migrator.sync(_make_recent_ckpt(migrator), target="2.0.0")
+
+    assert len(done_migrations) == 1
+    assert len(done_rollbacks) == 0
+    assert len(migrated_model["migrations"]) == 6
