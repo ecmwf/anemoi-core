@@ -92,7 +92,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
-                c_data,
+                c_data,  # SL TODO: remove this, makes it work with GNN though
                 node_attributes_data,
                 # einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
             ),
@@ -105,7 +105,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = torch.cat(
             (
                 self.node_attributes(self._graph_name_hidden, batch_size=bse),
-                c_hidden,
+                c_hidden,  # SL TODO: remove this, makes it work with GNN though
             ),
             dim=-1,
         )
@@ -475,7 +475,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
-                c_data,  # SL TODO: remove this ... compare to what was in old model
+                c_data,  # #SL TODO: remove this, makes it work with GNN though
                 node_attributes_data,
                 einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars"),
             ),
@@ -488,7 +488,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_hidden_latent = torch.cat(
             (
                 self.node_attributes(self._graph_name_hidden, batch_size=bse),
-                c_hidden,  # SL TODO: remove this ... compare to what was in old model
+                c_hidden,  # #SL TODO: remove this, makes it work with GNN though
             ),
             dim=-1,
         )
