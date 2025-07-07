@@ -35,6 +35,14 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MissingMigrationException(BaseException):
+    """The checkpoint is missing a migration that cannot be added (wrong order)."""
+
+    pass
+
+
+class FinalMigrationException(BaseException):
+    """This migration is final and older checkpoints cannot be migrated past this."""
+
     pass
 
 
@@ -49,6 +57,7 @@ MigrationVersions = TypedDict("MigrationVersions", {"migration": str, "anemoi-mo
 @dataclass
 class MigrationMetadata:
     versions: MigrationVersions
+    final: bool = False
 
 
 @dataclass
@@ -156,8 +165,8 @@ class Migrator:
         """
         return cls(_migrations_from_path(location, package))
 
-    def _get_missing_migrations(self, ckpt: CkptType) -> Sequence[Migration]:
-        """Get missing migrations from a checkpoint
+    def _get_first_missing_migration(self, ckpt: CkptType) -> int:
+        """Get first missing migrations from a checkpoint
 
         Parameters
         ----------
@@ -170,20 +179,21 @@ class Migrator:
 
         Returns
         -------
-        Sequence[Migration]
-                Missing migrations from the checkpoint to execute
+        int
+            Index of first missing migrations from the checkpoint to execute
         """
         if _ckpt_migration_key not in ckpt:
-            return self._migrations
+            return 0
         done_migrations = ckpt[_ckpt_migration_key]
         # Migration should be done in order, we look for the the last done migration and
-        # execute the rest. This is to allow havind removed migrations in a checkpoint and
+        # execute the rest. This is to allow having removed migrations in a checkpoint and
         # not complain.
         key_rest_migration = 0
         num_migrations = len(self._migrations)
         for k, mig in enumerate(reversed(self._migrations)):
             if mig.name in done_migrations:
                 key_rest_migration = num_migrations - k
+                break
 
         if self._raise_missing_migrations:
             for migration in self._migrations[:key_rest_migration]:
@@ -191,7 +201,7 @@ class Migrator:
                     raise MissingMigrationException(
                         f"{migration.name} is not part of the checkpoint but cannot be executed (out of order)."
                     )
-        return self._migrations[key_rest_migration:]
+        return key_rest_migration
 
     def _get_steps_from_target(self, done_migrations: Sequence[str], target_version: str) -> int:
         """Returns the number of migration steps to execute given a target version
@@ -294,6 +304,12 @@ class Migrator:
         ckpt, missing_migrations = self.migrate(ckpt, steps, copy_ckpt=False)
         return ckpt, missing_migrations, []
 
+    def _next_final_migration(self, start_migration: int) -> Optional[int]:
+        """Returns the next final migration from the given start_migration"""
+        for k, migration in enumerate(self._migrations[start_migration:], start_migration):
+            if migration.metadata.final:
+                return k
+
     def migrate(
         self, ckpt: CkptType, steps: Optional[int] = None, *, copy_ckpt: bool = True
     ) -> Tuple[CkptType, Sequence[Migration]]:
@@ -321,13 +337,26 @@ class Migrator:
 
         if _ckpt_migration_key not in ckpt:
             ckpt[_ckpt_migration_key] = []
-        missing_migrations = self._get_missing_migrations(ckpt)
+        key_missing_migration = self._get_first_missing_migration(ckpt)
+        next_final = self._next_final_migration(key_missing_migration)
+        if next_final is not None and steps is not None and next_final < steps:
+            raise FinalMigrationException("The checkpoint is too old. Migration is not supported.")
+        if steps is None and next_final is not None:
+            steps = next_final - key_missing_migration
+        missing_migrations = self._migrations[key_missing_migration:]
         if steps is not None:
             missing_migrations = missing_migrations[:steps]
         for migration in missing_migrations:
             ckpt = migration.migrate(ckpt)
             ckpt[_ckpt_migration_key].append(migration.serialize())
         return ckpt, missing_migrations
+
+    def _prev_final_migration(self, migrations: List[str]) -> int:
+        """Returns the previously stored final migration."""
+        for k, migration in enumerate(migrations):
+            if self._migration_map[migration].metadata.final:
+                return k
+        return len(migrations)
 
     def rollback(
         self, ckpt: CkptType, steps: Optional[int] = None, *, copy_ckpt: bool = True
@@ -358,8 +387,11 @@ class Migrator:
         if _ckpt_migration_key not in ckpt:
             ckpt[_ckpt_migration_key] = []
         rollbacks: List[Migration] = []
+        prev_final = self._prev_final_migration(ckpt[_ckpt_migration_key])
+        if steps is not None and steps > prev_final:
+            raise FinalMigrationException("The checkpoint is too recent. Migration is not supported.")
         if steps is None:
-            steps = len(ckpt[_ckpt_migration_key])
+            steps = len(ckpt[_ckpt_migration_key]) - prev_final - 1
         for _ in range(steps):
             migration_name = ckpt[_ckpt_migration_key].pop()
             last_migration = self._migration_map.get(migration_name, None)

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .. import __version__ as version_anemoi_models
 from ..migrations import MIGRATION_PATH
+from ..migrations import FinalMigrationException
 from ..migrations import Migrator
 from ..migrations import registered_migrations
 from . import Command
@@ -40,15 +41,21 @@ class Migration(Command):
         command_parser : ArgumentParser
             The argument parser to which the arguments will be added.
         """
-        subparsers = command_parser.add_subparsers(required=True)
+        subparsers = command_parser.add_subparsers(dest="subcommand", required=True)
         help_create = "Create a new migration script."
         create_parser = subparsers.add_parser("create", help=help_create, description=help_create)
-        create_parser.add_argument("name", help="Name of the migration")
-        create_parser.add_argument("--path", type=Path, default=MIGRATION_PATH, help="Path to the migration folder")
+        create_parser.add_argument("name", help="Name of the migration.")
+        create_parser.add_argument("--path", type=Path, default=MIGRATION_PATH, help="Path to the migration folder.")
+        create_parser.add_argument(
+            "--final",
+            action="store_true",
+            default=False,
+            help="Set this as the final migration. Older checkpoints cannot be migrated past this.",
+        )
 
         help_apply = "Apply migrations to a checkpoint."
         apply_parser = subparsers.add_parser("apply", help=help_apply, description=help_apply)
-        apply_parser.add_argument("ckpt", help="Path to the checkpoint to migrate")
+        apply_parser.add_argument("ckpt", help="Path to the checkpoint to migrate.")
         apply_parser.add_argument(
             "--steps",
             default=None,
@@ -107,10 +114,21 @@ class Migration(Command):
         from textwrap import dedent
 
         name = _get_migration_name(args.name)
+
+        imports_items = ["from anemoi.models.migrations import CkptType"]
+        if args.final:
+            imports_items.append("from anemoi.models.migrations import FinalMigrationException")
+        imports_items.append("from anemoi.models.migrations import MigrationMetadata")
+        imports = "\n".join(imports_items)
+
+        content = "return ckpt"
+        if args.final:
+            content = "raise FinalMigrationException"
+
         with open(args.path / name, "w") as f:
             f.write(
                 dedent(
-                    f"""
+                    """\
                     # (C) Copyright 2024 Anemoi contributors.
                     #
                     # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -118,33 +136,35 @@ class Migration(Command):
                     #
                     # In applying this licence, ECMWF does not waive the privileges and immunities
                     # granted to it by virtue of its status as an intergovernmental organisation
-                    # nor does it submit to any jurisdiction.
+                    # nor does it submit to any jurisdiction.\n
+                    """
+                )
+            )
+            f.write(imports)
 
-
-                    from anemoi.models.migrations import CkptType
-                    from anemoi.models.migrations import MigrationMetadata
-
+            f.write(
+                dedent(
+                    f"""
 
                     metadata = MigrationMetadata(
                         versions={{
                             "migration": "1.0.0",
                             "anemoi-models": "{version_anemoi_models}",
-                        }}
+                        }},
+                        final={args.final},
                     )
 
 
                     def migrate(ckpt: CkptType) -> CkptType:
-                        \"\"\"Migrate the checkpoint\"\"\"
-                        print(ckpt)
-                        return ckpt
+                        \"\"\"Migrate the checkpoint.\"\"\"
+                        {content}
 
 
                     def rollback(ckpt: CkptType) -> CkptType:
-                        \"\"\"Rollback the migration\"\"\"
-                        return ckpt
+                        \"\"\"Rollback the migration.\"\"\"
+                        {content}
                 """
-                ).strip()
-                + "\n"
+                )
             )
         print(f"Created migration {name} in {args.path}")
 
@@ -159,26 +179,31 @@ class Migration(Command):
         import torch
 
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-        new_ckpt, done_migrations, done_rollbacks = Migrator().sync(
-            ckpt, steps=args.steps, n_migrations=args.n_migrations, target=args.target
-        )
-        if len(done_migrations) or len(done_rollbacks):
-            version = len(registered_migrations(ckpt))
-            ckpt_path = Path(args.ckpt)
-            new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
-            torch.save(ckpt, new_path)
-            LOGGER.info("Saved previous checkpoint here: %s", str(new_path.resolve()))
-            torch.save(new_ckpt, ckpt_path)
-        if len(done_migrations):
-            LOGGER.info(
-                "Executed %s migrations: %s", len(done_migrations), [migration.name for migration in done_migrations]
+        try:
+            new_ckpt, done_migrations, done_rollbacks = Migrator().sync(
+                ckpt, steps=args.steps, n_migrations=args.n_migrations, target=args.target
             )
-        if len(done_rollbacks):
-            LOGGER.info(
-                "Executed %s migration rollbacks: %s",
-                len(done_rollbacks),
-                [migration.name for migration in done_rollbacks],
-            )
+            if len(done_migrations) or len(done_rollbacks):
+                version = len(registered_migrations(ckpt))
+                ckpt_path = Path(args.ckpt)
+                new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
+                torch.save(ckpt, new_path)
+                LOGGER.info("Saved previous checkpoint here: %s", str(new_path.resolve()))
+                torch.save(new_ckpt, ckpt_path)
+            if len(done_migrations):
+                LOGGER.info(
+                    "Executed %s migrations: %s",
+                    len(done_migrations),
+                    [migration.name for migration in done_migrations],
+                )
+            if len(done_rollbacks):
+                LOGGER.info(
+                    "Executed %s migration rollbacks: %s",
+                    len(done_rollbacks),
+                    [migration.name for migration in done_rollbacks],
+                )
+        except FinalMigrationException as e:
+            LOGGER.error(str(e))
 
 
 command = Migration
