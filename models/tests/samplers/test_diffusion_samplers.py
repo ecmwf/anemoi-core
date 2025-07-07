@@ -35,7 +35,12 @@ class MockDenoisingFunction:
         self.call_count = 0
 
     def __call__(
-        self, x: torch.Tensor, y: torch.Tensor, sigma: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        sigma: torch.Tensor,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
         """Mock denoising function that reduces noise proportionally to sigma."""
         self.call_count += 1
@@ -387,8 +392,8 @@ class TestSamplerComparison:
 
         # Create device-aware mock function
         class DeviceMockDenoisingFunction(MockDenoisingFunction):
-            def __call__(self, x, y, sigma, model_comm_group=None):
-                result = super().__call__(x, y, sigma, model_comm_group)
+            def __call__(self, x, y, sigma, model_comm_group=None, grid_shard_shapes=None):
+                result = super().__call__(x, y, sigma, model_comm_group, grid_shard_shapes)
                 return result.to(device)
 
         mock_fn1 = DeviceMockDenoisingFunction(deterministic=True)
