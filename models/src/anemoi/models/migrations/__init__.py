@@ -43,12 +43,12 @@ CkptType = MutableMapping[str, Any]
 
 # migration is the version of the migration module to allow future update of
 # the script and keep backward compatibility
-Versions = TypedDict("Versions", {"migration": str, "anemoi-models": str})
+MigrationVersions = TypedDict("MigrationVersions", {"migration": str, "anemoi-models": str})
 
 
 @dataclass
-class Metadata:
-    versions: Versions
+class MigrationMetadata:
+    versions: MigrationVersions
 
 
 @dataclass
@@ -61,7 +61,7 @@ class Migration:
     """Callback to execute the migration"""
     rollback: Callable[[CkptType], CkptType]
     """Callback to execute a migration rollback"""
-    metadata: Metadata
+    metadata: MigrationMetadata
     """Tracked metadata"""
 
     def serialize(self) -> str:

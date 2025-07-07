@@ -122,11 +122,10 @@ class Migration(Command):
 
 
                     from anemoi.models.migrations import CkptType
-                    from anemoi.models.migrations import Metadata
+                    from anemoi.models.migrations import MigrationMetadata
 
-                    from anemoi.models.migrations import Metadata
 
-                    metadata = Metadata(
+                    metadata = MigrationMetadata(
                         versions={{
                             "migration": "1.0.0",
                             "anemoi-models": "{version_anemoi_models}",
