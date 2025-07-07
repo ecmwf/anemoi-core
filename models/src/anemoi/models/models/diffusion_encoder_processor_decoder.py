@@ -310,10 +310,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
                 **kwargs,
             ).to(x.dtype)
 
-            # Apply post-processing
             out = post_processors(out, in_place=False)
 
-            # Gather output if needed
             if gather_out and model_comm_group is not None:
                 out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
 
@@ -542,21 +540,17 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         torch.Tensor
             Predicted state (after post-processing)
         """
-        # Apply pre-processing to get normalized state
-        batch_normalized = pre_processors(batch, in_place=False)
+        batch = pre_processors(batch, in_place=False)
 
         with torch.no_grad():
             assert (
-                len(batch_normalized.shape) == 4
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch_normalized.shape}!"
+                len(batch.shape) == 4
+            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
 
-            # Get reference state, with ensemble dimension
-            x_t0 = batch_normalized[:, -1, None, ...]
+            # Dimensions are batch, timesteps, grid, variables
+            x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension as 3rd index
+            x = batch[:, 0:multi_step, None, ...]
 
-            # Prepare input for diffusion model with ensemble dimension
-            x = batch_normalized[:, 0:multi_step, None, ...]
-
-            # Handle distributed processing
             grid_shard_shapes = None
             if model_comm_group is not None:
                 shard_shapes = get_shard_shapes(x, -2, model_comm_group)
@@ -564,41 +558,39 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 x = shard_tensor(x, -2, shard_shapes, model_comm_group)
                 x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
 
-            # Sample tendency, SL TODO: make this configurable for inference
-            sigma_max = 90
-            sigma_min = 0.03
-            rho = 7.0
-            num_steps = 20
-            sampler = "heun"
+            # Get sampler settings from kwargs with defaults matching parent class
+            sigma_max = kwargs.get("sigma_max", self.sigma_max)
+            sigma_min = kwargs.get("sigma_min", self.sigma_min)
+            rho = kwargs.get("rho", 7.0)
+            num_steps = kwargs.get("num_steps", 20)
+            sampler = kwargs.get("sampler", "heun")
+            schedule_type = kwargs.get("schedule_type", "karras")
 
             # Sample normalized tendency
             tendency_normalized = self.sample(
                 x,
                 model_comm_group,
+                grid_shard_shapes=grid_shard_shapes,
                 sigma_max=sigma_max,
                 sigma_min=sigma_min,
                 rho=rho,
                 num_steps=num_steps,
-                schedule_type="karras",
+                schedule_type=schedule_type,
                 sampler=sampler,
                 **kwargs,
             ).to(x_t0.dtype)
 
-            # Add tendency to reference state
-            state_output = self.add_tendency_to_state(
+            out = self.add_tendency_to_state(
                 x_t0,
                 tendency_normalized,
                 post_processors,
                 post_processors_tendencies,
             )
 
-            # Gather output if needed
             if gather_out and model_comm_group is not None:
-                state_output = gather_tensor(
-                    state_output, -2, apply_shard_shapes(state_output, -2, grid_shard_shapes), model_comm_group
-                )
+                out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
 
-        return state_output
+        return out
 
     def compute_tendency(
         self,
