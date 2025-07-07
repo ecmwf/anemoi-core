@@ -74,15 +74,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         base_input_dim = super()._calculate_input_dim(model_config)
         return base_input_dim + self.num_output_channels + self.noise_cond_dim
 
-    def _calculate_input_dim_latent(self, model_config):
-        base_input_dim = super()._calculate_input_dim_latent(model_config)
-        return base_input_dim + self.noise_cond_dim
-
-    def _assemble_input(self, x, y_noised, c_data, c_hidden, bse, grid_shard_shapes=None, model_comm_group=None):
-        # Get node attributes
+    def _assemble_input(self, x, y_noised, c_data, bse, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
-
-        # Shard node attributes if grid sharding is enabled
         if grid_shard_shapes is not None:
             shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
@@ -92,30 +85,18 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
-                c_data,  # SL TODO: remove this, makes it work with GNN though
+                c_data,  # SL TODO: remove this
                 node_attributes_data,
-                # einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars"),
             ),
             dim=-1,  # feature dimension
         )
-
-        # Get shard shapes for data
         shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
-        x_hidden_latent = torch.cat(
-            (
-                self.node_attributes(self._graph_name_hidden, batch_size=bse),
-                c_hidden,  # SL TODO: remove this, makes it work with GNN though
-            ),
-            dim=-1,
-        )
-        return x_data_latent, x_hidden_latent, None, shard_shapes_data
+        return x_data_latent, shard_shapes_data
 
-    def _assemble_output(self, x_out, x_skip, batch_size, bse, dtype):
+    def _assemble_output(self, x_out, batch_size, bse, dtype):
         x_out = einops.rearrange(x_out, "(bse n) f -> bse n f", bse=bse)
         x_out = einops.rearrange(x_out, "(bs e) n f -> bs e n f", bs=batch_size).to(dtype=dtype)
-
-        assert x_skip is None, "Residual connection not implemented for flow model"
 
         return x_out
 
@@ -176,21 +157,10 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
         ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
 
+        # prepare noise conditionings
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
-
-        x_data_latent, x_hidden_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, y_noised, c_data, c_hidden, bse, grid_shard_shapes, model_comm_group
-        )
-
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
-
-        # Shard conditioning tensors based on data shard shapes if grid sharding is enabled
-        if grid_shard_shapes is not None:
-            shape_c_data = shard_shapes_data
-            shape_c_hidden = shard_shapes_hidden
-        else:
-            shape_c_data = get_shard_shapes(c_data, 0, model_comm_group)
-            shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group)
+        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group)
+        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group)
 
         c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
         c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
@@ -198,6 +168,12 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
         processor_kwargs = {"cond": c_hidden}
         bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
+
+        x_data_latent, shard_shapes_data = self._assemble_input(
+            x, y_noised, c_data, bse, grid_shard_shapes, model_comm_group
+        )
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
@@ -233,7 +209,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             **bwd_mapper_kwargs,
         )
 
-        x_out = self._assemble_output(x_out, x_skip, batch_size, bse, x.dtype)
+        x_out = self._assemble_output(x_out, batch_size, bse, x.dtype)
 
         return x_out
 
@@ -457,7 +433,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         input_dim += self.noise_cond_dim
         return input_dim
 
-    def _assemble_input(self, x, y_noised, c_data, c_hidden, bse, grid_shard_shapes=None, model_comm_group=None):
+    def _assemble_input(self, x, y_noised, c_data, bse, grid_shard_shapes=None, model_comm_group=None):
         x_trunc = x[:, -1, :, :, self._internal_input_idx]
         x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
         x_trunc = self._apply_truncation(x_trunc, grid_shard_shapes, model_comm_group)
@@ -475,24 +451,15 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
-                c_data,  # #SL TODO: remove this, makes it work with GNN though
+                c_data,  # #SL TODO: remove this
                 node_attributes_data,
                 einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars"),
             ),
             dim=-1,  # feature dimension
         )
-
-        # Get shard shapes for data
         shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
-        x_hidden_latent = torch.cat(
-            (
-                self.node_attributes(self._graph_name_hidden, batch_size=bse),
-                c_hidden,  # #SL TODO: remove this, makes it work with GNN though
-            ),
-            dim=-1,
-        )
-        return x_data_latent, x_hidden_latent, None, shard_shapes_data
+        return x_data_latent, shard_shapes_data
 
     def add_tendency_to_state(
         self,

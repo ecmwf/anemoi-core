@@ -356,7 +356,11 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
 
         batch_size, nsteps, ensemble_size, _, _ = batch.shape
         batch_trunc = einops.rearrange(batch, "batch step ensemble grid vars -> (batch step ensemble) grid vars")
-        batch_trunc = self.model.model._apply_truncation(batch_trunc)
+        batch_trunc = self.model.model._apply_truncation(
+            batch_trunc,
+            grid_shard_shapes=self.grid_shard_shapes,
+            model_comm_group=self.model_comm_group,
+        )
         batch_trunc = einops.rearrange(
             batch_trunc,
             "(batch step ensemble) grid vars -> batch step ensemble grid vars",
