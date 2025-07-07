@@ -103,7 +103,7 @@ class ConstantImputerSchema(RootModel[dict[Any, Any]]):
 
 
 class PostprocessorSchema(BaseModel):
-    default: str = Field(literals=["none", "relu", "hardtanh"])
+    default: str = Field(literals=["none", "relu", "hardtanh", "hardtanh_0_1"])
     "Postprocessor default method to apply."
     relu: Union[list[str], None] = Field(default_factory=list)
     "Variables to postprocess with relu."

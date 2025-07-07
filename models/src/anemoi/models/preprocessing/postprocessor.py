@@ -97,6 +97,8 @@ class Postprocessor(BasePreprocessor):
             postprocessor_function = torch.nn.functional.relu
         elif method == "hardtanh":
             postprocessor_function = torch.nn.functional.hardtanh
+        elif method == "hardtanh_0_1":
+            postprocessor_function = torch.nn.Hardtanh(min_val=0)
         else:
             raise ValueError(f"Unknown postprocessing method: {method}")
 
