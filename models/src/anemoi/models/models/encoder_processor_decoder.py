@@ -10,7 +10,6 @@
 
 import logging
 from typing import Optional
-import os
 
 import einops
 import numpy as np
@@ -32,9 +31,6 @@ from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
-
-ANEMOI_ENCODER_CHUNKS = int(os.getenv("ANEMOI_ENCODER_CHUNKS", "0"))
-ANEMOI_DECODER_CHUNKS = int(os.getenv("ANEMOI_DECODER_CHUNKS", "0"))
 
 
 class AnemoiModelEncProcDec(nn.Module):
@@ -108,8 +104,6 @@ class AnemoiModelEncProcDec(nn.Module):
             shard_strategy=model_config.model.encoder.shard_strategy,
         )
 
-        self.encoder_num_chunks = model_config.model.encoder.get("num_chunks", 1)
-
         # Processor hidden -> hidden
         self.processor = instantiate(
             model_config.model.processor,
@@ -133,9 +127,6 @@ class AnemoiModelEncProcDec(nn.Module):
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
             shard_strategy=model_config.model.decoder.shard_strategy,
         )
-
-        self.decoder_num_chunks = model_config.model.decoder.get("num_chunks", 1)
-        print(f"Decoder num chunks: {self.decoder_num_chunks}")
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = nn.ModuleList(
@@ -356,8 +347,6 @@ class AnemoiModelEncProcDec(nn.Module):
         ensemble_size = x.shape[2]
         in_out_sharded = grid_shard_shapes is not None
 
-        self.encoder_num_chunks = self.encoder_num_chunks if ANEMOI_ENCODER_CHUNKS == 0 else ANEMOI_ENCODER_CHUNKS
-        self.decoder_num_chunks = self.decoder_num_chunks if ANEMOI_DECODER_CHUNKS == 0 else ANEMOI_DECODER_CHUNKS
         assert not (
             in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
         ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."

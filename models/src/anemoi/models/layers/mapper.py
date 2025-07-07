@@ -9,6 +9,7 @@
 
 
 import logging
+import os
 from abc import ABC
 from typing import Optional
 
@@ -22,14 +23,13 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
-from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.khop_edges import bipartite_subgraph
 from anemoi.models.distributed.khop_edges import drop_unconnected_src_nodes
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
-from anemoi.models.distributed.khop_edges import bipartite_subgraph
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvMapperBlock
@@ -41,6 +41,11 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+# Number of chunks used in inference (https://github.com/ecmwf/anemoi-models/pull/46)
+NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
+NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
+
 
 class BaseMapper(nn.Module, ABC):
     """Base Mapper from souce dimension to destination dimension."""
@@ -274,7 +279,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             out_channels=hidden_dim,
             num_heads=num_heads,
             edge_dim=self.edge_dim,
-            num_chunks=1, # disable "inner" chunking manually, TODO: better solution
+            num_chunks=num_chunks,
             qk_norm=qk_norm,
             layer_kernels=self.layer_factory,
             shard_strategy=shard_strategy,
@@ -331,17 +336,16 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
         x_src, edge_index = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
 
-        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
-            (x_src, x_dst), shard_shapes, model_comm_group, x_src_is_sharded=True, x_dst_is_sharded=x_dst_is_sharded
-        )  # x_src is sharded since we dropped unconnected src nodes
+        if not x_dst_is_sharded:
+            x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
 
         return x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst
 
-    def run_proc_chunk(
+    def process_chunk(
         self,
-        dst_chunk: Tensor, # ids of dst nodes in chunk
-        x: tuple[Tensor, Tensor], # x_src_shard ("full"), x_dst_chunk
-        edge_attr: Tensor, # full edges of shard
+        x: tuple[Tensor, Tensor],
+        dst_chunk: Tensor,
+        edge_attr: Tensor,
         edge_index: Adj,
         shapes: tuple[tuple[int], tuple[int]],
         batch_size: int,
@@ -349,6 +353,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         x_src, x_dst = x
+
         # get subgraph of x_dst_chunk and incoming edges, drop unconnected src nodes
         nodes_src_full = torch.arange(size[0], device=edge_index.device)
         edge_index, edge_attr = bipartite_subgraph(
@@ -361,20 +366,25 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         # drop unconnected src nodes and relabel edges
         x_src_chunk, edge_index_chunk = drop_unconnected_src_nodes(x_src, edge_index, size)
+        x_dst_chunk = x_dst[dst_chunk]
+        chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
-        chunk_size = (x_src_chunk.shape[0], x_dst.shape[0])
+        # pre-process chunk, embedding x_src/x_dst if not already done
+        x_src_chunk, x_dst_chunk, _, _ = self.pre_process(
+            (x_src_chunk, x_dst_chunk), shapes, model_comm_group, x_src_is_sharded=True, x_dst_is_sharded=True
+        )
 
-        (_, x_dst_out), _ = self.proc( # note: we don't update x_src or edge_attr here, only x_dst
-            (x_src_chunk, x_dst),
+        (_, x_dst_out), _ = self.proc(
+            (x_src_chunk, x_dst_chunk),
             edge_attr,
             edge_index_chunk,
-            shapes, # TODO: update chunked shapes (fine for edge sharding, no comms in self.proc)
+            shapes,
             batch_size,
             chunk_size,
             model_comm_group,
         )
 
-        return x_dst_out
+        return self.post_process(x_dst_out, shapes[1], model_comm_group, keep_x_dst_sharded=True)
 
     def forward_with_edge_sharding(
         self,
@@ -398,47 +408,27 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         )
 
         size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
-        dst_chunks = torch.arange(size[1], device=x_dst.device).tensor_split(self.num_chunks)
-        
+        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
+
+        dst_chunks = torch.arange(size[1], device=x_dst.device).tensor_split(num_chunks)
+        out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
+        out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=torch.float16)
+
         for dst_chunk in dst_chunks:
-            x_dst[dst_chunk] = checkpoint(
-                self.run_proc_chunk,
+            out_dst[dst_chunk] = checkpoint(
+                self.process_chunk,
+                (x_src, x_dst),
                 dst_chunk,
-                (x_src, x_dst[dst_chunk]),
                 edge_attr,
                 edge_index,
                 (shapes_src, shapes_dst),
                 batch_size,
                 size,
-                model_comm_group,
                 use_reentrant=False,
             )
 
-        if self.num_chunks > 1:
-            out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
-            out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=x_dst.dtype)
-            for dst_chunk in dst_chunks:
-                out_dst[dst_chunk] = checkpoint(
-                    self.post_process,
-                    x_dst[dst_chunk],
-                    shapes_dst,
-                    model_comm_group,
-                    keep_x_dst_sharded=True, # don't gather here, ...
-                    use_reentrant=False,
-                )
-            if not keep_x_dst_sharded:
-                out_dst = gather_tensor( # ... gather after processing all chunks instead
-                    out_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group
-                )
-        else:
-            out_dst = checkpoint(
-                self.post_process,
-                x_dst,
-                shapes_dst,
-                model_comm_group,
-                keep_x_dst_sharded=keep_x_dst_sharded,
-                use_reentrant=False,
-            )
+        if not keep_x_dst_sharded:  # gather after processing chunks
+            out_dst = gather_tensor(out_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group)
 
         return out_dst
 

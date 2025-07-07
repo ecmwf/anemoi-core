@@ -43,7 +43,6 @@ NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
 NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
 
-COMPILE_GT_CONV = os.environ.get("ANEMOI_COMPILE_GT_CONV", "0") == "1"
 
 class BaseBlock(nn.Module, ABC):
     """Base class for network blocks."""
@@ -704,14 +703,14 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             query, key, value, edges = self.shard_qkve_heads(
                 query, key, value, edges, shapes, batch_size, model_comm_group
             )
+            num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE
         else:
             query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges, batch_size)
+            num_chunks = 1  # no "inner chunking" for edge sharding
 
         if self.qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
-
-        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
 
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
 
