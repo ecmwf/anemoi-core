@@ -9,9 +9,9 @@
 
 
 from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import Metadata
+from anemoi.models.migrations import MigrationMetadata
 
-metadata = Metadata(
+metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
         "anemoi-models": "0.8.1",
