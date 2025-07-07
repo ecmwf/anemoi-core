@@ -26,7 +26,7 @@ def postprocessor():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "postprocessor": {"default": "none", "relu": ["q"], "hardtanh": ["x"]},
+                "postprocessor": {"default": "none", "relu": ["q"], "hardtanh": ["x"], "hardtanh_0_1": ["y"]},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -39,15 +39,15 @@ def postprocessor():
 
 @pytest.fixture()
 def output_data():
-    base = torch.Tensor([[1.0, 2.0, 3.0, -1, 5.0], [-2, 1, 8.0, 9.0, 10.0]])
-    expected = torch.Tensor([[1.0, 2.0, 3.0, 0.0, 5.0], [-1.0, 1, 8.0, 9.0, 10.0]])
+    base = torch.Tensor([[1.0, -2.0, 3.0, -1, 5.0], [-2, 1, 8.0, 9.0, 10.0]])
+    expected = torch.Tensor([[1.0, 0.0, 3.0, 0.0, 5.0], [-1.0, 1, 8.0, 9.0, 10.0]])
     return base, expected
 
 
 @pytest.fixture()
 def inference_output_data():
-    base = torch.Tensor([[1.0, 2.0, -1, 5.0], [-2, 1, 9.0, 10.0]])
-    expected = torch.Tensor([[1.0, 2.0, 0.0, 5.0], [-1, 1, 9.0, 10.0]])
+    base = torch.Tensor([[1.0, -2.0, -1, 5.0], [-2, 1, 9.0, 10.0]])
+    expected = torch.Tensor([[1.0, 0.0, 0.0, 5.0], [-1, 1, 9.0, 10.0]])
     return base, expected
 
 
