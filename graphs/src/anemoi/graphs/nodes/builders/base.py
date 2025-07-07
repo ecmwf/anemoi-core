@@ -86,8 +86,6 @@ class BaseNodeBuilder(ABC):
         for hidden_attr in self.hidden_attributes:
             graph[self.name][f"_{hidden_attr}"] = getattr(self, hidden_attr)
 
-        print(config)
-
         for attr_name, attr_config in config.items():
             graph[self.name][attr_name] = instantiate(attr_config).compute(graph, self.name)
 
