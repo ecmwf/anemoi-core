@@ -408,11 +408,12 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         )
 
         size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
-        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
+        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
 
         dst_chunks = torch.arange(size[1], device=x_dst.device).tensor_split(num_chunks)
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
-        out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=torch.float16)
+        out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
+        out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
         for dst_chunk in dst_chunks:
             out_dst[dst_chunk] = checkpoint(
@@ -425,7 +426,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
                 batch_size,
                 size,
                 use_reentrant=False,
-            )
+            ).to(dtype=out_type)
 
         if not keep_x_dst_sharded:  # gather after processing chunks
             out_dst = gather_tensor(out_dst, 0, change_channels_in_shape(shapes_dst, out_channels), model_comm_group)
