@@ -28,7 +28,6 @@ class MapperConfig:
     in_channels_src: int = 3
     in_channels_dst: int = 3
     hidden_dim: int = 256
-    out_channels_dst: int = 5
     trainable_size: int = 6
     num_chunks: int = 2
     num_heads: int = 16
@@ -49,6 +48,7 @@ class TestGraphTransformerBaseMapper:
     NUM_EDGES: int = 150
     NUM_SRC_NODES: int = 100
     NUM_DST_NODES: int = 200
+    OUT_CHANNELS_DST: int = 5
 
     @pytest.fixture
     def mapper_init(self):
@@ -58,6 +58,7 @@ class TestGraphTransformerBaseMapper:
     def mapper(self, mapper_init, fake_graph):
         return GraphTransformerBaseMapper(
             **asdict(mapper_init),
+            out_channels_dst=self.OUT_CHANNELS_DST,
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
         )
@@ -89,7 +90,7 @@ class TestGraphTransformerBaseMapper:
         assert mapper.in_channels_src == mapper_init.in_channels_src
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
         assert mapper.hidden_dim == mapper_init.hidden_dim
-        assert mapper.out_channels_dst == mapper_init.out_channels_dst
+        assert mapper.out_channels_dst == self.OUT_CHANNELS_DST
         assert isinstance(mapper.activation, nn.Module)
 
     def test_pre_process(self, mapper, pair_tensor):
@@ -122,6 +123,8 @@ class TestGraphTransformerBaseMapper:
 
 class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
     """Test the GraphTransformerForwardMapper class."""
+
+    OUT_CHANNELS_DST = None
 
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
@@ -185,6 +188,7 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
     def mapper(self, mapper_init, fake_graph):
         return GraphTransformerBackwardMapper(
             **asdict(mapper_init),
+            out_channels_dst=self.OUT_CHANNELS_DST,
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
         )
@@ -211,8 +215,8 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
 
         result = mapper.post_process(x_dst, shapes_dst)
         assert (
-            torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst]) == result.shape
-        ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, mapper_init.out_channels_dst]}) != result.shape ({result.shape})"
+            torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST]) == result.shape
+        ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, self.OUT_CHANNELS_DST]}) != result.shape ({result.shape})"
 
     def test_forward_backward(self, mapper_init, mapper, pair_tensor):
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
@@ -225,10 +229,10 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         )
 
         result = mapper.forward(x, batch_size, shard_shapes)
-        assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst])
+        assert result.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
 
         # Dummy loss
-        target = torch.rand(self.NUM_DST_NODES, mapper_init.out_channels_dst)
+        target = torch.rand(self.NUM_DST_NODES, self.OUT_CHANNELS_DST)
         loss_fn = nn.MSELoss()
 
         loss = loss_fn(result, target)

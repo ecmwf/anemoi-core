@@ -341,7 +341,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         return x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst
 
-    def process_chunk(
+    def run_processor_chunk(
         self,
         x: tuple[Tensor, Tensor],
         dst_chunk: Tensor,
@@ -417,7 +417,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         for dst_chunk in dst_chunks:
             out_dst[dst_chunk] = checkpoint(
-                self.process_chunk,
+                self.run_processor_chunk,
                 (x_src, x_dst),
                 dst_chunk,
                 edge_attr,
@@ -496,7 +496,6 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: Optional[int] = None,
         trainable_size: int,
         num_chunks: int,
         num_heads: int,
@@ -520,8 +519,6 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        out_channels_dst : int
-            Output channels of the destination node, by default None
         trainable_size : int
             Trainable tensor of edge
         num_chunks : int
@@ -551,7 +548,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
-            out_channels_dst=out_channels_dst,
+            out_channels_dst=None,
             trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
