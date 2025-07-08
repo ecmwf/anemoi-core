@@ -584,7 +584,7 @@ class ScaleTensor:
             Scaled tensor
         """
         x_subset = x[subset_indices] if subset_indices is not None else x
-        scaler = self.get_scaler(x_subset.ndim, device=x_subset.device)
+        scaler = self.get_scaler(x_subset.ndim)
         if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
             slices = [slice(None)] * x_subset.ndim
             slices[TensorDim.GRID] = grid_shard_slice
