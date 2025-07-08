@@ -459,12 +459,75 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         return x_data_latent, shard_shapes_data
 
+    def compute_tendency(
+        self,
+        x_t1: torch.Tensor,
+        x_t0: torch.Tensor,
+        pre_processors_state: Callable,
+        pre_processors_tendencies: Callable,
+        input_is_normalised: bool = False,
+        post_processors_state: Optional[Callable] = None,
+    ) -> torch.Tensor:
+        """Compute the tendency from two states.
+
+        Parameters
+        ----------
+        x_t1 : torch.Tensor
+            The state at time t1 with full input variables.
+        x_t0 : torch.Tensor
+            The state at time t0 with full input variables.
+        pre_processors_state : callable
+            Function to pre-process the state variables.
+        pre_processors_tendencies : callable
+            Function to pre-process the tendency variables.
+        input_is_normalised : bool, optional
+            Whether the input state is normalized, by default False
+        post_processors_state : Optional[Callable], optional
+            Function to post-process the state variables, by default None
+
+        Returns
+        -------
+        torch.Tensor
+            The normalized tendency tensor output from model.
+        """
+
+        if input_is_normalised:
+            x_t1 = post_processors_state(
+                x_t1[..., self.data_indices.data.output.full],
+                in_place=False,
+                data_index=self.data_indices.data.output.full,
+            )
+            x_t0 = post_processors_state(
+                x_t0[..., self.data_indices.data.output.full],
+                in_place=False,
+                data_index=self.data_indices.data.output.full,
+            )
+        else:
+            x_t1 = x_t1[..., self.data_indices.data.output.full]
+            x_t0 = x_t0[..., self.data_indices.data.output.full]
+
+        tendency = pre_processors_tendencies(
+            x_t1 - x_t0,
+            in_place=False,
+            data_index=self.data_indices.data.output.full,
+        )
+        # diagnostic variables are taken from x_t1, normalised as full fields:
+        tendency[..., self.data_indices.model.output.diagnostic] = pre_processors_state(
+            x_t1[..., self.data_indices.model.output.diagnostic],
+            in_place=False,
+            data_index=self.data_indices.data.output.diagnostic,
+        )
+
+        return tendency
+
     def add_tendency_to_state(
         self,
         state_inp: torch.Tensor,
         tendency: torch.Tensor,
         post_processors_state: Callable,
         post_processors_tendencies: Callable,
+        normalise_output: bool = False,
+        pre_processors_state: Optional[Callable] = None,
     ) -> torch.Tensor:
         """Add the tendency to the state.
 
@@ -478,6 +541,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to post-process the state variables.
         post_processors_tendencies : callable
             Function to post-process the tendency variables.
+        normalise_output : bool, optional
+            Whether to normalize the output state, by default False
+        pre_processors_state : Optional[Callable], optional
+            Function to pre-process the state variables, by default None
 
         Returns
         -------
@@ -497,6 +564,13 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             in_place=False,
             data_index=self.data_indices.data.input.prognostic,
         )
+
+        if normalise_output:
+            state_outp = pre_processors_state(
+                state_outp,
+                in_place=False,
+                data_index=self.data_indices.data.output.full,
+            )
 
         return state_outp
 
@@ -591,41 +665,3 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
 
         return out
-
-    def compute_tendency(
-        self,
-        x_t1: torch.Tensor,
-        x_t0: torch.Tensor,
-        pre_processors_state: Callable,
-        pre_processors_tendencies: Callable,
-    ) -> torch.Tensor:
-        """Compute the tendency from two states.
-
-        Parameters
-        ----------
-        x_t1 : torch.Tensor
-            The state at time t1 with full input variables.
-        x_t0 : torch.Tensor
-            The state at time t0 with full input variables.
-        pre_processors_state : callable
-            Function to pre-process the state variables.
-        pre_processors_tendencies : callable
-            Function to pre-process the tendency variables.
-
-        Returns
-        -------
-        torch.Tensor
-            The normalized tendency tensor output from model.
-        """
-        tendency = pre_processors_tendencies(
-            x_t1[..., self.data_indices.data.output.full] - x_t0[..., self.data_indices.data.output.full],
-            in_place=False,
-            data_index=self.data_indices.data.output.full,
-        )
-        # diagnostic variables are taken from x_t1, normalised as full fields:
-        tendency[..., self.data_indices.model.output.diagnostic] = pre_processors_state(
-            x_t1[..., self.data_indices.data.output.diagnostic],
-            in_place=False,
-            data_index=self.data_indices.data.output.diagnostic,
-        )
-        return tendency

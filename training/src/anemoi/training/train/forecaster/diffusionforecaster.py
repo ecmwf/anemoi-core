@@ -321,7 +321,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
-        """Rollout step for the tendency-based flow forecaster.
+        """Rollout step for the tendency-based diffusion forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
@@ -345,7 +345,19 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             Loss value, metrics, and predictions (per step)
 
         """
-        # Get batch tendencies from non processed batch
+        batch = self.model.pre_processors(batch)  # normalized in-place
+
+        # Delayed scalers need to be initialized after the pre-processors once
+        if self.is_first_step:
+            self.define_delayed_scalers()
+            self.is_first_step = False
+
+        msg = (
+            "Batch length not sufficient for requested multi_step length!"
+            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+        )
+        assert batch.shape[1] >= rollout + self.multi_step, msg
+
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None:
             msg = (
@@ -354,35 +366,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             )
             raise AttributeError(msg)
 
-        batch_size, nsteps, ensemble_size, _, _ = batch.shape
-        batch_trunc = einops.rearrange(batch, "batch step ensemble grid vars -> (batch step ensemble) grid vars")
-        batch_trunc = self.model.model._apply_truncation(
-            batch_trunc,
-            grid_shard_shapes=self.grid_shard_shapes,
-            model_comm_group=self.model_comm_group,
-        )
-        batch_trunc = einops.rearrange(
-            batch_trunc,
-            "(batch step ensemble) grid vars -> batch step ensemble grid vars",
-            batch=batch_size,
-            step=nsteps,
-            ensemble=ensemble_size,
-        )
-
-        batch_tendency = self.model.model.compute_tendency(
-            batch[:, self.multi_step : self.multi_step + self.rollout, ...],
-            batch_trunc[:, self.multi_step - 1 : self.multi_step + self.rollout - 1, ...],
-            self.model.pre_processors,
-            pre_processors_tendencies,
-        )  # SL TODO: possible to do this in-place? double check that gradient flow works for out of place
-
-        # Delayed scalers need to be initialized after the pre-processors once,
-        # compute_tendency does run pre-processors
-        if self.is_first_step:
-            self.define_delayed_scalers()
-            self.is_first_step = False
-
-        # start rollout
+        # start rollout of preprocessed batch
         x = batch[
             :,
             0 : self.multi_step,
@@ -390,19 +374,21 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             self.data_indices.data.input.full,
         ]  # (bs, multi_step, ens, latlon, nvar)
 
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
-
         for rollout_step in range(rollout or self.rollout):
 
-            # target tendency
-            tendency_target = batch_tendency[:, rollout_step, ...]
+            assert rollout_step < 1, "multi-step rollout not supported"
 
-            # normalise inputs
-            x_norm = self.model.pre_processors(x, in_place=False, data_index=self.data_indices.data.input.full)
+            x_ref = batch[:, self.multi_step + rollout_step - 1, ...]
+            x_ref = self.apply_reference_state_truncation(x_ref)
+
+            tendency_target = self.model.model.compute_tendency(
+                batch[:, self.multi_step + rollout_step, ...],
+                x_ref,
+                self.model.pre_processors,
+                self.model.pre_processors_tendencies,
+                input_is_normalised=True,
+                post_processors_state=self.model.post_processors,
+            )
 
             # get noise level and associated loss weights
             sigma, noise_weights = self._get_noise_level(
@@ -413,67 +399,72 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 device=x.device,
             )
 
-            # add noise to tendency
             tendency_target_noised = self._noise_target(tendency_target, sigma)
 
             # prediction, fwd_with_preconditioning
             tendency_pred = self(
-                x_norm,
+                x,
                 tendency_target_noised,
                 sigma,
             )  # shape is (bs, ens, latlon, nvar)
 
-            # re-construct predicted state
+            # re-construct predicted state, de-normalised
             y_pred = self.model.model.add_tendency_to_state(
-                x_norm[:, -1, ...],
+                x_ref[..., self.data_indices.data.input.full],
                 tendency_pred,
                 self.model.post_processors,
                 self.model.post_processors_tendencies,
-            )  # SL TODO: make explicit that this is not in-place
+                normalise_output=True,
+                pre_processors_state=self.model.pre_processors,
+            )
 
-            # Prepare states for validation if needed
-            y_pred_norm = None
-            y_norm = None
             y_noised = None
+            y = None
             if validation_mode:
                 # metrics calculation and plotting expects normalised states
-                # SL TODO: some could be in-place
-                y_pred_norm = self.model.pre_processors(
-                    y_pred,
-                    in_place=False,
-                    data_index=self.data_indices.data.output.full,
-                )
                 y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
-                y_norm = self.model.pre_processors(y, in_place=False, data_index=self.data_indices.data.output.full)
 
-                # Compute noised state for visualization
                 y_noised = self.model.model.add_tendency_to_state(
-                    x_norm[:, -1, ...],
+                    x_ref[..., self.data_indices.data.input.full],
                     tendency_target_noised,
                     self.model.post_processors,
                     self.model.post_processors_tendencies,
-                )
-                y_noised = self.model.pre_processors(
-                    y_noised,
-                    in_place=False,
-                    data_index=self.data_indices.data.output.full,
+                    normalise_output=True,
+                    pre_processors_state=self.model.pre_processors,
                 )
 
-            # Use checkpoint for compute_loss_metrics
+            # compute_loss_metrics
             loss, metrics_next = checkpoint(
                 self.compute_loss_metrics,
-                tendency_pred,  # predicted tendencies
-                tendency_target,  # target tendencies
+                tendency_pred,
+                tendency_target,
                 rollout_step,
                 training_mode,
                 validation_mode,
-                y_pred_norm,  # predicted states for metrics
-                y_norm,  # target states for metrics
-                weights=noise_weights,  # noise weights for loss
+                y_pred,
+                y,
+                weights=noise_weights,
                 use_reentrant=False,
             )
 
-            # advance input using non-processed x, y_pred and batch
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            yield loss, metrics_next, y_pred_norm, y_noised
+            yield loss, metrics_next, y_pred, y_noised
+
+    def apply_reference_state_truncation(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply reference state truncation to the input tensor.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape (bs, ens, latlon, nvar)
+
+        Returns
+        -------
+        torch.Tensor
+            Truncated tensor with same shape as input
+        """
+        bs, ens, _, _ = x.shape
+        x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
+        x_trunc = self.model.model._apply_truncation(x_trunc, self.grid_shard_shapes, self.model_comm_group)
+        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
