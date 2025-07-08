@@ -298,10 +298,6 @@ StrategySchemas = Union[BaseDDPStrategySchema, DDPEnsGroupStrategyStrategySchema
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    task: Literal[
-        "anemoi.training.train.forecaster.GraphForecaster",
-        "anemoi.training.train.autoencoder.GraphAutoEncoder",
-    ] = Field(default="anemoi.training.train.forecaster.GraphForecaster")
     "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
     run_id: Union[str, None] = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
@@ -378,4 +374,9 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
-TrainingSchema = Union[ForecasterSchema, ForecasterEnsSchema, InterpolationSchema]
+class AutoencoderSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
+    "Training objective."
+    
+
+TrainingSchema = Union[ForecasterSchema, ForecasterEnsSchema, InterpolationSchema, AutoencoderSchema]

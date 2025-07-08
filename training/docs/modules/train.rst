@@ -90,6 +90,8 @@ Current supported graphmodules include:
    :class:`~anemoi.training.train.tasks.ensforecaster.GraphEnsForecaster`
 #. **Time Interpolation** —
    :class:`~anemoi.training.train.tasks.interpolator.GraphInterpolator`
+#. **AutoEncoder** —
+   :class:`~anemoi.training.train.tasks.autoencoder.GraphAutoEncoder`
 
 Each of these implements the ``__init__`` and ``_step`` methods to
 define task-specific model behavior. They support full Lightning
@@ -114,6 +116,11 @@ Key methods to override when adapting or extending a model:
    :show-inheritance:
 
 .. automodule:: anemoi.training.train.tasks.interpolator
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.train.tasks.autoencoder
    :members:
    :no-undoc-members:
    :show-inheritance:

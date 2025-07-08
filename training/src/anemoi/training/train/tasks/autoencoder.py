@@ -6,24 +6,29 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
 
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.schemas.base_schema import BaseSchema
+from .base import BaseGraphModule
 
-from .forecaster import GraphForecaster
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from collections.abc import Mapping
+
+    from torch_geometric.data import HeteroData
+
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphAutoEncoder(GraphForecaster):
+class GraphAutoEncoder(BaseGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
     def __init__(
@@ -31,17 +36,18 @@ class GraphAutoEncoder(GraphForecaster):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
+        truncation_data: dict,
         statistics: dict,
+        statistics_tendencies: dict,
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
-        truncation_data: Optional[dict] = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
-        config : BaseSchema
+        config : DictConfig
             Job configuration
         graph_data : HeteroData
             Graph object
@@ -58,15 +64,14 @@ class GraphAutoEncoder(GraphForecaster):
         super().__init__(
             config=config,
             graph_data=graph_data,
+            truncation_data=truncation_data,
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
-            truncation_data=truncation_data,
         )
 
-        assert self.rollout == 1, "Rollout must be 1 for autoencoder"
-        assert self.rollout_epoch_increment == 0, "Rollout epoch increment must be 1 for autoencoder"
 
     def _step(
         self,
@@ -74,11 +79,8 @@ class GraphAutoEncoder(GraphForecaster):
         batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
         del batch_idx
-        batch = self.allgather_batch(batch)
 
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
@@ -89,18 +91,17 @@ class GraphAutoEncoder(GraphForecaster):
             # update loss scalar after first application and initialization of preprocessors
             self.training_weights_for_imputed_variables(batch)
 
-        # start rollout of preprocessed batch
+        print(batch.shape)
         x = batch[
-            :,
-            0 : self.multi_step,
             ...,
             self.data_indices.internal_data.input.full,
-        ]  # (bs, multi_step, latlon, nvar)
-
+        ] 
+        print(x.shape)
+        
         y_pred = self(x)
-        y = batch[:, 0, ..., self.data_indices.internal_data.output.full]
+        y = batch[..., self.data_indices.internal_data.output.full]
 
-        loss += checkpoint(self.loss, y_pred, y, use_reentrant=False)
+        loss = checkpoint(self.loss, y_pred, y, use_reentrant=False)
 
         metrics_next = {}
         if validation_mode:
