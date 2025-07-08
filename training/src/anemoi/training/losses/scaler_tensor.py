@@ -517,7 +517,7 @@ class ScaleTensor:
 
         return ScaleTensor(**resolved_scalers)
 
-    def apply_scalers_iteratively(
+    def scale_iteratively(
         self,
         x: torch.Tensor,
         subset_indices: tuple[int, ...] | None = None,
@@ -535,8 +535,8 @@ class ScaleTensor:
         grid_shard_slice : slice | None, optional
             Slice to apply to the grid dimension, by default None
         """
-        res = None
         x_subset = x[subset_indices] if subset_indices is not None else x
+        out = x_subset.clone()
         ndim = x.ndim
         tensors = self.resolve(ndim).tensors
 
@@ -552,7 +552,7 @@ class ScaleTensor:
             reshape = [1] * len(missing_dims)
             reshape.extend(scaler.shape)
 
-            reshaped_scaler = scaler.reshape(reshape).to(x.device)
+            reshaped_scaler = scaler.reshape(reshape)
             reshaped_scaler = torch.moveaxis(reshaped_scaler, list(range(ndim)), (*missing_dims, *dims))
 
             reshaped_scaler = reshaped_scaler.expand_as(x)
@@ -560,11 +560,17 @@ class ScaleTensor:
             if subset_indices is not None:
                 reshaped_scaler = reshaped_scaler[subset_indices]
 
-            res = x_subset * reshaped_scaler if res is None else res * reshaped_scaler
+            out = out * reshaped_scaler
 
-        return res
+        return out
 
-    def scale(self, tensor: torch.Tensor) -> torch.Tensor:
+    def scale(
+        self,
+        x: torch.Tensor,
+        subset_indices: tuple[int, ...] | None = None,
+        *,
+        grid_shard_slice: slice | None = None,
+    ) -> None:
         """Scale a given tensor by the scalers.
 
         Parameters
@@ -577,7 +583,14 @@ class ScaleTensor:
         torch.Tensor
             Scaled tensor
         """
-        return tensor * self.get_scaler(tensor.ndim, device=tensor.device)
+        x_subset = x[subset_indices] if subset_indices is not None else x
+        scaler = self.get_scaler(x_subset.ndim, device=x_subset.device)
+        if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
+            slices = [slice(None)] * x_subset.ndim
+            slices[TensorDim.GRID] = grid_shard_slice
+            scaler = scaler[tuple(slices)]
+
+        return x_subset * scaler
 
     def get_scaler(self, ndim: int, device: str | None = None) -> torch.Tensor:
         """Get completely resolved scaler tensor.

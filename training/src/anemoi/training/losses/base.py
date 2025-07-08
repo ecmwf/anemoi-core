@@ -123,7 +123,7 @@ class BaseLoss(nn.Module, ABC):
             else:
                 scale_tensor = self.scaler.without_by_dim(without_scalers)
 
-        return scale_tensor.apply_scalers_iteratively(
+        return scale_tensor.scale_iteratively(
             x,
             subset_indices=subset_indices,
             grid_shard_slice=grid_shard_slice,
