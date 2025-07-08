@@ -19,8 +19,9 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
+
+from .encoder_processor_decoder import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
 

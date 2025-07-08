@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
 from .base import BaseGraphModule
@@ -19,6 +18,7 @@ from .base import BaseGraphModule
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    import torch
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
@@ -84,20 +84,15 @@ class GraphAutoEncoder(BaseGraphModule):
 
         # for validation not normalized in-place because remappers cannot be applied in-place
         batch = self.model.pre_processors(batch, in_place=not validation_mode)
+        self.define_delayed_scalers()
 
-        if not self.updated_loss_mask:
-            # update loss scalar after first application and initialization of preprocessors
-            self.training_weights_for_imputed_variables(batch)
-
-        print(batch.shape)
         x = batch[
             ...,
-            self.data_indices.internal_data.input.full,
+            self.data_indices.data.input.full,
         ]
-        print(x.shape)
 
         y_pred = self(x)
-        y = batch[..., self.data_indices.internal_data.output.full]
+        y = batch[:, 0, ..., self.data_indices.data.output.full]
 
         loss = checkpoint(self.loss, y_pred, y, use_reentrant=False)
 
@@ -113,3 +108,20 @@ class GraphAutoEncoder(BaseGraphModule):
         y_preds.extend(y_pred)
 
         return loss, metrics, y_preds
+
+    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        train_loss, _, _ = self._step(batch, batch_idx)
+        self.log(
+            "train_" + self.loss.name + "_loss",
+            train_loss,
+            on_epoch=True,
+            on_step=True,
+            prog_bar=True,
+            logger=self.logger_enabled,
+            batch_size=batch.shape[0],
+            sync_dist=True,
+        )
+        return train_loss
+
+    def on_train_epoch_end(self) -> None:
+        pass

@@ -6,7 +6,7 @@ defaults:
 - hardware: example
 - graph: encoder_decoder_only
 - model: graphtransformer
-- training: default
+- training: autoencoder
 - _self_
 
 model:
@@ -15,7 +15,6 @@ model:
 
 training:
   model_task: anemoi.training.train.forecaster.GraphAutoEncoder
-  multistep_input: 1
 
 # set to true to switch on config validation
 config_validation: True

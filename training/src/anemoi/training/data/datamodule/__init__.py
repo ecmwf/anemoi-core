@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .autoencoderdatamodule import AnemoiAutoencoderDatasetsDataModule
 from .ensdatamodule import AnemoiEnsDatasetsDataModule
 from .singledatamodule import AnemoiDatasetsDataModule
 
-__all__ = ["AnemoiDatasetsDataModule", "AnemoiEnsDatasetsDataModule"]
+__all__ = ["AnemoiAutoencoderDatasetsDataModule", "AnemoiDatasetsDataModule", "AnemoiEnsDatasetsDataModule"]
