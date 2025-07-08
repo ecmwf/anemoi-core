@@ -39,6 +39,7 @@ class NativeGridDataset(IterableDataset):
         data_reader: Callable,
         grid_indices: type[BaseGridIndices],
         relative_date_indices: list,
+        timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
     ) -> None:
@@ -52,6 +53,8 @@ class NativeGridDataset(IterableDataset):
             indices of the grid to keep. Defaults to None, which keeps all spatial indices.
         relative_date_indices: list
             list of time indices to load from the data relative to the current sample i in __iter__
+        timestep : int, optional
+            the time frequency of the samples, by default '6h'
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
@@ -61,6 +64,7 @@ class NativeGridDataset(IterableDataset):
 
         self.data = data_reader
 
+        self.timestep = timestep
         self.grid_indices = grid_indices
 
         # lazy init
@@ -95,6 +99,14 @@ class NativeGridDataset(IterableDataset):
     def statistics(self) -> dict:
         """Return dataset statistics."""
         return self.data.statistics
+
+    @cached_property
+    def statistics_tendencies(self) -> dict:
+        """Return dataset tendency statistics."""
+        try:
+            return self.data.statistics_tendencies(self.timestep)
+        except (KeyError, AttributeError):
+            return None
 
     @cached_property
     def metadata(self) -> dict:

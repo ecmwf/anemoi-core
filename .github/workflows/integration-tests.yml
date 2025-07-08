@@ -17,3 +17,22 @@ jobs:
           test-directory: "training/tests/integration"
           pytest-options: "--longtests"
           manual: ${{github.event_name == 'workflow_dispatch' && 'true' || 'false'}}
+
+  notify-team:
+    needs: integration_tests
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add failure comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: 294
+          body: |
+            ## 🚨 Nightly Job Failed
+
+            **Repository:** ${{ github.repository }}
+            **Workflow:** ${{ github.workflow }}
+            **Run URL:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Time:** ${{ github.event.schedule }}
+
+            cc: @ecmwf/anemoisecurity

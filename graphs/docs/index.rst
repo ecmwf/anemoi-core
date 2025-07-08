@@ -140,6 +140,7 @@ Get more information in the :ref:`installing-graphs` section.
    :hidden:
    :caption: API Reference
 
+   modules/schemas
    modules/node_builder
    modules/edge_builder
    modules/node_attributes

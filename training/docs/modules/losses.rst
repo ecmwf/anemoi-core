@@ -5,17 +5,17 @@
 This module is used to define the loss function used to train the model.
 
 Anemoi-training exposes a couple of loss functions by default to be
-used, all of which are subclassed from ``BaseWeightedLoss``. This class
-enables scalar multiplication, and graph node weighting.
+used, all of which are subclassed from ``BaseLoss``. This class enables
+scaler multiplication, and graph node weighting.
 
 .. automodule:: anemoi.training.losses.weightedloss
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-************************
- Default Loss Functions
-************************
+******************************
+ Deterministic Loss Functions
+******************************
 
 By default anemoi-training trains the model using a latitude-weighted
 mean-squared-error, which is defined in the ``WeightedMSELoss`` class in
@@ -46,14 +46,56 @@ reference it in the config as follows:
       _target_: anemoi.training.losses.mse.WeightedMSELoss
       # loss function kwargs here
 
+******************************
+ Probabilistic Loss Functions
+******************************
+
+The following probabilistic loss functions are available by default:
+
+-  ``KernelCRPSLoss``: Kernel CRPS loss.
+-  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
+   et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+
+The config for these loss functions is the same as for the
+deterministic:
+
+.. code:: yaml
+
+   # loss function for the model
+   training_loss:
+      # loss class to initialise
+      _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
+      # loss function kwargs here
+
+************************
+ Spatial Loss Functions
+************************
+
+The following spatial loss functions are available (**to be used only
+with regular 2D fields, i.e. fields that can be written as [`n_lat`,
+`n_lon`]**):
+
+-  ``LogFFT2Distance``: log spectral distance from the 2D fast Fourier
+   transform.
+
+-  ``FourierCorrelationLoss``: Fourier correlation loss, also computed
+   from the 2D fast Fourier transform see `Yan et al. (2024)
+   <https://arxiv.org/pdf/2410.23159.pdf>`_.
+
+Both of these loss functions are defined in the
+``anemoi.training.losses.spatial`` module, and can be configured in the
+config file at ``config.training.training_loss`` in the same way as the
+deterministic loss functions with additional kwargs `x_dim` and `y_dim`
+specifying the field shape of the input tensors.
+
 *********
- Scalars
+ Scalers
 *********
 
 In addition to node scaling, the loss function can also be scaled by a
-scalar. These are provided by the ``Forecaster`` class, and a user can
+scaler. These are provided by the ``Forecaster`` class, and a user can
 define whether to include them in the loss function by setting
-``scalars`` in the loss config dictionary.
+``scalers`` in the loss config dictionary.
 
 .. code:: yaml
 
@@ -61,12 +103,105 @@ define whether to include them in the loss function by setting
    training_loss:
       # loss class to initialise
       _target_: anemoi.training.losses.mse.WeightedMSELoss
-      scalars: ['scalar1', 'scalar2']
+      scalers: ['scaler1', 'scaler2']
 
-Currently, the following scalars are available for use:
+Scalers can be added as options for the loss functions using the
+`scaler` builders in `config.training.scaler`.
 
--  ``variable``: Scale by the feature/variable weights as defined in the
-   config ``config.training.variable_loss_scaling``.
+``*`` is a valid entry to use all `scalers` given, if a scaler is to be
+excluded add `!scaler_name`, i.e. ``['*', '!scaler_1']``, and
+``scaler_1`` will not be added.
+
+Tendency Scalers
+================
+
+Tendency scalers allow the scaling of prognostic losses by the standard
+deviation or variance of the variable tendencies (e.g. the 6-hourly
+differences in the data). To floating point precision, this loss scaling
+is equivalent to training on tendencies rather than the forecasts
+themselves. This approach is particularly useful when training models
+that include both slow-evolving variables (e.g., Land/Ocean) and
+fast-evolving variables (e.g., Atmosphere), ensuring balanced
+contributions to the loss function. When using this option, it is
+recommended to set the `general_variable` scaling values close to 1.0
+for all prognostic variables to maintain consistency and avoid
+unintended bias in the training process.
+
+.. code:: yaml
+
+   stdev_tendency:
+      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+   var_tendency:
+     _target_: anemoi.training.losses.scalers.VarTendencyScaler
+
+Variable Level Scalers
+======================
+
+Variable level scalers allow the user to scale variables by its level,
+i.e. model or pressure levels for upper air variables. The variable
+level scalers are applied to groups that are defined under
+`scalers.variable_groups`.
+
+For a pressure level scaler applied to all pressure level variables the
+configuration would look like this:
+
+.. code:: yaml
+
+   pressure_level:
+      # Variable level scaler to be used
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: pl
+      y_intercept: 0.2
+      slope: 0.001
+
+This will scale all variables in the `pl` group by max(0.2, 0.001 *
+level), where `level` is the pressure level of the variable.
+
+Variable Groups
+===============
+
+Define a default group and a list of groups to be used in the variable
+level scalers.
+
+.. code:: yaml
+
+   # Variable groups to be used in the variable level scalers
+   variable_groups:
+      default: sfc
+      pl: [q, t, u, v, w, z]
+
+If working with upper-air variables from variable levels, the
+temperature fields start with the variable reference `t` followed by the
+level, i.e. `t_500`, `t_850`, etc. Since `t` is specified under variable
+group `pl`, all temperature fields are considered group `pl`.
+
+If the datasets are built from mars the variable reference is extracted
+from metadata, otherwise it is found by splitting the variable name by
+`_` and taking the first part, see class
+`anemoi.training.utils.ExtractVariableGroupAndLevel`.
+
+If more complex variable groups are required, it is possible to define
+the group values as a dictionary, such that the variable's metadata must
+contain the key and value pair. See
+`anemoi.transforms.variable.Variable` for the metadata attributes that
+are available.
+
+.. code:: yaml
+
+   variable_groups:
+     default: sfc
+     pl:
+        is_pressure_level: True
+     z_ml:
+        is_model_level: True
+        param: 'z'
+
+If metadata is not available, complex variable groups cannot be defined,
+and an error will be raised.
+
+If multiple groups are defined for a variable, the first group in the
+`variable_groups` is used. If the variable is not in any group, it is
+assigned to the default group.
 
 ********************
  Validation Metrics
@@ -81,24 +216,24 @@ name
 Scaling Validation Losses
 =========================
 
-Validation metrics can **not** by default be scaled by scalars across
-the variable dimension, but can be by all other scalars. If you want to
+Validation metrics can **not** by default be scaled by scalers across
+the variable dimension, but can be by all other scalers. If you want to
 scale a validation metric by the variable weights, it must be added to
 `config.training.scale_validation_metrics`.
 
 These metrics are then kept in the normalised, preprocessed space, and
-thus the indexing of scalars aligns with the indexing of the tensors.
+thus the indexing of scalers aligns with the indexing of the tensors.
 
 By default, only `all` is kept in the normalised space and scaled.
 
 .. code:: yaml
 
-   # List of validation metrics to keep in normalised space, and scalars to be applied
+   # List of validation metrics to keep in normalised space, and scalers to be applied
    # Use '*' in reference all metrics, or a list of metric names.
    # Unlike above, variable scaling is possible due to these metrics being
-   # calculated in the same way as the training loss, within the internal model space.
+   # calculated in the same way as the training loss, within the model space.
    scale_validation_metrics:
-   scalars_to_apply: ['variable']
+   scalers_to_apply: ['variable']
    metrics:
       - 'all'
       # - "*"
@@ -108,17 +243,16 @@ By default, only `all` is kept in the normalised space and scaled.
 ***********************
 
 Additionally, you can define your own loss function by subclassing
-``BaseWeightedLoss`` and implementing the ``forward`` method, or by
-subclassing ``FunctionalWeightedLoss`` and implementing the
-``calculate_difference`` function. The latter abstracts the scaling, and
-node weighting, and allows you to just specify the difference
-calculation.
+``BaseLoss`` and implementing the ``forward`` method, or by subclassing
+``FunctionalLoss`` and implementing the ``calculate_difference``
+function. The latter abstracts the scaling, and node weighting, and
+allows you to just specify the difference calculation.
 
 .. code:: python
 
-   from anemoi.training.losses.weightedloss import FunctionalWeightedLoss
+   from anemoi.training.losses.weightedloss import BaseLoss
 
-   class MyLossFunction(FunctionalWeightedLoss):
+   class MyLossFunction(FunctionalLoss):
       def calculate_difference(self, pred, target):
          return (pred - target) ** 2
 
@@ -142,8 +276,9 @@ losses above.
    training_loss:
       _target_: anemoi.training.losses.combined.CombinedLoss
       losses:
-         - _target_: anemoi.training.losses.mse.WeightedMSELoss
-         - _target_: anemoi.training.losses.mae.WeightedMAELoss
+         - __target__: anemoi.training.losses.mse.WeightedMSELoss
+         - __target__: anemoi.training.losses.mae.WeightedMAELoss
+      scalers: ['variable']
       loss_weights: [1.0,0.5]
       scalars: ['variable']
 
@@ -190,7 +325,7 @@ option ``config.training.loss_gradient_scaling=True``.
 
 ``ScaleTensor`` is a class that can record and apply arbitrary scaling
 factors to tensors. It supports relative indexing, combining multiple
-scalars over the same dimensions, and is only constructed at
+scalers over the same dimensions, and is only constructed at
 broadcasting time, so the shape can be resolved to match the tensor
 exactly.
 

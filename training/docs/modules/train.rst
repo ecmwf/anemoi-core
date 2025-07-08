@@ -2,17 +2,24 @@
  Train
 #######
 
-This module defines the training process for the neural network model.
-By setting the flag ``task``, you can choose which task to optimize your
-model over. Any model that inherits from the ``GraphForecaster`` object
-can be used. Examples are: GraphAutoEncoder, GraphInterpolator, etc..
+The ``GraphForecaster`` and ``AnemoiTrainer`` define the training
+process for the neural network model. While the ``GraphForecaster``
+defines the ``LightningModule`` that defines the model task, the
+``AnemoiTrainer`` module calls the training function.
 
-The default task is set to the ``GraphForecaster`` object in
-``forecaster.py`` which is responsible for the forward pass of the model
-itself.
+************
+ Forecaster
+************
 
-The key-functions in all tasks that users may want to adapt to their own
-applications are:
+The different model tasks are reflected in different forecasters:
+
+#. Deterministic Forecasting (GraphForecaster)
+#. Ensemble Forecasting (GraphEnsForecaster)
+#. Time Interpolation (GraphInterpolator)
+
+The ``GraphForecaster`` object in ``forecaster.py`` is responsible for
+the forward pass of the model itself. The key-functions in the
+forecaster that users may want to adapt to their own applications are:
 
 -  ``advance_input``, which defines how the model iterates forward in
    forecast time
@@ -23,10 +30,27 @@ applications are:
 of the model is controlled. It also contains functions that enable the
 user to profile the training of the model (``profiler.py``).
 
-.. automodule:: anemoi.training.train.forecaster
+.. automodule:: anemoi.training.train.forecaster.forecaster
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+.. automodule:: anemoi.training.train.forecaster.ensforecaster
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.train.forecaster.interpolator
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+*********
+ Trainer
+*********
+
+The ``AnemoiTrainer`` object in ``train.py`` is responsible for calling
+the training function.
 
 .. automodule:: anemoi.training.train.train
    :members:

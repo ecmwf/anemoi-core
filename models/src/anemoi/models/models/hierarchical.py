@@ -19,7 +19,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.shapes import get_shape_shards
+from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
@@ -82,6 +82,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # read config.model.layer_kernels to get the implementation for certain layers
         self.layer_kernels = load_layer_kernels(model_config.get("model.layer_kernels", {}))
+
+        self.supports_sharded_input = False
 
         # Encoder data -> hidden
         try:
@@ -209,7 +211,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             [
                 instantiate(
                     cfg,
-                    name_to_index=self.data_indices.internal_model.output.name_to_index,
+                    name_to_index=self.data_indices.model.output.name_to_index,
                     statistics=self.statistics,
                     name_to_index_stats=self.data_indices.data.input.name_to_index,
                 )
@@ -217,7 +219,17 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             ]
         )
 
-    def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None) -> Tensor:
+    def _create_trainable_attributes(self) -> None:
+        """Create all trainable attributes."""
+        self.trainable_data = TrainableTensor(trainable_size=self.trainable_data_size, tensor_size=self._data_grid_size)
+        self.trainable_hidden = nn.ModuleDict()
+
+        for hidden in self._graph_hidden_names:
+            self.trainable_hidden[hidden] = TrainableTensor(
+                trainable_size=self.trainable_hidden_size, tensor_size=self._hidden_grid_sizes[hidden]
+            )
+
+    def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None, **kwargs) -> Tensor:
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
 
@@ -236,10 +248,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_trainable_hiddens[hidden] = self.node_attributes(hidden, batch_size=batch_size)
 
         # Get data and hidden shapes for sharding
-        shard_shapes_data = get_shape_shards(x_trainable_data, 0, model_comm_group)
+        shard_shapes_data = get_shard_shapes(x_trainable_data, 0, model_comm_group)
         shard_shapes_hiddens = {}
         for hidden, x_latent in x_trainable_hiddens.items():
-            shard_shapes_hiddens[hidden] = get_shape_shards(x_latent, 0, model_comm_group)
+            shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group)
 
         # Run encoder
         x_data_latent, curr_latent = self._run_mapper(

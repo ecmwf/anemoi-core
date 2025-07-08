@@ -1,0 +1,62 @@
+# Modifications for the stretched grid template "stretched.yaml"
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+        thinning: 25 # ???-value in stretched config
+      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+  training:
+    start: "2017-01-01"
+    end: "2017-01-07"
+  validation:
+    start: "2017-01-08"
+    end: "2017-01-10"
+
+# need this modification since some variables set in the default zarr config are not part of the dataset
+data:
+  forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  diagnostic:
+  - tp
+  normalizer:
+    default: "mean-std"
+    std:
+    - "tp"
+    min-max:
+    max:
+    none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+
+hardware:
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+  files:
+    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        # use coarser resolution for testing
+        lam_resolution: 5
+        global_resolution: 3
+
+training:
+  scalers:
+    node_weights:
+      weight_frac_of_total: 0.25

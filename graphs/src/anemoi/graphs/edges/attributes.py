@@ -22,6 +22,7 @@ from torch_geometric.typing import Size
 
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
+from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import haversine_distance
 
 LOGGER = logging.getLogger(__name__)
@@ -42,7 +43,19 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             raise TypeError(error_msg)
 
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
-        return source_nodes[self.node_attr_name].to(self.device), target_nodes[self.node_attr_name].to(self.device)
+        if self.node_attr_name in source_nodes:
+            source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
+        else:
+            source_nodes_data = None
+            LOGGER.warning("The attribute %s is not in the source nodes.", self.node_attr_name)
+
+        if self.node_attr_name in target_nodes:
+            target_nodes_data = target_nodes[self.node_attr_name].to(self.device)
+        else:
+            target_nodes_data = None
+            LOGGER.warning("The attribute %s is not in the target nodes.", self.node_attr_name)
+
+        return source_nodes_data, target_nodes_data
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
         x = self.subset_node_information(*x)
@@ -130,41 +143,29 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
     """Base class for propagating an attribute from the nodes to the edges."""
 
-    node_idx: int = None
+    nodes_axis: NodesAxis | None = None
 
     def __init__(self, node_attr_name: str) -> None:
         self.node_attr_name = node_attr_name
         super().__init__()
-        if self.node_idx is None:
-            raise AttributeError(f"{self.__class__.__name__} class must set 'node_idx' attribute.")
+        if self.nodes_axis is None:
+            raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        return (x_j, x_i)[self.node_idx]
+        node_attr = (x_j, x_i)[self.nodes_axis.value]
+        assert (
+            node_attr is not None
+        ), f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
+        return node_attr
 
 
 class AttributeFromSourceNode(BaseEdgeAttributeFromNodeBuilder):
-    """
-    Copy an attribute of the source node to the edge.
-    Used for example to identify if an encoder edge originates from a LAM or global node.
+    """Copy an attribute of the source node to the edge."""
 
-    Attributes
-    ----------
-    node_attr_name : str
-        Name of the node attribute to propagate.
-    """
-
-    node_idx: int = 0
+    nodes_axis = NodesAxis.SOURCE
 
 
 class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
-    """Copy an attribute of the target node to the edge.
+    """Copy an attribute of the target node to the edge."""
 
-    Used for example to identify if an encoder edge ends at a LAM or global node.
-
-    Attributes
-    ----------
-    node_attr_name : str
-        Name of the node attribute to propagate.
-    """
-
-    node_idx: int = 1
+    nodes_axis = NodesAxis.TARGET

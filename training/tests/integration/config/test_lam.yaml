@@ -1,0 +1,52 @@
+# Modifications for the local area model template "lam.yaml"
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+        thinning: 25 # ???-value in lam template
+      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+  training:
+    start: "2017-01-01"
+    end: "2017-01-07"
+  validation:
+    start: "2017-01-08"
+    end: "2017-01-10"
+
+hardware:
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+  files:
+    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    # We only use the graph file in test_training_cycle_lam_with_existing_graph, not in test_training_cycle_lam
+    graph: anemoi-integration-tests/training/graphs/lam-graph.pt
+
+# need this modification since some variables set in the default zarr config are not part of the dataset
+data:
+  forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  diagnostic:
+  - "tp"
+
+  normalizer:
+    default: "mean-std"
+    std:
+    - "tp"
+    min-max:
+    max:
+    none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"

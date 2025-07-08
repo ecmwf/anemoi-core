@@ -306,6 +306,8 @@ class AnemoiProfiler(AnemoiTrainer):
         datamodule = super().datamodule
         # to generate a model summary with shapes we need a sample input array
         batch = next(iter(datamodule.train_dataloader()))
+        if type(batch) in [list, tuple]:
+            batch = batch[0]
         self.example_input_array = batch[
             :,
             0 : self.config.training.multistep_input,

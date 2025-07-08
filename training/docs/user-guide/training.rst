@@ -41,8 +41,22 @@ To configure the training:
    the command line interface.
 -  Replace all "missing" values in config `???` with the appropriate
    values for your training setup.
+-  Choose the model task and model type from :ref:`Models <Models>`.
 -  Optionally, customize additional components like the normaliser or
    optimization strategies to enhance model performance.
+
+*****************
+ Parallelization
+*****************
+
+Anemoi Training supports different parallelization strategies based on
+the training task (see :ref:`Strategy <strategy target>`):
+
+-  **DDPGroupStrategy**: Used for deterministic training tasks
+-  **DDPEnsGroupStrategy**: Used for ensemble training tasks
+
+These strategies have to be set depending on the model task specified in
+the configuration.
 
 Step 4: Set Up Experiment Tracking (Optional)
 =============================================
@@ -112,11 +126,11 @@ as wind forcing applied to an ocean model. Instead, forcing here refers
 to any variable which is an input only. In some cases this includes
 'traditional forcing', alongside other variables.
 
-   ``Diagnostics`` includes the variables like precipitation that we
-   want to predict, but which may not be available in forecast step zero
-   due to technical limitations. These can aso include derived
-   quantities which we wish to train the model to predict directly, but
-   do not want to use as inputs.
+``Diagnostics`` includes the variables like precipitation that we want
+to predict, but which may not be available in forecast step zero due to
+technical limitations. These can aso include derived quantities which we
+wish to train the model to predict directly, but do not want to use as
+inputs.
 
 ``Prognostic`` variables are the variables like temperature or humidity
 that we want to predict and appear as both inputs and outputs.
@@ -137,14 +151,29 @@ will be classed as a prognostic variable.
       diagnostics:
          - total_precipitation
 
+**************
+ Data Modules
+**************
+
+Anemoi Training provides different data modules to handle various model
+tasks:
+
+-  **AnemoiDatasetDataModule**: Standard data module for deterministic
+   training
+
+-  **AnemoiEnsDatasetsDataModule**: Specialized data module for ensemble
+   training. It also allows for training with perturbed initial
+   conditions.
+
+The choice of data module depends on your training task and input data
+requirements.
+
 ************
  Dataloader
 ************
 
 The dataloader file contains information on how many workers are used,
-and the batch size. ``num_workers`` relates to model parallelisation,
-for more information on this see :ref:`Parallelisation
-<Parallelisation>`
+and the batch size. ``num_workers`` relates to model parallelisation.
 
 .. code:: yaml
 
@@ -289,22 +318,71 @@ locations change in time.
       _convert_: all
       config: ${data.imputer}
 
+****************
+ Loss Functions
+****************
+
+Anemoi Training supports various loss functions for different training
+tasks and easily allows for custom loss functions to be added.
+
+.. code:: yaml
+
+   training_loss:
+      _target_: anemoi.training.losses.mse.WeightedMSELoss
+      # class kwargs
+
+The choice of loss function depends on the model task and the desired
+properties of the forecast.
+
+For ensemble training, the following loss functions are available:
+
+-  **Kernel CRPS**: Continuous Ranked Probability Score using kernel
+   density estimation
+-  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
+   the number of ensemble members used.
+
 ***********************
  Loss function scaling
 ***********************
 
 It is possible to change the weighting given to each of the variables in
-the loss function by changing
-``config.training.variable_loss_scaling.pl.<pressure level variable>``
-and ``config.training.variable_loss_scaling.sfc.<surface variable>``.
+the loss function by changing the default `pressure_level` and
+`general_variable` scalers. They are by default applied to the fields
+before applying the training loss function and defined in the
+configuration `training.scalers`.
 
-It is also possible to change the scaling given to the pressure levels
-using ``config.training.pressure_level_scaler``. For almost all
+While in the `general_variable` scaler each variable is given a
+weighting, the `pressure_level` scaler is applied to the pressure levels
+variables with respect to the pressure level. For almost all
 applications, upper atmosphere pressure levels should be given lower
 weighting than the lower atmosphere pressure levels (i.e. pressure
 levels nearer to the surface). By default anemoi-training uses a ReLU
 Pressure Level scaler with a minimum weighting of 0.2 (i.e. no pressure
-level has a weighting less than 0.2).
+level has a weighting less than 0.2), defined in class
+`anemoi.training.losses.scalers.ReluVariableLevelScaler`.
+
+.. code:: yaml
+
+   general_variable:
+      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+      weights:
+         default: 1
+         t: 6
+         z: 12
+         10u: 0.1
+         10v: 0.1
+         2d: 0.5
+         tp: 0.025
+         cp: 0.0025
+
+.. code:: yaml
+
+   pressure_level:
+      # Variable level scaler to be used
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: pl
+      y_intercept: 0.2
+      slope: 0.001
 
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as

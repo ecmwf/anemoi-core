@@ -18,7 +18,7 @@ from pydantic import Field
 from pydantic import ValidationError
 from pydantic import model_validator
 
-from .utils import BaseModel
+from anemoi.utils.schemas import BaseModel
 
 
 class NormalizerSchema(BaseModel):
@@ -48,7 +48,7 @@ class ImputerSchema(BaseModel):
 
 
 class RemapperSchema(BaseModel):
-    default: str = Field(literals=["none", "cos_sin"])
+    default: str = Field(literals=["none", "log1p", "sqrt", "boxcox"])
     "Remapper default method to apply."
     none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be remapped."
@@ -117,7 +117,5 @@ class DataSchema(PydanticBaseModel):
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
     diagnostic: list[str]
     "Features that are only part of the forecast state and are not used as an input to the model."
-    remapped: Union[dict, None]
-    "Dictionary of remapped names for variables."
     num_features: Union[int, None]
     "Number of features in the forecast state. To be set in the code."

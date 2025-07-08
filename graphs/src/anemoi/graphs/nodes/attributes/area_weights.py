@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+from abc import ABC
+from abc import abstractmethod
 
 import numpy as np
 import torch
@@ -18,20 +20,20 @@ from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
 from torch_geometric.data.storage import NodeStorage
 
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
 
 
-class UniformWeights(BaseNodeAttribute):
-    """Implements a uniform weight for the nodes.
+class BaseAreaWeights(BaseNodeAttribute, ABC):
+    """Base class for area weights of the nodes."""
 
-    Methods
-    -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
-    """
+    def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
+        return nodes.x.to(torch.float64)
+
+    @abstractmethod
+    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray: ...
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         """Compute the weights.
@@ -46,9 +48,37 @@ class UniformWeights(BaseNodeAttribute):
         Returns
         -------
         torch.Tensor
+            Area weights for the nodes.
+        """
+        latlons = self.get_latlon_coordinates(nodes).cpu().numpy()
+        area_weights = self.compute_area_weights(latlons)
+        return torch.from_numpy(area_weights)
+
+
+class UniformWeights(BaseAreaWeights):
+    """Implements a uniform weight for the nodes.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
+        """Compute area weights.
+
+        Parameters
+        ----------
+        latlons : np.ndarray
+            2D array of shape (N, 2) with latitude and longitude coordinates of the
+            nodes of the graph.
+
+        Returns
+        -------
+        np.ndarray
             Ones.
         """
-        return torch.ones((nodes.num_nodes,))
+        return np.ones(latlons.shape[0])
 
 
 class AreaWeights(BaseNodeAttribute):
@@ -80,8 +110,10 @@ class AreaWeights(BaseNodeAttribute):
         return SphericalAreaWeights(**kwargs)
 
 
-class PlanarAreaWeights(BaseNodeAttribute):
-    """Implements the 2D area of the nodes as the weights.
+class PlanarAreaWeights(BaseAreaWeights):
+    """Planar area weights
+
+    It computes the area in a 2D plane asociated to each node.
 
     Attributes
     ----------
@@ -154,29 +186,81 @@ class PlanarAreaWeights(BaseNodeAttribute):
 
         return np.concatenate([expanded_hull, np.vstack(boundary_points)])
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        points = nodes.x.cpu().numpy()
-        resolution = self._compute_mean_nearest_distance(points)
-        boundary_points = self._get_boundary_ring(points, resolution)
+    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
+        """Compute area weights.
+
+        Parameters
+        ----------
+        latlons : np.ndarray
+            2D array of shape (N, 2) with latitude and longitude coordinates of the
+            nodes of the graph.
+
+        Returns
+        -------
+        np.ndarray
+            Planar area weights.
+        """
+        resolution = self._compute_mean_nearest_distance(latlons)
+        boundary_points = self._get_boundary_ring(latlons, resolution)
 
         # Compute convex hull over all points (boundary ring included)
-        extended_points = np.vstack([points, boundary_points])
+        extended_points = np.vstack([latlons, boundary_points])
         v = Voronoi(extended_points, qhull_options="QJ Pp")
 
         # Compute the area of each node's region, excluding those in the boundary ring
         areas = []
-        for idx in range(len(points)):
+        for idx in range(len(latlons)):
             p_idx = v.point_region[idx]
             r = v.regions[p_idx]
             poly_coords = v.vertices[r]
             area = ConvexHull(poly_coords).volume
             areas.append(area)
 
-        return torch.from_numpy(np.array(areas))
+        return np.array(areas)
 
 
-class SphericalAreaWeights(BaseNodeAttribute):
-    """Implements the 3D area of the nodes as the weights.
+class MaskedPlanarAreaWeights(PlanarAreaWeights):
+    """Masked planar area weights
+
+    It computes the area in a 2D plane asociated to each node.
+
+    Attributes
+    ----------
+    mask_node_attr_name : str
+        Name of a node attribute to use as a mask for the computing the area weights.
+        It sets to 0 values outside this masked region.
+    norm : str, optional
+        Normalisation of the weights.
+
+    Methods
+    -------
+    compute(self, graph, nodes_name)
+        Compute the area attributes for each node.
+    """
+
+    def __init__(
+        self,
+        mask_node_attr_name: str,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm, dtype)
+        assert isinstance(
+            mask_node_attr_name, str
+        ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
+        self.mask_node_attr_name = mask_node_attr_name
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
+        attr_values = super().get_raw_values(nodes, **kwargs).to(self.device)
+        mask = nodes[self.mask_node_attr_name].squeeze()
+        return attr_values * mask
+
+
+class SphericalAreaWeights(BaseAreaWeights):
+    """Spherical area weights
+
+    It computes the area of a unit radius sphere asociated to each node.
 
     Attributes
     ----------
@@ -214,24 +298,23 @@ class SphericalAreaWeights(BaseNodeAttribute):
         self.centre = centre
         self.fill_value = fill_value
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
         """Compute the area associated to each node.
 
         It uses Voronoi diagrams to compute the area of each node.
 
         Parameters
         ----------
-        nodes : NodeStorage
-            Nodes of the graph.
-        kwargs : dict
-            Additional keyword arguments.
+        latlons : np.ndarray
+            2D array of shape (N, 2) with latitude and longitude coordinates of the
+            nodes of the graph.
 
         Returns
         -------
         np.ndarray
-            Attributes.
+            Spherical area weights.
         """
-        points = latlon_rad_to_cartesian(nodes.x.cpu())
+        points = latlon_rad_to_cartesian_np(latlons)
         sv = SphericalVoronoi(points, self.radius, self.centre)
         mask = np.array([bool(i) for i in sv.regions])
         sv.regions = [region for region in sv.regions if region]
@@ -252,4 +335,4 @@ class SphericalAreaWeights(BaseNodeAttribute):
             len(result),
             result.sum(),
         )
-        return torch.from_numpy(result)
+        return result

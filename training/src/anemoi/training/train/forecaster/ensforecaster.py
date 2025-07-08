@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.distributed.ensemble import gather_ensemble_members
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
 from .forecaster import GraphForecaster
@@ -41,6 +41,7 @@ class GraphEnsForecaster(GraphForecaster):
         graph_data: HeteroData,
         truncation_data: dict,
         statistics: dict,
+        statistics_tendencies: dict,
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict,
@@ -63,6 +64,7 @@ class GraphEnsForecaster(GraphForecaster):
             graph_data=graph_data,
             truncation_data=truncation_data,
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
@@ -104,7 +106,12 @@ class GraphEnsForecaster(GraphForecaster):
         self.ensemble_ic_generator = EnsembleInitialConditions(config=config, data_indices=data_indices)
 
     def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
-        return self.model(x, fcstep, self.model_comm_group)
+        return self.model(
+            x,
+            fcstep=fcstep,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
 
     def set_ens_comm_group(
         self,
@@ -120,14 +127,27 @@ class GraphEnsForecaster(GraphForecaster):
         self.ens_comm_num_groups = ens_comm_num_groups
         self.ens_comm_group_size = ens_comm_group_size
 
+    def set_ens_comm_subgroup(
+        self,
+        ens_comm_subgroup: ProcessGroup,
+        ens_comm_subgroup_id: int,
+        ens_comm_subgroup_rank: int,
+        ens_comm_subgroup_num_groups: int,
+        ens_comm_subgroup_size: int,
+    ) -> None:
+        self.ens_comm_subgroup = ens_comm_subgroup
+        self.ens_comm_subgroup_id = ens_comm_subgroup_id
+        self.ens_comm_subgroup_rank = ens_comm_subgroup_rank
+        self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
+        self.ens_comm_subgroup_size = ens_comm_subgroup_size
+
     def gather_and_compute_loss(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         loss: torch.nn.Module,
-        nens_per_device: int,
-        ens_comm_group_size: int,
-        ens_comm_group: ProcessGroup,
+        ens_comm_subgroup_size: int,
+        ens_comm_subgroup: ProcessGroup,
         model_comm_group: ProcessGroup,
         return_pred_ens: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
@@ -142,14 +162,12 @@ class GraphEnsForecaster(GraphForecaster):
                 Ground truth
             loss: torch.nn.Module
                 Loss function
-            nens_per_device: int
-                Number of ensemble members per device
             ens_comm_group_size: int
-                Size of ensemble communication group
-            ens_comm_group: int
-                Process ensemble group
-            model_comm_group: int
-                Process model group
+                Size of the ensemble communication group
+            ens_comm_subgroup: ProcessGroup
+                Ensemble communication subgroup
+            model_comm_group: ProcessGroup
+                Model communication group
             return_pred_ens: bool
                 Validation flag: if True, we return the predicted ensemble (post-gather)
 
@@ -162,18 +180,15 @@ class GraphEnsForecaster(GraphForecaster):
         """
         # gather ensemble members,
         # full ensemble is only materialised on GPU in checkpointed region
-        y_pred_ens = gather_ensemble_members(
+        y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=1,
-            shapes=[y_pred.shape] * ens_comm_group_size,
-            nens=nens_per_device,
-            ndevices=ens_comm_group_size,
-            memspacing=model_comm_group.size(),
-            mgroup=ens_comm_group,
-            scale_gradients=True,
+            shapes=[y_pred.shape] * ens_comm_subgroup_size,
+            mgroup=ens_comm_subgroup,
         )
+
         # compute the loss
-        loss_inc = loss(y_pred_ens, y, squash=True)
+        loss_inc = loss(y_pred_ens, y, squash=True, grid_shard_slice=self.grid_shard_slice, group=model_comm_group)
 
         return loss_inc, y_pred_ens if return_pred_ens else None
 
@@ -213,16 +228,18 @@ class GraphEnsForecaster(GraphForecaster):
             None
         """
         # for validation not normalized in-place because remappers cannot be applied in-place
-
-        ens_ic = self.ensemble_ic_generator(batch[0], batch[1] if len(batch) == 2 else None)
-
-        LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(ens_ic.shape))
-
         batch[0] = self.model.pre_processors(batch[0], in_place=not validation_mode)
-        x = self.model.pre_processors(
-            ens_ic,
-            in_place=not validation_mode,
-        )  # not in place required here??? ; shape = (bs, multistep, nens_per_device, latlon, input.full)
+
+        x = self.ensemble_ic_generator(
+            batch[0],
+            self.model.pre_processors(batch[1], in_place=not validation_mode) if len(batch) == 2 else None,
+        )
+        LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(x.shape))
+
+        # Scalers which are delayed need to be initialized after the pre-processors
+        if self.is_first_step:
+            self.define_delayed_scalers()
+            self.is_first_step = False
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -237,10 +254,6 @@ class GraphEnsForecaster(GraphForecaster):
         )
         assert batch[0].shape[1] >= rollout + self.multi_step, msg
 
-        if not self.updated_loss_mask:
-            # update loss scalar after first application and initialization of preprocessors
-            self.training_weights_for_imputed_variables(batch[0])
-
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, rollout_step)
@@ -249,7 +262,7 @@ class GraphEnsForecaster(GraphForecaster):
                 self.multi_step + rollout_step,
                 0,
                 :,
-                self.data_indices.internal_data.output.full,
+                self.data_indices.data.output.full,
             ]  # self.data_indices.data.output.full
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
@@ -260,9 +273,8 @@ class GraphEnsForecaster(GraphForecaster):
                     y_pred,
                     y,
                     self.loss,
-                    self.nens_per_device,
-                    self.ens_comm_group_size,
-                    self.ens_comm_group,
+                    self.ens_comm_subgroup_size,
+                    self.ens_comm_subgroup,
                     self.model_comm_group,
                     validation_mode,
                     use_reentrant=False,
@@ -279,8 +291,9 @@ class GraphEnsForecaster(GraphForecaster):
                     y_pred_ens_group,
                     y,
                     rollout_step,
+                    grid_shard_slice=self.grid_shard_slice,
                 )
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], ens_ic if validation_mode else None
+            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
 
     def _step(
         self,
@@ -290,10 +303,6 @@ class GraphEnsForecaster(GraphForecaster):
     ) -> tuple:
         """Training / validation step."""
         del batch_idx
-
-        batch[0] = self.allgather_batch(batch[0])
-        if len(batch) == 2:
-            batch[1] = self.allgather_batch(batch[1])
 
         LOGGER.debug(
             "SHAPES: batch[0].shape = %s, batch[1].shape == %s",
@@ -313,10 +322,16 @@ class GraphEnsForecaster(GraphForecaster):
         ):
             loss += loss_next
             metrics.update(metrics_next)
-            y_preds.extend(y_preds_next)
+            y_preds.append(y_preds_next)
 
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic
+
+    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
+        batch[0] = super().allgather_batch(batch[0])
+        if len(batch) == 2:
+            batch[1] = super().allgather_batch(batch[1])
+        return batch
 
     def training_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> torch.Tensor | dict:
         """Run one training step.
@@ -357,17 +372,22 @@ class GraphEnsForecaster(GraphForecaster):
 
         return train_loss
 
-    def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> None:
-        """Run one validation step.
+    def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Perform a validation step.
 
-        Args:
-            batch: tuple
-                Batch data. tuple of length 1 or 2.
-                batch[0]: analysis, shape (bs, multi_step + rollout, nvar, latlon)
-                batch[1] (optional): EDA perturbations, shape (nens_per_device, multi_step, nvar, latlon)
-            batch_idx: int
-                Validation batch index
-        return (*super().validation_step(batch, batch_idx), self.ens_ic)
+        Parameters
+        ----------
+        batch: tuple
+            Batch data. tuple of length 1 or 2.
+            batch[0]: analysis, shape (bs, multi_step + rollout, nvar, latlon)
+            batch[1] (optional): EDA perturbations, shape (nens_per_device, multi_step, nvar, latlon)
+        batch_idx: int
+            Validation batch index
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            Tuple containing the validation loss, the predictions, and the ensemble initial conditions
         """
         with torch.no_grad():
             val_loss, metrics, y_preds, ens_ic = self._step(batch, batch_idx, validation_mode=True)

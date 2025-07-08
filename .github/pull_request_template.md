@@ -1,52 +1,15 @@
 ## Description
+<!-- What issue or task does this change relate to? -->
 
-<!-- Provide a brief summary of the changes introduced in this pull request. -->
+## What problem does this change solve?
+<!-- Describe if it's a bugfix, new feature, doc update, or breaking change -->
 
-## Type of Change
+## What issue or task does this change relate to?
+<!-- link to Issue Number -->
 
--   [ ] Bug fix (non-breaking change which fixes an issue)
--   [ ] New feature (non-breaking change which adds functionality)
--   [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
--   [ ] Documentation update
-
-## Issue Number
-
-<!-- Link the Issue number this change addresses, ideally in one of the "magic format" such as Closes #XYZ -->
-
-<!-- Alternatively, explain the motivation behind the changes and the context in which they are being made. -->
-
-## Code Compatibility
-
--   [ ] I have performed a self-review of my code
-
-### Code Performance and Testing
-
--   [ ] I have added tests that prove my fix is effective or that my feature works
--   [ ] I ran the [complete Pytest test](https://anemoi.readthedocs.io/projects/training/en/latest/dev/testing.html) suite locally, and they pass
--   [ ] I have tested the changes on a single GPU
--   [ ] I have tested the changes on multiple GPUs / multi-node setups
--   [ ] I have run the Benchmark Profiler against the old version of the code
--   [ ] If the new feature introduces modifications at the config level, I have made sure to update Pydantic Schemas and default configs accordingly
-
-
-<!-- In case this affects the model sharding or other specific components please describe these here. -->
-
-### Dependencies
-
--   [ ] I have ensured that the code is still pip-installable after the changes and runs
--   [ ] I have tested that new dependencies themselves are pip-installable.
--   [ ] I have not introduced new dependencies in the inference portion of the pipeline
-
-<!-- List any new dependencies that are required for this change and the justification to add them. -->
-
-### Documentation
-
--   [ ] My code follows the style guidelines of this project
--   [ ] I have updated the documentation and docstrings to reflect the changes
--   [ ] I have added comments to my code, particularly in hard-to-understand areas
-
-<!-- Describe any major updates to the documentation -->
-
-## Additional Notes
-
+##  Additional notes ##
 <!-- Include any additional information, caveats, or considerations that the reviewer should be aware of. -->
+
+***As a contributor to the Anemoi framework, please ensure that your changes include unit tests, updates to any affected dependencies and documentation, and have been tested in a parallel setting  (i.e., with multiple GPUs). As a reviewer, you are also responsible for verifying these aspects and requesting changes if they are not adequately addressed. For guidelines about those please refer to https://anemoi.readthedocs.io/en/latest/***
+
+By opening this pull request, I affirm that all authors agree to the [Contributor License Agreement.](https://github.com/ecmwf/codex/blob/main/Legal/contributor_license_agreement.md)

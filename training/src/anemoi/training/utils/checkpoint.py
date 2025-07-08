@@ -90,12 +90,13 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     # Load the filtered st-ate_dict into the model
     model.load_state_dict(state_dict, strict=False)
+    # Needed for data indices check
+    model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
     return model
 
 
 def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
-    """
-    Recursively freezes the parameters of a submodule with the specified name.
+    """Recursively freezes the parameters of a submodule with the specified name.
 
     Parameters
     ----------
