@@ -465,7 +465,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_t0: torch.Tensor,
         pre_processors_state: Callable,
         pre_processors_tendencies: Callable,
-        input_is_normalised: bool = False,
+        post_process_input: bool = False,
         post_processors_state: Optional[Callable] = None,
     ) -> torch.Tensor:
         """Compute the tendency from two states.
@@ -480,7 +480,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to pre-process the state variables.
         pre_processors_tendencies : callable
             Function to pre-process the tendency variables.
-        input_is_normalised : bool, optional
+        post_process_input : bool, optional
             Whether the input state is normalized, by default False
         post_processors_state : Optional[Callable], optional
             Function to post-process the state variables, by default None
@@ -491,7 +491,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             The normalized tendency tensor output from model.
         """
 
-        if input_is_normalised:
+        if post_process_input:
             x_t1 = post_processors_state(
                 x_t1[..., self.data_indices.data.output.full],
                 in_place=False,
@@ -526,7 +526,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         tendency: torch.Tensor,
         post_processors_state: Callable,
         post_processors_tendencies: Callable,
-        normalise_output: bool = False,
+        pre_process_output: bool = False,
         pre_processors_state: Optional[Callable] = None,
     ) -> torch.Tensor:
         """Add the tendency to the state.
@@ -541,7 +541,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to post-process the state variables.
         post_processors_tendencies : callable
             Function to post-process the tendency variables.
-        normalise_output : bool, optional
+        pre_process_output : bool, optional
             Whether to normalize the output state, by default False
         pre_processors_state : Optional[Callable], optional
             Function to pre-process the state variables, by default None
@@ -565,7 +565,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             data_index=self.data_indices.data.input.prognostic,
         )
 
-        if normalise_output:
+        if pre_process_output:
             state_outp = pre_processors_state(
                 state_outp,
                 in_place=False,

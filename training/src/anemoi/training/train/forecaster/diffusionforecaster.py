@@ -386,7 +386,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 x_ref,
                 self.model.pre_processors,
                 self.model.pre_processors_tendencies,
-                input_is_normalised=True,
+                post_process_input=True,
                 post_processors_state=self.model.post_processors,
             )
 
@@ -414,7 +414,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 tendency_pred,
                 self.model.post_processors,
                 self.model.post_processors_tendencies,
-                normalise_output=True,
+                pre_process_output=True,
                 pre_processors_state=self.model.pre_processors,
             )
 
@@ -429,7 +429,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                     tendency_target_noised,
                     self.model.post_processors,
                     self.model.post_processors_tendencies,
-                    normalise_output=True,
+                    pre_process_output=True,
                     pre_processors_state=self.model.pre_processors,
                 )
 
