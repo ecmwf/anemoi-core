@@ -162,7 +162,7 @@ class GraphCreator:
             torch.save(graph, save_path)
             LOGGER.info(f"Graph saved at {save_path}.")
         else:
-            # The error is only logged for compatibility with multi-gpu training in anemoi-training.
+            # The error is only logged for compatibility with multi-gpu training in anemoi-training.
             # Currently, distributed graph creation is not supported so we create the same graph in each gpu.
             LOGGER.error(f"Graph already exists at {save_path}. Use overwrite=True to overwrite.")
 
