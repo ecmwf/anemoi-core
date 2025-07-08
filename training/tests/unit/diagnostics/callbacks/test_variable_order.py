@@ -15,7 +15,7 @@ import pytest
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.train.forecaster.forecaster import GraphForecaster
+from anemoi.training.train.tasks.forecaster import GraphForecaster
 from anemoi.training.train.train import AnemoiTrainer
 
 

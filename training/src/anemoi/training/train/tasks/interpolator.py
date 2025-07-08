@@ -19,12 +19,16 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 
+<<<<<<< HEAD:training/src/anemoi/training/train/forecaster/interpolator.py
 from .forecaster import GraphForecaster
+=======
+from .base import BaseGraphModule
+>>>>>>> feature/graphmodule:training/src/anemoi/training/train/tasks/interpolator.py
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphInterpolator(GraphForecaster):
+class GraphInterpolator(BaseGraphModule):
     """Graph neural network interpolator for PyTorch Lightning."""
 
     def __init__(
