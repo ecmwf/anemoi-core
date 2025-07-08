@@ -135,6 +135,24 @@ def ensemble_config(testing_modifications_with_temp_dir: OmegaConf, get_tmp_path
 
 
 @pytest.fixture
+def hierarchical_config(
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, list[str]]:
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_hierarchical"):
+        template = compose(config_name="hierarchical")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, dataset_urls
+
+
+@pytest.fixture
 def get_tmp_paths(temporary_directory_for_test_data: callable) -> callable:
     def _get_tmp_paths(config: OmegaConf, list_datasets: list[str]) -> tuple[str, list[str], list[str]]:
         tmp_paths = []
@@ -192,3 +210,35 @@ def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -
     cfg.training.run_id = "dummy_id"
     cfg.training.max_epochs = 3
     return cfg, dataset_url
+
+
+@pytest.fixture
+def interpolator_config(
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, str]:
+    """Compose a runnable configuration for the temporal-interpolation model.
+
+    It is based on `interpolator.yaml` and only patches paths pointing to the
+    sample dataset that the tests download locally.
+    """
+    # No model override here - the template already sets the dedicated
+    # interpolator model + GraphInterpolator Lightning task.
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_interpolator",
+    ):
+        template = compose(config_name="interpolator")
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_interpolator.yaml",
+    )
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, dataset_urls[0]

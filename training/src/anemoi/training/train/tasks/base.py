@@ -33,6 +33,7 @@ from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -181,22 +182,26 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
+        metadata_extractor = ExtractVariableGroupAndLevel(
+            variable_groups=config.model_dump(by_alias=True).training.variable_groups,
+            metadata_variables=metadata["dataset"].get("variables_metadata"),
+        )
+
         # Instantiate all scalers with the training configuration
         self.scalers, self.delayed_scaler_builders = create_scalers(
             config.model_dump(by_alias=True).training.scalers,
-            group_config=config.model_dump(by_alias=True).training.variable_groups,
             data_indices=data_indices,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
-            metadata_variables=metadata["dataset"].get("variables_metadata"),
+            metadata_extractor=metadata_extractor,
             output_mask=self.output_mask,
         )
 
         self.val_metric_ranges = get_metric_ranges(
             config,
             data_indices,
-            metadata["dataset"].get("variables_metadata"),
+            metadata_extractor=metadata_extractor,
         )
 
         self.loss = get_loss_function(
@@ -252,6 +257,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             "`hardware.num_gpus_per_model`.",
         )
         model_supports_sharding = getattr(self.model.model, "supports_sharded_input", False)
+
         assert model_supports_sharding or not self.keep_batch_sharded, (
             f"Model {self.model.model} does not support sharded inputs, but `model.keep_batch_sharded=True` was set. ",
             "Please set `model.keep_batch_sharded=False` or use a model that supports sharded inputs.",

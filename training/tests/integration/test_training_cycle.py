@@ -109,6 +109,23 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
 
 @skip_if_offline
 @pytest.mark.longtests
+def test_training_cycle_hierarchical(
+    hierarchical_config: tuple[DictConfig, list[str]],
+    get_test_archive: callable,
+) -> None:
+    cfg, urls = hierarchical_config
+    for url in urls:
+        get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = hierarchical_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.longtests
 def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
     cfg, url = gnn_config
     get_test_archive(url)
@@ -140,3 +157,21 @@ def test_restart_from_existing_checkpoint(gnn_config_with_checkpoint: DictConfig
     cfg, url = gnn_config_with_checkpoint
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.longtests
+def test_training_cycle_interpolator(
+    interpolator_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    """Full training-cycle smoke-test for the temporal interpolation task."""
+    cfg, url = interpolator_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
+    """Schema-level validation for the temporal interpolation config."""
+    cfg, _ = interpolator_config
+    BaseSchema(**cfg)
