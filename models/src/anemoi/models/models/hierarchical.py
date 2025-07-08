@@ -19,8 +19,6 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -70,8 +68,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self.level_process = model_config.model.enable_hierarchical_level_processing
         self.skip = model_config.model.skip_connections
 
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
-
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self.data_indices = data_indices
@@ -80,9 +76,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
-        input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-
-        self.supports_sharded_input = True  # TODO: deos it?
+        self.supports_sharded_input = True
 
         # Encoder data -> hidden
         self.encoder = instantiate(
