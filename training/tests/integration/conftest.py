@@ -205,6 +205,7 @@ def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -
             "training.model_task=anemoi.training.train.forecaster.GraphDiffusionTendForecaster",
         ],
     ],
+    ids=["diffusion", "diffusiontend"],
 )
 def diffusion_config(
     request: pytest.FixtureRequest,
@@ -214,7 +215,7 @@ def diffusion_config(
     overrides = request.param
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
-        template = compose(config_name="debug_diffusion", overrides=overrides)
+        template = compose(config_name="config", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
