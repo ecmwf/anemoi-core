@@ -101,7 +101,10 @@ ColormapSchema = Annotated[
 
 
 class PlotSampleSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
+    target_: Literal[
+        "anemoi.training.diagnostics.callbacks.plot.PlotSample",
+        "anemoi.training.diagnostics.callbacks.plot.PlotReconstruction",
+    ] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."

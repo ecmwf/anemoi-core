@@ -622,6 +622,216 @@ def plot_flat_sample(
             )
 
 
+def plot_predicted_multilevel_flat_recon(
+    parameters: dict[str, int],
+    n_plots_per_sample: int,
+    latlons: np.ndarray,
+    clevels: float,
+    sample: np.ndarray,
+    reconstruction: np.ndarray,
+    difference: np.ndarray,
+    datashader: bool = False,
+    precip_and_related_fields: list | None = None,
+    colormaps: dict[str, Colormap] | None = None,
+) -> Figure:
+    """Plots data for one multilevel latlon-"flat" reconstruction.
+
+    NB: this can be very slow for large data arrays
+    call it as infrequently as possible!
+
+    Parameters
+    ----------
+    parameters : dict[str, int]
+        Dictionary of variable names and indices
+    n_plots_per_sample : int
+        Number of plots per sample
+    latlons : np.ndarray
+        lat/lon coordinates array, shape (lat*lon, 2)
+    clevels : float
+        Accumulation levels used for precipitation related plots
+    sample : np.ndarray
+        Input data of shape (lat*lon, nvar*level)
+    reconstruction : np.ndarray
+        Predicted data of shape (lat*lon, nvar*level)
+    difference : np.ndarray
+        Difference between sample and reconstruction (lat*lon, nvar*level)
+    datashader: bool, optional
+        Scatter plot, by default False
+    precip_and_related_fields : list, optional
+        List of precipitation-like variables, by default []
+    colormaps : dict[str, Colormap], optional
+        Dictionary of colormaps, by default None
+
+    Returns
+    -------
+    Figure
+        The figure object handle.
+
+    """
+    n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
+
+    figsize = (n_plots_y * 4, n_plots_x * 3)
+    fig, ax = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, layout=LAYOUT)
+
+    pc_lat, pc_lon = equirectangular_projection(latlons)
+    if colormaps is None:
+        colormaps = {}
+
+    for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
+        if output_only:
+            continue
+
+        sample_t = sample[..., variable_idx].squeeze()
+        reconstruction_t = reconstruction[..., variable_idx].squeeze()
+        difference_t = difference[..., variable_idx].squeeze()
+
+        # get the colormap for the variable as defined in config file
+        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
+        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+        for key in colormaps:
+            if key not in ["default", "error"] and variable_name in colormaps[key].variables:
+                cmap = colormaps[key].get_cmap()
+                continue
+        if n_plots_x > 1:
+            plot_flat_recon(
+                fig,
+                ax[plot_idx, :],
+                pc_lon,
+                pc_lat,
+                sample_t,
+                reconstruction_t,
+                difference_t,
+                variable_name,
+                clevels,
+                datashader,
+                precip_and_related_fields,
+                cmap=cmap,
+                error_cmap=error_cmap,
+            )
+        else:
+            plot_flat_recon(
+                fig,
+                ax,
+                pc_lon,
+                pc_lat,
+                sample_t,
+                reconstruction_t,
+                difference_t,
+                variable_name,
+                clevels,
+                datashader,
+                precip_and_related_fields,
+                cmap=cmap,
+                error_cmap=error_cmap,
+            )
+
+    return fig
+
+
+def plot_flat_recon(
+    fig: Figure,
+    ax: plt.Axes,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    sample: np.ndarray,
+    reconstruction: np.ndarray,
+    difference: np.ndarray,
+    vname: str,
+    clevels: float,
+    datashader: bool = False,
+    precip_and_related_fields: list | None = None,
+    cmap: Colormap | None = None,
+    error_cmap: Colormap | None = None,
+) -> None:
+    """Plot a "flat" reconstruction 1D sample.
+
+    Data on non-rectangular (reduced Gaussian) grids.
+
+    Parameters
+    ----------
+    fig : Figure
+        Figure object handle
+    ax : matplotlib.axes
+        Axis object handle
+    lon : np.ndarray
+        longitude coordinates array, shape (lon,)
+    lat : np.ndarray
+        latitude coordinates array, shape (lat,)
+    input_ : np.ndarray
+        Input data of shape (lat*lon,)
+    truth : np.ndarray
+        Expected data of shape (lat*lon,)
+    pred : np.ndarray
+        Predicted data of shape (lat*lon,)
+    vname : str
+        Variable name
+    clevels : float
+        Accumulation levels used for precipitation related plots
+    datashader: bool, optional
+        Datashader plott, by default True
+    precip_and_related_fields : list, optional
+        List of precipitation-like variables, by default []
+    cmap : Colormap, optional
+        Colormap for the plot
+    error_cmap : Colormap, optional
+        Colormap for the error plot
+
+    Returns
+    -------
+    None
+    """
+    precip_and_related_fields = precip_and_related_fields or []
+    if vname in precip_and_related_fields:
+        # converting to mm from m
+        reconstruction *= 1000.0
+        if sum(sample) != 0:
+            sample *= 1000.0
+
+    data = [sample, reconstruction, difference]
+    # default titles for 6 plots
+    titles = [
+        f"{vname} input sample",
+        f"{vname} reconstruction",
+        f"{vname} error map",
+    ]
+    # colormaps
+    cmaps = [cmap] * 2 + [error_cmap]
+    # normalizations for significant colormaps
+    norms = [None for _ in range(3)]
+    norms[2] = TwoSlopeNorm(vmin=-0.00001, vcenter=0.0, vmax=0.00001)  # center the error colormaps at 0
+
+    if vname in precip_and_related_fields:
+        # Defining the actual precipitation accumulation levels in mm
+        cummulation_lvls = clevels
+        norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
+
+        norms[0] = norm
+        norms[1] = norm
+
+    else:
+        combined_data = np.concatenate((sample, reconstruction))
+        # For 'errors', only persistence and increments need identical colorbar-limits
+
+        norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
+
+        norms[0] = norm
+        norms[1] = norm
+
+    for ii in range(3):
+        if data[ii] is not None:
+            single_plot(
+                fig,
+                ax[ii],
+                lon,
+                lat,
+                data[ii],
+                cmap=cmaps[ii],
+                norm=norms[ii],
+                title=titles[ii],
+                datashader=datashader,
+            )
+
+
 def single_plot(
     fig: Figure,
     ax: plt.axes,
