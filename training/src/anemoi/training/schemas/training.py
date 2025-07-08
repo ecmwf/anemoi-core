@@ -377,6 +377,6 @@ class InterpolationSchema(BaseTrainingSchema):
 class AutoencoderSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
-    
+
 
 TrainingSchema = Union[ForecasterSchema, ForecasterEnsSchema, InterpolationSchema, AutoencoderSchema]

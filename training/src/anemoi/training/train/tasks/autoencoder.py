@@ -17,7 +17,6 @@ from torch.utils.checkpoint import checkpoint
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from collections.abc import Mapping
 
     from torch_geometric.data import HeteroData
@@ -72,7 +71,6 @@ class GraphAutoEncoder(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
-
     def _step(
         self,
         batch: torch.Tensor,
@@ -95,9 +93,9 @@ class GraphAutoEncoder(BaseGraphModule):
         x = batch[
             ...,
             self.data_indices.internal_data.input.full,
-        ] 
+        ]
         print(x.shape)
-        
+
         y_pred = self(x)
         y = batch[..., self.data_indices.internal_data.output.full]
 
