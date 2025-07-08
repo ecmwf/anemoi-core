@@ -499,6 +499,7 @@ class AnemoiTrainer:
             use_distributed_sampler=False,
             profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
+            check_val_every_n_epoch=self.config.diagnostics.check_val_every_n_epoch,
         )
 
         LOGGER.debug("Starting training..")
