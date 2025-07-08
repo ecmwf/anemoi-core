@@ -153,16 +153,3 @@ def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_
 def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
     cfg, _ = diffusion_config
     BaseSchema(**cfg)
-
-
-@skip_if_offline
-@pytest.mark.longtests
-def test_training_cycle_diffusiontend(diffusiontend_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    cfg, url = diffusiontend_config
-    get_test_archive(url)
-    AnemoiTrainer(cfg).train()
-
-
-def test_config_validation_diffusiontend(diffusiontend_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = diffusiontend_config
-    BaseSchema(**cfg)
