@@ -194,34 +194,30 @@ def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -
     return cfg, dataset_url
 
 
-@pytest.fixture
-def diffusion_config(testing_modifications_with_temp_dir: OmegaConf, get_tmp_paths: callable) -> tuple[OmegaConf, str]:
-    overrides = ["model=graphtransformer_diffusion", "graph=multi_scale"]
+@pytest.fixture(
+    params=[
+        [
+            "model=graphtransformer_diffusion",
+            "training.model_task=anemoi.training.train.forecaster.GraphDiffusionForecaster",
+        ],
+        [
+            "model=graphtransformer_diffusiontend",
+            "training.model_task=anemoi.training.train.forecaster.GraphDiffusionTendForecaster",
+        ],
+    ],
+    ids=["diffusion", "diffusiontend"],
+)
+def diffusion_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_paths: callable,
+) -> tuple[OmegaConf, str]:
+    overrides = request.param
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
         template = compose(config_name="config", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    return cfg, dataset_urls[0]
-
-
-@pytest.fixture
-def diffusiontend_config(
-    testing_modifications_with_temp_dir: OmegaConf,
-    get_tmp_paths: callable,
-) -> tuple[OmegaConf, str]:
-    overrides = ["model=graphtransformer_diffusiontend", "graph=multi_scale"]
-
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusiontend"):
-        template = compose(config_name="config", overrides=overrides)
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusiontend.yaml")
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = rel_paths[0]
