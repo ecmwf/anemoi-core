@@ -17,6 +17,7 @@ from typing import Literal
 from typing import Union
 
 from pydantic import AfterValidator
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -367,10 +368,19 @@ class ForecasterEnsSchema(BaseTrainingSchema):
 class InterpolationSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
     "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
     target_forcing: TargetForcing
     "Forcing parameters for target output times."
 
 
-TrainingSchema = Union[ForecasterSchema, ForecasterEnsSchema, InterpolationSchema]
+TrainingSchema = Annotated[
+    Union[
+        ForecasterSchema,
+        ForecasterEnsSchema,
+        InterpolationSchema,
+    ],
+    Discriminator("model_task"),
+]
