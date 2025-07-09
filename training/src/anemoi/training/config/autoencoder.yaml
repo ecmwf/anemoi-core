@@ -14,7 +14,7 @@ model:
     _target_: anemoi.models.models.AnemoiModelAutoEncoder
 
 training:
-  model_task: anemoi.training.train.forecaster.GraphAutoEncoder
+  model_task: anemoi.training.train.tasks.GraphAutoEncoder
 
 diagnostics:
   plot:
