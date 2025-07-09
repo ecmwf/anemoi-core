@@ -1,4 +1,4 @@
-# Modifications for the basic template "config.yaml"
+# Modifications for the diffusion template "diffusion.yaml"
 hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
@@ -8,9 +8,6 @@ hardware:
     truncation: null
     truncation_inv: null
     graph: null
-
-training:
-  model_task: anemoi.training.train.forecaster.GraphDiffusionForecaster
 
 dataloader:
   training:
