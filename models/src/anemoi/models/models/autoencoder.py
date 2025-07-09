@@ -155,6 +155,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
+
         return x_out
 
     def forward(

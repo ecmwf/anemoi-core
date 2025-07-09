@@ -678,7 +678,7 @@ def plot_predicted_multilevel_flat_recon(
         colormaps = {}
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        if output_only:
+        if not output_only:
             continue
 
         sample_t = sample[..., variable_idx].squeeze()

@@ -79,12 +79,11 @@ class GraphAutoEncoder(BaseGraphModule):
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         del batch_idx
 
-        metrics = {}
-        y_preds = []
+        batch = self.model.pre_processors(batch)  # normalized in-place
 
-        # for validation not normalized in-place because remappers cannot be applied in-place
-        batch = self.model.pre_processors(batch, in_place=not validation_mode)
-        self.define_delayed_scalers()
+        if self.is_first_step:
+            self.define_delayed_scalers()
+            self.is_first_step = False
 
         x = batch[
             ...,
@@ -94,20 +93,18 @@ class GraphAutoEncoder(BaseGraphModule):
         y_pred = self(x)
         y = batch[:, 0, ..., self.data_indices.data.output.full]
 
-        loss = checkpoint(self.loss, y_pred, y, use_reentrant=False)
+        # y includes the auxiliary variables, so we must leave those out when computing the loss
+        loss, metrics = checkpoint(
+            self.compute_loss_metrics,
+            y_pred,
+            y,
+            rollout_step=0,
+            training_mode=True,
+            validation_mode=validation_mode,
+            use_reentrant=False,
+        )
 
-        metrics_next = {}
-        if validation_mode:
-            metrics_next = self.calculate_val_metrics(
-                y_pred,
-                y,
-                rollout_step=0,
-            )
-
-        metrics.update(metrics_next)
-        y_preds.extend(y_pred)
-
-        return loss, metrics, y_preds
+        return loss, metrics, [y_pred]
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx)

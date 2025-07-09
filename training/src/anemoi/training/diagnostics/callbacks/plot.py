@@ -1102,19 +1102,16 @@ class PlotReconstruction(BasePerBatchPlotCallback):
 
         input_tensor = batch[
             self.sample_idx,
-            0:1,
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-        data = self.post_processors(input_tensor)
+        data = self.post_processors(input_tensor).numpy()
 
         output_tensor = self.post_processors(
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
 
         in_data = data[0, ...].squeeze()
         reconstruction = output_tensor[0, ...]
