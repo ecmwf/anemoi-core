@@ -11,22 +11,30 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing import Any
 
 import torch
+from omegaconf import DictConfig
+
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.loss import get_loss_function
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from anemoi.models.data_indices.collection import IndexCollection
 
 
-class FilteringLossWrapper(torch.nn.Module):
+class FilteringLossWrapper(BaseLoss):
     """Loss wrapper to filter variables to compute the loss on."""
 
     def __init__(
         self,
-        loss: torch.nn.Module,
+        loss: dict[str, Any] | Callable | BaseLoss,
         data_indices: IndexCollection,
         predicted_variables: list[str] | None = None,
         target_variables: list[str] | None = None,
+        **kwargs,
     ):
         """Loss wrapper to filter variables to compute the loss on.
 
@@ -45,12 +53,27 @@ class FilteringLossWrapper(torch.nn.Module):
             ), "predicted and target variables must have the same length for loss computation"
 
         super().__init__()
-        self.loss = loss
+
+        self._loss_scaler_specification = {}
+        if isinstance(loss, str):
+            self._loss_scaler_specification = ["*"]
+            self.loss = get_loss_function(DictConfig({"_target_": loss}), scalers={}, **dict(kwargs))
+        elif isinstance(loss, (DictConfig, dict)):
+            self._loss_scaler_specification = loss.pop("scalers", ["*"])
+            self.loss = get_loss_function(loss, scalers={}, **dict(kwargs))
+        elif isinstance(loss, type):
+            self._loss_scaler_specification = ["*"]
+            self.loss = loss(**kwargs)
+        else:
+            assert isinstance(loss, BaseLoss)
+            self._loss_scaler_specification = loss.scaler
+            self.loss = loss
+
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
         self.data_indices = data_indices
         name_to_index = data_indices.data.output.name_to_index
-        model_output = data_indices.internal_model.output
+        model_output = data_indices.model.output
         output_indices = model_output.full
         if self.predicted_variables is not None:
             predicted_indices = [model_output.name_to_index[name] for name in self.predicted_variables]
