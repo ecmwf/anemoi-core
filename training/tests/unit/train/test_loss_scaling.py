@@ -20,6 +20,7 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 
 @pytest.fixture
@@ -214,13 +215,17 @@ def test_variable_loss_scaling_vals(
 ) -> None:
     config, data_indices, statistics, statistics_tendencies = fake_data
 
+    metadata_extractor = ExtractVariableGroupAndLevel(
+        config.training.variable_groups,
+    )
+
     scalers, _ = create_scalers(
         config.training.scalers.builders,
-        group_config=config.training.variable_groups,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
         statistics=statistics,
         statistics_tendencies=statistics_tendencies,
+        metadata_extractor=metadata_extractor,
         output_mask=NoOutputMask(),
     )
 
@@ -235,7 +240,8 @@ def test_variable_loss_scaling_vals(
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices, _, _ = fake_data
 
-    metric_range = get_metric_ranges(config, data_indices)
+    metadata_extractor = ExtractVariableGroupAndLevel(config.training.variable_groups)
+    metric_range = get_metric_ranges(config, data_indices, metadata_extractor=metadata_extractor)
 
     del metric_range["all"]
 

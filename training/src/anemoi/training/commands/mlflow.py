@@ -137,7 +137,7 @@ class MlFlow(Command):
     @staticmethod
     def run(args: argparse.Namespace) -> None:
         if args.subcommand == "login":
-            from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+            from anemoi.utils.mlflow.auth import TokenAuth
 
             url = args.url or TokenAuth.load_config().get("url")
 
@@ -149,11 +149,11 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "sync":
-            from anemoi.training.diagnostics.mlflow.utils import health_check
             from anemoi.training.utils.mlflow_sync import MlFlowSync
+            from anemoi.utils.mlflow.utils import health_check
 
             if args.authentication:
-                from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+                from anemoi.utils.mlflow.auth import TokenAuth
 
                 auth = TokenAuth(url=args.destination)
                 auth.login()
@@ -178,8 +178,8 @@ class MlFlow(Command):
             from hydra import compose
             from hydra import initialize
 
-            from anemoi.training.diagnostics.mlflow.client import AnemoiMlflowClient
             from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
+            from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
             # Load configuration and resolve schema
             with initialize(version_base=None, config_path="./"):

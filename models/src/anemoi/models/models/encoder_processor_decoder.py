@@ -57,11 +57,14 @@ class AnemoiModelEncProcDec(nn.Module):
             Graph definition
         """
         super().__init__()
-        model_config = DotDict(model_config)
         self._graph_data = graph_data
+        self.data_indices = data_indices
+        self.statistics = statistics
+        self._truncation_data = truncation_data
+
+        model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
-
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
@@ -69,15 +72,6 @@ class AnemoiModelEncProcDec(nn.Module):
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
-        self.data_indices = data_indices
-        self.statistics = statistics
-
-        self.multi_step = model_config.training.multistep_input
-        self.num_channels = model_config.model.num_channels
-
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
-
-        self._truncation_data = truncation_data
 
         # we can't register these as buffers because DDP does not support sparse tensors
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
@@ -101,7 +95,6 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            shard_strategy=model_config.model.encoder.shard_strategy,
         )
 
         # Processor hidden -> hidden
@@ -125,7 +118,6 @@ class AnemoiModelEncProcDec(nn.Module):
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            shard_strategy=model_config.model.decoder.shard_strategy,
         )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -243,7 +235,6 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
-
         assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
             data_indices.model.output.diagnostic
         ), (

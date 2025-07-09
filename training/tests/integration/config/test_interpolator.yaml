@@ -1,0 +1,27 @@
+# Modifications for the basic template "interpolator.yaml"
+hardware:
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+    truncation: null
+  files:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    truncation: null
+    truncation_inv: null
+    graph: null
+
+data:
+  frequency: 6h
+  timestep: 12h
+
+dataloader:
+  training:
+    end: 2017-01-08 12:00:00
+  validation:
+    start: 2017-01-08 18:00:00
+
+training:
+
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+  explicit_times:
+    input: [0,2]
+    target: [1]
