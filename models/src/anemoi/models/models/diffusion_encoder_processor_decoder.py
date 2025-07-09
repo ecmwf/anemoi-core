@@ -11,6 +11,7 @@
 import logging
 from typing import Callable
 from typing import Optional
+from typing import Union
 
 import einops
 import torch
@@ -240,6 +241,87 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
         return c_skip, c_out, c_in, c_noise
 
+    def _before_sampling(
+        self,
+        batch: torch.Tensor,
+        pre_processors: nn.Module,
+        multi_step: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
+    ) -> tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]:
+        """Prepare batch before sampling.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Input batch after pre-processing
+        pre_processors : nn.Module
+            Pre-processing module (already applied)
+        multi_step : int
+            Number of input timesteps
+        model_comm_group : Optional[ProcessGroup]
+            Process group for distributed training
+        **kwargs
+            Additional parameters for subclasses
+
+        Returns
+        -------
+        tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]
+            Prepared input tensor(s) and grid shard shapes.
+            Can return a single tensor or tuple of tensors for sampling input.
+        """
+        # Dimensions are batch, timesteps, grid, variables
+        x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+
+        grid_shard_shapes = None
+        if model_comm_group is not None:
+            shard_shapes = get_shard_shapes(x, -2, model_comm_group)
+            grid_shard_shapes = [shape[-2] for shape in shard_shapes]
+            x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+
+        return (x,), grid_shard_shapes
+
+    def _after_sampling(
+        self,
+        out: torch.Tensor,
+        post_processors: nn.Module,
+        before_sampling_data: Union[torch.Tensor, tuple[torch.Tensor, ...]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
+        gather_out: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Process sampled output.
+
+        Parameters
+        ----------
+        out : torch.Tensor
+            Sampled output tensor
+        post_processors : nn.Module
+            Post-processing module
+        before_sampling_data : Union[torch.Tensor, tuple[torch.Tensor, ...]]
+            Data returned from _before_sampling (can be used by subclasses)
+        model_comm_group : Optional[ProcessGroup]
+            Process group for distributed training
+        grid_shard_shapes : Optional[list]
+            Grid shard shapes for gathering
+        gather_out : bool
+            Whether to gather output
+        **kwargs
+            Additional parameters for subclasses
+
+        Returns
+        -------
+        torch.Tensor
+            Post-processed output
+        """
+        out = post_processors(out, in_place=False)
+
+        if gather_out and model_comm_group is not None:
+            out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
+
+        return out
+
     def predict_step(
         self,
         batch: torch.Tensor,
@@ -248,6 +330,18 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        sigma_max: Optional[float] = None,
+        sigma_min: Optional[float] = None,
+        rho: float = 7.0,
+        num_steps: int = 20,
+        sampler: str = "heun",
+        schedule_type: str = "karras",
+        S_churn: float = 0.0,
+        S_min: float = 0.0,
+        S_max: float = float("inf"),
+        S_noise: float = 1.0,
+        pre_processors_tendencies: Optional[nn.Module] = None,
+        post_processors_tendencies: Optional[nn.Module] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Prediction step for flow/diffusion models - performs sampling.
@@ -266,8 +360,32 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Process group for distributed training
         gather_out : bool
             Whether to gather output tensors across distributed processes
+        sigma_max : Optional[float]
+            Maximum noise level for sampling. If None, uses self.sigma_max
+        sigma_min : Optional[float]
+            Minimum noise level for sampling. If None, uses self.sigma_min
+        rho : float
+            Time discretization parameter, default 7.0
+        num_steps : int
+            Number of sampling steps, default 20
+        sampler : str
+            Sampling method: "heun" or "dpmpp_2m", default "heun"
+        schedule_type : str
+            Type of noise schedule, default "karras"
+        S_churn : float
+            Stochasticity parameter for Heun sampler, default 0.0
+        S_min : float
+            Minimum noise level for stochasticity, default 0.0
+        S_max : float
+            Maximum noise level for stochasticity, default inf
+        S_noise : float
+            Noise multiplier for stochasticity, default 1.0
+        pre_processors_tendencies : Optional[nn.Module]
+            Pre-processing module for tendencies (used by subclasses)
+        post_processors_tendencies : Optional[nn.Module]
+            Post-processing module for tendencies (used by subclasses)
         **kwargs
-            Sampling parameters (sampler, num_steps, schedule_type, sigma_max, sigma_min, rho, etc.)
+            Additional sampling parameters
 
         Returns
         -------
@@ -281,21 +399,23 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
                 len(batch.shape) == 4
             ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
 
-            # Dimensions are batch, timesteps, grid, variables
-            x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+            # Before sampling hook
+            before_sampling_data, grid_shard_shapes = self._before_sampling(
+                batch,
+                pre_processors,
+                multi_step,
+                model_comm_group,
+                pre_processors_tendencies=pre_processors_tendencies,
+                post_processors_tendencies=post_processors_tendencies,
+                **kwargs,
+            )
 
-            grid_shard_shapes = None
-            if model_comm_group is not None:
-                shard_shapes = get_shard_shapes(x, -2, model_comm_group)
-                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+            x = before_sampling_data[0]
 
-            sigma_max = kwargs.get("sigma_max", self.sigma_max)
-            sigma_min = kwargs.get("sigma_min", self.sigma_min)
-            rho = kwargs.get("rho", 7.0)
-            num_steps = kwargs.get("num_steps", 20)
-            sampler = kwargs.get("sampler", "heun")
-            schedule_type = kwargs.get("schedule_type", "karras")
+            if sigma_max is None:
+                sigma_max = self.sigma_max
+            if sigma_min is None:
+                sigma_min = self.sigma_min
 
             out = self.sample(
                 x,
@@ -307,13 +427,25 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
                 num_steps=num_steps,
                 schedule_type=schedule_type,
                 sampler=sampler,
+                S_churn=S_churn,
+                S_min=S_min,
+                S_max=S_max,
+                S_noise=S_noise,
                 **kwargs,
             ).to(x.dtype)
 
-            out = post_processors(out, in_place=False)
-
-            if gather_out and model_comm_group is not None:
-                out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
+            # After sampling hook
+            out = self._after_sampling(
+                out,
+                post_processors,
+                before_sampling_data,
+                model_comm_group,
+                grid_shard_shapes,
+                gather_out,
+                pre_processors_tendencies=pre_processors_tendencies,
+                post_processors_tendencies=post_processors_tendencies,
+                **kwargs,
+            )
 
         return out
 
@@ -328,6 +460,10 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         rho: float = 7.0,
         sigma_max: float = None,
         sigma_min: float = None,
+        S_churn: float = 0.0,
+        S_min: float = 0.0,
+        S_max: float = float("inf"),
+        S_noise: float = 1.0,
         **kwargs,
     ) -> torch.Tensor:
         """Sample from the diffusion model.
@@ -384,10 +520,10 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
                 self.fwd_with_preconditioning,
                 model_comm_group,
                 grid_shard_shapes=grid_shard_shapes,
-                S_churn=kwargs.get("S_churn", 0.0),
-                S_min=kwargs.get("S_min", 0.0),
-                S_max=kwargs.get("S_max", float("inf")),
-                S_noise=kwargs.get("S_noise", 1.0),
+                S_churn=S_churn,
+                S_min=S_min,
+                S_max=S_max,
+                S_noise=S_noise,
                 dtype=sigmas.dtype,
             )
         elif sampler == "dpmpp_2m":
@@ -574,94 +710,64 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         return state_outp
 
-    def predict_step(
+    def _before_sampling(
         self,
         batch: torch.Tensor,
         pre_processors: nn.Module,
-        post_processors: nn.Module,
-        pre_processors_tendencies: nn.Module,
-        post_processors_tendencies: nn.Module,
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
+    ) -> tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]:
+        """Prepare batch for tendency prediction.
+
+        Override to return both x and x_t0 for tendency calculation.
+        """
+        # Get standard preprocessing from parent
+        x, grid_shard_shapes = super()._before_sampling(batch, pre_processors, multi_step, model_comm_group, **kwargs)
+
+        # Get x_t0 for tendency calculation
+        x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension
+
+        # Shard x_t0 if needed
+        if model_comm_group is not None and grid_shard_shapes is not None:
+            shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group)
+            x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
+
+        # Return tuple of (x, x_t0) for sampling
+        return (x, x_t0), grid_shard_shapes
+
+    def _after_sampling(
+        self,
+        out: torch.Tensor,
+        post_processors: nn.Module,
+        before_sampling_data: Union[torch.Tensor, tuple[torch.Tensor, ...]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
         gather_out: bool = True,
+        pre_processors_tendencies: Optional[nn.Module] = None,
+        post_processors_tendencies: Optional[nn.Module] = None,
         **kwargs,
     ) -> torch.Tensor:
-        """Prediction step for tendency diffusion models.
+        """Process sampled tendency to get state prediction.
 
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Input batched data (before pre-processing)
-        pre_processors : nn.Module
-            Pre-processing module for states
-        post_processors : nn.Module
-            Post-processing module for states
-        pre_processors_tendencies : nn.Module
-            Pre-processing module for tendencies
-        post_processors_tendencies : nn.Module
-            Post-processing module for tendencies
-        multi_step : int
-            Number of input timesteps
-        model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
-        gather_out : bool
-            Whether to gather output tensors across distributed processes
-        **kwargs
-            Sampling parameters
-
-        Returns
-        -------
-        torch.Tensor
-            Predicted state (after post-processing)
+        Override to convert tendency to state using x_t0.
         """
-        batch = pre_processors(batch, in_place=False)
+        # Extract x_t0 from before_sampling_data
+        if isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 2:
+            x_t0 = before_sampling_data[1]
+        else:
+            raise ValueError("Expected before_sampling_data to contain x_t0")
 
-        with torch.no_grad():
-            assert (
-                len(batch.shape) == 4
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
+        # Convert tendency to state
+        out = self.add_tendency_to_state(
+            x_t0,
+            out,  # this is the sampled tendency
+            post_processors,
+            post_processors_tendencies,
+        )
 
-            # Dimensions are batch, timesteps, grid, variables
-            x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension as 3rd index
-            x = batch[:, 0:multi_step, None, ...]
-
-            grid_shard_shapes = None
-            if model_comm_group is not None:
-                shard_shapes = get_shard_shapes(x, -2, model_comm_group)
-                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-                x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
-
-            # Get sampler settings from kwargs with defaults matching parent class
-            sigma_max = kwargs.get("sigma_max", self.sigma_max)
-            sigma_min = kwargs.get("sigma_min", self.sigma_min)
-            rho = kwargs.get("rho", 7.0)
-            num_steps = kwargs.get("num_steps", 20)
-            sampler = kwargs.get("sampler", "heun")
-            schedule_type = kwargs.get("schedule_type", "karras")
-
-            # Sample normalized tendency
-            tendency_normalized = self.sample(
-                x,
-                model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
-                sigma_max=sigma_max,
-                sigma_min=sigma_min,
-                rho=rho,
-                num_steps=num_steps,
-                schedule_type=schedule_type,
-                sampler=sampler,
-                **kwargs,
-            ).to(x_t0.dtype)
-
-            out = self.add_tendency_to_state(
-                x_t0,
-                tendency_normalized,
-                post_processors,
-                post_processors_tendencies,
-            )
-
-            if gather_out and model_comm_group is not None:
-                out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
+        # Gather if needed
+        if gather_out and model_comm_group is not None:
+            out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
 
         return out
