@@ -369,6 +369,8 @@ class ForecasterEnsSchema(BaseTrainingSchema):
 class InterpolationSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
     "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
     target_forcing: TargetForcing
