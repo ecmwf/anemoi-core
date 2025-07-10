@@ -13,7 +13,7 @@ from anemoi.models.migrations import MigrationMetadata
 metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
-        "anemoi-models": "1.0.0",
+        "anemoi-models": "0.9.0",
     },
     final=False,
 )
