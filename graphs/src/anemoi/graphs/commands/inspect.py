@@ -29,6 +29,13 @@ class Inspect(Command):
             help="Hide distribution plots of edge/node attributes.",
         )
         command_parser.add_argument(
+            "area",
+            type=float,
+            nargs=4,
+            default=None,
+            help="Area of interest to crop the nodes, (north, west, south, east).",
+        )
+        command_parser.add_argument(
             "--show_nodes",
             action=argparse.BooleanOptionalAction,
             default=False,
