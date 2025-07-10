@@ -77,7 +77,7 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
             LOGGER.info(
                 f"An attribute {self.save_mask_indices_to_attr} has been added with the indices to mask the nodes from the original graph."
             )
-            mask_indices = torch.where(self.mask)[0].reshape((graph[self.nodes_name].num_nodes, -1))
+            mask_indices = torch.where(self.mask)[0].reshape((graph[nodes_name].num_nodes, -1))
             graph[nodes_name][self.save_mask_indices_to_attr] = mask_indices
 
         return graph
