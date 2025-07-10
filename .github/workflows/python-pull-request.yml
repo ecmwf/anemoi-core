@@ -42,7 +42,7 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@v6
       with:
-        version: 0.7.19
+        version: 0.7.19  # use same version as the one in ecmwf/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml
 
     - name: Install packages
       run: |
