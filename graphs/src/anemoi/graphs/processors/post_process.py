@@ -14,6 +14,7 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Any
 from typing import Iterable
+from typing import Union
 
 import torch
 from hydra.utils import instantiate
@@ -39,7 +40,7 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
 
     def __init__(
         self,
-        nodes_name: str | Iterable[str],
+        nodes_name: Union[str, Iterable[str]],
         save_mask_indices_to_attr: str | None = None,
     ) -> None:
         self.nodes_names = (nodes_name,) if isinstance(nodes_name, str) else tuple(nodes_name)
@@ -149,7 +150,7 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
 
     def __init__(
         self,
-        nodes_name: str | Iterable[str],
+        nodes_name: Union[str, Iterable[str]],
         save_mask_indices_to_attr: str | None = None,
         ignore: str | None = None,
     ) -> None:
@@ -205,7 +206,7 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
 
     def __init__(
         self,
-        nodes_name: str | Iterable[str],
+        nodes_name: Union[str, Iterable[str]],
         area: tuple[float, float, float, float],
         save_mask_indices_to_attr: str | None = None,
         ignore: str | None = None,
