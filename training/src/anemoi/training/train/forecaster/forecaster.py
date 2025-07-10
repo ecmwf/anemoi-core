@@ -456,7 +456,7 @@ class GraphForecaster(pl.LightningModule):
         rollout: int | None = None,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
+    ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
         """Rollout step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
@@ -477,8 +477,8 @@ class GraphForecaster(pl.LightningModule):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
-            Loss value, metrics, and predictions, extra (per step)
+        Generator[tuple[Union[torch.Tensor, None], dict, torch.Tensor], None, None]
+            Loss value, metrics, and predictions
 
         """
         batch = self.model.pre_processors(batch)  # normalized in-place
@@ -519,7 +519,7 @@ class GraphForecaster(pl.LightningModule):
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            yield loss, metrics_next, y_pred, torch.zeros_like(y_pred)
+            yield loss, metrics_next, y_pred
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -556,9 +556,8 @@ class GraphForecaster(pl.LightningModule):
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
-        y_extra = []
 
-        for loss_next, metrics_next, y_preds_next, y_extra_next in self.rollout_step(
+        for loss_next, metrics_next, y_preds_next in self.rollout_step(
             batch,
             rollout=self.rollout,
             training_mode=True,
@@ -567,10 +566,9 @@ class GraphForecaster(pl.LightningModule):
             loss += loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
-            y_extra.append(y_extra_next)
 
         loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds, y_extra
+        return loss, metrics, y_preds
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
@@ -655,7 +653,7 @@ class GraphForecaster(pl.LightningModule):
         return metrics
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _, _ = self._step(batch, batch_idx)
+        train_loss, _, _ = self._step(batch, batch_idx)
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
@@ -697,18 +695,8 @@ class GraphForecaster(pl.LightningModule):
         self.rollout = min(self.rollout, self.rollout_max)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
-        """Calculate the loss over a validation batch using the training loss function.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Validation batch
-        batch_idx : int
-            Batch inces
-
-        """
         with torch.no_grad():
-            val_loss, metrics, y_preds, y_extra = self._step(batch, batch_idx, validation_mode=True)
+            val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
@@ -733,7 +721,7 @@ class GraphForecaster(pl.LightningModule):
                 sync_dist=True,
             )
 
-        return val_loss, y_preds, y_extra
+        return val_loss, y_preds
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
         """Configure the optimizers and learning rate scheduler.

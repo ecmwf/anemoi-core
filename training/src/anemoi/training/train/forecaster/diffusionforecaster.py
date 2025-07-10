@@ -114,7 +114,7 @@ class GraphDiffusionForecaster(GraphForecaster):
         rollout: int | None = None,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
+    ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
         """Rollout step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
@@ -135,7 +135,7 @@ class GraphDiffusionForecaster(GraphForecaster):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+        Generator[tuple[Union[torch.Tensor, None], dict, torch.Tensor], None, None]
             Loss value, metrics, and predictions (per step)
 
         """
@@ -195,7 +195,7 @@ class GraphDiffusionForecaster(GraphForecaster):
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            yield loss, metrics_next, y_pred, y_noised
+            yield loss, metrics_next, y_pred
 
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Add noise to the state."""
@@ -320,7 +320,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         rollout: int | None = None,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
+    ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
         """Rollout step for the tendency-based diffusion forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
@@ -341,7 +341,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+        Generator[tuple[Union[torch.Tensor, None], dict, torch.Tensor], None, None]
             Loss value, metrics, and predictions (per step)
 
         """
@@ -418,20 +418,21 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 pre_processors_state=self.model.pre_processors,
             )
 
-            y_noised = None
             y = None
             if validation_mode:
                 # metrics calculation and plotting expects normalised states
                 y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
 
-                y_noised = self.model.model.add_tendency_to_state(
-                    x_ref[..., self.data_indices.data.input.full],
-                    tendency_target_noised,
-                    self.model.post_processors,
-                    self.model.post_processors_tendencies,
-                    pre_process_output=True,
-                    pre_processors_state=self.model.pre_processors,
-                )
+                # re-construct target state with noised tendency
+                # ruff: noqa: ERA001
+                # y_noised = self.model.model.add_tendency_to_state(
+                #     x_ref[..., self.data_indices.data.input.full],
+                #     tendency_target_noised,
+                #     self.model.post_processors,
+                #     self.model.post_processors_tendencies,
+                #     pre_process_output=True,
+                #     pre_processors_state=self.model.pre_processors,
+                # )
 
             # compute_loss_metrics
             loss, metrics_next = checkpoint(
@@ -449,7 +450,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            yield loss, metrics_next, y_pred, y_noised
+            yield loss, metrics_next, y_pred
 
     def apply_reference_state_truncation(self, x: torch.Tensor) -> torch.Tensor:
         """Apply reference state truncation to the input tensor.

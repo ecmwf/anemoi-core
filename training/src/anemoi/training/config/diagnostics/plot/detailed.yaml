@@ -53,7 +53,7 @@ callbacks:
     every_n_batches: ${diagnostics.plot.frequency.batch}
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
     sample_idx: ${diagnostics.plot.sample_idx}
-    per_sample : 7
+    per_sample : 6
     parameters: ${diagnostics.plot.parameters}
     every_n_batches: ${diagnostics.plot.frequency.batch}
     #Defining the accumulation levels for precipitation related fields and the colormap

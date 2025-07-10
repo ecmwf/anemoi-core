@@ -15,7 +15,6 @@ forcing:
 - "cos_local_time"
 - "sin_julian_day"
 - "sin_local_time"
-# - "cos_solar_zenith_angle"
 - "insolation"
 - "lsm"
 - "sdor"
@@ -58,7 +57,6 @@ normalizer:
   - "cos_local_time"
   - "sin_julian_day"
   - "sin_local_time"
-  # - "cos_solar_zenith_angle"
   - "insolation"
   - "lsm"
 
