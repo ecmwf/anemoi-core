@@ -57,16 +57,21 @@ class BasePreprocessor(nn.Module):
 
         super().__init__()
 
-        self.default, self.remap, self.method_config = self._process_config(config)
+        self.default, self.remap, self.normalizer, self.method_config = self._process_config(config)
         self.methods = self._invert_key_value_list(self.method_config)
 
         self.data_indices = data_indices
 
     @classmethod
     def _process_config(cls, config):
-        _special_keys = ["default", "remap"]  # Keys that do not contain a list of variables in a preprocessing method.
+        _special_keys = [
+            "default",
+            "remap",
+            "normalizer",
+        ]  # Keys that do not contain a list of variables in a preprocessing method.
         default = config.get("default", "none")
         remap = config.get("remap", {})
+        normalizer = config.get("normalizer", "none")
         method_config = {k: v for k, v in config.items() if k not in _special_keys and v is not None and v != "none"}
 
         if not method_config:
@@ -79,7 +84,7 @@ class BasePreprocessor(nn.Module):
             elif isinstance(method_config[m], list):
                 method_config[m] = {method: f"{m}_{method}" for method in method_config[m]}
 
-        return default, remap, method_config
+        return default, remap, normalizer, method_config
 
     @staticmethod
     def _invert_key_value_list(method_config: dict[str, list[str]]) -> dict[str, str]:

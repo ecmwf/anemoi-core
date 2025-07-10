@@ -119,6 +119,7 @@ def test_scale_tensor_one_dim(
         scale.add_scaler(*scaler)
 
     torch.testing.assert_close(scale.scale(input_tensor), output)
+    torch.testing.assert_close(scale.scale_iteratively(input_tensor), output)
 
 
 def test_invalid_dim_sizes() -> None:
@@ -173,6 +174,7 @@ def test_scale_tensor_two_dim(
         output = torch.tensor(output, dtype=torch.float32)
 
     torch.testing.assert_close(scale.scale(input_tensor), output)
+    torch.testing.assert_close(scale.scale_iteratively(input_tensor), output)
 
 
 @pytest.mark.parametrize("subset_id", ["test", 0])
