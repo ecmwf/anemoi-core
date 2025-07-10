@@ -14,6 +14,7 @@ from anemoi.graphs.inspect import GraphInspector
 
 from . import Command
 
+
 def parse_str_area(area_str: str) -> tuple[float, float, float, float]:
     # Remove parentheses if present, then split by comma
     area_str = area_str.strip("()")
