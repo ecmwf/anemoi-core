@@ -668,7 +668,10 @@ def plot_predicted_multilevel_flat_recon(
     output_vars = [(i, vname) for i, (vname, output_only) in (parameters.items()) if output_only]
     n_vars = len(output_vars)
     fig, ax = plt.subplots(
-        n_vars, n_plots_per_sample, figsize=(n_plots_per_sample * 4, n_vars * 3), layout="constrained",
+        n_vars,
+        n_plots_per_sample,
+        figsize=(n_plots_per_sample * 4, n_vars * 3),
+        layout="constrained",
     )
 
     if n_vars == 1:
