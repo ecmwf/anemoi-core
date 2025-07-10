@@ -21,6 +21,7 @@ from threading import Thread
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
+from typing import Optional
 from weakref import WeakValueDictionary
 
 from packaging.version import Version
@@ -28,6 +29,7 @@ from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from typing_extensions import override
 
 from anemoi.utils.mlflow.auth import TokenAuth
 from anemoi.utils.mlflow.utils import clean_config_params
@@ -36,9 +38,11 @@ from anemoi.utils.mlflow.utils import health_check
 
 if TYPE_CHECKING:
     from argparse import Namespace
+    from collections.abc import Mapping
 
     import mlflow
     from mlflow.tracking import MlflowClient
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -466,34 +470,13 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
     @override
     @rank_zero_only
-    def log_metrics(self) -> None:
-        #super().log_metrics()
-        assert rank_zero_only.rank == 0, "experiment tried to log from global_rank != 0"
-        from mlflow.entities import Metric
-        metrics = _add_prefix(metrics, self._prefix, self.LOGGER_JOIN_CHAR)
-        metrics_list: list[Metric] = []
-        timestamp_ms = int(time() * 1000)
-        for k, v in metrics.items():
-            if isinstance(v, str):
-                log.warning(f"Discarding metric with string value {k}={v}.")
-                continue
-            new_k = re.sub("[^a-zA-Z0-9_/. -]+", "", k)
-            if k != new_k:
-                rank_zero_warn(
-                    "MLFlow only allows '_', '/', '.' and ' ' special characters in metric name."
-                    f" Replacing {k} with {new_k}.",
-                    category=RuntimeWarning,
-                )
-                k = new_k
-
+    def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
+        for k in metrics:
             metric_id = (k, step or 0)
             if metric_id in self._logged_metrics:
                 continue
             self._logged_metrics.add(metric_id)
-
-            metrics_list.append(Metric(key=k, value=v, timestamp=timestamp_ms, step=step or 0))
-
-        self.experiment.log_batch(run_id=self.run_id, metrics=metrics_list, **self._log_batch_kwargs)
+        return super().log_metrics(metrics=metrics, step=step)
 
     @rank_zero_only
     def log_system_metrics(self) -> None:
