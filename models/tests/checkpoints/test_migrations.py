@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from anemoi.models.migrations import FinalMigrationException
+from anemoi.models.migrations import IncompatibleCheckpointException
 from anemoi.models.migrations import Migrator
 from anemoi.models.migrations import MissingMigrationException
 
@@ -60,8 +60,9 @@ def test_run_last_migration():
 
 def test_wrong_order():
     dummy_model = {
-        "bar": "bar",
-        "migrations": ["1750841219_add_bar"],
+        "foo": "foo",
+        "baz": "baz",
+        "migrations": ["1750840837_add_foo", "1750859824_add_baz"],
     }
     migrator = get_test_migrator()
 
@@ -70,12 +71,12 @@ def test_wrong_order():
 
 
 def test_extra_migration():
-    dummy_model = {"migrations": ["dummy"]}
+    dummy_model = {"foo": "foo", "migrations": ["1750840837_add_foo", "dummy"]}
 
     migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model)
 
-    assert len(done_migrations) == 4
+    assert len(done_migrations) == 3
     assert len(done_rollbacks) == 0
     assert len(migrated_model["migrations"]) == 5
     assert "foo" in migrated_model and migrated_model["foo"] == "foo"
@@ -244,49 +245,59 @@ def test_no_rollback_with_target_overshoot():
 
 def test_error_migration_past_final():
     migrator = get_test_migrator()
-    with pytest.raises(FinalMigrationException):
+    with pytest.raises(IncompatibleCheckpointException):
         migrator.sync({}, steps=5)
 
 
-def _make_recent_ckpt(migrator: Migrator):
-    migrated_model, _, _ = migrator.sync({})
-    migrated_model["migrations"].append("1751895180_final")
-    return migrated_model
+def _make_recent_ckpt():
+    return {
+        "foo": "foo",
+        "bar": "bar",
+        "test": "baz",
+        "migrations": ["1751895180_final"],
+    }
 
 
 def test_migrate_recent_model():
     migrator = get_test_migrator()
-    model = _make_recent_ckpt(migrator)
+    model = _make_recent_ckpt()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(model)
 
     assert len(done_migrations) == 1
     assert len(done_rollbacks) == 0
-    assert len(migrated_model["migrations"]) == 6
+    assert len(migrated_model["migrations"]) == 2
     assert migrated_model.get("after", None) == "after"
 
 
 def test_stop_rollback_to_prev_final():
     migrator = get_test_migrator()
-    model, _, _ = migrator.sync(_make_recent_ckpt(migrator))
+    model, _, _ = migrator.sync(_make_recent_ckpt())
     assert model.get("after", None) == "after"
     rollbacked_model, done_rollbacks = migrator.rollback(model)
 
     assert len(done_rollbacks) == 1
-    assert len(rollbacked_model["migrations"]) == 5
+    assert len(rollbacked_model["migrations"]) == 1
     assert "after" not in rollbacked_model
 
 
 def test_error_rollback_to_old():
     migrator = get_test_migrator()
-    model, _, _ = migrator.sync(_make_recent_ckpt(migrator))
-    with pytest.raises(FinalMigrationException):
+    model, _, _ = migrator.sync(_make_recent_ckpt())
+    with pytest.raises(IncompatibleCheckpointException):
         migrator.rollback(model, steps=2)
+
+
+def test_error_rollback_to_old_target_version():
+    migrator = get_test_migrator()
+    model, _, _ = migrator.sync(_make_recent_ckpt())
+    with pytest.raises(IncompatibleCheckpointException):
+        migrator.sync(model, target="0.8.0")
 
 
 def test_migrate_with_target_future():
     migrator = get_test_migrator()
-    migrated_model, done_migrations, done_rollbacks = migrator.sync(_make_recent_ckpt(migrator), target="2.0.0")
+    migrated_model, done_migrations, done_rollbacks = migrator.sync(_make_recent_ckpt(), target="1.0.0")
 
     assert len(done_migrations) == 1
     assert len(done_rollbacks) == 0
-    assert len(migrated_model["migrations"]) == 6
+    assert len(migrated_model["migrations"]) == 2

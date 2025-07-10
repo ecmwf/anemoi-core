@@ -8,13 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import FinalMigrationException
+from anemoi.models.migrations import IncompatibleCheckpointException
 from anemoi.models.migrations import MigrationMetadata
 
 metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
-        "anemoi-models": "1.0.0",
+        "anemoi-models": "0.9.0",
     },
     final=True,
 )
@@ -22,9 +22,9 @@ metadata = MigrationMetadata(
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint."""
-    raise FinalMigrationException
+    raise IncompatibleCheckpointException
 
 
 def rollback(ckpt: CkptType) -> CkptType:
     """Rollback the migration."""
-    raise FinalMigrationException
+    raise IncompatibleCheckpointException
