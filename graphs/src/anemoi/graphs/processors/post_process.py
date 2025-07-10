@@ -168,7 +168,7 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
     nodes_name : str | Iterable[str]
         Name of the unconnected nodes to remove.
     area : tuple[float, float, float, float]
-        Area of interest to crop the nodes
+        Area of interest to crop the nodes, (north, west, south, east).
     ignore: str, optional
         Name of an attribute to ignore when removing nodes. Nodes with
         this attribute set to True will not be removed.
