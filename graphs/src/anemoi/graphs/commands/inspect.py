@@ -14,9 +14,32 @@ from anemoi.graphs.inspect import GraphInspector
 
 from . import Command
 
+def parse_str_area(area_str: str) -> tuple[float, float, float, float]:
+    # Remove parentheses if present, then split by comma
+    area_str = area_str.strip("()")
+    parts = area_str.split(",")
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError("Area must be four comma-separated values: north,west,south,east")
+    try:
+        return [float(x) for x in parts]
+    except ValueError:
+        raise argparse.ArgumentTypeError("All area values must be floats.")
+
 
 class Inspect(Command):
-    """Inspect a graph."""
+    """Inspect a graph.
+
+    Example
+    -------
+    To save all visualizations in a folder, use the following command:
+    ```
+    anemoi-graphs inspect graph.pt output_dir/
+    ```
+    For high-resolution graphs, you can specify an area to crop the graph using the `--area` option:
+    ```
+    anemoi-graphs inspect graph.pt output_dir/ --area=40,10,20,30
+    ```
+    """
 
     internal = True
     timestamp = True
@@ -29,9 +52,8 @@ class Inspect(Command):
             help="Hide distribution plots of edge/node attributes.",
         )
         command_parser.add_argument(
-            "area",
-            type=float,
-            nargs=4,
+            "--area",
+            type=parse_str_area,
             default=None,
             help="Area of interest to crop the nodes, (north, west, south, east).",
         )
