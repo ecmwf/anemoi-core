@@ -48,6 +48,7 @@ from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
 
 if TYPE_CHECKING:
     from typing import Any
+    from typing import Optional
 
     import pytorch_lightning as pl
     from matplotlib.colors import Colormap
@@ -906,6 +907,7 @@ class PlotSample(BasePerBatchPlotCallback):
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
+        focus_area: Optional[dict] = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -928,6 +930,10 @@ class PlotSample(BasePerBatchPlotCallback):
             Number of plots per sample, by default 6
         every_n_batches : int, optional
             Batch frequency to plot at, by default None
+        focus_area : dict | None, optional
+            Area or point indices to focus the plot on. Can be:
+            - {"spacial_mask": str}
+            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         del kwargs
         super().__init__(config, every_n_batches=every_n_batches)
@@ -938,6 +944,7 @@ class PlotSample(BasePerBatchPlotCallback):
         self.accumulation_levels_plot = accumulation_levels_plot
         self.per_sample = per_sample
         self.colormaps = colormaps
+        self.focus_area = focus_area
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -966,18 +973,32 @@ class PlotSample(BasePerBatchPlotCallback):
             for name in self.parameters
         }
 
-        # When running in Async mode, it might happen that in the last epoch these tensors
-        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
-        # but internal ones would be on the cpu), The lines below allow to address this problem
+        # Handle device movement
         if self.post_processors is None:
-            # Copy to be used across all the training cycle
             self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+        latlons = self.latlons
         local_rank = pl_module.local_rank
-
         rollout = getattr(pl_module, "rollout", 0)
 
+        # Compute focus mask
+        focus_mask = np.ones(latlons.shape[0], dtype=bool)
+        if self.focus_area is not None:
+            if "spacial_mask" in self.focus_area:
+                focus_mask = np.zeros(latlons.shape[0], dtype=bool)
+                spacial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spacial_mask"]]
+                focus_mask[spacial_mask_idxs.squeeze()] = True
+
+            elif "latlon_bounds" in self.focus_area:
+                (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
+                lat, lon = latlons[:, 0], latlons[:, 1]
+                focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
+            else:
+                msg = "focus_area must contain either 'indices' or 'latlon_bounds'."
+                raise ValueError(msg)
+
+        # Prepare tensors
         input_tensor = batch[
             self.sample_idx,
             pl_module.multi_step - 1 : pl_module.multi_step + rollout + 1,
@@ -994,11 +1015,16 @@ class PlotSample(BasePerBatchPlotCallback):
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
+        # Apply spatial mask
+        latlons = latlons[focus_mask]
+        data = data[..., focus_mask, :]
+        output_tensor = output_tensor[..., focus_mask, :]
+
         for rollout_step in range(rollout):
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
                 self.per_sample,
-                self.latlons,
+                latlons,
                 self.accumulation_levels_plot,
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
@@ -1030,6 +1056,7 @@ class PlotReconstruction(BasePerBatchPlotCallback):
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 3,
         every_n_batches: int | None = None,
+        focus_area: Optional[dict] = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -1052,6 +1079,10 @@ class PlotReconstruction(BasePerBatchPlotCallback):
             Number of plots per sample, by default 6
         every_n_batches : int, optional
             Batch frequency to plot at, by default None
+        focus_area : dict | None, optional
+            Area or point indices to focus the plot on. Can be:
+            - {"spacial_mask": str}
+            - {"latlon_bounds": [[lat_min, lon_min], [lat_max, lon_max]]}
         """
         del kwargs
         super().__init__(config, every_n_batches=every_n_batches)
@@ -1062,6 +1093,7 @@ class PlotReconstruction(BasePerBatchPlotCallback):
         self.accumulation_levels_plot = accumulation_levels_plot
         self.per_sample = per_sample
         self.colormaps = colormaps
+        self.focus_area = focus_area
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -1090,37 +1122,59 @@ class PlotReconstruction(BasePerBatchPlotCallback):
             for name in self.parameters
         }
 
-        # When running in Async mode, it might happen that in the last epoch these tensors
-        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
-        # but internal ones would be on the cpu), The lines below allow to address this problem
+        # Ensure post_processors and latlons are initialized
         if self.post_processors is None:
-            # Copy to be used across all the training cycle
             self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+
+        latlons = self.latlons  # Shape: [n_points, 2]
         local_rank = pl_module.local_rank
 
+        # Compute focus mask based on optional focus_area input
+        focus_mask = np.ones(latlons.shape[0], dtype=bool)  # Default: use all points
+        if self.focus_area is not None:
+            if "spacial_mask" in self.focus_area:
+                focus_mask = np.zeros(latlons.shape[0], dtype=bool)
+                spacial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spacial_mask"]]
+                focus_mask[spacial_mask_idxs.squeeze()] = True
+
+            elif "latlon_bounds" in self.focus_area:
+                (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
+                lat, lon = latlons[:, 0], latlons[:, 1]
+                focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
+            else:
+                msg = "focus_area must contain either 'indices' or 'latlon_bounds'."
+                raise ValueError(msg)
+
+        # Fetch and post-process input and output tensors
         input_tensor = batch[
             self.sample_idx,
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
+
         data = self.post_processors(input_tensor).numpy()
+        in_data = data[0, ...].squeeze()  # Shape: [channels, spatial]
 
         output_tensor = self.post_processors(
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
         )
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
+        reconstruction = output_tensor[0, ...]  # Shape: [channels, spatial]
 
-        in_data = data[0, ...].squeeze()
-        reconstruction = output_tensor[0, ...]
+        # Apply mask
+        in_data = in_data[..., focus_mask, :]
+        reconstruction = reconstruction[..., focus_mask, :]
         diff = (in_data - reconstruction) ** 2
+        latlons = latlons[focus_mask]
 
+        # Plotting
         fig = plot_predicted_multilevel_flat_recon(
             plot_parameters_dict,
             self.per_sample,
-            self.latlons,
+            latlons,
             self.accumulation_levels_plot,
             in_data,
             reconstruction,

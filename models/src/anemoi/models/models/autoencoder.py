@@ -52,7 +52,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         graph_data : HeteroData
             Graph definition
         """
-        super(AnemoiModelEncProcDec, self).__init__()
+        nn.Module.__init__(self)
 
         self._graph_data = graph_data
         self.data_indices = data_indices
@@ -246,7 +246,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         graph_data : HeteroData
             Graph definition
         """
-
         nn.Module.__init__(self)
         self._graph_data = graph_data
         self.data_indices = data_indices
@@ -259,17 +258,13 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.num_hidden = len(self._graph_hidden_names)
         self.multi_step = model_config.training.multistep_input
         num_channels = model_config.model.num_channels
-
-        # hidden_dims is the dimentionality of features at each depth
         self.hidden_dims = {hidden: num_channels * (2**i) for i, hidden in enumerate(self._graph_hidden_names)}
+        self.level_process = model_config.model.enable_hierarchical_level_processing
+
+        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
-        self.data_indices = data_indices
-
-        self.multi_step = model_config.training.multistep_input
-
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
         self.supports_sharded_input = True
 
@@ -301,7 +296,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     src_grid_size=self.node_attributes.num_nodes[nodes_names],
                     dst_grid_size=self.node_attributes.num_nodes[nodes_names],
                     num_layers=model_config.model.level_process_num_layers,
-                    layer_kernels=self.layer_kernels,
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
@@ -312,7 +306,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     src_grid_size=self.node_attributes.num_nodes[nodes_names],
                     dst_grid_size=self.node_attributes.num_nodes[nodes_names],
                     num_layers=model_config.model.level_process_num_layers,
-                    layer_kernels=self.layer_kernels,
                 )
 
         # Downscale
@@ -331,7 +324,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
-                layer_kernels=self.layer_kernels,
             )
 
         # Upscale
@@ -351,7 +343,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
-                layer_kernels=self.layer_kernels,
             )
 
         # Decoder hidden -> data
@@ -381,10 +372,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         )
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return AnemoiModelAutoEncoder._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
+        return super()._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
 
     def _assemble_output(self, x_out, batch_size, ensemble_size, dtype):
-        return AnemoiModelAutoEncoder._assemble_output(x_out, batch_size, ensemble_size, dtype)
+        return super()._assemble_output(x_out, batch_size, ensemble_size, dtype)
 
     def forward(
         self,
@@ -418,9 +409,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
 
         # Prepare input
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, batch_size, grid_shard_shapes, model_comm_group
-        )
+        x_data_latent, shard_shapes_data = self._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
 
         # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
         x_hidden_latents = {}
@@ -517,6 +506,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
         )
 
-        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
+        x_out = self._assemble_output(x_out, batch_size, ensemble_size, x.dtype)
 
         return x_out

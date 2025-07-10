@@ -100,6 +100,14 @@ ColormapSchema = Annotated[
 ]
 
 
+class FocusAreaSchema(BaseModel):
+    spacial_mask: Optional[str] = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+
+    latlon_bounds: Optional[list[list[float]]] = Field(default=None, min_items=2, max_items=2)
+    "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
+
+
 class PlotSampleSchema(BaseModel):
     target_: Literal[
         "anemoi.training.diagnostics.callbacks.plot.PlotSample",
@@ -122,6 +130,8 @@ class PlotSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: Union[dict[str, ColormapSchema], None] = Field(default=None)
     "List of colormaps to use, by default None."
+    focus_area: Optional[FocusAreaSchema] = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spacial_mask' or 'latlon_bounds'."
 
 
 class PlotSpectrumSchema(BaseModel):

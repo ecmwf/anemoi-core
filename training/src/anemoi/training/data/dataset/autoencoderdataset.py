@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 import torch
 from einops import rearrange
@@ -19,9 +20,42 @@ from .singledataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from anemoi.training.data.grid_indices import BaseGridIndices
+
 
 class AutoencoderNativeGridDataset(NativeGridDataset):
     """Iterable autoencoder dataset for AnemoI data on the arbitrary grids."""
+
+    def __init__(
+        self,
+        data_reader: Callable,
+        grid_indices: type[BaseGridIndices],
+        relative_date_indices: list,
+        timestep: str = "6h",
+        shuffle: bool = True,
+        label: str = "generic",
+    ) -> None:
+        """Initialize (part of) the dataset state.
+
+        Parameters
+        ----------
+        data_reader : Callable
+            user function that opens and returns the anemoi-datasets array data
+        grid_indices : Type[BaseGridIndices]
+            indices of the grid to keep. Defaults to None, which keeps all spatial indices.
+        relative_date_indices: list
+            list of time indices to load from the data relative to the current sample i in __iter__
+        timestep : int, optional
+            the time frequency of the samples, by default '6h'
+        shuffle : bool, optional
+            Shuffle batches, by default True
+        label : str, optional
+            label for the dataset, by default "generic"
+        """
+        super().__init__(data_reader, grid_indices, relative_date_indices, timestep, shuffle, label)
 
     def __iter__(self) -> torch.Tensor:
         """Return an iterator over the dataset.
@@ -61,16 +95,8 @@ class AutoencoderNativeGridDataset(NativeGridDataset):
             i = int(i)
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
 
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[i : i + 1, :, :, grid_shard_indices]  # trick to keep the date dimention
-
-            else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[i : i + 1, :, :, :]  # trick to keep the date dimention
-                x = x[..., grid_shard_indices]  # select the grid shard
+            x = self.data[i : i + 1]  # trick to keep the date dimention
+            x = x[..., grid_shard_indices]  # select the grid shard
 
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1

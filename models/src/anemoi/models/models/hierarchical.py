@@ -19,9 +19,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
-
-from .encoder_processor_decoder import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -67,17 +66,23 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # Unpack config for hierarchical graph
         self.level_process = model_config.model.enable_hierarchical_level_processing
-        self.skip = model_config.model.skip_connections
-
-        self._calculate_shapes_and_indices(data_indices)
-        self._assert_matching_indices(data_indices)
-        self.data_indices = data_indices
-
-        self.multi_step = model_config.training.multistep_input
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
-        self.supports_sharded_input = True
+        self._calculate_shapes_and_indices(data_indices)
+        self._assert_matching_indices(data_indices)
+
+        # we can't register these as buffers because DDP does not support sparse tensors
+        # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
+        self.A_down, self.A_up = None, None
+        if "down" in self._truncation_data:
+            self.A_down = self._make_truncation_matrix(self._truncation_data["down"])
+            LOGGER.info("Truncation: A_down %s", self.A_down.shape)
+        if "up" in self._truncation_data:
+            self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
+            LOGGER.info("Truncation: A_up %s", self.A_up.shape)
+
+        self.supports_sharded_input = True  # TODO: deos it?
 
         # Encoder data -> hidden
         self.encoder = instantiate(
@@ -107,7 +112,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     src_grid_size=self.node_attributes.num_nodes[nodes_names],
                     dst_grid_size=self.node_attributes.num_nodes[nodes_names],
                     num_layers=model_config.model.level_process_num_layers,
-                    layer_kernels=self.layer_kernels,
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
@@ -118,7 +122,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     src_grid_size=self.node_attributes.num_nodes[nodes_names],
                     dst_grid_size=self.node_attributes.num_nodes[nodes_names],
                     num_layers=model_config.model.level_process_num_layers,
-                    layer_kernels=self.layer_kernels,
                 )
 
         self.processor = instantiate(
@@ -148,7 +151,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
-                layer_kernels=self.layer_kernels,
             )
 
         # Upscale
@@ -168,7 +170,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 src_grid_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_grid_size=self.node_attributes.num_nodes[dst_nodes_name],
-                layer_kernels=self.layer_kernels,
             )
 
         # Decoder hidden -> data
