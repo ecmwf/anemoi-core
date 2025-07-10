@@ -88,7 +88,3 @@ class GraphInspector:
             LOGGER.info("Saving interactive plots of nodes ...")
             for nodes_name in self.graph.node_types:
                 plot_interactive_nodes(self.graph, nodes_name, out_file=self.output_path / f"{nodes_name}_nodes.html")
-
-
-if __name__ == "__main__":
-    GraphInspector("/home/ecm1924/GitRepos/anemoi/g.pt", "output_gpu2").inspect()
