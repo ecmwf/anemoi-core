@@ -63,29 +63,6 @@ class Migration(Command):
             help=(
                 "Relative number of steps to execute. Positive migrates, negative rollbacks. "
                 "Defaults to execute all migrations."
-                "Mutually exclusive with --n_migrations and --target"
-            ),
-        )
-        apply_parser.add_argument(
-            "--n-migrations",
-            default=None,
-            type=int,
-            help=(
-                "Absolute number of migrations to be executed. "
-                "Will migrate or rollback to have exactly this number of migrations executed. "
-                "Cannot be negative."
-                "Defaults to all migrations. "
-                "Mutually exclusive with --steps and --target"
-            ),
-        )
-        apply_parser.add_argument(
-            "--target",
-            default=None,
-            type=str,
-            help=(
-                "Target version of anemoi-models. Will migrate or rollback accordingly. "
-                "Defaults to latest version. "
-                "Mutually exclusive with --steps and --n_migrations."
             ),
         )
 
@@ -180,9 +157,7 @@ class Migration(Command):
 
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
         try:
-            new_ckpt, done_migrations, done_rollbacks = Migrator().sync(
-                ckpt, steps=args.steps, n_migrations=args.n_migrations, target=args.target
-            )
+            new_ckpt, done_migrations, done_rollbacks = Migrator().sync(ckpt, steps=args.steps)
             if len(done_migrations) or len(done_rollbacks):
                 version = len(registered_migrations(ckpt))
                 ckpt_path = Path(args.ckpt)
@@ -191,17 +166,9 @@ class Migration(Command):
                 LOGGER.info("Saved previous checkpoint here: %s", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
             if len(done_migrations):
-                LOGGER.info(
-                    "Executed %s migrations: %s",
-                    len(done_migrations),
-                    [migration.name for migration in done_migrations],
-                )
+                LOGGER.info("Executed %s migrations: %s", len(done_migrations), done_migrations)
             if len(done_rollbacks):
-                LOGGER.info(
-                    "Executed %s migration rollbacks: %s",
-                    len(done_rollbacks),
-                    [migration.name for migration in done_rollbacks],
-                )
+                LOGGER.info("Executed %s migration rollbacks: %s", len(done_rollbacks), done_rollbacks)
         except IncompatibleCheckpointException as e:
             LOGGER.error(str(e))
 
