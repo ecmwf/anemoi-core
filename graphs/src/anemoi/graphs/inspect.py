@@ -21,6 +21,7 @@ from anemoi.graphs.plotting.displots import plot_distribution_node_derived_attri
 from anemoi.graphs.plotting.interactive_html import plot_interactive_nodes
 from anemoi.graphs.plotting.interactive_html import plot_interactive_subgraph
 from anemoi.graphs.plotting.interactive_html import plot_isolated_nodes
+from anemoi.graphs.processors.post_process import SubsetNodesInArea
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,15 +45,20 @@ class GraphInspector:
         self,
         path: Union[str, Path],
         output_path: Path,
+        area: tuple[float, float, float, float] = None,
         show_attribute_distributions: Optional[bool] = True,
         show_nodes: Optional[bool] = False,
         **kwargs,
     ):
         self.path = path
         self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
+        self.area = area
         self.output_path = output_path
         self.show_attribute_distributions = show_attribute_distributions
         self.show_nodes = show_nodes
+
+        if self.area is not None:
+            self.graph = SubsetNodesInArea(nodes_name=list(self.graph.node_types), area=area).update_graph(self.graph)
 
         if isinstance(self.output_path, str):
             self.output_path = Path(self.output_path)
