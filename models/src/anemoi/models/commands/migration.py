@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .. import __version__ as version_anemoi_models
 from ..migrations import MIGRATION_PATH
-from ..migrations import FinalMigrationException
+from ..migrations import IncompatibleCheckpointException
 from ..migrations import Migrator
 from ..migrations import registered_migrations
 from . import Command
@@ -117,13 +117,13 @@ class Migration(Command):
 
         imports_items = ["from anemoi.models.migrations import CkptType"]
         if args.final:
-            imports_items.append("from anemoi.models.migrations import FinalMigrationException")
+            imports_items.append("from anemoi.models.migrations import IncompatibleCheckpointException")
         imports_items.append("from anemoi.models.migrations import MigrationMetadata")
         imports = "\n".join(imports_items)
 
         content = "return ckpt"
         if args.final:
-            content = "raise FinalMigrationException"
+            content = "raise IncompatibleCheckpointException"
 
         with open(args.path / name, "w") as f:
             f.write(
@@ -202,7 +202,7 @@ class Migration(Command):
                     len(done_rollbacks),
                     [migration.name for migration in done_rollbacks],
                 )
-        except FinalMigrationException as e:
+        except IncompatibleCheckpointException as e:
             LOGGER.error(str(e))
 
 
