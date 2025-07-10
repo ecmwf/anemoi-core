@@ -127,8 +127,14 @@ class Migration(Command):
                         versions={{
                             "migration": "1.0.0",
                             "anemoi-models": "{version_anemoi_models}",
-                        }},
-                        final={args.final},
+                        }}"""
+                )
+            )
+            if args.final:
+                f.write(f",\n    final={args.final},")
+            f.write(
+                dedent(
+                    f"""
                     )
 
 
@@ -143,7 +149,7 @@ class Migration(Command):
                 """
                 )
             )
-        print(f"Created migration {name} in {args.path}")
+        print(f"Created migration {args.path}/{name}")
 
     def run_appy(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
