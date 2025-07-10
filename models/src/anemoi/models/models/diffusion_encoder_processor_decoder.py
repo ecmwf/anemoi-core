@@ -73,9 +73,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
     def _calculate_input_dim(self, model_config):
         base_input_dim = super()._calculate_input_dim(model_config)
-        return base_input_dim + self.num_output_channels + self.noise_cond_dim
+        return base_input_dim + self.num_output_channels  # input + noised targets
 
-    def _assemble_input(self, x, y_noised, c_data, bse, grid_shard_shapes=None, model_comm_group=None):
+    def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
             shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
@@ -86,7 +86,6 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
-                c_data,  # SL TODO: remove this
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -170,9 +169,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         processor_kwargs = {"cond": c_hidden}
         bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
 
-        x_data_latent, shard_shapes_data = self._assemble_input(
-            x, y_noised, c_data, bse, grid_shard_shapes, model_comm_group
-        )
+        x_data_latent, shard_shapes_data = self._assemble_input(x, y_noised, bse, grid_shard_shapes, model_comm_group)
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
@@ -564,10 +561,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
         input_dim += self.num_output_channels  # noised targets
         input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
-        input_dim += self.noise_cond_dim
         return input_dim
 
-    def _assemble_input(self, x, y_noised, c_data, bse, grid_shard_shapes=None, model_comm_group=None):
+    def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         x_trunc = x[:, -1, :, :, self._internal_input_idx]
         x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
         x_trunc = self._apply_truncation(x_trunc, grid_shard_shapes, model_comm_group)
@@ -585,7 +581,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
-                c_data,  # #SL TODO: remove this
                 node_attributes_data,
                 einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars"),
             ),

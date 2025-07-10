@@ -5,13 +5,10 @@ defaults:
 - datamodule: single
 - hardware: example
 - graph: multi_scale
-- model: graphtransformer_diffusion # or: graphtransformer_diffusiontend
-- training: default
+- model: graphtransformer_diffusion
+- training: diffusion
 - _self_
 
 
 # set to true to switch on config validation
 config_validation: True
-
-training:
-  model_task: anemoi.training.train.forecaster.GraphDiffusionForecaster # or: anemoi.training.train.forecaster.GraphDiffusionTendForecaster

@@ -84,7 +84,7 @@ validation_metrics:
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: []
+    scalers: ['node_weights']
     # other kwargs
     ignore_nans: True
 

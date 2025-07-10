@@ -202,10 +202,10 @@ class GraphForecaster(pl.LightningModule):
                 ", ".join(self.metrics.keys()),
             )
 
-        LOGGER.debug("Rollout window length: %d", self.rollout)
-        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
-        LOGGER.debug("Rollout max : %d", self.rollout_max)
-        LOGGER.debug("Multistep: %d", self.multi_step)
+        LOGGER.info("Rollout window length: %d", self.rollout)
+        LOGGER.info("Rollout increase every : %d epochs", self.rollout_epoch_increment)
+        LOGGER.info("Rollout max : %d", self.rollout_max)
+        LOGGER.info("Multistep: %d", self.multi_step)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
@@ -693,7 +693,7 @@ class GraphForecaster(pl.LightningModule):
     def on_train_epoch_end(self) -> None:
         if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
             self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
+            LOGGER.info("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
