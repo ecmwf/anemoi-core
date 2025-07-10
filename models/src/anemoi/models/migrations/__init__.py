@@ -25,8 +25,6 @@ from typing import Tuple
 from typing import TypedDict
 from typing import Union
 
-import semver
-
 MIGRATION_PATH = Path(__file__).parent
 
 _ckpt_migration_key = "migrations"
@@ -73,8 +71,8 @@ class Migration:
     metadata: MigrationMetadata
     """Tracked metadata"""
 
-    def serialize(self) -> str:
-        return self.name
+    def serialize(self) -> Dict[str, Any]:
+        return {"name": self.name, "rollback": self.rollback}
 
 
 def registered_migrations(ckpt: CkptType) -> List[Dict[str, Any]]:
@@ -144,7 +142,7 @@ class Migrator:
         if migrations is None:
             migrations = _migrations_from_path(MIGRATION_PATH, __name__)
 
-        # compatibility groups. Checkpoints cannot be migrated past their
+        # Compatibility groups. Checkpoints cannot be migrated past their
         # own group. This is useful to indicate when migrating checkpoints is no longer
         # supported.
         self._grouped_migrations: List[List[Migration]] = []
@@ -157,7 +155,6 @@ class Migrator:
         self._grouped_migrations.append(current_group)
 
         self._raise_missing_migrations = raise_missing_migrations
-        self._migration_map = {migration.name: migration for migration in migrations}
 
     @classmethod
     def from_path(cls, location: Union[str, PathLike], package: str) -> "Migrator":
@@ -194,7 +191,7 @@ class Migrator:
         if _ckpt_migration_key not in ckpt or not len(ckpt[_ckpt_migration_key]):
             return self._grouped_migrations[0]
 
-        first_migration = ckpt[_ckpt_migration_key][0]
+        first_migration = ckpt[_ckpt_migration_key][0]["name"]
         for group in self._grouped_migrations:
             # Compare the first migration to get the correct group.
             # Migrations that are not in the first group must always have at least the previous "final" migration registered.
@@ -202,7 +199,7 @@ class Migrator:
                 return group
         raise ValueError("Unknown migration group.")
 
-    def _get_missing_migrations(self, ckpt: CkptType) -> Sequence[Migration]:
+    def _get_missing_migrations(self, ckpt: CkptType, migrations: List[Migration]) -> Sequence[Migration]:
         """Get missing migrations from a checkpoint
 
         Parameters
@@ -211,19 +208,15 @@ class Migrator:
             The loaded checkpoint
         migrations : Sequence[Migration]
             List of migration to execute
-        raise_missing_migrations : bool
-            Whether to check if there are out of order migrations missing from the checkpoint
 
         Returns
         -------
         Sequence[Migration]
                 Missing migrations from the checkpoint to execute
         """
-        migrations = self.compatible_migrations(ckpt)
-
         if _ckpt_migration_key not in ckpt:
             return migrations
-        done_migrations = ckpt[_ckpt_migration_key]
+        done_migrations = [mig["name"] for mig in ckpt[_ckpt_migration_key]]
         # Migration should be done in order, we look for the the last done migration and
         # execute the rest. This is to allow havind removed migrations in a checkpoint and
         # not complain.
@@ -242,60 +235,7 @@ class Migrator:
                     )
         return migrations[key_rest_migration:]
 
-    def _get_steps_from_target(
-        self, compatible_migrations: List[Migration], done_migrations: Sequence[str], target_version: str
-    ) -> int:
-        """Returns the number of migration steps to execute given a target version
-
-        Parameters
-        ----------
-        compatible_migrations : List[Migration]
-            List of compatible migrations for the checkpoint
-        migrations : Sequence[Migration]
-            All possible migrations
-        done_migrations : Sequence[str]
-            Names of already done migrations in the checkpoint
-        target_version : str
-            The target version
-
-        Returns
-        -------
-        int
-            The number of steps
-        """
-        if not len(done_migrations):
-            current_version = "0.0.0"
-        else:
-            current_version = self._migration_map[done_migrations[-1]].metadata.versions["anemoi-models"]
-        current = semver.Version.parse(current_version)
-        target = semver.Version.parse(target_version)
-        steps = 0
-        if current > target:
-            # rollback
-            for migration_name in reversed(done_migrations):
-                migration = self._migration_map.get(migration_name, None)
-                if migration is None:
-                    raise MissingMigrationException(f"{migration_name} does not exist anymore.")
-                if semver.Version.parse(migration.metadata.versions["anemoi-models"]) <= target_version:
-                    return steps
-                steps -= 1
-        else:
-            # migrate
-            for migration in compatible_migrations:
-                if migration.name in done_migrations:
-                    continue
-                if semver.Version.parse(migration.metadata.versions["anemoi-models"]) > target_version:
-                    return steps
-                steps += 1
-        return steps
-
-    def sync(
-        self,
-        ckpt: CkptType,
-        steps: Optional[int] = None,
-        n_migrations: Optional[int] = None,
-        target: Optional[str] = None,
-    ) -> Tuple[CkptType, Sequence[Migration], List[Migration]]:
+    def sync(self, ckpt: CkptType, steps: Optional[int] = None) -> Tuple[CkptType, List[str], List[str]]:
         """Migrate or rollbacks the checkpoint using provided migrations
 
         Parameters
@@ -304,52 +244,37 @@ class Migrator:
             The checkpoint to migrate.
         steps : Optional[int], default None
             Number of relative migration step to execute. If negative, will rollback the provided number of steps.
-            Mutually exclusive with steps and target.
-            Defaults to migrate all missing migrations.
-        n_migrations : Optional [int]
-            Number migrations to be executed. Cannot be negative. Will migrate or rollback
-            to have exactly n_migrations migrations executed.
-            Mutually exclusive with rel_steps and target.
-            Defaults to migrate all migrations.
-        target : Optional[str], default None
-            Target version of anemoi-models. Will migrate or rollback accordingly.
-            Mutually exclusive with steps and n_migrations.
-            Defaults to latest version.
+            Mutually exclusive with steps and target. Defaults to migrate all missing migrations.
 
         Returns
         -------
-        Tuple[CkptType, Sequence[Migration], List[Migration]]
+        Tuple[CkptType, Sequence[str], List[str]]
             * The migrated checkpoint
             * The list of migrations that were applied to the checkpoint
             * The list of rollbacks that were applied
         """
-        if steps is not None and target is not None:
-            raise ValueError("Cannot have both rel_steps and target")
-        if steps is not None and n_migrations is not None:
-            raise ValueError("Cannot have both rel_steps and steps")
-        if n_migrations is not None and target is not None:
-            raise ValueError("Cannot have both steps and target")
-
         ckpt = deepcopy(ckpt)
 
         if _ckpt_migration_key not in ckpt:
             ckpt[_ckpt_migration_key] = []
-        done_migrations = ckpt[_ckpt_migration_key]
-        # we convert steps and target to rel_steps and
-        # do computation with rel_step.
-        if n_migrations is not None:
-            steps = n_migrations - len(done_migrations)
-        if target is not None:
-            steps = self._get_steps_from_target(self.compatible_migrations(ckpt), done_migrations, target)
+        compatible_migrations = self.compatible_migrations(ckpt)
+
+        if len(compatible_migrations) < len(ckpt[_ckpt_migration_key]):
+            # We should rollback, set a negative steps
+            steps = len(compatible_migrations) - len(ckpt[_ckpt_migration_key])
+
         if steps is not None and steps <= 0:
-            ckpt, rollbacks = self.rollback(ckpt, -steps, copy_ckpt=False)
+            ckpt, rollbacks = self._rollback(ckpt, -steps)
             return ckpt, [], rollbacks
-        ckpt, missing_migrations = self.migrate(ckpt, steps, copy_ckpt=False)
+        ckpt, missing_migrations = self._migrate(ckpt, compatible_migrations, steps)
         return ckpt, missing_migrations, []
 
-    def migrate(
-        self, ckpt: CkptType, steps: Optional[int] = None, *, copy_ckpt: bool = True
-    ) -> Tuple[CkptType, Sequence[Migration]]:
+    def _migrate(
+        self,
+        ckpt: CkptType,
+        compatible_migrations: List[Migration],
+        steps: Optional[int] = None,
+    ) -> Tuple[CkptType, List[str]]:
         """Rollbacks the checkpoint using provided migrations
 
         Parameters
@@ -358,75 +283,57 @@ class Migrator:
             The checkpoint to migrate.
         steps : Optional[int], default None
             Number of migration step to execute. Defaults to all missing migrations.
-        copy_ckpt : bool, default True
-            Whether to deepcopy the checkpoint before applying migrations before applying migrations.
-            If False, the input ckpt cannot be used after migration.
         Returns
         -------
-        Tuple[CkptType, Sequence[Migration], List[Migration]]
+        Tuple[CkptType, List[str]]
             * The migrated checkpoint
             * The list of migrations that were applied to the checkpoint
         """
         if steps is not None and steps < 0:
             raise ValueError("Cannot migrate negative number of steps. Use sync instead")
-        if copy_ckpt:
-            ckpt = deepcopy(ckpt)
 
         if _ckpt_migration_key not in ckpt:
             ckpt[_ckpt_migration_key] = []
-        missing_migrations = self._get_missing_migrations(ckpt)
+        missing_migrations = self._get_missing_migrations(ckpt, compatible_migrations)
         if steps is not None:
             if steps > len(missing_migrations):
                 raise IncompatibleCheckpointException(
                     f"Checkpoint cannot be migrated {steps} steps. (Max: {len(missing_migrations)})."
                 )
             missing_migrations = missing_migrations[:steps]
+        migrated: List[str] = []
         for migration in missing_migrations:
             ckpt = migration.migrate(ckpt)
             ckpt[_ckpt_migration_key].append(migration.serialize())
-        return ckpt, missing_migrations
+            migrated.append(migration.name)
+        return ckpt, migrated
 
-    def rollback(
-        self, ckpt: CkptType, steps: Optional[int] = None, *, copy_ckpt: bool = True
-    ) -> Tuple[CkptType, List[Migration]]:
+    def _rollback(self, ckpt: CkptType, steps: int) -> Tuple[CkptType, List[str]]:
         """Rollbacks the checkpoint using provided migrations
 
         Parameters
         ----------
         ckpt : CkptType
             The checkpoint to rollback.
-        steps : Optional[int], default None
-            Number of rollback steps to execute. Defaults to rollback everything
-        copy_ckpt : bool, default True
-            Whether to deepcopy the checkpoint before applying migrations before applying migrations.
-            If False, the input ckpt cannot be used after migration.
+        steps : int
+            Number of rollback steps to execute.
 
         Returns
         -------
-        Tuple[CkptType, Sequence[Migration], List[Migration]]
+        Tuple[CkptType, Sequence[Migration], List[str]]
             * The migrated checkpoint
             * The list of rollbacks that were applied
         """
         if steps is not None and steps < 0:
             raise ValueError("Cannot rollback negative number of steps. Use sync instead")
-        if copy_ckpt:
-            ckpt = deepcopy(ckpt)
 
         if _ckpt_migration_key not in ckpt:
             ckpt[_ckpt_migration_key] = []
-        rollbacks: List[Migration] = []
-        num_migrations = len(ckpt[_ckpt_migration_key])
-        if steps is None:
-            steps = num_migrations
-            if len(ckpt[_ckpt_migration_key]) and self._migration_map[ckpt[_ckpt_migration_key][0]].metadata.final:
-                steps -= 1
+        rollbacks: List[str] = []
         for _ in range(steps):
-            migration_name = ckpt[_ckpt_migration_key].pop()
-            last_migration = self._migration_map.get(migration_name, None)
-            if last_migration is None:
-                raise MissingMigrationException(f"Migration {migration_name} does not exist anymore. Cannot rollback.")
-            rollbacks = [last_migration] + rollbacks
-            ckpt = last_migration.rollback(ckpt)
+            migration = ckpt[_ckpt_migration_key].pop()
+            rollbacks = [migration["name"]] + rollbacks
+            ckpt = migration["rollback"](ckpt)
         return ckpt, rollbacks
 
     def register_migrations(self, ckpt: CkptType) -> CkptType:
