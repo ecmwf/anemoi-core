@@ -53,10 +53,10 @@ class Migration(Command):
             help="Set this as the final migration. Older checkpoints cannot be migrated past this.",
         )
 
-        help_apply = "Apply migrations to a checkpoint."
-        apply_parser = subparsers.add_parser("apply", help=help_apply, description=help_apply)
-        apply_parser.add_argument("ckpt", help="Path to the checkpoint to migrate.")
-        apply_parser.add_argument(
+        help_sync = "Apply migrations to a checkpoint."
+        sync_parser = subparsers.add_parser("sync", help=help_sync, description=help_sync)
+        sync_parser.add_argument("ckpt", help="Path to the checkpoint to migrate.")
+        sync_parser.add_argument(
             "--steps",
             default=None,
             type=int,
@@ -76,8 +76,8 @@ class Migration(Command):
         """
         if args.subcommand == "create":
             return self.run_create(args)
-        elif args.subcommand == "apply":
-            return self.run_appy(args)
+        elif args.subcommand == "sync":
+            return self.run_sync(args)
         raise ValueError(f"{args.subcommand} does not exist.")
 
     def run_create(self, args: Namespace) -> None:
@@ -151,7 +151,7 @@ class Migration(Command):
             )
         print(f"Created migration {args.path}/{name}")
 
-    def run_appy(self, args: Namespace) -> None:
+    def run_sync(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
 
         Parameters
