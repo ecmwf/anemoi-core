@@ -24,15 +24,14 @@ from typing import Literal
 from typing import Optional
 from weakref import WeakValueDictionary
 
-from packaging.version import Version
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from typing_extensions import override
 
+from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.utils.mlflow.auth import TokenAuth
-from anemoi.utils.mlflow.utils import clean_config_params
 from anemoi.utils.mlflow.utils import expand_iterables
 from anemoi.utils.mlflow.utils import health_check
 
@@ -616,10 +615,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
             import mlflow
             from mlflow.entities import Param
 
-            truncation_length = 250
-
-            if Version(mlflow.VERSION) >= Version("1.28.0"):
-                truncation_length = 500
+            try:  # Check maximum param value length is available and use it
+                truncation_length = mlflow.utils.validation.MAX_PARAM_VAL_LENGTH
+            except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
+                truncation_length = 250  # Historical default value
 
             AnemoiMLflowLogger.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
 
