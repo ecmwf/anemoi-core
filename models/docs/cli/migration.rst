@@ -1,10 +1,10 @@
-.. _cli-migration:
+.. _other-migration:
 
 ##########################
  Migrating your checkpoint
 ##########################
 
-Anemoi-models provides a way for users to migrate old checkpoints so that they can be
+anemoi-models provides a way for users to migrate old checkpoints so that they can be
 used with recent versions of anemoi-models.
 
 If you want to use your checkpoint with the currently installed version of anemoi-models,
