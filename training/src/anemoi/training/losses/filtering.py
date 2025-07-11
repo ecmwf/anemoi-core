@@ -25,13 +25,13 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
 
 
+# TODO(Harrison): Consider renaming and reworking to a RemappingLossWrapper or similar, as it remaps variables
 class FilteringLossWrapper(BaseLoss):
     """Loss wrapper to filter variables to compute the loss on."""
 
     def __init__(
         self,
         loss: dict[str, Any] | Callable | BaseLoss,
-        data_indices: IndexCollection,
         predicted_variables: list[str] | None = None,
         target_variables: list[str] | None = None,
         **kwargs,
@@ -73,10 +73,14 @@ class FilteringLossWrapper(BaseLoss):
 
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
+
+    def set_data_indices(self, data_indices: IndexCollection) -> None:
+        """Hook to set the data indices for the loss."""
         self.data_indices = data_indices
         name_to_index = data_indices.data.output.name_to_index
         model_output = data_indices.model.output
         output_indices = model_output.full
+
         if self.predicted_variables is not None:
             predicted_indices = [model_output.name_to_index[name] for name in self.predicted_variables]
         else:
