@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
-from .base import BaseGraphModule
+from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
