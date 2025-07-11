@@ -264,6 +264,15 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             # output: [loss, [pred1, pred2, ...]], gather predictions for plotting
             output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
 
+            # When running in Async mode, it might happen that in the last epoch these tensors
+            # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
+            # but internal ones would be on the cpu), The lines below allow to address this problem
+            self.post_processors = copy.deepcopy(pl_module.model.post_processors)
+            for post_processor in self.post_processors.processors.values():
+                if hasattr(post_processor, "nan_locations"):
+                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
+            self.post_processors = self.post_processors.cpu()
+
             self.plot(
                 trainer,
                 pl_module,
@@ -422,8 +431,6 @@ class LongRolloutPlots(BasePlotCallback):
             )
             for name in self.parameters
         }
-        if self.post_processors is None:
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
 
@@ -435,12 +442,12 @@ class LongRolloutPlots(BasePlotCallback):
         # prepare input tensor for plotting
         # the batch is already preprocessed in-place
         input_tensor_0 = batch[
-            self.sample_idx,
+            :,
             pl_module.multi_step - 1,
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-        data_0 = self.post_processors(input_tensor_0).numpy()
+        data_0 = self.post_processors(input_tensor_0)[self.sample_idx]
 
         if self.video_rollout:
             data_over_time = []
@@ -513,14 +520,14 @@ class LongRolloutPlots(BasePlotCallback):
         """Plot the predicted output, input, true target and error plots for a given rollout step."""
         # prepare true output tensor for plotting
         input_tensor_rollout_step = input_batch[
-            self.sample_idx,
+            :,
             pl_module.multi_step + rollout_step,  # (pl_module.multi_step - 1) + (rollout_step + 1)
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-        data_rollout_step = self.post_processors(input_tensor_rollout_step).numpy()
+        data_rollout_step = self.post_processors(input_tensor_rollout_step)[self.sample_idx]
         # predicted output tensor
-        output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
+        output_tensor = self.post_processors(y_pred.cpu())[self.sample_idx : self.sample_idx + 1]
 
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
@@ -550,7 +557,7 @@ class LongRolloutPlots(BasePlotCallback):
     ) -> tuple[list, np.ndarray, np.ndarray]:
         """Store the data for each frame of the video."""
         # prepare predicted output tensors for video
-        output_tensor = self.post_processors(y_pred[self.sample_idx : self.sample_idx + 1, ...].cpu()).numpy()
+        output_tensor = self.post_processors(y_pred.cpu())[self.sample_idx : self.sample_idx + 1]
         data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
         # update min and max values for each variable for the colorbar
         vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=1))
@@ -625,6 +632,12 @@ class LongRolloutPlots(BasePlotCallback):
         if (batch_idx) == 0 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
             batch = pl_module.allgather_batch(batch)
             output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
+
+            self.post_processors = copy.deepcopy(pl_module.model.post_processors)
+            for post_processor in self.post_processors.processors.values():
+                if hasattr(post_processor, "nan_locations"):
+                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
+            self.post_processors = self.post_processors.cpu()
 
             precision_mapping = {
                 "16-mixed": torch.float16,
@@ -963,28 +976,22 @@ class PlotSample(BasePerBatchPlotCallback):
             for name in self.parameters
         }
 
-        # When running in Async mode, it might happen that in the last epoch these tensors
-        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
-        # but internal ones would be on the cpu), The lines below allow to address this problem
-        if self.post_processors is None:
-            # Copy to be used across all the training cycle
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
         local_rank = pl_module.local_rank
 
         input_tensor = batch[
-            self.sample_idx,
+            :,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-        data = self.post_processors(input_tensor)
+        data = self.post_processors(input_tensor)[self.sample_idx]
 
         output_tensor = self.post_processors(
-            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
+            torch.cat(tuple(x[:, ...].cpu() for x in outputs[1])),
             in_place=False,
-        )
+        )[self.sample_idx : self.sample_idx + 1]
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
@@ -1021,23 +1028,16 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         outputs: list,
         batch: torch.Tensor,
     ) -> tuple[np.ndarray, np.ndarray]:
-        # When running in Async mode, it might happen that in the last epoch these tensors
-        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
-        # but internal ones would be on the cpu), The lines below allow to address this problem
-        if self.post_processors is None:
-            # Copy to be used across all the training cycle
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
 
         input_tensor = batch[
-            self.sample_idx,
+            :,
             pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
             ...,
             pl_module.data_indices.data.output.full,
         ].cpu()
-
-        data = self.post_processors(input_tensor)
+        data = self.post_processors(input_tensor)[self.sample_idx]
         output_tensor = self.post_processors(
             torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
             in_place=False,
