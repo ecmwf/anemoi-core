@@ -64,10 +64,13 @@ class FilteringLossWrapper(BaseLoss):
         elif isinstance(loss, type):
             self._loss_scaler_specification = ["*"]
             self.loss = loss(**kwargs)
-        else:
-            assert isinstance(loss, BaseLoss)
+        elif isinstance(loss, BaseLoss):
             self._loss_scaler_specification = loss.scaler
             self.loss = loss
+        else:
+            msg = f"Invalid loss type provided: {type(loss)}. Expected a str, dict/DicConfig, type, or instance of BaseLoss."
+            raise TypeError(
+                msg)
 
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
