@@ -172,9 +172,9 @@ class Migration(Command):
                 LOGGER.info("Saved previous checkpoint here: %s", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
             if len(done_migrations):
-                LOGGER.info("Executed %s migrations: %s", len(done_migrations), done_migrations)
+                LOGGER.info("Executed %s migration(s): %s", len(done_migrations), done_migrations)
             if len(done_rollbacks):
-                LOGGER.info("Executed %s migration rollbacks: %s", len(done_rollbacks), done_rollbacks)
+                LOGGER.info("Executed %s rollback(s): %s", len(done_rollbacks), done_rollbacks)
         except IncompatibleCheckpointException as e:
             LOGGER.error(str(e))
 
