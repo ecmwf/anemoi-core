@@ -26,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 class RemoveUnconnectedNodesSchema(BaseModel):
     target_: Literal["anemoi.graphs.processors.RemoveUnconnectedNodes"] = Field(..., alias="_target_")
     "Post processor to remove unconnected nodes."
-    nodes_name: str | Iterable[str]
+    nodes_name: Union[str, Iterable[str]]
     "Nodes from which to remove the unconnected nodes."
     ignore: str = Field(example=None)
     "Attribute name of nodes to be ignored."
@@ -37,11 +37,11 @@ class RemoveUnconnectedNodesSchema(BaseModel):
 class SubsetNodesInAreaSchema(BaseModel):
     target_: Literal["anemoi.graphs.processors.SubsetNodesInArea"] = Field(..., alias="_target_")
     "Post processor to remove unconnected nodes."
-    nodes_name: str | Iterable[str]
+    nodes_name: Union[str, Iterable[str]]
     "Nodes from which to remove the unconnected nodes."
     area: tuple[float, float, float, float] = Field(default=(40, 10, 30, 20))
     "Area of interest to crop the nodes, (north, west, south, east)."
-    nodes_name: str | Iterable[str]
+    nodes_name: Union[str, Iterable[str]]
     "Nodes from which to remove the unconnected nodes."
     ignore: str = Field(example=None)
     "Attribute name of nodes to be ignored."
