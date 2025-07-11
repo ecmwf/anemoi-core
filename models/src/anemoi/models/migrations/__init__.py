@@ -10,8 +10,10 @@
 
 import importlib
 import logging
+import sys
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import cached_property
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,8 @@ from typing import Sequence
 from typing import Tuple
 from typing import TypedDict
 from typing import Union
+
+import cloudpickle
 
 MIGRATION_PATH = Path(__file__).parent
 
@@ -58,6 +62,26 @@ class MigrationMetadata:
     final: bool = False
 
 
+class _SerializedRollback:
+    """Use cloudpickle to serialize the rollback function by value and not reference.
+    When doing rollbacks, migration files might not exist anymore, and we need to
+    execute the migration from the checkpoint directly.
+    """
+
+    def __init__(self, rollback_bytes: bytes):
+        self._rollback_bytes = rollback_bytes
+
+    @cached_property
+    def rollback(self) -> Callable[[CkptType], CkptType]:
+        return cloudpickle.loads(self._rollback_bytes)
+
+    def __call__(self, ckpt: CkptType) -> CkptType:
+        return self.rollback(ckpt)
+
+    def __reduce__(self) -> "Tuple[Callable[[bytes], _SerializedRollback], Tuple[bytes]]":
+        return self.__class__, (self._rollback_bytes,)
+
+
 @dataclass
 class Migration:
     """Represents a migration"""
@@ -72,7 +96,9 @@ class Migration:
     """Tracked metadata"""
 
     def serialize(self) -> Dict[str, Any]:
-        return {"name": self.name, "rollback": self.rollback}
+        cloudpickle.register_pickle_by_value(sys.modules[self.rollback.__module__])
+        rollback_bytes = cloudpickle.dumps(self.rollback)
+        return {"name": self.name, "rollback": _SerializedRollback(rollback_bytes)}
 
 
 def registered_migrations(ckpt: CkptType) -> List[Dict[str, Any]]:

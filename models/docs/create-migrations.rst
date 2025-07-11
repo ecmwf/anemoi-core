@@ -42,6 +42,13 @@ must return a checkpoint compatible with your changes.
 compatible with your changes and must return a checkpoint usable before
 your change.
 
+.. note::
+
+   We use `cloudpickle <https://github.com/cloudpipe/cloudpickle>`_ to
+   pickle the rollback function by value rather than by inference. In
+   particular, you should follow the recommandations described `here
+   <https://github.com/cloudpipe/cloudpickle/tree/master?tab=readme-ov-file#overriding-pickles-serialization-mechanism-for-importable-constructs>`_.
+
 For example, if you renamed a layer x to y, you can make the following
 migration:
 
