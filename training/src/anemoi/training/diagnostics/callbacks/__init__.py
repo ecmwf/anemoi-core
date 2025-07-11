@@ -25,6 +25,7 @@ from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
+from anemoi.training.utils.checkpoint import RegisterMigrations
 
 if TYPE_CHECKING:
     from pytorch_lightning.callbacks import Callback
@@ -200,6 +201,7 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
         (
             ParentUUIDCallback(config),
             CheckVariableOrder(),
+            RegisterMigrations(),
         ),
     )
 
