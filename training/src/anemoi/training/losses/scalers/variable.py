@@ -91,7 +91,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         Retrieve the loss scaling for each variable from the config file.
         """
         variable_loss_scaling = (
-            np.ones((len(self.data_indices.data.output.full),), dtype=np.float32) * self.weights.default
+            np.empty((len(self.data_indices.data.output.full),), dtype=np.float32) 
         )
 
         for variable_name, idx in self.data_indices.model.output.name_to_index.items():
@@ -100,7 +100,7 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
             # or base variable name (variable_ref: variable name without variable level)
             variable_loss_scaling[idx] = self.weights.get(
                 variable_ref,
-                1.0,
+                self.weights.get("default", 1.0),
             )
             if variable_ref != variable_name:
                 assert (

@@ -64,6 +64,40 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
 
+@pytest.fixture
+def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
+    config = DictConfig(
+        {
+            "data": {
+                "forcing": ["x"],
+                "diagnostic": ["z", "q"],
+            },
+            "training": {
+                "training_loss": {
+                    "_target_": "anemoi.training.losses.MSELoss",
+                    "scalers": ["variable_masking"],
+                },
+                 "variable_groups": {
+                    "default": "sfc",
+                    "pl": ["y"],
+                },
+                "scalers": {
+                    "builders": {
+                        "variable_masking": {
+                            "_target_": "anemoi.training.losses.scalers.VariableMaskingLossScaler",
+                            "variables": ["z", "other", "q"],
+                            },
+                        },
+                    },
+                },
+                "metrics": [],
+            },
+    )
+    name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
+    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
+    statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
+    return config, data_indices, statistics, statistics_tendencies
 
 linear_scaler = {
     "_target_": "anemoi.training.losses.scalers.LinearVariableLevelScaler",
@@ -260,3 +294,40 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     }
 
     assert metric_range == expected_metric_range
+
+def test_variable_masking(
+    fake_data_no_param: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    graph_with_nodes: HeteroData,
+) -> None:
+    config, data_indices, statistics, statistics_tendencies = fake_data_no_param
+
+    metadata_extractor = ExtractVariableGroupAndLevel(
+        config.training.variable_groups,
+    )
+
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        metadata_extractor=metadata_extractor,
+        output_mask=NoOutputMask(),
+    )
+    vars_to_mask = ["z", "other", "q"]
+    indices_to_mask = [data_indices.model.output.name_to_index[v] for v in vars_to_mask]
+    assert scalers["variable_masking"][0][0] == len(vars_to_mask)
+    assert not scalers["variable_masking"][1][indices_to_mask].any(), "Expected scalers for masked variables to be zero"
+    
+    config.training.scalers.builders["variable_masking"].update(inverse=True)
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        metadata_extractor=metadata_extractor,
+        output_mask=NoOutputMask(),
+    )
+    assert scalers["variable_masking"][0][0] == len(vars_to_mask)
+    assert scalers["variable_masking"][1][indices_to_mask].all(), "Expected scalers for unmasked variables to be one"
