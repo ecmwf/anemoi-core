@@ -8,29 +8,17 @@
 # nor does it submit to any jurisdiction.
 
 
-from pathlib import Path
-
 import pytest
 
+from anemoi.models.migrations import CkptType
 from anemoi.models.migrations import IncompatibleCheckpointException
 from anemoi.models.migrations import Migrator
 from anemoi.models.migrations import MissingMigrationException
 
 
-def get_test_migrator() -> Migrator:
-    """Load the test migrator with migrations from this folder.
-
-    Returns
-    -------
-    A Migrator instance
-    """
-    return Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
-
-
-def test_run_all_migrations():
+def test_run_all_migrations(migrator: Migrator):
     dummy_model = {}
 
-    migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model)
 
     assert len(done_migrations) == 4
@@ -42,13 +30,12 @@ def test_run_all_migrations():
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_run_last_migration():
+def test_run_last_migration(migrator: Migrator):
     dummy_model = {
         "foo": "foo",
         "migrations": [{"name": "1750840837_add_foo", "rollback": lambda x: x}],
     }
 
-    migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model)
 
     assert len(done_migrations) == 3
@@ -58,7 +45,7 @@ def test_run_last_migration():
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_wrong_order():
+def test_wrong_order(migrator: Migrator):
     dummy_model = {
         "foo": "foo",
         "baz": "baz",
@@ -67,13 +54,12 @@ def test_wrong_order():
             {"name": "1750859824_add_baz", "rollback": lambda x: x},
         ],
     }
-    migrator = get_test_migrator()
 
     with pytest.raises(MissingMigrationException):
         migrator.sync(dummy_model)
 
 
-def test_extra_migration():
+def test_extra_migration(migrator: Migrator):
     dummy_model = {
         "foo": "foo",
         "migrations": [
@@ -82,7 +68,6 @@ def test_extra_migration():
         ],
     }
 
-    migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model)
 
     assert len(done_migrations) == 3
@@ -93,10 +78,9 @@ def test_extra_migration():
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_migrate_step():
+def test_migrate_step(migrator: Migrator):
     dummy_model = {}
 
-    migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=1)
 
     assert len(done_migrations) == 1
@@ -109,10 +93,9 @@ def test_migrate_step():
     assert "test" not in migrated_model
 
 
-def test_migrate_no_step():
+def test_migrate_no_step(migrator: Migrator):
     dummy_model = {}
 
-    migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=0)
 
     assert len(done_migrations) == 0
@@ -121,13 +104,12 @@ def test_migrate_no_step():
     assert len(migrated_model) == 1
 
 
-def test_run_migration_step():
+def test_run_migration_step(migrator: Migrator):
     dummy_model = {
         "foo": "foo",
         "migrations": [{"name": "1750840837_add_foo", "rollback": lambda x: x}],
     }
 
-    migrator = get_test_migrator()
     migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=1)
 
     assert len(done_migrations) == 1
@@ -138,8 +120,7 @@ def test_run_migration_step():
     assert "test" not in migrated_model
 
 
-def test_sync_rollback():
-    migrator = get_test_migrator()
+def test_sync_rollback(migrator: Migrator):
     dummy_model, _, _ = migrator.sync({})
     # only keep the first two migrations of the first group
     migrator._grouped_migrations[0] = migrator._grouped_migrations[0][:2]
@@ -155,8 +136,7 @@ def test_sync_rollback():
     assert "test" not in rollbacked_model
 
 
-def test_rollback_step_from_latest():
-    migrator = get_test_migrator()
+def test_rollback_step_from_latest(migrator: Migrator):
     dummy_model, _, _ = migrator.sync({})
     rollbacked_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=-1)
 
@@ -169,8 +149,7 @@ def test_rollback_step_from_latest():
     assert "test" not in rollbacked_model
 
 
-def test_rollback_step_from_middle():
-    migrator = get_test_migrator()
+def test_rollback_step_from_middle(migrator: Migrator):
     dummy_model, _, _ = migrator.sync({}, steps=2)
     rollbacked_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=-1)
 
@@ -181,29 +160,13 @@ def test_rollback_step_from_middle():
     assert "foo" in rollbacked_model
 
 
-def test_error_migration_past_final():
-    migrator = get_test_migrator()
+def test_error_migration_past_final(migrator: Migrator):
     with pytest.raises(IncompatibleCheckpointException):
         migrator.sync({}, steps=5)
 
 
-def final_rollback(_):
-    raise IncompatibleCheckpointException
-
-
-def _make_recent_ckpt():
-    return {
-        "foo": "foo",
-        "bar": "bar",
-        "test": "baz",
-        "migrations": [{"name": "1751895180_final", "rollback": final_rollback}],
-    }
-
-
-def test_migrate_recent_model():
-    migrator = get_test_migrator()
-    model = _make_recent_ckpt()
-    migrated_model, done_migrations, done_rollbacks = migrator.sync(model)
+def test_migrate_recent_model(migrator: Migrator, recent_ckpt: CkptType):
+    migrated_model, done_migrations, done_rollbacks = migrator.sync(recent_ckpt)
 
     assert len(done_migrations) == 1
     assert len(done_rollbacks) == 0
@@ -211,9 +174,8 @@ def test_migrate_recent_model():
     assert migrated_model.get("after", None) == "after"
 
 
-def test_stop_rollback_to_prev_final():
-    migrator = get_test_migrator()
-    model, _, _ = migrator.sync(_make_recent_ckpt())
+def test_stop_rollback_to_prev_final(migrator: Migrator, recent_ckpt: CkptType):
+    model, _, _ = migrator.sync(recent_ckpt)
     # only keep the first "final" migration
     migrator._grouped_migrations[-1] = migrator._grouped_migrations[-1][:1]
     assert model.get("after", None) == "after"
@@ -224,8 +186,7 @@ def test_stop_rollback_to_prev_final():
     assert "after" not in rollbacked_model
 
 
-def test_error_rollback_to_old():
-    migrator = get_test_migrator()
-    model, _, _ = migrator.sync(_make_recent_ckpt())
+def test_error_rollback_to_old(migrator: Migrator, recent_ckpt: CkptType):
+    model, _, _ = migrator.sync(recent_ckpt)
     with pytest.raises(IncompatibleCheckpointException):
         migrator._rollback(model, steps=2)
