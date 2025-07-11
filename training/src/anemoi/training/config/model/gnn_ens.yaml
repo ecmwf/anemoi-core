@@ -55,6 +55,7 @@ encoder:
   num_chunks: 1
   mlp_extra_layers: 0
   layer_kernels: ${model.layer_kernels}
+  shard_strategy: edges
 
 decoder:
   _target_: anemoi.models.layers.mapper.GNNBackwardMapper
@@ -64,6 +65,7 @@ decoder:
   num_chunks: 1
   mlp_extra_layers: 0
   layer_kernels: ${model.layer_kernels}
+  shard_strategy: edges
 
 trainable_parameters:
   data: 8

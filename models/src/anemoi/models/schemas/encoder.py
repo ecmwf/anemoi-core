@@ -21,6 +21,8 @@ from .common_components import TransformerModelComponent
 class GNNEncoderSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GNNForwardMapper"] = Field(..., alias="_target_")
     "GNN encoder object from anemoi.models.layers.mapper."
+    shard_strategy: str = Field(example="edges")
+    "Shard strategy to use for the model component. Default to 'edges'."
 
 
 class GraphTransformerEncoderSchema(TransformerModelComponent):
@@ -32,6 +34,8 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
     "Edge attributes to consider in the encoder features."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
+    shard_strategy: str = Field(example="edges")
+    "Shard strategy to use for the model component. Default to 'edges'."
 
 
 class TransformerEncoderSchema(TransformerModelComponent):
@@ -47,3 +51,5 @@ class TransformerEncoderSchema(TransformerModelComponent):
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)
     "Use alibi slopes for attention implementation. Default to False."
+    shard_strategy: str = Field(example="heads")
+    "Shard strategy to use for the model component. Default to 'heads'."
