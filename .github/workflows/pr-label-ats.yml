@@ -39,8 +39,8 @@ jobs:
       - name: Evaluate ATS labels
         run: |
           AUTHOR='${{ steps.check-pr.outputs.author }}'
-          if [ "$AUTHOR" == "DeployDuck" ]; then
-            echo "DeployDuck PR, skipping."
+          if [ "$AUTHOR" == "DeployDuck" ] || [ "$AUTHOR" == "pre-commit-ci[bot]" ]; then
+            echo "Bot PR, skipping."
             exit 0
           fi
           LABELS=$(echo '${{ steps.check-pr.outputs.labels }}' | jq -r '.[]')
