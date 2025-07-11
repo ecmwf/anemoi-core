@@ -12,10 +12,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from omegaconf import DictConfig
+
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.variable import GeneralVariableLossScaler
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
@@ -26,8 +27,16 @@ LOGGER = logging.getLogger(__name__)
 
 class VariableMaskingLossScaler(GeneralVariableLossScaler):
     """Class for masking variables in the loss."""
-    def __init__(self, variables:list[str], data_indices: IndexCollection, metadata_extractor: ExtractVariableGroupAndLevel, inverse:bool = False, norm: str | None = None, **kwargs) -> None:
-        weights =  {var: 0.0 for var in variables} if not inverse else {var: 1.0 for var in variables}
+
+    def __init__(
+        self,
+        variables: list[str],
+        data_indices: IndexCollection,
+        metadata_extractor: ExtractVariableGroupAndLevel,
+        inverse: bool = False,
+        norm: str | None = None,
+        **kwargs,
+    ) -> None:
+        weights = dict.fromkeys(variables, 0.0) if not inverse else dict.fromkeys(variables, 1.0)
         weights["default"] = 1.0 if not inverse else 0.0
         super().__init__(data_indices, DictConfig(weights), metadata_extractor, norm, **kwargs)
-
