@@ -69,6 +69,32 @@ preserved. For example:
 In this configuration, any node with the attribute `important_nodes` set
 will not be pruned, regardless of its connectivity status.
 
+*******************
+ SubsetNodesInArea
+*******************
+
+The ``SubsetNodesInArea`` post-processor is used to focus the graph on a
+specific geographic region. It removes all nodes that fall outside the 
+user-defined area, as well as any edges connected to those nodes. This is
+useful for restricting analysis or training to a particular spatial domain, 
+ensuring that only relevant nodes and their relationships are retained in 
+the graph.
+
+
+.. code:: yaml
+
+   nodes: ...
+   edges: ...
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.SubsetNodesInArea
+      nodes_name: [data, hidden]
+      area: [40, 10, 20, 30] # (north, west, south, east)
+
+The area is defined by four values representing the northern, western, southern, 
+and eastern boundaries, in that order: `(north, west, south, east)`. Only nodes 
+within these boundaries will be retained in the graph.
+
 ********************
  RestrictEdgeLength
 ********************
