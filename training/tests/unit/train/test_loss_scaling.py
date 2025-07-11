@@ -322,7 +322,7 @@ def test_variable_masking(
     assert scalers["variable_masking"][0][0] == len(vars_to_mask)
     assert not scalers["variable_masking"][1][indices_to_mask].any(), "Expected scalers for masked variables to be zero"
 
-    config.training.scalers.builders["variable_masking"].update(inverse=True)
+    config.training.scalers.builders["variable_masking"].update(invert=True)
     scalers, _ = create_scalers(
         config.training.scalers.builders,
         data_indices=data_indices,
