@@ -45,7 +45,7 @@ class NodeMaskingMixin:
         """Get cartesian coordinates of the source and target nodes.
 
         This method handles also the masking of source/target nodes if specified.
-        
+
         Attributes
         ----------
         source_nodes : NodeStorage
@@ -56,7 +56,7 @@ class NodeMaskingMixin:
         Return
         ------
         source_coords : torch.Tensor
-            Source coordinates. 
+            Source coordinates.
         target_coords : torch.Tensor
             Target coordinates.
         """
