@@ -13,11 +13,14 @@ import logging
 from enum import Enum
 from typing import Annotated
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
+from pydantic import PositiveFloat
+from pydantic import PositiveInt
 from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
@@ -44,6 +47,14 @@ class DefinedModels(str, Enum):
     ANEMOI_MODEL_ENC_HIERPROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_INTERPENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
     ANEMOI_MODEL_INTERPENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
+    ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
+    )
+    ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionModelEncProcDec"
+    ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"
+    )
+    ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
 
 
 class Model(BaseModel):
@@ -51,6 +62,8 @@ class Model(BaseModel):
     "Model object defined in anemoi.models.model."
     convert_: str = Field("all", alias="_convert_")
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
+    diffusion: Optional[DiffusionSchema] = Field(default=None)
+    "Diffusion configuration for diffusion models"
 
 
 class TrainableParameters(PydanticBaseModel):
@@ -157,6 +170,26 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class DiffusionNoiseSchema(PydanticBaseModel):
+    rho: PositiveFloat = Field(default=7.0, example=7.0)
+    "Time discretization parameter for Karras schedule"
+    sigma_max: PositiveFloat = Field(default=100.0, example=100.0)
+    "Maximum noise level"
+    sigma_min: PositiveFloat = Field(default=0.02, example=0.02)
+    "Minimum noise level"
+    sigma_data: PositiveFloat = Field(default=1.0, example=1.0)
+    "Data scaling parameter"
+    noise_channels: PositiveInt = Field(default=32, example=32)
+    "Number of channels for noise embedding"
+    noise_cond_dim: PositiveInt = Field(default=16, example=16)
+    "Dimension of noise conditioning"
+
+
+class DiffusionSchema(PydanticBaseModel):
+    noise: DiffusionNoiseSchema = Field(default_factory=DiffusionNoiseSchema)
+    "Noise configuration for diffusion models"
+
+
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
@@ -189,6 +222,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN decoder schema."
+    diffusion: Optional[DiffusionSchema] = None
+    "Diffusion configuration for diffusion models"
 
 
 class NoiseInjectorSchema(BaseModel):
@@ -209,6 +244,23 @@ class NoiseInjectorSchema(BaseModel):
 class EnsModelSchema(BaseModelSchema):
     noise_injector: NoiseInjectorSchema = Field(default_factory=list)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+    diffusion: Optional[DiffusionSchema] = None
+    "Diffusion configuration for diffusion models"
 
 
-ModelSchema = Union[BaseModelSchema, EnsModelSchema]
+class DiffusionModelSchema(BaseModelSchema):
+    diffusion: DiffusionSchema = Field(default_factory=DiffusionSchema)
+    "Diffusion configuration for diffusion models"
+
+    @model_validator(mode="after")
+    def validate_no_bounding_for_diffusion(self) -> "DiffusionModelSchema":
+        if self.bounding:
+            raise ValueError(
+                "Diffusion models do not support bounding layers. "
+                f"Found {len(self.bounding)} bounding configuration(s). "
+                "Please remove all bounding configurations for diffusion models."
+            )
+        return self
+
+
+ModelSchema = Union[BaseModelSchema, EnsModelSchema, DiffusionModelSchema]

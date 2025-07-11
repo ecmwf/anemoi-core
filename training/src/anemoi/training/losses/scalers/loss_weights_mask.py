@@ -41,6 +41,7 @@ class NaNMaskScaler(BaseDelayedScaler):
     def get_scaling_values(self) -> np.ndarray:
         return np.ones(tuple([1] * len(self.scale_dims)))
 
+    # SL: why does this go via numpy and cpu??? Here we should pass the processors directly instead of the model
     def get_delayed_scaling_values(self, model: AnemoiModelInterface) -> np.ndarray:
         """Get loss scaling.
 
@@ -54,5 +55,8 @@ class NaNMaskScaler(BaseDelayedScaler):
         for pre_processor in model.pre_processors.processors.values():
             if hasattr(pre_processor, "loss_mask_training"):
                 loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training.cpu().numpy()
-
+        if hasattr(model, "pre_processors_tendencies"):
+            for pre_processor in model.pre_processors_tendencies.processors.values():
+                if hasattr(pre_processor, "loss_mask_training"):
+                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training.cpu().numpy()
         return loss_weights_mask

@@ -92,6 +92,7 @@ class BaseDelayedScaler(BaseScaler):
     for scalers requiring information from the `model.pre_processors`.
     """
 
+    # SL: why does this go via numpy??? Here we should pass the processors directly instead of the model
     @abstractmethod
     def get_delayed_scaling_values(self, **kwargs) -> np.ndarray: ...
 

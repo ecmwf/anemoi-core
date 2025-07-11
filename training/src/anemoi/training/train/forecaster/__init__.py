@@ -7,8 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .diffusionforecaster import GraphDiffusionForecaster
+from .diffusionforecaster import GraphDiffusionTendForecaster
 from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
 
-__all__ = ["GraphEnsForecaster", "GraphForecaster", "GraphInterpolator"]
+__all__ = [
+    "GraphDiffusionForecaster",
+    "GraphDiffusionTendForecaster",
+    "GraphEnsForecaster",
+    "GraphForecaster",
+    "GraphInterpolator",
+]
