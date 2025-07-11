@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 
 class VariableMaskingLossScaler(GeneralVariableLossScaler):
     """Class for masking variables out in the loss.
-    
+
     Use `invert=True` to set this to only mask the specified
     variables in.
     """
