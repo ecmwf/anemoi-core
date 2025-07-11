@@ -97,10 +97,10 @@ class LogFFT2Distance(FunctionalLoss):
         target: torch.Tensor,
         squash: bool = True,
         *,
-        scalar_indices: tuple[int, ...] | None = None,
-        without_scalars: list[str] | list[int] | None = None,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        result = super().forward(pred, target, squash, scalar_indices=scalar_indices, without_scalars=without_scalars)
+        result = super().forward(pred, target, squash, scaler_indices=scaler_indices, without_scalers=without_scalers)
         return torch.sqrt(torch.mean(result))
 
 
@@ -136,16 +136,16 @@ class FourierCorrelationLoss(FunctionalLoss):
         target: torch.Tensor,
         squash: bool = True,
         *,
-        scalar_indices: tuple[int, ...] | None = None,
-        without_scalars: list[str] | list[int] | None = None,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
-        # scaling the scalar product with node weights
+        # scaling the scaler product with node weights
         scaled_scalar_product = super().forward(
             pred,
             target,
             squash,
-            scalar_indices=scalar_indices,
-            without_scalars=without_scalars,
+            scaler_indices=scaler_indices,
+            without_scalers=without_scalers,
         )
         # the rest of the loss implies summing over spatial dimensions
         numerator = (1 / 2) * torch.sum(
