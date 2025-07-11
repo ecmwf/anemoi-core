@@ -185,9 +185,6 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
         Name of the unconnected nodes to remove.
     area : tuple[float, float, float, float]
         Area of interest to crop the nodes, (north, west, south, east).
-    ignore: str, optional
-        Name of an attribute to ignore when removing nodes. Nodes with
-        this attribute set to True will not be removed.
     save_mask_indices_to_attr : str, optional
         Name of the attribute to save the mask indices. If provided,
         the indices of the kept nodes will be saved in this attribute.
@@ -209,24 +206,28 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
         nodes_name: Union[str, Iterable[str]],
         area: tuple[float, float, float, float],
         save_mask_indices_to_attr: str | None = None,
-        ignore: str | None = None,
     ) -> None:
         super().__init__(nodes_name, save_mask_indices_to_attr)
         self.area = area
-        self.ignore = ignore
+
+    @staticmethod
+    def points_inside_area(
+        lats: torch.Tensor, lons: torch.Tensor, area: tuple[float, float, float, float]
+    ) -> torch.Tensor:
+        north, west, south, east = area
+        west, east = west % 360, east % 360
+        in_lat_range = (lats >= south) & (lats <= north)
+        if west < east:
+            in_lon_range = (lons >= west) & (lons <= east)
+        else:
+            # e.g: W=-10,E=10. They will be mapped to west=350, east=10.
+            in_lon_range = (lons >= west) | (lons <= east)
+        return in_lat_range & in_lon_range
 
     def compute_mask(self, graph: HeteroData, nodes_name: str) -> torch.Tensor:
         """Compute the mask of connected nodes."""
-        nodes = graph[nodes_name]
-        connected_mask = torch.zeros(nodes.num_nodes, dtype=torch.bool)
-
-        if self.ignore is not None:
-            LOGGER.info(f"The nodes with {self.ignore}=True will not be removed.")
-            connected_mask[nodes[self.ignore].bool().squeeze()] = True
-
-        lat_in_area = (self.area[0] > nodes.x[:, 0] * 180 / torch.pi) & (nodes.x[:, 0] * 180 / torch.pi > self.area[2])
-        lon_in_area = (self.area[3] > nodes.x[:, 1] * 180 / torch.pi) & (nodes.x[:, 1] * 180 / torch.pi > self.area[1])
-        return lat_in_area & lon_in_area
+        latlons = graph[nodes_name].x * 180 / torch.pi
+        return SubsetNodesInArea.points_inside_area(lats=latlons[:, 0], lons=latlons[:, 1], area=self.area)
 
 
 class BaseSortEdgeIndex(PostProcessor, ABC):

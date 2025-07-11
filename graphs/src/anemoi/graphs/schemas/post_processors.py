@@ -43,8 +43,6 @@ class SubsetNodesInAreaSchema(BaseModel):
     "Area of interest to crop the nodes, (north, west, south, east)."
     nodes_name: Union[str, Iterable[str]]
     "Nodes from which to remove the unconnected nodes."
-    ignore: str = Field(example=None)
-    "Attribute name of nodes to be ignored."
     save_mask_indices_to_attr: str = Field(example=None)
     "New attribute name to store the mask indices."
 
