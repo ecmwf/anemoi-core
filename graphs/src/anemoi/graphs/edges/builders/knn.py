@@ -24,6 +24,8 @@ LOGGER = logging.getLogger(__name__)
 class KNNEdges(BaseDistanceEdgeBuilders):
     """Computes KNN based edges and adds them to the graph.
 
+    It uses as reference the target nodes.
+
     Attributes
     ----------
     source_name : str
@@ -87,6 +89,32 @@ class KNNEdges(BaseDistanceEdgeBuilders):
 
 
 class ReversedKNNEdges(KNNEdges):
+    """Computes KNN based edges and adds them to the graph.
+
+    It uses as reference the source nodes.
+
+    Attributes
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    num_nearest_neighbours : int
+        Number of nearest neighbours.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
+
+    Methods
+    -------
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
+    """
     def get_cartesian_node_coordinates(
         self, source_nodes: NodeStorage, target_nodes: NodeStorage
     ) -> tuple[torch.Tensor, torch.Tensor]:

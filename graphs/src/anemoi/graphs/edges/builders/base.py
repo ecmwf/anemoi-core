@@ -145,6 +145,7 @@ class BaseEdgeBuilder(ABC):
 
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
+    """Base class for edge builders based on distance."""
     @abstractmethod
     def _compute_edge_index_pyg(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
 
