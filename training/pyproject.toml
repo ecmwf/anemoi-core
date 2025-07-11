@@ -44,7 +44,7 @@ dependencies = [
   "anemoi-graphs>=0.5.2",
   "anemoi-models>=0.8",
   "anemoi-transform>=0.1.11",
-  "anemoi-utils[provenance]>=0.4.28",
+  "anemoi-utils[provenance,mlflow]>=0.4.28",
   "datashader>=0.16.3,<0.17; python_version<'3.10'",
   "datashader>=0.17; python_version>='3.10'",
   "einops>=0.6.1",
