@@ -18,8 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-
-from .base import BaseGraphModule
+from anemoi.training.train.tasks.base import BaseGraphModule
 
 LOGGER = logging.getLogger(__name__)
 
