@@ -68,7 +68,7 @@ class FilteringLossWrapper(BaseLoss):
             self._loss_scaler_specification = loss.scaler
             self.loss = loss
         else:
-            msg = f"Invalid loss type provided: {type(loss)}. Expected a str, dict/DicConfig, type, or instance of BaseLoss."
+            msg = f"Invalid loss type provided: {type(loss)}. Expected a str or dict or BaseLoss."
             raise TypeError(msg)
 
         self.predicted_variables = predicted_variables
