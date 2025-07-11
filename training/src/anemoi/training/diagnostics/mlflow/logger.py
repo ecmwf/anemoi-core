@@ -29,10 +29,10 @@ from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from anemoi.training.diagnostics.mlflow.auth import TokenAuth
-from anemoi.training.diagnostics.mlflow.utils import clean_config_params
-from anemoi.training.diagnostics.mlflow.utils import expand_iterables
-from anemoi.training.diagnostics.mlflow.utils import health_check
+from anemoi.utils.mlflow.auth import TokenAuth
+from anemoi.utils.mlflow.utils import clean_config_params
+from anemoi.utils.mlflow.utils import expand_iterables
+from anemoi.utils.mlflow.utils import health_check
 
 if TYPE_CHECKING:
     from argparse import Namespace
