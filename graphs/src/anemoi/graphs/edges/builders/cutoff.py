@@ -58,6 +58,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
     update_graph(graph, attrs_config)
         Update the graph with the edges.
     """
+
     def __init__(
         self,
         source_name: str,
@@ -205,6 +206,7 @@ class ReversedCutOffEdges(CutOffEdges):
     update_graph(graph, attrs_config)
         Update the graph with the edges.
     """
+
     def get_cartesian_node_coordinates(
         self, source_nodes: NodeStorage, target_nodes: NodeStorage
     ) -> tuple[torch.Tensor, torch.Tensor]:
