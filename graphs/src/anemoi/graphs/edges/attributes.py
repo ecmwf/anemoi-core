@@ -32,6 +32,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
     """Base class for edge attribute builders."""
 
     node_attr_name: str = None
+    norm_by_group: bool = False
 
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
@@ -72,8 +73,8 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
         return edge_features
 
-    def aggregate(self, edge_features: torch.Tensor) -> torch.Tensor:
-        return self.normalise(edge_features)
+    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+        return self.normalise(edge_features, index, dim_size)
 
 
 class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
@@ -169,3 +170,18 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     """Copy an attribute of the target node to the edge."""
 
     nodes_axis = NodesAxis.TARGET
+
+
+class GaussianDistanceWeights(EdgeLength):
+    """Gaussian distance weights."""
+
+    norm_by_group: bool = True  # normalise the gaussian weights by target node
+
+    def __init__(self, sigma: float = 1.0, norm: str = "l2", **kwargs) -> None:
+        self.sigma = sigma
+        super().__init__(norm=norm)
+
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        dists = super().compute(x_i, x_j)
+        gaussian_weights = torch.exp(-(dists**2) / (2 * self.sigma**2))
+        return gaussian_weights
