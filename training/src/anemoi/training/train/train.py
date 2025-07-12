@@ -169,6 +169,7 @@ class AnemoiTrainer:
         Loads truncation data.
         """
         truncation_data = {}
+        # for reference field truncation
         if self.config.hardware.files.truncation is not None:
             truncation_data["down"] = load_npz(
                 Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation),
@@ -177,6 +178,17 @@ class AnemoiTrainer:
             truncation_data["up"] = load_npz(
                 Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation_inv),
             )
+
+        # for loss decomposition
+        if self.config.hardware.files.truncation_loss is not None:
+            truncation_data["loss"] = []
+            for interp_data_loss in self.config.hardware.files.truncation_loss:
+                if interp_data_loss:
+                    truncation_data["loss"].append(
+                        load_npz(Path(self.config.hardware.paths.truncation, interp_data_loss)),
+                    )
+                else:
+                    truncation_data["loss"].append(None)
 
         return truncation_data
 
