@@ -40,6 +40,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR"] = "2"
     os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_JITTER"] = "1"
 
+    from anemoi.training.diagnostics.mlflow.logger import MAX_PARAMS_LENGTH
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
     resumed = config.training.run_id is not None
@@ -72,6 +73,8 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         )
         log_hyperparams = False
 
+    max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
+
     logger = AnemoiMLflowLogger(
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
         project_name=config.diagnostics.log.mlflow.project_name,
@@ -87,9 +90,9 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         log_hyperparams=log_hyperparams,
         authentication=config.diagnostics.log.mlflow.authentication,
         on_resume_create_child=config.diagnostics.log.mlflow.on_resume_create_child,
+        max_params_length=max_params_length,
     )
     config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
-
     logger.log_hyperparams(
         config_params,
         expand_keys=config.diagnostics.log.mlflow.expand_hyperparams,

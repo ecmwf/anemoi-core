@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
+from typing import Any
 from typing import Literal
 from typing import Optional
 from typing import Union
@@ -18,8 +19,11 @@ from typing import Union
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import ValidationError
+from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
+from anemoi.utils.schemas import PydanticBaseModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -248,7 +252,16 @@ class WandbSchema(BaseModel):
     "Username or team name where to send runs. This entity must exist before you can send runs there."
 
 
-class MlflowSchema(BaseModel):
+class MlflowSchema(PydanticBaseModel):
+    class Config:
+        """Pydantic BaseModel configuration."""
+
+        use_attribute_docstrings = True
+        use_enum_values = True
+        validate_assignment = True
+        validate_default = True
+        extra = "allow"  # Beware this allows extra fields in the config, typos are less likely to be spotted
+
     enabled: bool
     "Use MLflow logger."
     offline: bool
@@ -276,6 +289,21 @@ class MlflowSchema(BaseModel):
     "Keys to expand within params. Any key being expanded will have lists converted according to `expand_iterables`."
     http_max_retries: PositiveInt = Field(example=35)
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
+
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"max_params_length": int}
+        # "Specifies the maximum number of params to be logged to the MLflow server."
+        for extra_field in self.__pydantic_extra__:
+            if extra_field not in allowed_extras:
+                msg = f"Extra field {extra_field} not allowed for MlflowSchema."
+                raise ValidationError(msg)
+            if isinstance(extra_field, allowed_extras[extra_field]):
+                msg = f"Extra field {extra_field} should be of type {allowed_extras[extra_field]}."
+                raise ValidationError(msg)
+
+        return self
 
 
 class TensorboardSchema(BaseModel):

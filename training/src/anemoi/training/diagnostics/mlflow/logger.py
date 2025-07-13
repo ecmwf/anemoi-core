@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from mlflow.tracking import MlflowClient
 
 LOGGER = logging.getLogger(__name__)
-
 MAX_PARAMS_LENGTH = 2000
 
 
@@ -265,6 +264,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         authentication: bool | None = None,
         log_hyperparams: bool | None = True,
         on_resume_create_child: bool | None = True,
+        max_params_length: int | None = MAX_PARAMS_LENGTH,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -300,6 +300,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
             Whether to log hyperparameters, by default True
         on_resume_create_child: bool | None, optional
             Whether to create a child run when resuming a run, by default False
+        max_params_length: int | None, optional
+            Maximum number of params to be logged to Mlflow
         """
         self._resumed = resumed
         self._forked = forked
@@ -308,6 +310,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self._fork_run_server2server = None
         self._parent_run_server2server = None
         self._parent_dry_run = False
+        self._max_params_length = max_params_length
 
         enabled = authentication and not offline
         self.auth = TokenAuth(tracking_uri, enabled=enabled)
@@ -464,37 +467,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
             self._logged_metrics.clear()
         return super().experiment
 
-    @override
-    @rank_zero_only
-    def log_metrics(self) -> None:
-        #super().log_metrics()
-        assert rank_zero_only.rank == 0, "experiment tried to log from global_rank != 0"
-        from mlflow.entities import Metric
-        metrics = _add_prefix(metrics, self._prefix, self.LOGGER_JOIN_CHAR)
-        metrics_list: list[Metric] = []
-        timestamp_ms = int(time() * 1000)
-        for k, v in metrics.items():
-            if isinstance(v, str):
-                log.warning(f"Discarding metric with string value {k}={v}.")
-                continue
-            new_k = re.sub("[^a-zA-Z0-9_/. -]+", "", k)
-            if k != new_k:
-                rank_zero_warn(
-                    "MLFlow only allows '_', '/', '.' and ' ' special characters in metric name."
-                    f" Replacing {k} with {new_k}.",
-                    category=RuntimeWarning,
-                )
-                k = new_k
-
-            metric_id = (k, step or 0)
-            if metric_id in self._logged_metrics:
-                continue
-            self._logged_metrics.add(metric_id)
-
-            metrics_list.append(Metric(key=k, value=v, timestamp=timestamp_ms, step=step or 0))
-
-        self.experiment.log_batch(run_id=self.run_id, metrics=metrics_list, **self._log_batch_kwargs)
-
     @rank_zero_only
     def log_system_metrics(self) -> None:
         """Log system metrics (CPU, GPU, etc)."""
@@ -577,6 +549,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             params,
             expand_keys=expand_keys,
             log_hyperparams=self._flag_log_hparams,
+            max_params_length=self._max_params_length,
         )
 
     @rank_zero_only
@@ -601,6 +574,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         expand_keys: list[str] | None = None,
         log_hyperparams: bool | None = True,
         clean_params: bool = True,
+        max_params_length: int | None = MAX_PARAMS_LENGTH,
     ) -> None:
         """Log hyperparameters to MLflow server.
 
@@ -622,6 +596,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
             by default None.
         log_hyperparams : bool | None, optional
             Whether to log hyperparameters, by default True.
+        max_params_length: int | None, optional
+            Maximum number of params to be logged to Mlflow
         """
         if log_hyperparams:
             params = _convert_params(params)
@@ -658,9 +634,9 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 expanded_params = clean_config_params(expanded_params)
 
             LOGGER.info("Logging %s parameters", len(expanded_params))
-
-            if len(expanded_params) > MAX_PARAMS_LENGTH:
-                LOGGER.warning("Logging a large number of parameters to %s", len(expanded_params))
+            if len(expanded_params) > max_params_length:
+                error_msg = f"Too many params: {len(expanded_params)} > {max_params_length}"
+                raise ValueError(error_msg)
 
             # Truncate parameter values.
             params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
