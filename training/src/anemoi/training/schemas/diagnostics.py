@@ -21,6 +21,7 @@ from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 from pydantic import ValidationError
 from pydantic import model_validator
+from pydantic import root_validator
 
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas import PydanticBaseModel
@@ -250,6 +251,12 @@ class WandbSchema(BaseModel):
     "Whether to log the hyper parameters."
     entity: Union[str, None] = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
+
+    @root_validator(pre=True)
+    def clean_entity(self, values: dict) -> dict:
+        if values["enabled"] is False:
+            values["entity"] = None
+        return values
 
 
 class MlflowSchema(PydanticBaseModel):
