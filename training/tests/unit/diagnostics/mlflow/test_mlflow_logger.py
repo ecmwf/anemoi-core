@@ -1,17 +1,30 @@
+from unittest.mock import Mock
+
 import pytest
 
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
 
+@pytest.fixture(scope="session")
+def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> str:
+    # returns a session-scoped temporary directory
+    return str(tmp_path_factory.mktemp("mlruns"))
+
+
 @pytest.fixture
-def default_logger() -> AnemoiMLflowLogger:
-    return AnemoiMLflowLogger(
+def default_logger(tmp_path: str) -> AnemoiMLflowLogger:
+    logger = AnemoiMLflowLogger(
         experiment_name="test_experiment",
         run_name="test_run",
         offline=True,
         tracking_uri=None,
         authentication=False,
+        save_dir=tmp_path,
     )
+    mock_client = Mock()
+    logger._mlflow_client = mock_client
+
+    return logger
 
 
 def test_mlflowlogger_metric_deduplication(default_logger: AnemoiMLflowLogger) -> None:
