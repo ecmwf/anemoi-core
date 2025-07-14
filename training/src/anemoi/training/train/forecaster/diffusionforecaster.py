@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import einops
 import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -379,7 +378,11 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             assert rollout_step < 1, "multi-step rollout not supported"
 
             x_ref = batch[:, self.multi_step + rollout_step - 1, ...]
-            x_ref = self.apply_reference_state_truncation(x_ref)
+            x_ref = self.model.model.apply_reference_state_truncation(
+                x_ref,
+                self.grid_shard_shapes,
+                self.model_comm_group,
+            )
 
             tendency_target = self.model.model.compute_tendency(
                 batch[:, self.multi_step + rollout_step, ...],
@@ -451,21 +454,3 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
-
-    def apply_reference_state_truncation(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply reference state truncation to the input tensor.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor with shape (bs, ens, latlon, nvar)
-
-        Returns
-        -------
-        torch.Tensor
-            Truncated tensor with same shape as input
-        """
-        bs, ens, _, _ = x.shape
-        x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-        x_trunc = self.model.model._apply_truncation(x_trunc, self.grid_shard_shapes, self.model_comm_group)
-        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)

@@ -713,22 +713,40 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]:
-        """Prepare batch for tendency prediction.
+        """Prepare batch before sampling.
 
-        Override to return both x and x_t0 for tendency calculation.
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Input batch after pre-processing
+        pre_processors : nn.Module
+            Pre-processing module (already applied)
+        multi_step : int
+            Number of input timesteps
+        model_comm_group : Optional[ProcessGroup]
+            Process group for distributed training
+        **kwargs
+            Additional parameters for subclasses
+
+        Returns
+        -------
+        tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]
+            Prepared input tensor(s) and grid shard shapes.
+            Can return a single tensor or tuple of tensors for sampling input.
         """
-        # Get standard preprocessing from parent
-        x, grid_shard_shapes = super()._before_sampling(batch, pre_processors, multi_step, model_comm_group, **kwargs)
-
-        # Get x_t0 for tendency calculation
+        # Dimensions are batch, timesteps, grid, variables
+        x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
         x_t0 = batch[:, -1, None, ...]  # add dummy ensemble dimension
 
-        # Shard x_t0 if needed
-        if model_comm_group is not None and grid_shard_shapes is not None:
+        grid_shard_shapes = None
+        if model_comm_group is not None:
+            shard_shapes = get_shard_shapes(x, -2, model_comm_group)
+            grid_shard_shapes = [shape[-2] for shape in shard_shapes]
+            x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+
             shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group)
             x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
 
-        # Return tuple of (x, x_t0) for sampling
         return (x, x_t0), grid_shard_shapes
 
     def _after_sampling(
@@ -753,10 +771,13 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         else:
             raise ValueError("Expected before_sampling_data to contain x_t0")
 
+        # truncate x_t0 if needed
+        x_t0 = self.apply_reference_state_truncation(x_t0, grid_shard_shapes, model_comm_group)
+
         # Convert tendency to state
         out = self.add_tendency_to_state(
             x_t0,
-            out,  # this is the sampled tendency
+            out,
             post_processors,
             post_processors_tendencies,
         )
@@ -766,3 +787,23 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
 
         return out
+
+    def apply_reference_state_truncation(
+        self, x: torch.Tensor, grid_shard_shapes: list, model_comm_group: ProcessGroup
+    ) -> torch.Tensor:
+        """Apply reference state truncation to the input tensor.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape (bs, ens, latlon, nvar)
+
+        Returns
+        -------
+        torch.Tensor
+            Truncated tensor with same shape as input
+        """
+        bs, ens, _, _ = x.shape
+        x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
+        x_trunc = self.model.model._apply_truncation(x_trunc, grid_shard_shapes, model_comm_group)
+        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
