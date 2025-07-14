@@ -62,7 +62,7 @@ class BaseEdgeBuilder(ABC):
         """Get the edge index."""
         source_nodes, target_nodes = self.prepare_node_data(graph)
         edge_index = self.compute_edge_index(source_nodes, target_nodes)
-        return edge_index.to(self.device)
+        return edge_index.to(dtype=torch.int32, device=self.device)
 
     def register_edges(self, graph: HeteroData) -> HeteroData:
         """Register edges in the graph.
