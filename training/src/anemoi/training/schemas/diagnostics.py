@@ -15,7 +15,6 @@ from typing import Any
 from typing import Literal
 from typing import Optional
 from typing import Union
-from typing import typing_type
 
 from pydantic import Field
 from pydantic import NonNegativeInt
@@ -254,7 +253,7 @@ class WandbSchema(BaseModel):
     "Username or team name where to send runs. This entity must exist before you can send runs there."
 
     @root_validator(pre=True)
-    def clean_entity(cls: typing_type[WandbSchema], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+    def clean_entity(cls: type[WandbSchema], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["entity"] = None
         return values
