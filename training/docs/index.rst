@@ -37,6 +37,7 @@ This package provides the *Anemoi* training functionality.
    user-guide/hydra-intro
    user-guide/configuring
    user-guide/kcrps-set-up
+   user-guide/diffusion-set-up
    user-guide/training
    user-guide/models
    user-guide/tracking

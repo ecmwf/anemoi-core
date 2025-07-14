@@ -10,6 +10,7 @@ anemoi-training:
 #. Deterministic Forecasting (GraphForecaster)
 #. Ensemble Forecasting (GraphEnsForecaster)
 #. Time Interpolation (GraphInterpolator)
+#. Diffusion-based Forecasting (GraphDiffusionForecaster)
 
 The model tasks specify the training objective and are specified in the
 configuration through ``training.model_task``. They are our
@@ -35,7 +36,7 @@ For detailed instructions on creating models, see the
 .. note::
 
    Currently, the GNN model type is not supported with the Ensemble
-   Forecasting model task.
+   Forecasting model task and the Diffusion Forecasting model task.
 
 ************
  Processors
@@ -161,4 +162,5 @@ configuration:
       ensemble_size_per_device: 4
 
 This determines how many ensemble members are generated per device
-during training.
+during training. Effective ensemble size is then the number of ensemble
+members per device times the number of GPUs per ensemble.
