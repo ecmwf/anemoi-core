@@ -215,7 +215,14 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
         lats: torch.Tensor, lons: torch.Tensor, area: tuple[float, float, float, float]
     ) -> torch.Tensor:
         north, west, south, east = area
-        west, east = west % 360, east % 360
+
+        # Convert area limits to [-90, 90]x[0,360]
+        west, east = west % 360, (east - 1) % 360 + 1
+        assert (west - east) % 360 != 0, "West and East limits must be different."
+
+        # Convert lat & lons to [-90, 90]x[0,360)
+        lons %= 360
+
         in_lat_range = (lats >= south) & (lats <= north)
         if west < east:
             in_lon_range = (lons >= west) & (lons <= east)
@@ -227,7 +234,9 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
     def compute_mask(self, graph: HeteroData, nodes_name: str) -> torch.Tensor:
         """Compute the mask of connected nodes."""
         latlons = graph[nodes_name].x * 180 / torch.pi
-        return SubsetNodesInArea.points_inside_area(lats=latlons[:, 0], lons=latlons[:, 1], area=self.area)
+        mask = SubsetNodesInArea.points_inside_area(lats=latlons[:, 0], lons=latlons[:, 1], area=self.area)
+        assert mask.any(), f"The area selected does not contain any {nodes_name} node."
+        return mask
 
 
 class BaseSortEdgeIndex(PostProcessor, ABC):
