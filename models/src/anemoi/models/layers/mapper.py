@@ -42,7 +42,7 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
-# Number of chunks used in inference (https://github.com/ecmwf/anemoi-models/pull/46)
+# Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/406)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
 
@@ -279,7 +279,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             out_channels=hidden_dim,
             num_heads=num_heads,
             edge_dim=self.edge_dim,
-            num_chunks=num_chunks,
             qk_norm=qk_norm,
             layer_kernels=self.layer_factory,
             shard_strategy=shard_strategy,
@@ -341,7 +340,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         return x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst
 
-    def run_processor_chunk(
+    def run_processor_chunk_edge_sharding(
         self,
         x: tuple[Tensor, Tensor],
         dst_chunk: Tensor,
@@ -417,7 +416,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         for dst_chunk in dst_chunks:
             out_dst[dst_chunk] = checkpoint(
-                self.run_processor_chunk,
+                self.run_processor_chunk_edge_sharding,
                 (x_src, x_dst),
                 dst_chunk,
                 edge_attr,
