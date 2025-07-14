@@ -211,4 +211,11 @@ class EnsModelSchema(BaseModelSchema):
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
-ModelSchema = Union[BaseModelSchema, EnsModelSchema]
+class HierarchicalModelSchema(BaseModelSchema):
+    enable_hierarchical_level_processing: bool = Field(default=False)
+    "Toggle to do message passing at every downscaling and upscaling step"
+    level_process_num_layers: NonNegativeInt = Field(default=1)
+    "Number of message passing steps at each level"
+
+
+ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema]
