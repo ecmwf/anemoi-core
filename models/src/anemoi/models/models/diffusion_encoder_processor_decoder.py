@@ -805,5 +805,5 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         bs, ens, _, _ = x.shape
         x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-        x_trunc = self.model.model._apply_truncation(x_trunc, grid_shard_shapes, model_comm_group)
+        x_trunc = self._apply_truncation(x_trunc, grid_shard_shapes, model_comm_group)
         return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
