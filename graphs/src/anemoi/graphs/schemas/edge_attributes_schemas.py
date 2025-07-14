@@ -23,6 +23,7 @@ class ImplementedEdgeAttributeSchema(str, Enum):
     edge_length = "anemoi.graphs.edges.attributes.EdgeLength"
     edge_dirs = "anemoi.graphs.edges.attributes.EdgeDirection"
     azimuth = "anemoi.graphs.edges.attributes.Azimuth"
+    gaussian_weights = "anemoi.graphs.edges.attributes.GaussianDistanceWeights"
 
 
 class BaseEdgeAttributeSchema(BaseModel):
