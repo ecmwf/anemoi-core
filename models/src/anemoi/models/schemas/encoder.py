@@ -7,12 +7,15 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Any
 from typing import Literal
 from typing import Union
 
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import ValidationError
+from pydantic import model_validator
 
 from .common_components import GNNModelComponent
 from .common_components import TransformerModelComponent
@@ -32,6 +35,20 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
     "Edge attributes to consider in the encoder features."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
+
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"shard_strategy": str}
+        for extra_field in self.__pydantic_extra__:
+            if extra_field not in allowed_extras:
+                msg = f"Extra field {extra_field} not allowed for GraphTransformerEncoderSchema."
+                raise ValidationError(msg)
+            if not isinstance(extra_field, allowed_extras[extra_field]):
+                msg = f"Extra field {extra_field} should be of type {allowed_extras[extra_field]}."
+                raise ValidationError(msg)
+
+        return self
 
 
 class TransformerEncoderSchema(TransformerModelComponent):
