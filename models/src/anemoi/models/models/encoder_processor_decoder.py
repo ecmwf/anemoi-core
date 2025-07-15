@@ -412,9 +412,8 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Model output (after post-processing)
         """
-        batch = pre_processors(batch, in_place=False)
-
         with torch.no_grad():
+            batch = pre_processors(batch, in_place=False)
             assert (
                 len(batch.shape) == 4
             ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
