@@ -382,7 +382,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
         )
 
         # Track logged metrics to prevent duplicate logs
-        self._logged_metrics = FixedLengthSet(maxlen=1000)  # Track (key, step)
+        # 2000 has been chosen as this should contain metrics form many steps
+        self._logged_metrics = FixedLengthSet(maxlen=2000)  # Track (key, step)
 
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
         """Check if the parent run is a dry run.
