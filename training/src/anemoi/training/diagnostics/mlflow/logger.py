@@ -381,6 +381,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
+        # Track logged metrics to prevent duplicate logs
         self._logged_metrics = FixedLengthSet(maxlen=100)  # Track (key, step)
 
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
@@ -488,6 +489,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
         return run_id, run_name, tags
 
+    @override
     @property
     def experiment(self) -> MLFlowLogger.experiment:
         if rank_zero_only.rank == 0:
