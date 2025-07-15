@@ -31,7 +31,6 @@ def test_mlflowlogger_metric_deduplication(default_logger: AnemoiMLflowLogger) -
 
     default_logger.log_metrics({"foo": 1.0}, step=5)
     default_logger.log_metrics({"foo": 1.0}, step=5)  # duplicate
-
     # Only the first metric should be logged
     assert len(default_logger._logged_metrics) == 1
     assert next(iter(default_logger._logged_metrics))[0] == "foo"  # key

@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING
@@ -46,6 +47,34 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 MAX_PARAMS_LENGTH = 2000
+
+
+class FixedLengthSet:
+    def __init__(self, maxlen: int):
+        self.maxlen = maxlen
+        self._deque = deque(maxlen=maxlen)
+        self._set = set()
+
+    def add(self, item: float) -> None:
+        if item in self._set:
+            return  # Already present, do nothing
+        if len(self._deque) == self.maxlen:
+            oldest = self._deque.popleft()
+            self._set.remove(oldest)
+        self._deque.append(item)
+        self._set.add(item)
+
+    def __contains__(self, item: float):
+        return item in self._set
+
+    def __len__(self):
+        return len(self._set)
+
+    def __iter__(self):
+        return iter(self._deque)
+
+    def __repr__(self):
+        return f"{list(self._deque)}"
 
 
 class LogsMonitor:
@@ -352,7 +381,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
-        self._logged_metrics = set()  # Track (key, step)
+        self._logged_metrics = FixedLengthSet(maxlen=100)  # Track (key, step)
 
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
         """Check if the parent run is a dry run.
@@ -463,19 +492,19 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def experiment(self) -> MLFlowLogger.experiment:
         if rank_zero_only.rank == 0:
             self.auth.authenticate()
-        if self._run_id is None:
-            self._logged_metrics.clear()
         return super().experiment
 
     @override
     @rank_zero_only
     def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
+        cleaned_metrics = metrics.copy()
         for k in metrics:
             metric_id = (k, step or 0)
             if metric_id in self._logged_metrics:
+                cleaned_metrics.pop(k)
                 continue
             self._logged_metrics.add(metric_id)
-        return super().log_metrics(metrics=metrics, step=step)
+        return super().log_metrics(metrics=cleaned_metrics, step=step)
 
     @rank_zero_only
     def log_system_metrics(self) -> None:
