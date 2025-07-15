@@ -17,6 +17,7 @@ from typing import Literal
 from typing import Union
 
 from pydantic import AfterValidator
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -307,6 +308,7 @@ StrategySchemas = Union[BaseDDPStrategySchema, DDPEnsGroupStrategyStrategySchema
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
     run_id: Union[str, None] = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
     fork_run_id: Union[str, None] = Field(example=None)
@@ -345,8 +347,6 @@ class BaseTrainingSchema(BaseModel):
     "List of validation metrics configurations."
     variable_groups: dict[str, Union[str, list[str], dict[str, Union[str, bool, list[str]]]]]
     "Groups for variable loss scaling"
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
     max_epochs: Union[PositiveInt, None] = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
     max_steps: PositiveInt = 150000
@@ -360,19 +360,23 @@ class BaseTrainingSchema(BaseModel):
 
 
 class ForecasterSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.forecaster.GraphForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.tasks.GraphForecaster",] = Field(..., alias="model_task")
     "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
 
 
 class ForecasterEnsSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.forecaster.GraphEnsForecaster",] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
     ensemble_size_per_device: PositiveInt = Field(example=1)
     "Number of ensemble member per device"
 
 
 class InterpolationSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.forecaster.GraphInterpolator"] = Field(..., alias="model_task")
+    model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
     "Training objective."
     explicit_times: ExplicitTimes
     "Time indices for input and output."
@@ -380,4 +384,17 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
-TrainingSchema = Union[ForecasterSchema, ForecasterEnsSchema, InterpolationSchema]
+class AutoencoderSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
+    "Training objective."
+
+
+TrainingSchema = Annotated[
+    Union[
+        ForecasterSchema,
+        ForecasterEnsSchema,
+        InterpolationSchema,
+        AutoencoderSchema,
+    ],
+    Discriminator("model_task"),
+]

@@ -20,4 +20,5 @@ class DataModuleSchema(PydanticBaseModel):
     target_: Literal[
         "anemoi.training.data.datamodule.AnemoiEnsDatasetsDataModule",
         "anemoi.training.data.datamodule.AnemoiDatasetsDataModule",
+        "anemoi.training.data.datamodule.AnemoiAutoencoderDatasetsDataModule",
     ] = Field(..., alias="_target_")
