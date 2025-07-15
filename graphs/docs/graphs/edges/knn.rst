@@ -25,3 +25,16 @@ YAML configuration:
 
    The ``KNNEdges`` method is recommended for the decoder edges, to
    connect all target nodes with the surrounding source nodes.
+
+There is also a reversed KNN edges variant that will connect each target
+node to its k nearest source nodes, but the resulting edge direction is
+still from the source nodes to the target nodes.
+
+.. code:: yaml
+
+   edges:
+     -  source_name: source
+        target_name: target
+        edge_builders:
+        - _target_: anemoi.graphs.edges.ReversedKNNEdges
+          num_nearest_neighbours: 3 :contentReference[oaicite:5]{index=5}
