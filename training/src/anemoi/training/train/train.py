@@ -284,7 +284,7 @@ class AnemoiTrainer:
         return get_tensorboard_logger(self.config)
 
     @cached_property
-    def last_checkpoint(self) -> str | None:
+    def last_checkpoint(self) -> Path | None:
         """Path to the last checkpoint."""
         if not self.start_from_checkpoint:
             return None
@@ -295,8 +295,9 @@ class AnemoiTrainer:
             fork_id or self.lineage_run,
             self.config.hardware.files.warm_start or "last.ckpt",
         )
+
         # Check if the last checkpoint exists
-        if Path(checkpoint).exists():
+        if checkpoint.exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
             return checkpoint
 
@@ -501,6 +502,7 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
+
         trainer.fit(
             self.model,
             datamodule=self.datamodule,

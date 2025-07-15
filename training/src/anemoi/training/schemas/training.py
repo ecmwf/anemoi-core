@@ -127,6 +127,14 @@ class GeneralVariableLossScalerSchema(BaseModel):
     "Weight of each variable."  # Check keys (variables) are read ???
 
 
+class VariableMaskingScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.VariableMaskingLossScaler"] = Field(..., alias="_target_")
+    variables: list[str] = Field(defaultexample=["tp"])
+    "Variables to compute the loss over."
+    invert: bool = Field(examples=False)
+    "Flag to invert the variable mask."
+
+
 class NaNMaskScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
 
@@ -194,6 +202,7 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 ScalerSchema = Union[
     GeneralVariableLossScalerSchema,
     VariableLevelScalerSchema,
+    VariableMaskingScalerSchema,
     TendencyScalerSchema,
     NaNMaskScalerSchema,
     GraphNodeAttributeScalerSchema,
@@ -334,7 +343,7 @@ class BaseTrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations."
-    variable_groups: dict[str, Union[str, list[str]]]
+    variable_groups: dict[str, Union[str, list[str], dict[str, Union[str, bool, list[str]]]]]
     "Groups for variable loss scaling"
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."

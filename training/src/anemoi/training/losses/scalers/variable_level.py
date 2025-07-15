@@ -18,9 +18,9 @@ import numpy as np
 from anemoi.training.losses.scalers.variable import BaseVariableLossScaler
 
 if TYPE_CHECKING:
-    from omegaconf import DictConfig
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,12 +30,11 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
 
     def __init__(
         self,
-        group_config: DictConfig,
         data_indices: IndexCollection,
         group: str,
         y_intercept: float,
         slope: float,
-        metadata_variables: dict | None = None,
+        metadata_extractor: ExtractVariableGroupAndLevel,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -43,8 +42,6 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
 
         Parameters
         ----------
-        group_config : DictConfig
-            Configuration of groups for variable loss scaling.
         data_indices : IndexCollection
             Collection of data indices.
         group : str
@@ -53,12 +50,12 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
             Y-axis shift of scaling function.
         slope : float
             Slope of scaling function.
-        metadata_variables : dict
-            Metadata of the dataset.
+        metadata_extractor : ExtractVariableGroupAndLevel
+            Metadata extractor for variable groups and levels.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(group_config, data_indices, metadata_variables=metadata_variables, norm=norm)
+        super().__init__(data_indices, metadata_extractor=metadata_extractor, norm=norm)
         del kwargs
         self.scaling_group = group
         self.y_intercept = y_intercept
@@ -87,7 +84,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
             "Variable Level Scaling: Applying %s scaling to %s variables (%s)",
             self.__class__.__name__,
             self.scaling_group,
-            self.variable_metadata_extractor.get_group_variables(self.scaling_group),
+            self.variable_metadata_extractor.get_group_specification(self.scaling_group),
         )
         LOGGER.info("with slope = %s and y-intercept/minimum = %s.", self.slope, self.y_intercept)
 
@@ -128,21 +125,19 @@ class NoVariableLevelScaler(BaseVariableLevelScaler):
 
     def __init__(
         self,
-        group_config: DictConfig,
         data_indices: IndexCollection,
         group: str,
-        metadata_variables: dict | None = None,
+        metadata_extractor: ExtractVariableGroupAndLevel,
         **kwargs,
     ) -> None:
         """Initialise Scaler with constant scaling of 1."""
         del kwargs
         super().__init__(
-            group_config,
             data_indices,
             group,
             y_intercept=1.0,
             slope=0.0,
-            metadata_variables=metadata_variables,
+            metadata_extractor=metadata_extractor,
         )
 
     @staticmethod
