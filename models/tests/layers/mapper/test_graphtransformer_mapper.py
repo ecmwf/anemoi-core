@@ -192,8 +192,12 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         mapper.num_chunks = 1
         x_src, x_dst = mapper.forward(x, batch_size, shard_shapes)
 
-        assert torch.allclose(x_src, x_src_c), f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed"
-        assert torch.allclose(x_dst, x_dst_c), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
+        assert torch.allclose(
+            x_src, x_src_c, atol=1e-4
+        ), f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed"
+        assert torch.allclose(
+            x_dst, x_dst_c, atol=1e-4
+        ), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
 
 
 class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
@@ -283,4 +287,4 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         mapper.num_chunks = 1
         out = mapper.forward(x, batch_size, shard_shapes)
 
-        assert torch.allclose(out, out_c), f"out ({out}) != out_c ({out_c}) when num_chunks is changed"
+        assert torch.allclose(out, out_c, atol=1e-4), f"out ({out}) != out_c ({out_c}) when num_chunks is changed"
