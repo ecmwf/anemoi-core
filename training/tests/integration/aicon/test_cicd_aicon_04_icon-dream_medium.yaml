@@ -194,7 +194,6 @@ model:
     layer_kernels:
       Activation:
         _target_: torch.nn.GELU
-    shard_strategy: edges
   decoder:
     _target_: anemoi.models.layers.mapper.GNNBackwardMapper
     trainable_size: ${model.trainable_parameters.hidden2data}
@@ -205,7 +204,6 @@ model:
     layer_kernels:
       Activation:
         _target_: torch.nn.GELU
-    shard_strategy: edges
   attributes:
     edges:
     - edge_length

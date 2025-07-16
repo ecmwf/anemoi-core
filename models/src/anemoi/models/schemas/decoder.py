@@ -7,12 +7,14 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Any
 from typing import Literal
 from typing import Union
 
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import model_validator
 
 from .common_components import GNNModelComponent
 from .common_components import TransformerModelComponent
@@ -21,8 +23,6 @@ from .common_components import TransformerModelComponent
 class GNNDecoderSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GNNBackwardMapper"] = Field(..., alias="_target_")
     "GNN decoder object from anemoi.models.layers.mapper."
-    shard_strategy: str = Field(example="edges")
-    "Shard strategy to use for the model component. Default to 'edges'."
 
 
 class GraphTransformerDecoderSchema(TransformerModelComponent):
@@ -36,8 +36,21 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Normalize the query and key vectors. Default to False."
     initialise_data_extractor_zero: bool = Field(example=False)
     "Initialise the data extractor with zeros. Default to False."
-    shard_strategy: str = Field(example="edges")
-    "Shard strategy to use for the model component. Default to 'edges'."
+
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"shard_strategy": str}
+        extras = getattr(self, "__pydantic_extra__", {}) or {}
+        for extra_field, value in extras.items():
+            if extra_field not in allowed_extras:
+                msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
+                raise ValueError(msg)
+            if not isinstance(value, allowed_extras[extra_field]):
+                msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
+                raise TypeError(msg)
+
+        return self
 
 
 class TransformerDecoderSchema(TransformerModelComponent):
@@ -55,5 +68,3 @@ class TransformerDecoderSchema(TransformerModelComponent):
     "Use alibi slopes for attention implementation. Default to False."
     use_rotary_embeddings: bool = Field(example=False)
     "Use rotary embeddings for attention implementation. Default to False."
-    shard_strategy: str = Field(example="heads")
-    "Shard strategy to use for the model component. Default to 'heads'."
