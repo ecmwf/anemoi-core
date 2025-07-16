@@ -254,6 +254,8 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
             Strategy to shard tensors, by default "edges"
+        shard_strategy : str, optional
+            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -281,6 +283,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             edge_dim=self.edge_dim,
             qk_norm=qk_norm,
             layer_kernels=self.layer_factory,
+            shard_strategy=shard_strategy,
             shard_strategy=shard_strategy,
         )
 

@@ -719,7 +719,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         nodes_new_dst = self.run_node_dst_mlp(out, **layer_kwargs) + out
 
         if self.update_src_nodes:
-            # compute nodes_new_src = self.run_node_src_mlp(out) + out in chunks:
             nodes_new_src = self.run_node_src_mlp(x_skip[0], **layer_kwargs) + x_skip[0]
         else:
             nodes_new_src = x_skip[0]
