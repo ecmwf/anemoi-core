@@ -25,6 +25,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseNodeAttribute(ABC, NormaliserMixin):
     """Base class for the weights of the nodes."""
 
+    norm_by_group: bool = False
+
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         self.norm = norm
         self.dtype = getattr(torch, dtype)

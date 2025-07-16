@@ -26,6 +26,8 @@ from anemoi.training.utils.enums import TensorDim
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.models.data_indices.collection import IndexCollection
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -73,6 +75,9 @@ class BaseLoss(nn.Module, ABC):
     @functools.wraps(ScaleTensor.update_scaler)
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
+
+    def set_data_indices(self, data_indices: IndexCollection) -> None:
+        """Hook to set the data indices for the loss."""
 
     def scale(
         self,
