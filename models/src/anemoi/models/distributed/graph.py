@@ -91,7 +91,7 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     return _ReduceParallelSection.apply(input_, mgroup)
 
 
-def sync_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup) -> Tensor:
+def sync_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup, gather_in_fwd: bool = True) -> Tensor:
     """Sync tensor.
 
     Perform a gather in the forward pass and an allreduce followed by a split in the backward pass.
@@ -106,13 +106,15 @@ def sync_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup) -
         Shapes of sharded Tensors
     mgroup : ProcessGroup
         model communication group
+    gather_in_fwd : bool
+        perform gather in forward, default True
 
     Returns
     -------
     Tensor
         Synced tensor.
     """
-    return _SyncParallelSection.apply(input_, dim, shapes, mgroup)
+    return _SyncParallelSection.apply(input_, dim, shapes, mgroup, gather_in_fwd)
 
 
 def reduce_shard_tensor(input_: Tensor, dim: int, shapes: tuple, mgroup: ProcessGroup) -> Tensor:
@@ -189,11 +191,12 @@ class _SyncParallelSection(torch.autograd.Function):
     """Sync the input from parallel section."""
 
     @staticmethod
-    def forward(ctx, input_, dim_, shapes_, mgroup_):
+    def forward(ctx, input_, dim_, shapes_, mgroup_, gather_in_fwd_=True):
         ctx.dim = dim_
         ctx.comm_group = mgroup_
         ctx.shapes = shapes_
-        if mgroup_:
+        ctx.gather_in_fwd = gather_in_fwd_
+        if mgroup_ and gather_in_fwd_:
             return _gather(input_, dim_, shapes_, group=mgroup_)
         return input_
 
@@ -201,13 +204,15 @@ class _SyncParallelSection(torch.autograd.Function):
     def backward(ctx, grad_output):
         if ctx.comm_group:
             grad_output = _reduce(grad_output, group=ctx.comm_group)
-            return (
-                _split(grad_output, ctx.dim, ctx.shapes, group=ctx.comm_group),
-                None,
-                None,
-                None,
-            )
-        return grad_output, None, None, None
+            if ctx.gather_in_fwd:
+                return (
+                    _split(grad_output, ctx.dim, ctx.shapes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+        return grad_output, None, None, None, None
 
 
 class _ReduceShardParallelSection(torch.autograd.Function):
