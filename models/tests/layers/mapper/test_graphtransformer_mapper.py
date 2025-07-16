@@ -37,6 +37,7 @@ class MapperConfig:
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
+    shard_strategy: str = "edges"
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
@@ -180,6 +181,20 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
 
+    def test_chunking(self, mapper, pair_tensor):
+        x = pair_tensor
+        batch_size = 1
+        shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
+
+        mapper.num_chunks = 4
+        x_src_c, x_dst_c = mapper.forward(x, batch_size, shard_shapes)
+
+        mapper.num_chunks = 1
+        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes)
+
+        assert torch.allclose(x_src, x_src_c), f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed"
+        assert torch.allclose(x_dst, x_dst_c), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
+
 
 class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
     """Test the GraphTransformerBackwardMapper class."""
@@ -251,3 +266,21 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             assert (
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+    def test_chunking(self, mapper_init, mapper, pair_tensor):
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        batch_size = 1
+
+        # Different size for x_dst, as the Backward mapper changes the channels in shape in pre-processor
+        x = (
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
+        )
+
+        mapper.num_chunks = 4
+        out_c = mapper.forward(x, batch_size, shard_shapes)
+
+        mapper.num_chunks = 1
+        out = mapper.forward(x, batch_size, shard_shapes)
+
+        assert torch.allclose(out, out_c), f"out ({out}) != out_c ({out_c}) when num_chunks is changed"
