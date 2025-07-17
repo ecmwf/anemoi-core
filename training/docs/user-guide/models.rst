@@ -147,6 +147,15 @@ which can be specified in the configuration:
 Once set, the truncation matrices are used automatically during the
 rollout.
 
+.. note::
+
+   The truncation matrices required for field truncation can be generated using
+   the ``anemoi-graphs`` package. 
+   
+   For detailed instructions on how to create these matrices, see the documentation at 
+   ``anemoi-graphs:usage/create_sparse_matrices.rst``.
+
+
 ***************
  Ensemble Size
 ***************
