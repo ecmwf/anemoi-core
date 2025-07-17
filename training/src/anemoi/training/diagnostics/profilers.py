@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-    from anemoi.training.train.forecaster import GraphForecaster
+    from anemoi.training.train.tasks import GraphForecaster
 
     if importlib.util.find_spec("ipywidgets") is not None:
         from tqdm.auto import tqdm as _tqdm
