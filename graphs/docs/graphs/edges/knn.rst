@@ -26,16 +26,16 @@ YAML configuration:
    The ``KNNEdges`` method is recommended for the decoder edges, to
    connect all target nodes with the surrounding source nodes.
 
-
 ###############################
  Reversed K-Nearest Neighbours
 ###############################
 
-The reversed k-nearest neighbours (``ReversedKNNEdges``) method is similar to 
-the standard KNN method, but instead establishes connections based on the
-nearest neighbours of each source node. Given two sets of nodes, (`source`, 
-`target`), the ``ReversedKNNEdges`` method connects all source nodes to their
-``num_nearest_neighbours`` nearest target nodes.
+The reversed k-nearest neighbours (``ReversedKNNEdges``) method is
+similar to the standard KNN method, but instead establishes connections
+based on the nearest neighbours of each source node. Given two sets of
+nodes, (`source`, `target`), the ``ReversedKNNEdges`` method connects
+all source nodes to their ``num_nearest_neighbours`` nearest target
+nodes.
 
 To use this method to build your connections, you can use the following
 YAML configuration:
