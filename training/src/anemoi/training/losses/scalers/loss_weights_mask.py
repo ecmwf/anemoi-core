@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -23,9 +23,9 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class NaNMaskScaler(BaseDelayedScaler):
+class NaNMaskScaler(BaseUpdatingScaler):
 
-    scale_dims: tuple[TensorDim] = (TensorDim.GRID, TensorDim.VARIABLE)
+    scale_dims: tuple[TensorDim, ...] = (TensorDim.GRID, TensorDim.VARIABLE)
 
     def __init__(self, norm: str | None = None, **kwargs) -> None:
         """Initialise NanMaskScaler.
@@ -38,10 +38,7 @@ class NaNMaskScaler(BaseDelayedScaler):
         super().__init__(norm=norm)
         del kwargs
 
-    def get_scaling_values(self) -> np.ndarray:
-        return np.ones(tuple([1] * len(self.scale_dims)))
-
-    def get_delayed_scaling_values(self, model: AnemoiModelInterface) -> np.ndarray:
+    def on_training_start(self, model: AnemoiModelInterface) -> np.ndarray:
         """Get loss scaling.
 
         Get  mask multiplying NaN locations with zero.
