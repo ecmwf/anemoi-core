@@ -10,7 +10,8 @@
 import pytest
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.edges import CutOffEdges, ReversedCutOffEdges
+from anemoi.graphs.edges import CutOffEdges
+from anemoi.graphs.edges import ReversedCutOffEdges
 
 
 @pytest.mark.parametrize("edge_builder", [CutOffEdges, ReversedCutOffEdges])
@@ -28,6 +29,8 @@ def test_fail_init(edge_builder, cutoff_factor: str):
 
 
 pytest.mark.parametrize("edge_builder", [CutOffEdges, ReversedCutOffEdges])
+
+
 def test_cutoff(edge_builder, graph_with_nodes: HeteroData):
     """Test CutOffEdges."""
     builder = edge_builder("test_nodes", "test_nodes", 0.5)
