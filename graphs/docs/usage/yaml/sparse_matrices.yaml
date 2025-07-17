@@ -1,0 +1,29 @@
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+      grid: o96
+  down:
+    node_builder:
+      _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+      grid: o32
+
+edges:
+  - source_name: data
+    target_name: down
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 9
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: l2
+  - source_name: down
+    target_name: data
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+    attributes:
+      gauss_weight:
+        _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+        norm: l2
