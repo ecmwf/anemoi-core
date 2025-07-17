@@ -50,9 +50,9 @@ latitude and longitude coordinates of the source and target nodes.
 ******************
 
 The `Gaussian Weights` attribute assigns a weight to each edge based on
-the distance between its source and target nodes, using a Gaussian (normal)
-function of the edge length. This is useful for encoding spatial locality
-or for constructing weighted adjacency matrices.
+the distance between its source and target nodes, using a Gaussian
+(normal) function of the edge length. This is useful for encoding
+spatial locality or for constructing weighted adjacency matrices.
 
 The Gaussian weight for an edge is computed as:
 
@@ -62,11 +62,12 @@ The Gaussian weight for an edge is computed as:
 
 where:
 
-- :math:`w_{ij}` is the weight assigned to the edge from node :math:`i` to node :math:`j`
-- :math:`\ell_{ij}` is the edge length (distance between nodes, as computed by the 
-  ``EdgeLength`` attribute)
-- :math:`\sigma` is a configurable parameter controlling the width of the Gaussian
-  (the "spread" of the weights)
+-  :math:`w_{ij}` is the weight assigned to the edge from node :math:`i`
+   to node :math:`j`
+-  :math:`\ell_{ij}` is the edge length (distance between nodes, as
+   computed by the ``EdgeLength`` attribute)
+-  :math:`\sigma` is a configurable parameter controlling the width of
+   the Gaussian (the "spread" of the weights)
 
 This means that edges connecting closer nodes will have higher weights,
 while those connecting distant nodes will have lower weights.
@@ -86,8 +87,8 @@ Example configuration:
 
 .. note::
 
-   This edge attribute normalisation is applied independently for each target
-   node, and the default normalisation is L2 for this.
+   This edge attribute normalisation is applied independently for each
+   target node, and the default normalisation is L2 for this.
 
 *********************
  Attribute from Node
