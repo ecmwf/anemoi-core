@@ -88,7 +88,7 @@ Example configuration:
 .. note::
 
    This edge attribute normalisation is applied independently for each
-   target node, and the default normalisation is L2 for this.
+   target node, and the default normalisation is :math:`L_1` for this.
 
 *********************
  Attribute from Node
