@@ -31,6 +31,7 @@ from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvMapperBlock
+from anemoi.models.layers.block import GraphInterpolationMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
@@ -1256,6 +1257,209 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
+            x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
+        )
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        if not x_dst_is_sharded:
+            x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
+        x_dst = self.emb_nodes_dst(x_dst)
+        shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+        return x_src, x_dst, shapes_src, shapes_dst
+
+
+class GraphInterpolationBaseMapper(GraphEdgeMixin, BaseMapper):
+    """Non-learnable interpolation Base Mapper from hidden -> data or data -> hidden."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
+        out_channels_dst: Optional[int] = None,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+    ) -> None:
+        """Initialize GraphInterpolationBaseMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node
+        hidden_dim : int
+            Hidden dimension
+        out_channels_dst : int, optional
+            Output channels of the destination node, by default None
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        """
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            layer_kernels=layer_kernels,
+            cpu_offload=cpu_offload,
+        )
+
+        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, 0)
+
+        self.trainable = TrainableTensor(trainable_size=0, tensor_size=self.edge_attr.shape[0])
+
+        self.proc = GraphInterpolationMapperBlock()
+
+        self.offload_layers(cpu_offload)
+
+        self.emb_nodes_dst = nn.Identity()
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+    ) -> PairTensor:
+        if model_comm_group:
+            assert (
+                model_comm_group.size() == 1
+            ), f"Model sharding across GPUs is not supported for {self.__class__.__name__}"
+
+        size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
+        edge_attr = self.trainable(self.edge_attr, batch_size)
+        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+        shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
+        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+
+        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
+            x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
+        )
+
+        (x_src, x_dst), edge_attr = self.proc(
+            x=(x_src, x_dst),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            shapes=(shapes_src, shapes_dst, shapes_edge_attr),
+            batch_size=batch_size,
+            size=size,
+            model_comm_group=model_comm_group,
+        )
+
+        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded)
+
+        return x_dst
+
+
+class GraphInterpolationForwardMapper(ForwardMapperPreProcessMixin, GraphInterpolationBaseMapper):
+    """Non-learnable Interpolation forward mapper from data -> hidden."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
+        out_channels_dst: Optional[int] = None,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+    ) -> None:
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            sub_graph=sub_graph,
+            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            src_grid_size=src_grid_size,
+            dst_grid_size=dst_grid_size,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            layer_kernels=layer_kernels,
+            cpu_offload=cpu_offload,
+        )
+        self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = True,
+    ) -> PairTensor:
+        x_dst = super().forward(
+            x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+        )
+        return x[0], x_dst
+
+
+class GraphInterpolationBackwardMapper(BackwardMapperPostProcessMixin, GraphInterpolationBaseMapper):
+    """Non-learnable Interpolation backward mapper from hidden -> data."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
+        out_channels_dst: Optional[int] = None,
+        initialise_data_extractor_zero: bool = False,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+    ) -> None:
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            sub_graph=sub_graph,
+            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            src_grid_size=src_grid_size,
+            dst_grid_size=dst_grid_size,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            layer_kernels=layer_kernels,
+            cpu_offload=cpu_offload,
+        )
+
+        self.node_data_extractor = nn.Sequential(
+            self.layer_factory.LayerNorm(self.hidden_dim),
+            self.layer_factory.Linear(self.hidden_dim, self.out_channels_dst),
+        )
+        if initialise_data_extractor_zero:
+            for module in self.node_data_extractor.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.constant_(module.weight, 0.0)
+                    if module.bias is not None:
+                        nn.init.constant_(module.bias, 0.0)
 
     def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(

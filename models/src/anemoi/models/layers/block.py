@@ -64,6 +64,35 @@ class BaseBlock(nn.Module, ABC):
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
 
+class PointWiseMLPProcessorBlock(BaseBlock):
+    """Point-wise MLP block with MultiHeadSelfAttention and MLPs."""
+
+    def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
+        super().__init__()
+        layers = [
+            layer_kernels.Linear(num_channels, hidden_dim),
+            layer_kernels.LayerNorm(hidden_dim),
+            layer_kernels.Activation(),
+        ]
+        if num_channels != hidden_dim:
+            layers.append(layer_kernels.Linear(hidden_dim, num_channels))
+
+        if dropout_p is not None and dropout_p > 0:
+            layers.append(nn.Dropout(p=dropout_p))
+
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
+    ) -> Tensor:
+        return self.mlp(x)
+
+
 class TransformerProcessorBlock(BaseBlock):
     """Transformer block with MultiHeadSelfAttention and MLPs."""
 
@@ -841,3 +870,27 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         nodes_new = self.run_node_dst_mlp(out, **layer_kwargs) + out
 
         return nodes_new, edge_attr
+
+
+class GraphInterpolationMapperBlock(BaseBlock):
+    def forward(
+        self,
+        x: OptPairTensor,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        shapes: tuple,
+        batch_size: int,
+        size: Union[int, tuple[int, int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
+    ):
+        x_src, x_dst = x
+        interp = torch.zeros(x_dst.shape[0], x_src.shape[1], device=x_src.device, dtype=x_src.dtype)
+        counts = torch.zeros(x_dst.shape[0], 1, device=x_src.device, dtype=edge_index.dtype)
+
+        interp.index_add_(0, edge_index[1], x_src[edge_index[0]])
+        counts.index_add_(
+            0, edge_index[1], torch.ones(edge_index.shape[1], 1, device=counts.device, dtype=edge_index.dtype)
+        )
+        assert min(counts) > 0, "All target nodes need to be connected"
+        return (x_src, interp / counts), edge_attr
