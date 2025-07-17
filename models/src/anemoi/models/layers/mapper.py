@@ -389,6 +389,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        **kwargs,
     ) -> PairTensor:
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
         edge_attr = self.trainable(self.edge_attr, batch_size)
@@ -408,6 +409,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            **kwargs,
         )
 
         x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded)
@@ -524,9 +526,17 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = True,
+        **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
-            x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+            x,
+            batch_size,
+            shard_shapes,
+            model_comm_group,
+            x_src_is_sharded,
+            x_dst_is_sharded,
+            keep_x_dst_sharded,
+            **kwargs,
         )
         return x[0], x_dst
 
@@ -738,6 +748,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        **kwargs,
     ) -> PairTensor:
 
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
@@ -755,6 +766,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             (shapes_src, shapes_dst),
             model_comm_group,
             size=size,
+            **kwargs,
         )
 
         x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded)
@@ -964,10 +976,18 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        **kwargs,
     ) -> Tensor:
 
         _, x_dst = super().forward(
-            x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+            x,
+            batch_size,
+            shard_shapes,
+            model_comm_group,
+            x_src_is_sharded,
+            x_dst_is_sharded,
+            keep_x_dst_sharded,
+            **kwargs,
         )
         return x_dst
 

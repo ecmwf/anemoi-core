@@ -87,6 +87,7 @@ class GraphForecaster(pl.LightningModule):
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
@@ -206,10 +207,10 @@ class GraphForecaster(pl.LightningModule):
                 ", ".join(self.metrics.keys()),
             )
 
-        LOGGER.debug("Rollout window length: %d", self.rollout)
-        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
-        LOGGER.debug("Rollout max : %d", self.rollout_max)
-        LOGGER.debug("Multistep: %d", self.multi_step)
+        LOGGER.info("Rollout window length: %d", self.rollout)
+        LOGGER.info("Rollout increase every : %d epochs", self.rollout_epoch_increment)
+        LOGGER.info("Rollout max : %d", self.rollout_max)
+        LOGGER.info("Multistep: %d", self.multi_step)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
@@ -297,19 +298,37 @@ class GraphForecaster(pl.LightningModule):
         ]
         return x
 
-    def compute_loss_metrics(
+    def _prepare_tensors_for_loss(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
+        """Prepare tensors for loss computation, handling sharding if necessary.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        training_mode : bool
+            Whether in training mode
+        validation_mode : bool
+            Whether in validation mode
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, slice | None]
+            Prepared y_pred, y, and grid_shard_slice
+        """
         is_sharded = self.grid_shard_slice is not None
 
         sharding_supported = (self.loss_supports_sharding or not training_mode) and (
             self.metrics_support_sharding or not validation_mode
         )
+
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
             shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, self.grid_shard_shapes)
             y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
@@ -319,25 +338,120 @@ class GraphForecaster(pl.LightningModule):
             y_pred_full, y_full = y_pred, y
             grid_shard_slice = self.grid_shard_slice
 
-        loss = (
-            self.loss(
-                y_pred_full,
-                y_full,
-                grid_shard_slice=grid_shard_slice,
-                group=self.model_comm_group,
-            )
-            if training_mode
-            else None
+        return y_pred_full, y_full, grid_shard_slice
+
+    def _compute_loss(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Compute the loss function.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+        **_kwargs
+            Additional arguments
+
+        Returns
+        -------
+        torch.Tensor
+            Computed loss
+        """
+        return self.loss(
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
         )
 
+    def _compute_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int,
+        grid_shard_slice: slice | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Compute validation metrics.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        rollout_step : int
+            Current rollout step
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Computed metrics
+        """
+        return self.calculate_val_metrics(
+            y_pred,
+            y,
+            rollout_step,
+            grid_shard_slice=grid_shard_slice,
+        )
+
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int,
+        training_mode: bool = True,
+        validation_mode: bool = False,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        """Compute loss and metrics for the given predictions and targets.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        rollout_step : int
+            Current rollout step
+        training_mode : bool
+            Whether to compute training loss
+        validation_mode : bool
+            Whether to compute validation metrics
+        **kwargs
+            Additional arguments to pass to loss computation
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
+            Loss (if training_mode) and metrics dictionary (if validation_mode)
+        """
+        # Prepare tensors for loss/metrics computation
+        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            training_mode,
+            validation_mode,
+        )
+
+        # Compute loss if in training mode
+        loss = None
+        if training_mode:
+            loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice, **kwargs)
+
+        # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self.calculate_val_metrics(
-                y_pred_full,
-                y_full,
-                rollout_step,
-                grid_shard_slice=grid_shard_slice,
-            )
+            metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice)
 
         return loss, metrics_next
 
@@ -347,7 +461,7 @@ class GraphForecaster(pl.LightningModule):
         rollout: int | None = None,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
+    ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
         """Rollout step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
@@ -368,8 +482,8 @@ class GraphForecaster(pl.LightningModule):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
-            Loss value, metrics, and predictions (per step)
+        Generator[tuple[Union[torch.Tensor, None], dict, torch.Tensor], None, None]
+            Loss value, metrics, and predictions
 
         """
         batch = self.model.pre_processors(batch)  # normalized in-place
@@ -582,20 +696,10 @@ class GraphForecaster(pl.LightningModule):
     def on_train_epoch_end(self) -> None:
         if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
             self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
+            LOGGER.info("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
-        """Calculate the loss over a validation batch using the training loss function.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Validation batch
-        batch_idx : int
-            Batch inces
-
-        """
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
 

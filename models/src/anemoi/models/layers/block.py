@@ -116,13 +116,18 @@ class TransformerProcessorBlock(BaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
     ) -> Tensor:
+
+        # In case we have conditionings we pass these to the layer norm
+        cond = layer_kwargs.pop("cond", None)
+        cond_kwargs = {"cond": cond} if cond is not None else {}
+
         x = x + self.attention(
-            self.layer_norm_attention(x, **layer_kwargs), shapes, batch_size, model_comm_group=model_comm_group
+            self.layer_norm_attention(x, **cond_kwargs), shapes, batch_size, model_comm_group=model_comm_group
         )
         x = x + self.mlp(
             self.layer_norm_mlp(
                 x,
-                **layer_kwargs,
+                **cond_kwargs,
             )
         )
         return x
@@ -640,7 +645,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         LayerNorm = layer_kernels.LayerNorm
 
         self.layer_norm_attention_src = LayerNorm(normalized_shape=in_channels)
-        self.layer_norm_attention_dest = self.layer_norm_attention
+        self.layer_norm_attention_dst = self.layer_norm_attention
 
         if self.update_src_nodes:
             self.layer_norm_mlp_src = LayerNorm(normalized_shape=out_channels)
@@ -690,9 +695,14 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
     ):
         x_skip = x
 
+        # In case we have conditionings we pass these to the layer norm
+        cond = layer_kwargs.pop("cond", None)
+        cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
+        cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
+
         x = (
-            self.layer_norm_attention_src(x[0], **layer_kwargs),
-            self.layer_norm_attention_dest(x[1], **layer_kwargs),
+            self.layer_norm_attention_src(x[0], **cond_src_kwargs),
+            self.layer_norm_attention_dst(x[1], **cond_dst_kwargs),
         )
 
         x_r = self.lin_self(x[1])
@@ -726,7 +736,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         # compute nodes_new_dst = self.run_node_dst_mlp(out) + out in chunks:
         nodes_new_dst = torch.cat(
-            [self.run_node_dst_mlp(chunk, **layer_kwargs) + chunk for chunk in out.tensor_split(num_chunks, dim=0)],
+            [self.run_node_dst_mlp(chunk, **cond_dst_kwargs) + chunk for chunk in out.tensor_split(num_chunks, dim=0)],
             dim=0,
         )
 
@@ -734,7 +744,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             # compute nodes_new_src = self.run_node_src_mlp(out) + out in chunks:
             nodes_new_src = torch.cat(
                 [
-                    self.run_node_src_mlp(chunk, **layer_kwargs) + chunk
+                    self.run_node_src_mlp(chunk, **cond_src_kwargs) + chunk
                     for chunk in x_skip[0].tensor_split(num_chunks, dim=0)
                 ],
                 dim=0,
@@ -817,7 +827,11 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
     ):
         x_skip = x
 
-        x = self.layer_norm_attention(x, **layer_kwargs)
+        # In case we have conditionings we pass these to the layer norm
+        cond = layer_kwargs.pop("cond", None)
+        cond_kwargs = {"cond": cond} if cond is not None else {}
+
+        x = self.layer_norm_attention(x, **cond_kwargs)
         x_r = self.lin_self(x)
 
         query, key, value, edges = self.get_qkve(x, edge_attr)
@@ -838,6 +852,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)
 
         out = out + x_skip
-        nodes_new = self.run_node_dst_mlp(out, **layer_kwargs) + out
+        nodes_new = self.run_node_dst_mlp(out, **cond_kwargs) + out
 
         return nodes_new, edge_attr

@@ -145,7 +145,7 @@ class TestSine:
                 2.0,
                 0.0,
                 torch.tensor(torch.pi / 4, dtype=torch.float32),
-                torch.tensor(torch.sin(torch.tensor(torch.pi / 2)), dtype=torch.float32),
+                torch.tensor(torch.sin(torch.tensor(torch.pi / 2)).item(), dtype=torch.float32),
             ),
             (1.0, torch.pi / 2, torch.tensor(0.0, dtype=torch.float32), torch.tensor(1.0, dtype=torch.float32)),
         ],
