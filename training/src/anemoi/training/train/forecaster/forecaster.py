@@ -430,8 +430,6 @@ class GraphForecaster(pl.LightningModule):
         ----------
         batch : torch.Tensor
             Batch to transfer
-        dataloader_idx : int
-            Dataloader index
 
         Returns
         -------
