@@ -1,0 +1,10 @@
+nodes:
+  data:
+    node_builder: ...
+    attributes:
+      weights:
+        _target_: anemoi.graphs.nodes.attributes.CosineLatWeightedAttribute
+        min_value: 0.001
+        max_value: 1
+        norm: unit-max # options: unit-max, unit-sum, unit-std
+  hidden: ...
