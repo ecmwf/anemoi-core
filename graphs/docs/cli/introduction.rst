@@ -92,4 +92,4 @@ Export To Sparse Command
     :module: anemoi.graphs.__main__
     :func: create_parser
     :prog: anemoi-graphs
-    :path: export_to_parse
+    :path: export_to_sparse
