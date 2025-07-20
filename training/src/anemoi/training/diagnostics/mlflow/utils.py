@@ -9,7 +9,36 @@
 from __future__ import annotations
 
 import functools
+from collections import deque
 from typing import Any
+
+
+class FixedLengthSet:
+    def __init__(self, maxlen: int):
+        self.maxlen = maxlen
+        self._deque = deque(maxlen=maxlen)
+        self._set = set()
+
+    def add(self, item: float) -> None:
+        if item in self._set:
+            return  # Already present, do nothing
+        if len(self._deque) == self.maxlen:
+            oldest = self._deque.popleft()
+            self._set.remove(oldest)
+        self._deque.append(item)
+        self._set.add(item)
+
+    def __contains__(self, item: float):
+        return item in self._set
+
+    def __len__(self):
+        return len(self._set)
+
+    def __iter__(self):
+        return iter(self._deque)
+
+    def __repr__(self):
+        return f"{list(self._deque)}"
 
 
 def expand_iterables(

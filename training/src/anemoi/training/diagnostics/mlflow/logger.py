@@ -16,7 +16,6 @@ import os
 import re
 import sys
 import time
-from collections import deque
 from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING
@@ -31,9 +30,10 @@ from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from typing_extensions import override
 
+from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
+from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.utils.mlflow.auth import TokenAuth
-from anemoi.utils.mlflow.utils import expand_iterables
 from anemoi.utils.mlflow.utils import health_check
 
 if TYPE_CHECKING:
@@ -47,34 +47,6 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 MAX_PARAMS_LENGTH = 2000
-
-
-class FixedLengthSet:
-    def __init__(self, maxlen: int):
-        self.maxlen = maxlen
-        self._deque = deque(maxlen=maxlen)
-        self._set = set()
-
-    def add(self, item: float) -> None:
-        if item in self._set:
-            return  # Already present, do nothing
-        if len(self._deque) == self.maxlen:
-            oldest = self._deque.popleft()
-            self._set.remove(oldest)
-        self._deque.append(item)
-        self._set.add(item)
-
-    def __contains__(self, item: float):
-        return item in self._set
-
-    def __len__(self):
-        return len(self._set)
-
-    def __iter__(self):
-        return iter(self._deque)
-
-    def __repr__(self):
-        return f"{list(self._deque)}"
 
 
 class LogsMonitor:
