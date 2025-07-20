@@ -495,6 +495,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def experiment(self) -> MLFlowLogger.experiment:
         if rank_zero_only.rank == 0:
             self.auth.authenticate()
+        if self._run_id is None:
+            self._logged_metrics.clear()
         return super().experiment
 
     @override

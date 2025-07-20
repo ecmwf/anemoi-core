@@ -71,7 +71,8 @@ decoder:
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
 
-output_mask: null
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
   data: 8
