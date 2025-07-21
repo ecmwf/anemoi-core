@@ -19,7 +19,6 @@ from typing import Union
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
-from pydantic import ValidationError
 from pydantic import model_validator
 from pydantic import root_validator
 
@@ -299,16 +298,17 @@ class MlflowSchema(PydanticBaseModel):
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
+        # Check for valid extra fields related to MultiHeadSelfAttention and MultiHeadCrossAttention
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
         allowed_extras = {"max_params_length": int}
-        # "Specifies the maximum number of params to be logged to the MLflow server."
-        for extra_field in self.__pydantic_extra__:
+        extras = getattr(self, "__pydantic_extra__", {}) or {}
+        for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
-                msg = f"Extra field {extra_field} not allowed for MlflowSchema."
-                raise ValidationError(msg)
-            if isinstance(extra_field, allowed_extras[extra_field]):
-                msg = f"Extra field {extra_field} should be of type {allowed_extras[extra_field]}."
-                raise ValidationError(msg)
+                msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
+                raise ValueError(msg)
+            if not isinstance(value, allowed_extras[extra_field]):
+                msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
+                raise TypeError(msg)
 
         return self
 
