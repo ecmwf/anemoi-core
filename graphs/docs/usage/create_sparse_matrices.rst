@@ -8,9 +8,9 @@ Anemoi graphs supports the creation of sparse matrices using the
 ``export_to_sparse`` command. See the :ref:`Export To Sparse Command
 <export-to-sparse-command>` for details.
 
-The main use case in Anemoi is to create the truncation matrices used 
-in the models for the residual connection as explained
-:ref:`here <anemoi-training:usage-field_truncation>`.
+The main use case in Anemoi is to create the truncation matrices used in
+the models for the residual connection as explained :ref:`here
+<anemoi-training:usage-field_truncation>`.
 
 **************************
  Create your graph recipe
