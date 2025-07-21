@@ -470,9 +470,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
     @override
     @rank_zero_only
     def log_metrics(self) -> None:
-        #super().log_metrics()
+        # super().log_metrics()
         assert rank_zero_only.rank == 0, "experiment tried to log from global_rank != 0"
         from mlflow.entities import Metric
+
         metrics = _add_prefix(metrics, self._prefix, self.LOGGER_JOIN_CHAR)
         metrics_list: list[Metric] = []
         timestamp_ms = int(time() * 1000)
