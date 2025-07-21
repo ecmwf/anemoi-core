@@ -83,6 +83,8 @@ class AnemoiModelEncProcDec(nn.Module):
             self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
 
+        self.supports_sharded_input = True
+
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
