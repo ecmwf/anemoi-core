@@ -176,7 +176,7 @@ def _gather_channels_alltoall(input_: Tensor, shapes: list, group: Optional[Proc
     input_list = [x.contiguous() for x in torch.tensor_split(input_, comm_size, dim=-2)]
 
     # Get total channels from shapes (original shape before channel splitting)
-    channels = [x[-1] for x in shapes]
+    channels = [x.shape[-1] for x in torch.tensor_split(torch.empty(shapes[myrank][-1], device="meta"), comm_size)]
     seq_per_rank = [x.shape[-2] for x in input_list]
 
     output_list = [
@@ -197,8 +197,7 @@ def _gather_channels_alltoall(input_: Tensor, shapes: list, group: Optional[Proc
 def _split_channels_alltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the head dimension.
 
-    Split input along dimension dim_split and join after all_to_all along dimesion
-    dim_concatenate.
+    Split input along dimension dim_split and join after all_to_all along last dimesion.
     """
     comm_size = dist.get_world_size(group=group)
     # Bypass the function if we are using only 1 GPU.
@@ -216,7 +215,7 @@ def _split_channels_alltoall(input_: Tensor, shapes: list, group: Optional[Proce
 
     output_list = [
         torch.empty(
-            (*input_shape[rank][:-2], shapes[rank][0], channels_per_rank[myrank]),
+            (*input_shape[rank][:-2], shapes[rank][-2], channels_per_rank[myrank]),
             dtype=input_.dtype,
             layout=input_.layout,
             device=input_.device,

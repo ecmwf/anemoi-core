@@ -467,6 +467,37 @@ class AnemoiMLflowLogger(MLFlowLogger):
             self._logged_metrics.clear()
         return super().experiment
 
+    @override
+    @rank_zero_only
+    def log_metrics(self) -> None:
+        #super().log_metrics()
+        assert rank_zero_only.rank == 0, "experiment tried to log from global_rank != 0"
+        from mlflow.entities import Metric
+        metrics = _add_prefix(metrics, self._prefix, self.LOGGER_JOIN_CHAR)
+        metrics_list: list[Metric] = []
+        timestamp_ms = int(time() * 1000)
+        for k, v in metrics.items():
+            if isinstance(v, str):
+                log.warning(f"Discarding metric with string value {k}={v}.")
+                continue
+            new_k = re.sub("[^a-zA-Z0-9_/. -]+", "", k)
+            if k != new_k:
+                rank_zero_warn(
+                    "MLFlow only allows '_', '/', '.' and ' ' special characters in metric name."
+                    f" Replacing {k} with {new_k}.",
+                    category=RuntimeWarning,
+                )
+                k = new_k
+
+            metric_id = (k, step or 0)
+            if metric_id in self._logged_metrics:
+                continue
+            self._logged_metrics.add(metric_id)
+
+            metrics_list.append(Metric(key=k, value=v, timestamp=timestamp_ms, step=step or 0))
+
+        self.experiment.log_batch(run_id=self.run_id, metrics=metrics_list, **self._log_batch_kwargs)
+
     @rank_zero_only
     def log_system_metrics(self) -> None:
         """Log system metrics (CPU, GPU, etc)."""
