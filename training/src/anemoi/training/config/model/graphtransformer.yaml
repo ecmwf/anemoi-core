@@ -43,7 +43,7 @@ encoder:
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
-
+  shard_strategy: "edges"
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
