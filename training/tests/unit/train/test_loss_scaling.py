@@ -67,6 +67,7 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
 
+
 @pytest.fixture
 def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
     config = DictConfig(
