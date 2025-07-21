@@ -477,14 +477,11 @@ def test_filtered_loss() -> None:
     assert hasattr(loss.loss, "y_dim")
     assert hasattr(loss.loss, "x_dim")
 
-<<<<<<< HEAD
     loss.set_data_indices(data_indices)
     assert hasattr(loss, "predicted_indices")
 
     assert loss.predicted_variables == ["tp"]
 
-=======
->>>>>>> 58a3f450 (Update code)
     right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
     loss_value = loss(*right_shaped_pred_output_pair, squash=False)
     assert loss_value.shape[0] == len(
@@ -509,10 +506,7 @@ def test_filtered_loss() -> None:
         ),
         data_indices=data_indices,
     )
-<<<<<<< HEAD
     loss.set_data_indices(data_indices)
 
-=======
->>>>>>> 58a3f450 (Update code)
     assert isinstance(loss, FilteringLossWrapper)
     assert isinstance(loss.loss, FunctionalLoss)
