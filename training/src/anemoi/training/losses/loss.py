@@ -71,12 +71,6 @@ def get_loss_function(
 
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
-    if data_indices is not None:
-        kwargs.update(
-            {
-                "data_indices": data_indices,
-            },
-        )
 
     # Instantiate the loss function with the loss_init_config
     loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
@@ -96,6 +90,9 @@ def get_loss_function(
                     scaling = scalers[key][1][idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
+
+        if hasattr(loss_function, "set_data_indices"):
+            loss_function.set_data_indices(data_indices)
 
     return loss_function
 

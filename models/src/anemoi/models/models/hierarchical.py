@@ -192,6 +192,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     def forward(self, x: Tensor, model_comm_group: Optional[ProcessGroup] = None, **kwargs) -> Tensor:
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
+        in_out_sharded = False  # grid_shard_shapes is not None when sharding is supported in the future
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # add data positional info (lat/lon)
         x_trainable_data = torch.cat(
