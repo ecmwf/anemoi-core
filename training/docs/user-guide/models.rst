@@ -125,6 +125,8 @@ under the ``layer_kernels`` section.
 For detailed information and examples, see
 :ref:`anemoi-models:layer-kernels`.
 
+.. _usage-field_truncation:
+
 ******************
  Field Truncation
 ******************
@@ -153,8 +155,8 @@ rollout.
    generated using the ``anemoi-graphs`` package.
 
    For detailed instructions on how to create these matrices, see the
-   documentation at :ref:`anemoi-graphs
-   <anemoi-graphs:usage-create_sparse_matrices>`.
+   documentation at :ref:`Create sparse matrices with anemoi-graphs
+   <anemoi-graphs:usage-create_sparse_matrices>` tutorial.
 
 ***************
  Ensemble Size
