@@ -256,6 +256,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             "`hardware.num_gpus_per_model`.",
         )
         model_supports_sharding = getattr(self.model.model, "supports_sharded_input", False)
+
         assert model_supports_sharding or not self.keep_batch_sharded, (
             f"Model {self.model.model} does not support sharded inputs, but `model.keep_batch_sharded=True` was set. ",
             "Please set `model.keep_batch_sharded=False` or use a model that supports sharded inputs.",
