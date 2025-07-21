@@ -21,7 +21,7 @@ from .variable_masking import VariableMaskingLossScaler
 from .variable_tendency import NoTendencyScaler
 from .variable_tendency import StdevTendencyScaler
 from .variable_tendency import VarTendencyScaler
-
+from .variable_masking import VariableMaskingLossScaler
 __all__ = [
     "GeneralVariableLossScaler",
     "GraphNodeAttributeScaler",
