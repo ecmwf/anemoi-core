@@ -153,7 +153,8 @@ rollout.
    generated using the ``anemoi-graphs`` package.
 
    For detailed instructions on how to create these matrices, see the
-   documentation at :ref:`anemoi-graphs <anemoi-graphs:usage-create_sparse_matrices>`.
+   documentation at :ref:`anemoi-graphs
+   <anemoi-graphs:usage-create_sparse_matrices>`.
 
 ***************
  Ensemble Size
