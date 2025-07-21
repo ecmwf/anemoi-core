@@ -64,8 +64,9 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
 
+
 @pytest.fixture
-def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
+def fake_data_no_param() -> tuple[DictConfig, IndexCollection]:
     config = DictConfig(
         {
             "data": {
@@ -77,7 +78,7 @@ def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
                     "_target_": "anemoi.training.losses.MSELoss",
                     "scalers": ["variable_masking"],
                 },
-                 "variable_groups": {
+                "variable_groups": {
                     "default": "sfc",
                     "pl": ["y"],
                 },
@@ -86,12 +87,12 @@ def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
                         "variable_masking": {
                             "_target_": "anemoi.training.losses.scalers.VariableMaskingLossScaler",
                             "variables": ["z", "other", "q"],
-                            },
                         },
                     },
                 },
-                "metrics": [],
             },
+            "metrics": [],
+        },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
@@ -330,6 +331,7 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     }
 
     assert metric_range == expected_metric_range
+
 
 def test_variable_masking(
     fake_data_no_param: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
