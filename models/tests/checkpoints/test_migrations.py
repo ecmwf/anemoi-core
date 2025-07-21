@@ -16,10 +16,8 @@ from anemoi.models.migrations import Migrator
 from anemoi.models.migrations import MissingMigrationException
 
 
-def test_run_all_migrations(migrator: Migrator):
-    dummy_model = {}
-
-    migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model)
+def test_run_all_migrations(migrator: Migrator, old_ckpt: CkptType):
+    migrated_model, done_migrations, done_rollbacks = migrator.sync(old_ckpt)
 
     assert len(done_migrations) == 4
     assert len(done_rollbacks) == 0
@@ -28,6 +26,11 @@ def test_run_all_migrations(migrator: Migrator):
     assert "bar" in migrated_model and migrated_model["bar"] == "bar"
     assert "baz" not in migrated_model
     assert "test" in migrated_model and migrated_model["test"] == "baz"
+
+
+def test_break_ckpt_too_old(migrator: Migrator):
+    with pytest.raises(IncompatibleCheckpointException):
+        migrator.sync({})
 
 
 def test_run_last_migration(migrator: Migrator):
@@ -78,10 +81,8 @@ def test_extra_migration(migrator: Migrator):
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_migrate_step(migrator: Migrator):
-    dummy_model = {}
-
-    migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=1)
+def test_migrate_step(migrator: Migrator, old_ckpt: CkptType):
+    migrated_model, done_migrations, done_rollbacks = migrator.sync(old_ckpt, steps=1)
 
     assert len(done_migrations) == 1
     assert len(done_rollbacks) == 0
@@ -93,10 +94,8 @@ def test_migrate_step(migrator: Migrator):
     assert "test" not in migrated_model
 
 
-def test_migrate_no_step(migrator: Migrator):
-    dummy_model = {}
-
-    migrated_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=0)
+def test_migrate_no_step(migrator: Migrator, old_ckpt: CkptType):
+    migrated_model, done_migrations, done_rollbacks = migrator.sync(old_ckpt, steps=0)
 
     assert len(done_migrations) == 0
     assert len(done_rollbacks) == 0
@@ -120,9 +119,10 @@ def test_run_migration_step(migrator: Migrator):
     assert "test" not in migrated_model
 
 
-def test_sync_rollback(migrator: Migrator):
-    dummy_model, _, _ = migrator.sync({})
+def test_sync_rollback(migrator: Migrator, old_ckpt: CkptType):
+    dummy_model, _, _ = migrator.sync(old_ckpt)
     # only keep the first two migrations of the first group
+    old_grouped_migrations = migrator._grouped_migrations[0][:]
     migrator._grouped_migrations[0] = migrator._grouped_migrations[0][:2]
 
     rollbacked_model, done_migrations, done_rollbacks = migrator.sync(dummy_model)
@@ -135,9 +135,12 @@ def test_sync_rollback(migrator: Migrator):
     assert "baz" not in rollbacked_model
     assert "test" not in rollbacked_model
 
+    # cleanup to not break future tests
+    migrator._grouped_migrations[0] = old_grouped_migrations
 
-def test_rollback_step_from_latest(migrator: Migrator):
-    dummy_model, _, _ = migrator.sync({})
+
+def test_rollback_step_from_latest(migrator: Migrator, old_ckpt: CkptType):
+    dummy_model, _, _ = migrator.sync(old_ckpt)
     rollbacked_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=-1)
 
     assert len(done_migrations) == 0
@@ -149,8 +152,8 @@ def test_rollback_step_from_latest(migrator: Migrator):
     assert "test" not in rollbacked_model
 
 
-def test_rollback_step_from_middle(migrator: Migrator):
-    dummy_model, _, _ = migrator.sync({}, steps=2)
+def test_rollback_step_from_middle(migrator: Migrator, old_ckpt: CkptType):
+    dummy_model, _, _ = migrator.sync(old_ckpt, steps=2)
     rollbacked_model, done_migrations, done_rollbacks = migrator.sync(dummy_model, steps=-1)
 
     assert len(done_migrations) == 0
@@ -160,9 +163,9 @@ def test_rollback_step_from_middle(migrator: Migrator):
     assert "foo" in rollbacked_model
 
 
-def test_error_migration_past_final(migrator: Migrator):
+def test_error_migration_past_final(migrator: Migrator, old_ckpt: CkptType):
     with pytest.raises(IncompatibleCheckpointException):
-        migrator.sync({}, steps=5)
+        migrator.sync(old_ckpt, steps=5)
 
 
 def test_migrate_recent_model(migrator: Migrator, recent_ckpt: CkptType):

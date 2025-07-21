@@ -17,7 +17,7 @@ from anemoi.models.migrations import IncompatibleCheckpointException
 from anemoi.models.migrations import Migrator
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def migrator() -> Migrator:
     """Load the test migrator with migrations from this folder.
 
@@ -30,6 +30,11 @@ def migrator() -> Migrator:
 
 def final_rollback(_):
     raise IncompatibleCheckpointException
+
+
+@pytest.fixture
+def old_ckpt() -> CkptType:
+    return {"migrations": []}
 
 
 @pytest.fixture

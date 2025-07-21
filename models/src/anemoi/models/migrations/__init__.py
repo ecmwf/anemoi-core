@@ -213,8 +213,11 @@ class Migrator:
             Index of compatibility group
         """
 
-        # No migration means oldest checkpoint => first group
-        if _ckpt_migration_key not in ckpt or not len(ckpt[_ckpt_migration_key]):
+        # No migration means checkpoint too old, no migrations available.
+        if _ckpt_migration_key not in ckpt:
+            return []
+        # If empty, means first group
+        if not len(ckpt[_ckpt_migration_key]):
             return self._grouped_migrations[0]
 
         first_migration = ckpt[_ckpt_migration_key][0]["name"]
@@ -241,7 +244,7 @@ class Migrator:
                 Missing migrations from the checkpoint to execute
         """
         if _ckpt_migration_key not in ckpt:
-            return migrations
+            raise IncompatibleCheckpointException("Checkpoint too old. Cannot be migrated")
         done_migrations = [mig["name"] for mig in ckpt[_ckpt_migration_key]]
         # Migration should be done in order, we look for the the last done migration and
         # execute the rest. This is to allow havind removed migrations in a checkpoint and
@@ -282,7 +285,7 @@ class Migrator:
         ckpt = deepcopy(ckpt)
 
         if _ckpt_migration_key not in ckpt:
-            ckpt[_ckpt_migration_key] = []
+            raise IncompatibleCheckpointException("Checkpoint too old. Cannot be migrated")
         compatible_migrations = self.compatible_migrations(ckpt)
 
         if len(compatible_migrations) < len(ckpt[_ckpt_migration_key]):
@@ -318,8 +321,7 @@ class Migrator:
         if steps is not None and steps < 0:
             raise ValueError("Cannot migrate negative number of steps. Use sync instead")
 
-        if _ckpt_migration_key not in ckpt:
-            ckpt[_ckpt_migration_key] = []
+        assert _ckpt_migration_key in ckpt
         missing_migrations = self._get_missing_migrations(ckpt, compatible_migrations)
         if steps is not None:
             if steps > len(missing_migrations):
@@ -353,8 +355,7 @@ class Migrator:
         if steps is not None and steps < 0:
             raise ValueError("Cannot rollback negative number of steps. Use sync instead")
 
-        if _ckpt_migration_key not in ckpt:
-            ckpt[_ckpt_migration_key] = []
+        assert _ckpt_migration_key in ckpt
         rollbacks: List[str] = []
         for _ in range(steps):
             migration = ckpt[_ckpt_migration_key].pop()
