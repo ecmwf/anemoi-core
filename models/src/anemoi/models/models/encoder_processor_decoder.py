@@ -27,6 +27,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -81,8 +82,6 @@ class AnemoiModelEncProcDec(nn.Module):
         if "up" in self._truncation_data:
             self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
-
-        self.supports_sharded_input = True
 
         # Encoder data -> hidden
 
@@ -246,6 +245,26 @@ class AnemoiModelEncProcDec(nn.Module):
             self._internal_output_idx,
         ), f"Model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
 
+    def _assert_valid_sharding(
+        self,
+        batch_size: int,
+        ensemble_size: int,
+        in_out_sharded: bool,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> None:
+        assert not (
+            in_out_sharded and model_comm_group is None
+        ), "If input is sharded, model_comm_group must be provided."
+
+        if model_comm_group is not None:
+            assert (
+                model_comm_group.size() == 1 or batch_size == 1
+            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+
+            assert (
+                model_comm_group.size() == 1 or ensemble_size == 1
+            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+
     def _run_mapper(
         self,
         mapper: nn.Module,
@@ -281,6 +300,17 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Mapped data
         """
+        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
+            return mapper(  # finer grained checkpointing inside GTM with edge sharding
+                data,
+                batch_size=batch_size,
+                shard_shapes=shard_shapes,
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=x_src_is_sharded,
+                x_dst_is_sharded=x_dst_is_sharded,
+                keep_x_dst_sharded=keep_x_dst_sharded,
+            )
+
         return checkpoint(
             mapper,
             data,
@@ -320,10 +350,7 @@ class AnemoiModelEncProcDec(nn.Module):
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
         in_out_sharded = grid_shard_shapes is not None
-
-        assert not (
-            in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
-        ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
             x, batch_size, grid_shard_shapes, model_comm_group

@@ -410,6 +410,12 @@ class GraphEnsForecaster(BaseGraphModule):
 
         return train_loss
 
+    def on_train_epoch_end(self) -> None:
+        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
+            self.rollout += 1
+            LOGGER.debug("Rollout window length: %d", self.rollout)
+        self.rollout = min(self.rollout, self.rollout_max)
+
     def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Perform a validation step.
 

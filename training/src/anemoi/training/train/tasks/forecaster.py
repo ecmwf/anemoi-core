@@ -80,6 +80,24 @@ class GraphForecaster(BaseGraphModule):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
+    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        train_loss = super().training_step(batch, batch_idx)
+        self.log(
+            "rollout",
+            float(self.rollout),
+            on_step=True,
+            logger=self.logger_enabled,
+            rank_zero_only=True,
+            sync_dist=False,
+        )
+        return train_loss
+
+    def on_train_epoch_end(self) -> None:
+        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
+            self.rollout += 1
+            LOGGER.debug("Rollout window length: %d", self.rollout)
+        self.rollout = min(self.rollout, self.rollout_max)
+
     def advance_input(
         self,
         x: torch.Tensor,

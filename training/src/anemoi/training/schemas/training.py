@@ -128,6 +128,14 @@ class GeneralVariableLossScalerSchema(BaseModel):
     "Weight of each variable."  # Check keys (variables) are read ???
 
 
+class VariableMaskingScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.VariableMaskingLossScaler"] = Field(..., alias="_target_")
+    variables: list[str] = Field(defaultexample=["tp"])
+    "Variables to compute the loss over."
+    invert: bool = Field(examples=False)
+    "Flag to invert the variable mask."
+
+
 class NaNMaskScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
 
@@ -195,6 +203,7 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 ScalerSchema = Union[
     GeneralVariableLossScalerSchema,
     VariableLevelScalerSchema,
+    VariableMaskingScalerSchema,
     TendencyScalerSchema,
     NaNMaskScalerSchema,
     GraphNodeAttributeScalerSchema,

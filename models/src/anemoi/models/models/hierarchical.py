@@ -1,12 +1,11 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024 ECMWF.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-#
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
+#
 
 import logging
 from typing import Optional
@@ -81,8 +80,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         if "up" in self._truncation_data:
             self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
-
-        self.supports_sharded_input = True  # TODO: deos it?
 
         # Encoder data -> hidden
         self.encoder = instantiate(

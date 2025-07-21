@@ -6,7 +6,7 @@ defaults:
 - hardware: example
 - graph: multi_scale
 - model: graphtransformer
-- training: default
+- training: interpolator
 - _self_
 
 config_validation: True
@@ -29,9 +29,7 @@ model:
   grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
 
 training:
-  model_task: anemoi.training.train.tasks.GraphInterpolator
-
-# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+  # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0,6]
     target: [1,2,3,4,5]

@@ -342,7 +342,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
+        rollout_step: int = 0,
         training_mode: bool = True,
         validation_mode: bool = False,
     ) -> torch.Tensor:
@@ -449,7 +449,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
+        rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -509,14 +509,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             batch_size=batch.shape[0],
             sync_dist=True,
         )
-        self.log(
-            "rollout",
-            float(self.rollout),
-            on_step=True,
-            logger=self.logger_enabled,
-            rank_zero_only=True,
-            sync_dist=False,
-        )
+
         return train_loss
 
     def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
@@ -534,10 +527,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scheduler.step(epoch=self.trainer.global_step)
 
     def on_train_epoch_end(self) -> None:
-        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
-            self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
-        self.rollout = min(self.rollout, self.rollout_max)
+        pass
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
         """Calculate the loss over a validation batch using the training loss function.
