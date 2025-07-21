@@ -223,15 +223,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         """
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
-        in_out_sharded = grid_shard_shapes is not None
 
-        assert not (
-            in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
-        ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
-
-        # Prepare input
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, batch_size, grid_shard_shapes, model_comm_group
+        # add data positional info (lat/lon)
+        x_trainable_data = torch.cat(
+            (
+                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                self.node_attributes(self._graph_name_data, batch_size=batch_size),
+            ),
+            dim=-1,  # feature dimension
         )
 
         # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
