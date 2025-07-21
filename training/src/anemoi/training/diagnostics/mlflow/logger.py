@@ -352,8 +352,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
-        self._logged_metrics = set()  # Track (key, step)
-
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
         """Check if the parent run is a dry run.
 
@@ -463,10 +461,9 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def experiment(self) -> MLFlowLogger.experiment:
         if rank_zero_only.rank == 0:
             self.auth.authenticate()
-        if self._run_id is None:
-            self._logged_metrics.clear()
         return super().experiment
 
+<<<<<<< HEAD
     @override
     @rank_zero_only
     def log_metrics(self) -> None:
@@ -499,6 +496,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
         self.experiment.log_batch(run_id=self.run_id, metrics=metrics_list, **self._log_batch_kwargs)
 
+=======
+>>>>>>> 4f866ab0 (clean)
     @rank_zero_only
     def log_system_metrics(self) -> None:
         """Log system metrics (CPU, GPU, etc)."""
