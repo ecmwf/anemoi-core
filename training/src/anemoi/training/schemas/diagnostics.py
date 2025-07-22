@@ -274,7 +274,7 @@ class MlflowSchema(PydanticBaseModel):
     "Run MLflow offline. Necessary if no internet access available."
     authentication: bool
     "Whether to authenticate with server or not"
-    log_model: Union[bool, Literal["all"]]
+    log_model: Union[bool, Literal["all"], None] = None
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
     tracking_uri: Union[str, None]

@@ -41,7 +41,9 @@ if TYPE_CHECKING:
     from mlflow.tracking import MlflowClient
 
 LOGGER = logging.getLogger(__name__)
+
 MAX_PARAMS_LENGTH = 2000
+LOG_MODEL = False
 
 
 class LogsMonitor:

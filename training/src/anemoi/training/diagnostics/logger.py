@@ -40,6 +40,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR"] = "2"
     os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_JITTER"] = "1"
 
+    from anemoi.training.diagnostics.mlflow.logger import LOG_MODEL
     from anemoi.training.diagnostics.mlflow.logger import MAX_PARAMS_LENGTH
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
@@ -74,6 +75,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         log_hyperparams = False
 
     max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
+    log_model = getattr(config.diagnostics.log.mlflow, "log_model", LOG_MODEL)
 
     logger = AnemoiMLflowLogger(
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
@@ -83,7 +85,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         run_name=config.diagnostics.log.mlflow.run_name,
         run_id=config.training.run_id,
         fork_run_id=config.training.fork_run_id,
-        log_model=config.diagnostics.log.mlflow.log_model,
+        log_model=log_model,
         offline=offline,
         resumed=resumed,
         forked=forked,
