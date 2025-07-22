@@ -34,3 +34,13 @@ def test_mlflowlogger_params_limit(default_logger: AnemoiMLflowLogger) -> None:
     # # Expect an exception when logging too many hyperparameters
     with pytest.raises(ValueError, match=r"Too many params:"):
         default_logger.log_hyperparams(params)
+
+
+def test_mlflowlogger_metric_deduplication(default_logger: AnemoiMLflowLogger) -> None:
+
+    default_logger.log_metrics({"foo": 1.0}, step=5)
+    default_logger.log_metrics({"foo": 1.0}, step=5)  # duplicate
+    # Only the first metric should be logged
+    assert len(default_logger._logged_metrics) == 1
+    assert next(iter(default_logger._logged_metrics))[0] == "foo"  # key
+    assert next(iter(default_logger._logged_metrics))[1] == 5  # step
