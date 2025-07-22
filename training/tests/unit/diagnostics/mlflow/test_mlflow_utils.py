@@ -5,8 +5,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.utils.mlflow.utils import clean_config_params
-from anemoi.utils.mlflow.utils import expand_iterables
+from anemoi.training.diagnostics.mlflow.utils import clean_config_params
+from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 
 
 def test_clean_config_params() -> None:
