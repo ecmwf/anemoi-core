@@ -114,11 +114,11 @@ class TransformerProcessorBlock(BaseBlock):
         shapes: list,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[Tensor] = None,
         **layer_kwargs,
     ) -> Tensor:
 
         # In case we have conditionings we pass these to the layer norm
-        cond = layer_kwargs.pop("cond", None)
         cond_kwargs = {"cond": cond} if cond is not None else {}
 
         x = x + self.attention(
@@ -691,12 +691,12 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
         **layer_kwargs,
     ):
         x_skip = x
 
         # In case we have conditionings we pass these to the layer norm
-        cond = layer_kwargs.pop("cond", None)
         cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
         cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
 

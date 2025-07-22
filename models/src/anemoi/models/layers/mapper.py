@@ -343,6 +343,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        **kwargs,
     ) -> PairTensor:
         x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst = checkpoint(
             self.pre_process_edge_sharding_wrapper,
@@ -366,6 +367,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            **kwargs,
             use_reentrant=False,
         )
 
@@ -425,14 +427,29 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        **kwargs,
     ) -> PairTensor:
         if self.shard_strategy == "edges":
             return self.forward_with_edge_sharding(
-                x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+                x,
+                batch_size,
+                shard_shapes,
+                model_comm_group,
+                x_src_is_sharded,
+                x_dst_is_sharded,
+                keep_x_dst_sharded,
+                **kwargs,
             )
         else:  # self.shard_strategy == "heads"
             return self.forward_with_heads_sharding(
-                x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+                x,
+                batch_size,
+                shard_shapes,
+                model_comm_group,
+                x_src_is_sharded,
+                x_dst_is_sharded,
+                keep_x_dst_sharded,
+                **kwargs,
             )
 
 

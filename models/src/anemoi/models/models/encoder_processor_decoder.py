@@ -307,29 +307,18 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Mapped data
         """
-        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
-            return mapper(  # finer grained checkpointing inside GTM with edge sharding
-                data,
-                batch_size=batch_size,
-                shard_shapes=shard_shapes,
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=x_src_is_sharded,
-                x_dst_is_sharded=x_dst_is_sharded,
-                keep_x_dst_sharded=keep_x_dst_sharded,
-            )
-
-        return checkpoint(
-            mapper,
-            data,
-            batch_size=batch_size,
-            shard_shapes=shard_shapes,
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=x_src_is_sharded,
-            x_dst_is_sharded=x_dst_is_sharded,
-            keep_x_dst_sharded=keep_x_dst_sharded,
-            use_reentrant=use_reentrant,
+        mapper_args = {
+            "batch_size": batch_size,
+            "shard_shapes": shard_shapes,
+            "model_comm_group": model_comm_group,
+            "x_src_is_sharded": x_src_is_sharded,
+            "x_dst_is_sharded": x_dst_is_sharded,
+            "keep_x_dst_sharded": keep_x_dst_sharded,
             **kwargs,
-        )
+        }
+        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
+            return mapper(data, **mapper_args)  # finer grained checkpointing inside GTM with edge sharding
+        return checkpoint(mapper, data, **mapper_args, use_reentrant=use_reentrant)
 
     def forward(
         self,

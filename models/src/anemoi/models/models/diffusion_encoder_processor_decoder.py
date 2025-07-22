@@ -92,12 +92,16 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         )
         shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
-        return x_data_latent, shard_shapes_data
+        return x_data_latent, None, shard_shapes_data
 
-    def _assemble_output(self, x_out, batch_size, bse, dtype):
+    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
+        bse = batch_size * ensemble_size
         x_out = einops.rearrange(x_out, "(bse n) f -> bse n f", bse=bse)
         x_out = einops.rearrange(x_out, "(bs e) n f -> bs e n f", bs=batch_size).to(dtype=dtype)
 
+        for bounding in self.boundings:
+            # bounding performed in the order specified in the config file
+            x_out = bounding(x_out)
         return x_out
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
@@ -152,10 +156,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = grid_shard_shapes is not None
-
-        assert not (
-            in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
-        ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # prepare noise conditionings
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
@@ -169,7 +170,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         processor_kwargs = {"cond": c_hidden}
         bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
 
-        x_data_latent, shard_shapes_data = self._assemble_input(x, y_noised, bse, grid_shard_shapes, model_comm_group)
+        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
+            x, y_noised, bse, grid_shard_shapes, model_comm_group
+        )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
@@ -207,7 +210,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             **bwd_mapper_kwargs,
         )
 
-        x_out = self._assemble_output(x_out, batch_size, bse, x.dtype)
+        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
 
@@ -587,7 +590,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
         shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
-        return x_data_latent, shard_shapes_data
+        return x_data_latent, None, shard_shapes_data
 
     def compute_tendency(
         self,
