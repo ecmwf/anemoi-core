@@ -17,6 +17,7 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import GraphInterpolationModelComponent
 from .common_components import TransformerModelComponent
 
 
@@ -64,3 +65,8 @@ class TransformerEncoderSchema(TransformerModelComponent):
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)
     "Use alibi slopes for attention implementation. Default to False."
+
+
+class GraphInterpolationEncoderSchema(GraphInterpolationModelComponent):
+    target_: Literal["anemoi.models.layers.mapper.GraphInterpolationForwardMapper"] = Field(..., alias="_target_")
+    "Graph interpolation Encoder object from anemoi.models.layers.mapper."

@@ -1139,6 +1139,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         sample_idx: int,
         parameters: list[str],
         precip_and_related_fields: list[str] | None = None,
+        log_scale: bool | False = False,
         every_n_batches: int | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
@@ -1160,6 +1161,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.precip_and_related_fields = precip_and_related_fields
+        self.log_scale = log_scale
         LOGGER.info(
             "Using precip histogram plotting method for fields: %s.",
             self.precip_and_related_fields,
@@ -1199,6 +1201,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 self.precip_and_related_fields,
+                self.log_scale,
             )
 
             self._output_figure(
