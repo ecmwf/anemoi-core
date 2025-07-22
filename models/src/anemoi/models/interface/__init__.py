@@ -37,10 +37,10 @@ class AnemoiModelInterface(torch.nn.Module):
         Graph data for the model.
     statistics : dict
         Statistics for the data.
-    statistics_tendencies : dict
-        Statistics for the tendencies of the data.
     metadata : dict
         Metadata for the model.
+    statistics_tendencies : dict
+        Statistics for the tendencies of the data.
     supporting_arrays : dict
         Numpy arraysto store in the checkpoint.
     data_indices : dict
@@ -59,9 +59,9 @@ class AnemoiModelInterface(torch.nn.Module):
         config: DotDict,
         graph_data: HeteroData,
         statistics: dict,
-        statistics_tendencies: dict = None,
         data_indices: dict,
         metadata: dict,
+        statistics_tendencies: dict = None,
         supporting_arrays: dict = None,
         truncation_data: dict,
     ) -> None:

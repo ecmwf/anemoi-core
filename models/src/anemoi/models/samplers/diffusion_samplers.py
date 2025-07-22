@@ -14,6 +14,10 @@ from typing import Optional
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+DenoisingFunction = Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor, Optional[ProcessGroup], Optional[list]], torch.Tensor
+]
+
 
 def get_noise_schedule(
     num_steps: int,
@@ -92,7 +96,7 @@ def edm_heun_sampler(
     x: torch.Tensor,
     y: torch.Tensor,
     sigmas: torch.Tensor,
-    denoising_fn: Callable,
+    denoising_fn: DenoisingFunction,
     model_comm_group: Optional[ProcessGroup] = None,
     grid_shard_shapes: Optional[list] = None,
     S_churn: float = 0.0,
@@ -183,7 +187,7 @@ def dpmpp_2m_sampler(
     x: torch.Tensor,
     y: torch.Tensor,
     sigmas: torch.Tensor,
-    denoising_fn: Callable,
+    denoising_fn: DenoisingFunction,
     model_comm_group: Optional[ProcessGroup] = None,
     grid_shard_shapes: Optional[list] = None,
 ) -> torch.Tensor:
