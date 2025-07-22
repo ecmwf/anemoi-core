@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import datashader as dsh
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -620,7 +622,26 @@ def plot_flat_sample(
                 norm=norms[ii],
                 title=titles[ii],
                 datashader=datashader,
+                transform=None,
             )
+
+
+def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> ccrs.LambertConformal:
+    lat_min, lon_min = latlon.min(axis=0)
+    lat_max, lon_max = latlon.max(axis=0)
+
+    central_latitude = (lat_min + lat_max) / 2
+    central_longitude = (lon_min + lon_max) / 2
+
+    lat_span = lat_max - lat_min
+    std_parallel_1 = central_latitude - lat_span * 0.25
+    std_parallel_2 = central_latitude + lat_span * 0.25
+
+    return ccrs.LambertConformal(
+        central_latitude=central_latitude,
+        central_longitude=central_longitude,
+        standard_parallels=[std_parallel_1, std_parallel_2],
+    )
 
 
 def plot_predicted_multilevel_flat_recon(
@@ -631,7 +652,7 @@ def plot_predicted_multilevel_flat_recon(
     sample: np.ndarray,
     reconstruction: np.ndarray,
     difference: np.ndarray,
-    datashader: bool = False,
+    datashader: bool = True,
     precip_and_related_fields: list | None = None,
     colormaps: dict[str, Colormap] | None = None,
 ) -> Figure:
@@ -667,17 +688,19 @@ def plot_predicted_multilevel_flat_recon(
     """
     output_vars = [(i, vname) for i, (vname, output_only) in (parameters.items()) if output_only]
     n_vars = len(output_vars)
+    proj = lambert_conformal_from_latlon_points(latlons)
     fig, ax = plt.subplots(
         n_vars,
         n_plots_per_sample,
         figsize=(n_plots_per_sample * 4, n_vars * 3),
         layout="constrained",
+        subplot_kw={"projection": proj},
     )
 
     if n_vars == 1:
         ax = np.expand_dims(ax, axis=0)
 
-    pc_lat, pc_lon = equirectangular_projection(latlons)
+    pc_lat, pc_lon = latlons[:, 0], latlons[:, 1]
     colormaps = colormaps or {}
 
     for row_idx, (var_idx, var_name) in enumerate(output_vars):
@@ -801,6 +824,7 @@ def plot_flat_recon(
                 norm=norms[i],
                 title=titles[i],
                 datashader=datashader,
+                transform=ccrs.PlateCarree() if not datashader else None,
             )
 
 
@@ -814,6 +838,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
+    transform: ccrs.Projection = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -840,6 +865,8 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
+    transform: ccrs.Projection, optional
+        Cartopy projection for the plot, by default None
 
     Returns
     -------
@@ -857,6 +884,7 @@ def single_plot(
             alpha=1.0,
             norm=norm,
             rasterized=False,
+            transform=transform,
         )
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
@@ -876,12 +904,9 @@ def single_plot(
             ax=ax,
         )
 
-    xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
-    ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
-    ax.set_xlim((xmin - 0.1, xmax + 0.1))
-    ax.set_ylim((ymin - 0.1, ymax + 0.1))
-
-    continents.plot_continents(ax)
+    # Add map features
+    ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
+    ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
 
     if title is not None:
         ax.set_title(title)
@@ -1013,6 +1038,7 @@ def plot_graph_node_features(
                 data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
                 datashader=datashader,
+                transform=None,
             )
 
     return fig
