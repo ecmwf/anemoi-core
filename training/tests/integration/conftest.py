@@ -12,12 +12,9 @@ import os
 from pathlib import Path
 
 import pytest
-import torch
 from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
-
-from anemoi.models.migrations import Migrator
 
 
 @pytest.fixture(autouse=True)
@@ -152,70 +149,6 @@ def hierarchical_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls
-
-
-@pytest.fixture
-def get_tmp_paths(temporary_directory_for_test_data: callable) -> callable:
-    def _get_tmp_paths(config: OmegaConf, list_datasets: list[str]) -> tuple[str, list[str], list[str]]:
-        tmp_paths = []
-        dataset_names = []
-        archive_urls = []
-
-        for dataset in list_datasets:
-            url_archive = config.hardware.files[dataset] + ".tgz"
-            name_dataset = Path(config.hardware.files[dataset]).name
-            tmp_path_dataset = temporary_directory_for_test_data(url_archive, archive=True)
-
-            tmp_paths.append(tmp_path_dataset)
-            dataset_names.append(name_dataset)
-            archive_urls.append(url_archive)
-
-        if len(list_datasets) == 1:
-            return tmp_paths[0], dataset_names, archive_urls
-
-        tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
-        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths)]
-        return tmp_dir, rel_paths, archive_urls
-
-    return _get_tmp_paths
-
-
-@pytest.fixture
-def gnn_config(
-    testing_modifications_with_temp_dir: OmegaConf,
-    get_tmp_paths: callable,
-) -> tuple[OmegaConf, str]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
-        template = compose(config_name="config")
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    return cfg, dataset_urls[0]
-
-
-@pytest.fixture
-def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -> OmegaConf:
-    cfg, dataset_url = gnn_config
-    existing_ckpt = get_test_data(
-        "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-06-24.ckpt",
-    )
-
-    # Execute migrations
-    ckpt = torch.load(existing_ckpt, map_location="cpu", weights_only=False)
-    new_ckpt, _, _ = Migrator().sync(ckpt)
-
-    checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
-
-    cfg.training.run_id = "dummy_id"
-    cfg.training.max_epochs = 3
-    return cfg, dataset_url
 
 
 @pytest.fixture
