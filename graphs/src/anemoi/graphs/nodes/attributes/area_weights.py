@@ -350,7 +350,7 @@ class BaseLatWeightedAttribute(BaseAreaWeights, ABC):
 
 
 class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
-    """Latitude-weighting of the node attributes as a function of a polynomial.
+    """Latitude-weighting of the node attributes for rectilinear grids.
 
     Attributes
     ----------
