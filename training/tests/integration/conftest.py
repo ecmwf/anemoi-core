@@ -228,8 +228,14 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     return cfg, dataset_urls[0]
 
 
+@pytest.fixture(scope="session")
+def migrator() -> Migrator:
+    return Migrator()
+
+
 @pytest.fixture
 def gnn_config_with_checkpoint(
+    migrator: Migrator,
     gnn_config: tuple[DictConfig, str],
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
@@ -240,7 +246,7 @@ def gnn_config_with_checkpoint(
 
     # Execute migrations
     ckpt = torch.load(existing_ckpt, map_location="cpu", weights_only=False)
-    new_ckpt, _, _ = Migrator().sync(ckpt)
+    new_ckpt, _, _ = migrator.sync(ckpt)
 
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
