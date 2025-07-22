@@ -72,24 +72,22 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
 
-    # Load the checkpoint
+    # Load the state dictionary from checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
-
-    # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
+    state_dict = {k.replace("model.model.", ""): v for k, v in state_dict.items()}
 
-    model_state_dict = model.state_dict()
+    # Update relevant layers of model with this external state dict
+    model.model.update_state_dict(
+        state_dict,
+        keywords=[
+            "bias",
+            "weight",
+            # normalizer not working yet, needs to be fixed
+            # "processors.normalizer",
+        ],
+    )
 
-    for key in state_dict.copy():
-        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
-            LOGGER.info("Skipping loading parameter: %s", key)
-            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
-            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
-
-            del state_dict[key]  # Remove the mismatched key
-
-    # Load the filtered st-ate_dict into the model
-    model.load_state_dict(state_dict, strict=False)
     # Needed for data indices check
     model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
     return model

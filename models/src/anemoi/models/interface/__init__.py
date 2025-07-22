@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import uuid
 from typing import Optional
 
@@ -21,6 +22,20 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
+
+
+# see if function below is really needed
+# if so consider moving to some utils
+def contains_any(key, specifications):
+    contained = False
+    for specification in specifications:
+        if specification in key:
+            contained = True
+            break
+    return contained
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -148,3 +163,43 @@ class AnemoiModelInterface(torch.nn.Module):
                 y_hat = gather_tensor(y_hat, -2, apply_shard_shapes(y_hat, -2, grid_shard_shapes), model_comm_group)
 
         return y_hat
+
+    def update_state_dict(
+        self, external_state_dict, keywords="", ignore_mismatched_layers=False, ignore_additional_layers=False
+    ):
+        """Update the model's stated_dict with entries from an external state_dict.
+        Only entries whose keys contain the specified keywords are considered.
+        """
+
+        LOGGER.info("Updating model state dictionary.")
+
+        if isinstance(keywords, str):
+            keywords = [keywords]
+
+        # select relevant part of external_state_dict
+        reduced_state_dict = {k: v for k, v in external_state_dict.items() if contains_any(k, keywords)}
+        model_state_dict = self.model.state_dict()
+
+        # check layers and their shapes
+        for key in list(reduced_state_dict):
+            if key not in model_state_dict:
+                if ignore_additional_layers:
+                    LOGGER.info("Skipping injection of %s, which is not in the model.", key)
+                    del reduced_state_dict[key]
+                else:
+                    raise AssertionError(
+                        "Layer %s not in model. Consider setting 'ignore_additional_layers = True'.", key
+                    )
+            elif reduced_state_dict[key].shape != model_state_dict[key].shape:
+                if ignore_mismatched_layers:
+                    LOGGER.info("Skipping injection of %s due to shape mismatch.", key)
+                    LOGGER.info("Model shape: %s", model_state_dict[key].shape)
+                    LOGGER.info("Provided shape: %s", reduced_state_dict[key].shape)
+                    del reduced_state_dict[key]
+                else:
+                    raise AssertionError(
+                        "Mismatch in shape of %s. Consider setting 'ignore_mismatched_layers = True'.", key
+                    )
+
+        # update
+        self.model.load_state_dict(reduced_state_dict, strict=False)
