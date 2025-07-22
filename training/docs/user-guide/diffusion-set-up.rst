@@ -24,8 +24,11 @@ deterministic training:
    :class:`AnemoiDiffusionTendModelEncProcDec`) instead of
    :class:`AnemoiModelEncProcDec`
 
--  **Loss computation**: Standard MSE loss (noise-based weighting
-   applied automatically during training)
+-  **Loss computation**: Standard MSE loss is recommended as it is the
+   most appropriate for diffusion training (noise-based weighting
+   applied automatically during training before loss computation). While
+   other losses could be used, they may not make sense in the diffusion
+   context
 
 *************************
  Changes in model config
@@ -130,7 +133,7 @@ Uses `graphtransformer_diffusion.yaml` or `transformer_diffusion.yaml`:
 -  Applies noise to the target state during training
 -  Model class: :class:`AnemoiDiffusionModelEncProcDec`
 -  Forecaster: :class:`GraphDiffusionForecaster`
--  Suitable for most weather forecasting applications
+-  Use single-step rollout (`rollout.max: 1`)
 
 **Tendency-based Diffusion**
 ============================

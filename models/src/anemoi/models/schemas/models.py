@@ -171,17 +171,17 @@ OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
 class DiffusionNoiseSchema(PydanticBaseModel):
-    rho: PositiveFloat = Field(default=7.0, example=7.0)
+    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
     "Time discretization parameter for Karras schedule"
-    sigma_max: PositiveFloat = Field(default=100.0, example=100.0)
+    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
     "Maximum noise level"
-    sigma_min: PositiveFloat = Field(default=0.02, example=0.02)
+    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
     "Minimum noise level"
-    sigma_data: PositiveFloat = Field(default=1.0, example=1.0)
+    sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Data scaling parameter"
-    noise_channels: PositiveInt = Field(default=32, example=32)
+    noise_channels: PositiveInt = Field(default=32, examples=[32])
     "Number of channels for noise embedding"
-    noise_cond_dim: PositiveInt = Field(default=16, example=16)
+    noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Dimension of noise conditioning"
 
 
@@ -222,8 +222,6 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN decoder schema."
-    diffusion: Optional[DiffusionSchema] = None
-    "Diffusion configuration for diffusion models"
 
 
 class NoiseInjectorSchema(BaseModel):
