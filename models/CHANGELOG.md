@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.2](https://github.com/ecmwf/anemoi-core/compare/models-0.8.1...models-0.8.2) (2025-07-22)
+
+
+### Features
+
+* **model:** Postprocessors for leaky boundings ([#315](https://github.com/ecmwf/anemoi-core/issues/315)) ([b54562b](https://github.com/ecmwf/anemoi-core/commit/b54562b83b4b5620891b28827964f9c554ee0615))
+* **models:** Mapper edge sharding ([#366](https://github.com/ecmwf/anemoi-core/issues/366)) ([326751d](https://github.com/ecmwf/anemoi-core/commit/326751d25f9bc299f3e19c795d9065a60a6af3d9))
+
+
+### Bug Fixes
+
+* **models,traininig:** Hierarchical model + integration test ([#400](https://github.com/ecmwf/anemoi-core/issues/400)) ([71dfd89](https://github.com/ecmwf/anemoi-core/commit/71dfd89d4326d5e59c8ff8fef339b500110ded42))
+* **models:** Remove repeated lines ([#377](https://github.com/ecmwf/anemoi-core/issues/377)) ([1f0b861](https://github.com/ecmwf/anemoi-core/commit/1f0b861062db023d7eaaf215846a66adb8560c5c))
+* **models:** Uneven channel sharding ([#385](https://github.com/ecmwf/anemoi-core/issues/385)) ([dd095c4](https://github.com/ecmwf/anemoi-core/commit/dd095c416334975185232c0eea7cf98be3085f54))
+* Pydantic model validator not working in transformer schema ([#422](https://github.com/ecmwf/anemoi-core/issues/422)) ([42f437a](https://github.com/ecmwf/anemoi-core/commit/42f437a282adbbec6c306037b48758ab02925631))
+* Remove dead code and fix typo ([#357](https://github.com/ecmwf/anemoi-core/issues/357)) ([8c615ba](https://github.com/ecmwf/anemoi-core/commit/8c615ba87b68957b4cc53cd82d8f396f572b9943))
+
 ## [0.8.1](https://github.com/ecmwf/anemoi-core/compare/models-0.8.0...models-0.8.1) (2025-06-17)
 
 
