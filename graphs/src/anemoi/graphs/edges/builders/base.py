@@ -41,7 +41,7 @@ class BaseEdgeBuilder(ABC):
         self.target_mask_attr_name = target_mask_attr_name
         if torch.cuda.is_available():
             import os
-            
+
             local_rank = int(os.environ.get("SLURM_LOCALID", 0))
             self.device = torch.device(f"cuda:{local_rank}")
         else:

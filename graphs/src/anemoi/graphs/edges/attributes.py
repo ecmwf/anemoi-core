@@ -40,7 +40,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         self.dtype = dtype
         if torch.cuda.is_available():
             import os
-            
+
             local_rank = int(os.environ.get("SLURM_LOCALID", 0))
             self.device = torch.device(f"cuda:{local_rank}")
         else:

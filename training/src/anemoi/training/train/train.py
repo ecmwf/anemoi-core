@@ -152,6 +152,7 @@ class AnemoiTrainer:
 
                 if torch.cuda.is_available():
                     import os
+
                     local_rank = int(os.environ.get("SLURM_LOCALID", 0))
                     device = torch.device(f"cuda:{local_rank}")
                 else:
