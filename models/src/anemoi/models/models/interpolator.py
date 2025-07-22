@@ -133,10 +133,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         batch_size = x.shape[0]
         ensemble_size = x.shape[2]
         in_out_sharded = grid_shard_shapes is not None
-
-        assert not (
-            in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
-        ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
             x, target_forcing, batch_size, grid_shard_shapes, model_comm_group

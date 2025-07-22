@@ -91,6 +91,9 @@ def get_loss_function(
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
 
+        if hasattr(loss_function, "set_data_indices"):
+            loss_function.set_data_indices(data_indices)
+
     return loss_function
 
 

@@ -126,6 +126,8 @@ under the ``layer_kernels`` section.
 For detailed information and examples, see
 :ref:`anemoi-models:layer-kernels`.
 
+.. _usage-field_truncation:
+
 ******************
  Field Truncation
 ******************
@@ -147,6 +149,15 @@ which can be specified in the configuration:
 
 Once set, the truncation matrices are used automatically during the
 rollout.
+
+.. note::
+
+   The truncation matrices required for field truncation can be
+   generated using the ``anemoi-graphs`` package.
+
+   For detailed instructions on how to create these matrices, see the
+   documentation at :ref:`Create sparse matrices with anemoi-graphs
+   <anemoi-graphs:usage-create_sparse_matrices>` tutorial.
 
 ***************
  Ensemble Size
