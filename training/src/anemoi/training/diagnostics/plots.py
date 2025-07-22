@@ -689,6 +689,7 @@ def plot_predicted_multilevel_flat_recon(
     output_vars = [(i, vname) for i, (vname, output_only) in (parameters.items()) if output_only]
     n_vars = len(output_vars)
     proj = lambert_conformal_from_latlon_points(latlons)
+    datashader = False
     fig, ax = plt.subplots(
         n_vars,
         n_plots_per_sample,
