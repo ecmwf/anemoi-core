@@ -149,7 +149,15 @@ class AnemoiTrainer:
 
             if graph_filename.exists() and not self.config.graph.overwrite:
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, weights_only=False)
+
+                if torch.cuda.is_available():
+                    import os
+                    local_rank = int(os.environ.get("SLURM_LOCALID", 0))
+                    device = torch.device(f"cuda:{local_rank}")
+                else:
+                    device = "cpu"
+
+                return torch.load(graph_filename, map_location=device, weights_only=False)
 
         else:
             graph_filename = None

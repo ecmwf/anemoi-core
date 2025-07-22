@@ -38,7 +38,12 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         super().__init__()
         self.norm = norm
         self.dtype = dtype
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            import os
+            local_rank = int(os.environ.get("SLURM_LOCALID", 0))
+            self.device = torch.device(f"cuda:{local_rank}")
+        else:
+            self.device = "cpu"
         if self.node_attr_name is None:
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
