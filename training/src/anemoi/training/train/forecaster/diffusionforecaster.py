@@ -71,8 +71,8 @@ class GraphDiffusionForecaster(GraphForecaster):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
+        weights: torch.Tensor,
         grid_shard_slice: slice | None = None,
-        weights: torch.Tensor = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
@@ -95,10 +95,6 @@ class GraphDiffusionForecaster(GraphForecaster):
         torch.Tensor
             Computed loss with noise weighting applied
         """
-        msg = "Diffusion loss requires 'weights' parameter"
-        if weights is None:
-            raise ValueError(msg)
-
         fact = weights**0.5  # factor for mse loss
         return self.loss(
             y_pred * fact,
@@ -292,7 +288,12 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         # Compute loss on tendencies if in training mode
         loss = None
         if training_mode:
-            loss = self._compute_loss(tendency_pred_full, tendency_full, grid_shard_slice, **kwargs)
+            loss = self._compute_loss(
+                y_pred=tendency_pred_full,
+                y=tendency_full,
+                grid_shard_slice=grid_shard_slice,
+                **kwargs,
+            )
 
         # Compute metrics on states if in validation mode
         metrics_next = {}

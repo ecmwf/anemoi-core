@@ -442,7 +442,7 @@ class GraphForecaster(pl.LightningModule):
         # Compute loss if in training mode
         loss = None
         if training_mode:
-            loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice, **kwargs)
+            loss = self._compute_loss(y_pred=y_pred_full, y=y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
         # Compute metrics if in validation mode
         metrics_next = {}

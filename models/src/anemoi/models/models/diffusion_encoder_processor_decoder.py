@@ -625,6 +625,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
 
         if post_process_input:
+            if post_processors_state is None:
+                raise ValueError("post_processors_state must be provided when post_process_input is True")
+            if not callable(post_processors_state):
+                raise TypeError("post_processors_state must be callable")
             x_t1 = post_processors_state(
                 x_t1[..., self.data_indices.data.output.full],
                 in_place=False,
@@ -699,6 +703,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
 
         if pre_process_output:
+            if pre_processors_state is None:
+                raise ValueError("pre_processors_state must be provided when pre_process_output is True")
+            if not callable(pre_processors_state):
+                raise TypeError("pre_processors_state must be callable")
             state_outp = pre_processors_state(
                 state_outp,
                 in_place=False,
