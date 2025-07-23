@@ -10,14 +10,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
-if TYPE_CHECKING:
-    from anemoi.models.schemas.data_processor import PreprocessorSchema
+from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC001
 
 
 class DataSchema(PydanticBaseModel):
