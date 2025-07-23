@@ -654,8 +654,12 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
             LOGGER.info("Logging %s parameters", len(expanded_params))
             if len(expanded_params) > max_params_length:
-                error_msg = f"Too many params: {len(expanded_params)} > {max_params_length}"
-                raise ValueError(error_msg)
+                msg = (
+                    f"Too many params: {len(expanded_params)} > {max_params_length}",
+                    "Please revisit the fields being logged and add redudant or irrelevant",
+                    " ones to clean_config_params function.",
+                )
+                raise ValueError(msg)
 
             # Truncate parameter values.
             params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
