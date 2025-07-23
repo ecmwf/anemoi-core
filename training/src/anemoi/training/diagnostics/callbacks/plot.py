@@ -1134,15 +1134,18 @@ class PlotReconstruction(BasePerBatchPlotCallback):
         # Compute focus mask based on optional focus_area input
         focus_mask = np.ones(latlons.shape[0], dtype=bool)  # Default: use all points
         if self.focus_area is not None:
-            if "spacial_mask" in self.focus_area:
+            if "spacial_mask" in self.focus_area and self.focus_area["spacial_mask"] is not None:
                 focus_mask = np.zeros(latlons.shape[0], dtype=bool)
                 spacial_mask_idxs = pl_module.model.graph_data["data"][self.focus_area["spacial_mask"]]
                 focus_mask[spacial_mask_idxs.squeeze()] = True
+                tag = "spacial_mask"
 
-            elif "latlon_bounds" in self.focus_area:
+            elif "latlon_bounds" in self.focus_area and self.focus_area["latlon_bounds"] is not None:
                 (lat_min, lon_min), (lat_max, lon_max) = self.focus_area["latlon_bounds"]
                 lat, lon = latlons[:, 0], latlons[:, 1]
                 focus_mask = (lat >= lat_min) & (lat <= lat_max) & (lon >= lon_min) & (lon <= lon_max)
+                tag = "latlon_bounds"
+
             else:
                 msg = "focus_area must contain either 'indices' or 'latlon_bounds'."
                 raise ValueError(msg)
@@ -1188,7 +1191,7 @@ class PlotReconstruction(BasePerBatchPlotCallback):
             logger,
             fig,
             epoch=epoch,
-            tag=f"reconstruction_val_sample_batch{batch_idx:04d}_rank0",
+            tag=f"reconstruction_val_sample_batch{batch_idx:04d}_{tag}_rank0",
             exp_log_tag=f"val_pred_sample_rank{local_rank:01d}",
         )
 
