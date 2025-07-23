@@ -230,7 +230,7 @@ target_to_schema = {
 }
 
 
-class PreprocessorSchema(BaseModel):
+class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
     config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema]

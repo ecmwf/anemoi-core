@@ -10,16 +10,22 @@
 from anemoi.models.schemas.data_processor import NormalizerSchema
 from anemoi.models.schemas.data_processor import PreprocessorSchema
 
-# ✅ Test with raw dict
-raw_input = PreprocessorSchema(
-    _target_="anemoi.models.preprocessing.normalizer.InputNormalizer",
-    config={"default": "mean-std", "min-max": ["x"], "max": ["y"], "none": ["z"], "mean-std": ["q"]},
-)
-print("Parsed from dict:", raw_input)
 
-# ✅ Test with NormalizerSchema instance
-normalizer_instance = NormalizerSchema(default="std", remap={"c": "d"})
-model_input = PreprocessorSchema(
-    _target_="anemoi.models.preprocessing.normalizer.InputNormalizer", config=normalizer_instance
-)
-print("Parsed from model instance:", model_input)
+def test_preprocessor_with_raw_dict():
+    raw_config = {"default": "mean-std", "min-max": ["x"], "max": ["y"], "none": ["z"], "mean-std": ["q"]}
+    schema = PreprocessorSchema(_target_="anemoi.models.preprocessing.normalizer.InputNormalizer", config=raw_config)
+
+    assert schema.target_ == "anemoi.models.preprocessing.normalizer.InputNormalizer"
+    assert schema.config == raw_config
+
+
+def test_preprocessor_with_normalizer_instance():
+    normalizer_instance = NormalizerSchema(default="std", remap={"c": "d"})
+    schema = PreprocessorSchema(
+        _target_="anemoi.models.preprocessing.normalizer.InputNormalizer", config=normalizer_instance
+    )
+
+    assert schema.target_ == "anemoi.models.preprocessing.normalizer.InputNormalizer"
+    assert isinstance(schema.config, NormalizerSchema)
+    assert schema.config.default == "std"
+    assert schema.config.remap == {"c": "d"}
