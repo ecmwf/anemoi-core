@@ -20,6 +20,7 @@ import torchinfo
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.utils.checkpoints import check_classes
 from anemoi.utils.checkpoints import save_metadata
 
 if TYPE_CHECKING:
@@ -150,6 +151,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
     def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
         """Defines the filepath for the inference checkpoint."""
         return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Checks that the model's metadata do not contain Pydantic schemas references."""
+        del pl_module
+
+        if trainer.is_global_zero:
+            model = self._torch_drop_down(trainer)
+            check_classes(model)
 
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:
