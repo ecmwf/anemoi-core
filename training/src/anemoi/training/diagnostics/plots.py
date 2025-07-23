@@ -887,6 +887,10 @@ def single_plot(
             rasterized=False,
             transform=transform,
         )
+        
+        # Add map features
+        ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
+        ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
         # Adjust binning to match the resolution of the data
@@ -904,10 +908,7 @@ def single_plot(
             aspect="auto",
             ax=ax,
         )
-
-    # Add map features
-    ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
-    ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
+        continents.plot_continents(ax)
 
     if title is not None:
         ax.set_title(title)
