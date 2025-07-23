@@ -153,7 +153,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
         return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Checks that the model's metadata do not contain Pydantic schemas references."""
+        """Check that model's metadata does not contain Pydantic schemas references."""
         del pl_module
 
         if trainer.is_global_zero:
