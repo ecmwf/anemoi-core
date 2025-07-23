@@ -277,7 +277,7 @@ class MlflowSchema(PydanticBaseModel):
     log_model: Union[bool, Literal["all"], None] = None
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
-    tracking_uri: Union[str, None]
+    tracking_uri: Union[str, None] = None
     "Address of local or remote tracking server."
     experiment_name: str
     "Name of experiment."
@@ -311,6 +311,12 @@ class MlflowSchema(PydanticBaseModel):
                 raise TypeError(msg)
 
         return self
+
+    @root_validator(pre=True)
+    def clean_entity(cls: type[MlflowSchema], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+        if values["enabled"] is False:
+            values["tracking_uri"] = None
+        return values
 
 
 class TensorboardSchema(BaseModel):
