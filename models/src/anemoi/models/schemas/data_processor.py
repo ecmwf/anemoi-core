@@ -98,6 +98,8 @@ class PostprocessorSchema(BaseModel):
     "Variables to postprocess with relu."
     hardtanh: Union[list[str], None] = Field(default_factory=list)
     "Variables to postprocess with hardtanh."
+    hardtanh_0_1: Union[list[str], None] = Field(default_factory=list)
+    "Variables to postprocess with hardtanh in range [0, 1]."
     none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be postprocessed."
 
@@ -230,7 +232,7 @@ target_to_schema = {
 }
 
 
-class PreprocessorSchema(BaseModel):
+class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
     config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema]
