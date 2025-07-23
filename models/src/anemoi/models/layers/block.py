@@ -445,10 +445,10 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
         self.projection = Linear(out_channels, out_channels)
-
-        if self.qk_norm:
-            self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
-            self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
+        if hasattr(self, "qk_norm"):
+            if self.qk_norm:
+                self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
+                self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
 
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
@@ -459,6 +459,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         )
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
+        if not hasattr(self, "layer_norm_mlp_dst"):
+            return self.node_dst_mlp(self.layer_norm_mlp(x, **layer_kwargs))
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
 
     def get_qkve(
@@ -710,9 +712,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         else:
             query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
 
-        if self.qk_norm:
-            query = self.q_norm(query)
-            key = self.k_norm(key)
+        if hasattr(self, "qk_norm"):
+            if self.qk_norm:
+                query = self.q_norm(query)
+                key = self.k_norm(key)
 
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks=1)
 
@@ -815,10 +818,10 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
-
-        if self.qk_norm:
-            query = self.q_norm(query)
-            key = self.k_norm(key)
+        if hasattr(self, "qk_norm"):
+            if self.qk_norm:
+                query = self.q_norm(query)
+                key = self.k_norm(key)
 
         num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
