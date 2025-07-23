@@ -249,7 +249,7 @@ def interpolator_config(
         [],
         [
             "model=graphtransformer_diffusiontend",
-            "training.model_task=anemoi.training.train.forecaster.GraphDiffusionTendForecaster",
+            "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
         ],
     ],
     ids=["diffusion", "diffusiontend"],

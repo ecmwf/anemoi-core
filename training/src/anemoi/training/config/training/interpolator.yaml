@@ -44,7 +44,17 @@ optimizer:
     betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+model_task: anemoi.training.train.tasks.GraphInterpolator
+
+# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+explicit_times:
+  input: [0,6]
+  target: [1,2,3,4,5]
+
+target_forcing: #forcing parameters for the target time to include as input
+  data: #of which come from the dataset
+    - "insolation"
+  time_fraction: True
 
 # select strategy
 strategy:
@@ -84,7 +94,7 @@ validation_metrics:
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: ['node_weights']
+    scalers: []
     # other kwargs
     ignore_nans: True
 
@@ -119,14 +129,6 @@ metrics:
 - t_850
 - u_850
 - v_850
-
-# length of the "rollout" window (see Keisler's paper)
-rollout:
-  start: 1
-  # increase rollout every n epochs
-  epoch_increment: 0
-  # maximum rollout to use
-  max: 1
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
