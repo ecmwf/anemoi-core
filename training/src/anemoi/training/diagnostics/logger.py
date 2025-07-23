@@ -75,6 +75,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         log_hyperparams = False
 
     max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
+    LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
     log_model = getattr(config.diagnostics.log.mlflow, "log_model", LOG_MODEL)
 
     logger = AnemoiMLflowLogger(

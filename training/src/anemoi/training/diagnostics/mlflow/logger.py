@@ -656,8 +656,8 @@ class AnemoiMLflowLogger(MLFlowLogger):
             if len(expanded_params) > max_params_length:
                 msg = (
                     f"Too many params: {len(expanded_params)} > {max_params_length}",
-                    "Please revisit the fields being logged and add redudant or irrelevant",
-                    " ones to clean_config_params function.",
+                    "Please revisit the fields being logged and add redundant or irrelevant "
+                    "ones to the clean_config_params function.",
                 )
                 raise ValueError(msg)
 
