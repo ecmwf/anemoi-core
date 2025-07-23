@@ -20,7 +20,7 @@ import torchinfo
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
-from anemoi.utils.checkpoints import check_classes
+from anemoi.training.utils.checkpoint import check_classes
 from anemoi.utils.checkpoints import save_metadata
 
 if TYPE_CHECKING:

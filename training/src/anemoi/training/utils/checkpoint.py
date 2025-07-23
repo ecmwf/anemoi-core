@@ -121,10 +121,8 @@ class LoggingUnpickler(pickle.Unpickler):
     def find_class(self, module: str, name: str) -> str:
         if "anemoi.training.schemas" in module:
             msg = (
-                "anemoi-training Pydantic schemas found in model's metadata: (%s,%s)",
-                module,
-                name,
-                "Please review Pydantic schemas to avoid this.",
+                f"anemoi-training Pydantic schemas found in model's metadata: "
+                f"({module}, {name}) Please review Pydantic schemas to avoid this."
             )
             raise ValueError(msg)
         return super().find_class(module, name)
