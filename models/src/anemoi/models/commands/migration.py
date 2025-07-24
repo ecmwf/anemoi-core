@@ -14,6 +14,8 @@ from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
 
+from rich import print as rprint
+
 from .. import __version__ as version_anemoi_models
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
@@ -66,6 +68,10 @@ class Migration(Command):
             ),
         )
 
+        help_inspect = "Inspect migrations in a checkpoint."
+        inspect_parser = subparsers.add_parser("inspect", help=help_inspect, description=help_inspect)
+        inspect_parser.add_argument("ckpt", help="Path to the checkpoint to inspect.")
+
     def run(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
 
@@ -78,6 +84,8 @@ class Migration(Command):
             return self.run_create(args)
         elif args.subcommand == "sync":
             return self.run_sync(args)
+        elif args.subcommand == "inspect":
+            return self.run_inspect(args)
         raise ValueError(f"{args.subcommand} does not exist.")
 
     def run_create(self, args: Namespace) -> None:
@@ -169,14 +177,50 @@ class Migration(Command):
                 ckpt_path = Path(args.ckpt)
                 new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
                 torch.save(ckpt, new_path)
-                LOGGER.info("Saved previous checkpoint here: %s", str(new_path.resolve()))
+                print("Saved backed-up checkpoint here:", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
             if len(done_migrations):
-                LOGGER.info("Executed %s migration(s): %s", len(done_migrations), done_migrations)
+                print(f"Executed {len(done_migrations)} migration(s):")
+            for migration in done_migrations:
+                rprint(f"[green]+ [bold]{migration}[/bold][/green]")
             if len(done_rollbacks):
-                LOGGER.info("Executed %s rollback(s): %s", len(done_rollbacks), done_rollbacks)
+                print(f"Executed {len(done_rollbacks)} rollback(s):")
+            for migration in done_rollbacks:
+                rprint(f"[red]- [bold]{migration}[/red]")
         except IncompatibleCheckpointException as e:
             LOGGER.error(str(e))
+
+    def run_inspect(self, args: Namespace) -> None:
+        import torch
+
+        ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+        migrator = Migrator()
+        try:
+            executed_migrations, missing_migrations, extra_migrations = migrator.inspect(ckpt)
+            if len(executed_migrations):
+                print("Registered migrations:")
+            else:
+                print("No migration registered.")
+            for migration in executed_migrations:
+                rprint(
+                    f"[cyan]* [bold]{migration.name} \\[{migration.metadata.versions['anemoi-models']}][/bold][/cyan]"
+                )
+            if len(missing_migrations):
+                print("Compatible migration to execute:")
+            else:
+                print("No compatible migration to execute.")
+            for migration in missing_migrations:
+                rprint(
+                    f"[green]+ [bold]{migration.name} \\[{migration.metadata.versions['anemoi-models']}][/bold][/green]"
+                )
+            if len(extra_migrations):
+                print("Extra migration to rollback:")
+            else:
+                print("No extra migration to rollback.")
+            for migration in extra_migrations:
+                rprint(f"[red]- [bold]{migration}[/red]")
+        except IncompatibleCheckpointException:
+            print("No compatible migrations available. (Checkpoint too old).")
 
 
 command = Migration
