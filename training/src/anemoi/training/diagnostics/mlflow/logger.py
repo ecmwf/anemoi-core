@@ -21,7 +21,6 @@ from threading import Thread
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
-from typing import Optional
 from weakref import WeakValueDictionary
 
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
@@ -471,7 +470,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
     @override
     @rank_zero_only
-    def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
+    def log_metrics(self, metrics: Mapping[str, float], step: int | None = None) -> None:
         cleaned_metrics = metrics.copy()
         for k in metrics:
             metric_id = (k, step or 0)
