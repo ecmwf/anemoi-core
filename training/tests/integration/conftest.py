@@ -246,6 +246,9 @@ def gnn_config_with_checkpoint(
 
     # Execute migrations
     ckpt = torch.load(existing_ckpt, map_location="cpu", weights_only=False)
+    # TODO(benjamin): remove this line when we have a checkpoint that supports migrations
+    # in get_test_data
+    ckpt["migrations"] = []
     new_ckpt, _, _ = migrator.sync(ckpt)
 
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
