@@ -9,13 +9,15 @@
 
 
 import os
-import shutil
 from pathlib import Path
 
 import pytest
+import torch
 from hydra import compose
 from hydra import initialize
 from omegaconf import OmegaConf
+
+from anemoi.models.migrations import Migrator
 
 
 @pytest.fixture(autouse=True)
@@ -183,7 +185,6 @@ def gnn_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_paths: callable,
 ) -> tuple[OmegaConf, str]:
-
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(config_name="config")
 
@@ -197,15 +198,28 @@ def gnn_config(
     return cfg, dataset_urls[0]
 
 
+@pytest.fixture(scope="session")
+def migrator() -> Migrator:
+    return Migrator()
+
+
 @pytest.fixture
-def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -> OmegaConf:
+def gnn_config_with_checkpoint(migrator: Migrator, gnn_config: OmegaConf, get_test_data: callable) -> OmegaConf:
     cfg, dataset_url = gnn_config
     existing_ckpt = get_test_data(
         "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-06-24.ckpt",
     )
+
+    # Execute migrations
+    ckpt = torch.load(existing_ckpt, map_location="cpu", weights_only=False)
+    # TODO(benjamin): remove this line when we have a checkpoint that supports migrations
+    # in get_test_data
+    ckpt["migrations"] = []
+    new_ckpt, _, _ = migrator.sync(ckpt)
+
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(existing_ckpt, checkpoint_dir / "last.ckpt")
+    torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
     cfg.training.run_id = "dummy_id"
     cfg.training.max_epochs = 3
