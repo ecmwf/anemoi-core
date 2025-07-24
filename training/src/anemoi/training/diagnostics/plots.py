@@ -26,7 +26,6 @@ from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
 from matplotlib.colors import Colormap
-from matplotlib.colors import LogNorm
 from matplotlib.colors import Normalize
 from matplotlib.colors import TwoSlopeNorm
 from pyshtools.expand import SHGLQ
@@ -805,13 +804,11 @@ def plot_flat_recon(
         norms[0] = norm
         norms[1] = norm
 
-    # Normalize for error map
-    err_vmax = np.nanpercentile(difference, 99)
-    err_vmin = max(np.nanmin(difference), 1e-12)
-    if err_vmax / err_vmin > 1e4:
-        norms[2] = LogNorm(vmin=err_vmin, vmax=err_vmax)
-    else:
-        norms[2] = Normalize(vmin=0.0, vmax=err_vmax)
+        # Clip extreme errors for more readable plots
+    clipped_diff = np.clip(difference, 0, np.nanpercentile(difference, 99))
+
+    # Set a fixed linear color normalization
+    norms[2] = Normalize(vmin=0.0, vmax=np.nanmax(clipped_diff))
 
     for i in range(3):
         if data[i] is not None:
@@ -887,7 +884,7 @@ def single_plot(
             rasterized=False,
             transform=transform,
         )
-        
+
         # Add map features
         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)

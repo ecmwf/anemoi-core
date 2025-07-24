@@ -1170,7 +1170,7 @@ class PlotReconstruction(BasePerBatchPlotCallback):
         # Apply mask
         in_data = in_data[..., focus_mask, :]
         reconstruction = reconstruction[..., focus_mask, :]
-        diff = (in_data - reconstruction) ** 2
+        diff = np.abs(in_data - reconstruction)
         latlons = latlons[focus_mask]
 
         # Plotting
