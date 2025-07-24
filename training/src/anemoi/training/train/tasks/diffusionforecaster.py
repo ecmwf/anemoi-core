@@ -390,8 +390,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 x_ref,
                 self.model.pre_processors,
                 self.model.pre_processors_tendencies,
-                post_process_input=True,
-                post_processors_state=self.model.post_processors,
+                input_post_processor=self.model.post_processors,
             )
 
             # get noise level and associated loss weights
@@ -418,8 +417,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 tendency_pred,
                 self.model.post_processors,
                 self.model.post_processors_tendencies,
-                pre_process_output=True,
-                pre_processors_state=self.model.pre_processors,
+                output_pre_processor=self.model.pre_processors,
             )
 
             y = None
@@ -434,8 +432,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 #     tendency_target_noised,
                 #     self.model.post_processors,
                 #     self.model.post_processors_tendencies,
-                #     pre_process_output=True,
-                #     pre_processors_state=self.model.pre_processors,
+                #     output_pre_processor=self.model.pre_processors,
                 # )
 
             # compute_loss_metrics

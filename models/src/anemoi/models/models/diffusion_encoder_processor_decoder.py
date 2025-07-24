@@ -598,8 +598,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_t0: torch.Tensor,
         pre_processors_state: Callable,
         pre_processors_tendencies: Callable,
-        post_process_input: bool = False,
-        post_processors_state: Optional[Callable] = None,
+        input_post_processor: Optional[Callable] = None,
     ) -> torch.Tensor:
         """Compute the tendency from two states.
 
@@ -613,10 +612,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to pre-process the state variables.
         pre_processors_tendencies : callable
             Function to pre-process the tendency variables.
-        post_process_input : bool, optional
-            Whether the input state is normalized, by default False
-        post_processors_state : Optional[Callable], optional
-            Function to post-process the state variables, by default None
+        input_post_processor : Optional[Callable], optional
+            Function to post-process the input state variables. If provided,
+            the input states will be post-processed before computing the tendency.
+            If None, the input states are used directly. Default is None.
 
         Returns
         -------
@@ -624,17 +623,13 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             The normalized tendency tensor output from model.
         """
 
-        if post_process_input:
-            if post_processors_state is None:
-                raise ValueError("post_processors_state must be provided when post_process_input is True")
-            if not callable(post_processors_state):
-                raise TypeError("post_processors_state must be callable")
-            x_t1 = post_processors_state(
+        if input_post_processor is not None:
+            x_t1 = input_post_processor(
                 x_t1[..., self.data_indices.data.output.full],
                 in_place=False,
                 data_index=self.data_indices.data.output.full,
             )
-            x_t0 = post_processors_state(
+            x_t0 = input_post_processor(
                 x_t0[..., self.data_indices.data.output.full],
                 in_place=False,
                 data_index=self.data_indices.data.output.full,
@@ -663,8 +658,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         tendency: torch.Tensor,
         post_processors_state: Callable,
         post_processors_tendencies: Callable,
-        pre_process_output: bool = False,
-        pre_processors_state: Optional[Callable] = None,
+        output_pre_processor: Optional[Callable] = None,
     ) -> torch.Tensor:
         """Add the tendency to the state.
 
@@ -678,10 +672,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Function to post-process the state variables.
         post_processors_tendencies : callable
             Function to post-process the tendency variables.
-        pre_process_output : bool, optional
-            Whether to normalize the output state, by default False
-        pre_processors_state : Optional[Callable], optional
-            Function to pre-process the state variables, by default None
+        output_pre_processor : Optional[Callable], optional
+            Function to pre-process the output state. If provided,
+            the output state will be pre-processed before returning.
+            If None, the output state is returned directly. Default is None.
 
         Returns
         -------
@@ -702,12 +696,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             data_index=self.data_indices.data.input.prognostic,
         )
 
-        if pre_process_output:
-            if pre_processors_state is None:
-                raise ValueError("pre_processors_state must be provided when pre_process_output is True")
-            if not callable(pre_processors_state):
-                raise TypeError("pre_processors_state must be callable")
-            state_outp = pre_processors_state(
+        if output_pre_processor is not None:
+            state_outp = output_pre_processor(
                 state_outp,
                 in_place=False,
                 data_index=self.data_indices.data.output.full,
