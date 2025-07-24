@@ -7,6 +7,21 @@
 anemoi-models provides a way for users to migrate old checkpoints so that they can be
 used with recent versions of anemoi-models.
 
+********
+ Inspect
+********
+
+To inspect the registered versions in the checkpoint, run:
+
+.. code:: bash
+
+   anemoi-models migration inspect PATH_TO_CKPT
+
+
+********
+ Migrate
+********
+
 If you want to use your checkpoint with the currently installed version of anemoi-models,
 you can use:
 

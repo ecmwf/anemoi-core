@@ -191,6 +191,17 @@ class Migration(Command):
             LOGGER.error(str(e))
 
     def run_inspect(self, args: Namespace) -> None:
+        """Inspects the checkpoint.
+        It will show:
+        * the migrations already registered in the checkpoint
+        * the missing migrations to execute
+        * the extra migrations to rollback
+
+        Parameters
+        ----------
+        args : Namespace
+            The arguments passed to the command.
+        """
         import torch
 
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
