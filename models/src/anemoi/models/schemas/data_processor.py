@@ -244,7 +244,7 @@ target_to_schema = {
 class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
-    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema]
+    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema]
     "Target schema containing processor methods."
 
     @model_validator(mode="after")
