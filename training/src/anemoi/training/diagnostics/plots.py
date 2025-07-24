@@ -805,13 +805,11 @@ def plot_flat_recon(
         norms[0] = norm
         norms[1] = norm
 
-    # Normalize for error map
-    err_vmax = np.nanpercentile(difference, 99)
-    err_vmin = max(np.nanmin(difference), 1e-12)
-    if err_vmax / err_vmin > 1e4:
-        norms[2] = LogNorm(vmin=err_vmin, vmax=err_vmax)
-    else:
-        norms[2] = Normalize(vmin=0.0, vmax=err_vmax)
+        # Clip extreme errors for more readable plots
+    clipped_diff = np.clip(difference, 0, np.nanpercentile(difference, 99))
+
+    # Set a fixed linear color normalization
+    norms[2] = Normalize(vmin=0.0, vmax=np.nanmax(clipped_diff))
 
     for i in range(3):
         if data[i] is not None:
