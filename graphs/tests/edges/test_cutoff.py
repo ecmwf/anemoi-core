@@ -28,9 +28,7 @@ def test_fail_init(edge_builder, cutoff_factor: str):
         edge_builder("test_nodes1", "test_nodes2", cutoff_factor)
 
 
-pytest.mark.parametrize("edge_builder", [CutOffEdges, ReversedCutOffEdges])
-
-
+@pytest.mark.parametrize("edge_builder", [CutOffEdges, ReversedCutOffEdges])
 def test_cutoff(edge_builder, graph_with_nodes: HeteroData):
     """Test CutOffEdges."""
     builder = edge_builder("test_nodes", "test_nodes", 0.5)
