@@ -28,6 +28,19 @@ def migrator() -> Migrator:
     return Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
 
 
+@pytest.fixture(scope="module")
+def old_migrator() -> Migrator:
+    """Load the test migrator with migrations from this folder from the first compatibility group only.
+
+    Returns
+    -------
+    A Migrator instance
+    """
+    migrator = Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
+    migrator._grouped_migrations.pop()
+    return migrator
+
+
 def final_rollback(_):
     raise IncompatibleCheckpointException
 

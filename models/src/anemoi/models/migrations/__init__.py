@@ -199,8 +199,8 @@ class Migrator:
         """
         return cls(_migrations_from_path(location, package))
 
-    def compatible_migrations(self, ckpt: CkptType) -> List[Migration]:
-        """Get the compatibility group of a checkpoint.
+    def is_compatible_ckpt(self, ckpt: CkptType) -> bool:
+        """Checks whether the ckpt is compatible with the current version.
 
         Parameters
         ----------
@@ -209,24 +209,26 @@ class Migrator:
 
         Returns
         -------
-        List[Migration]
-            Index of compatibility group
+        bool
+            Whether it is compatible
         """
 
         # No migration means checkpoint too old, no migrations available.
         if _ckpt_migration_key not in ckpt:
-            return []
+            return False
         # If empty, means first group
         if not len(ckpt[_ckpt_migration_key]):
-            return self._grouped_migrations[0]
+            if len(self._grouped_migrations) > 1:
+                return False
+            else:
+                return True
 
         first_migration = ckpt[_ckpt_migration_key][0]["name"]
-        for group in self._grouped_migrations:
-            # Compare the first migration to get the correct group.
-            # Migrations that are not in the first group must always have at least the previous "final" migration registered.
-            if group[0].name == first_migration:
-                return group
-        raise ValueError("Unknown migration group.")
+        # Compare the first migration of the last group
+        # Migrations that are not in the first group must always have at least the previous "final" migration registered.
+        if self._grouped_migrations[-1][0].name == first_migration:
+            return True
+        return False
 
     def _get_missing_migrations(self, ckpt: CkptType, migrations: List[Migration]) -> Sequence[Migration]:
         """Get missing migrations from a checkpoint
@@ -244,7 +246,7 @@ class Migrator:
                 Missing migrations from the checkpoint to execute
         """
         if _ckpt_migration_key not in ckpt:
-            raise IncompatibleCheckpointException("Checkpoint too old. Cannot be migrated")
+            raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
         done_migrations = [mig["name"] for mig in ckpt[_ckpt_migration_key]]
         # Migration should be done in order, we look for the the last done migration and
         # execute the rest. This is to allow havind removed migrations in a checkpoint and
@@ -284,9 +286,9 @@ class Migrator:
         """
         ckpt = deepcopy(ckpt)
 
-        if _ckpt_migration_key not in ckpt:
-            raise IncompatibleCheckpointException("Checkpoint too old. Cannot be migrated")
-        compatible_migrations = self.compatible_migrations(ckpt)
+        if not self.is_compatible_ckpt(ckpt):
+            raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
+        compatible_migrations = self._grouped_migrations[-1]
 
         if len(compatible_migrations) < len(ckpt[_ckpt_migration_key]):
             # We should rollback, set a negative steps
@@ -362,6 +364,57 @@ class Migrator:
             rollbacks = [migration["name"]] + rollbacks
             ckpt = migration["rollback"](ckpt)
         return ckpt, rollbacks
+
+    def inspect(self, ckpt: CkptType) -> Tuple[List[Migration], List[Migration], List[str]]:
+        """Inspect migration information in checkpoint
+
+        Parameters
+        ----------
+        ckpt : CkptType
+            The chekpoint to inspect
+
+        Returns
+        -------
+        Tuple[List[Migration], List[Migration], List[str]]
+            * The list of already executed migrations
+            * The list of missing migrations
+            * The list of extra migrations in the checkpoint (to rollback)
+        """
+        if not self.is_compatible_ckpt(ckpt):
+            raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
+        compatible_migrations = self._grouped_migrations[-1]
+        registered_migrations = self.registered_migrations(ckpt)
+        common_migrations: List[Migration] = []
+        extra_migrations: List[str] = []
+        missing_migrations: List[Migration] = []
+        k = 0
+        for migration in compatible_migrations:
+            if migration.name in registered_migrations:
+                common_migrations.append(migration)
+            else:
+                missing_migrations.append(migration)
+            k += 1
+        if len(registered_migrations) > k:
+            for migration in registered_migrations[k:]:
+                extra_migrations.append(migration)
+        return common_migrations, missing_migrations, extra_migrations
+
+    def registered_migrations(self, ckpt: CkptType) -> List[str]:
+        """Registered migrations in a ckpt
+
+        Parameters
+        ----------
+        ckpt : CkptType
+            The checkpoint
+
+        Returns
+        -------
+        List[str]
+            The names of registered migrations
+        """
+        if _ckpt_migration_key not in ckpt:
+            return []
+        return [migration["name"] for migration in ckpt[_ckpt_migration_key]]
 
     def register_migrations(self, ckpt: CkptType) -> CkptType:
         """Registers a list of migration to the checkpoint.
