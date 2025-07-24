@@ -312,15 +312,10 @@ class AnemoiTrainer:
         return Path(self.config.hardware.paths.checkpoints.parent, fork_id or self.lineage_run)
 
     def get_checkpoint(self, fork_id: str) -> Path:
-        checkpoint = self.get_checkpoint(fork_id)
-        # Usage
-        warm_start_path = self._get_warm_start_checkpoint(self.config)
-
-        if warm_start_path:
-            checkpoint = warm_start_path
-        else:
-            checkpoint = self._get_checkpoint_directory(self.config, fork_id, self.lineage_run) / "last.ckpt"
-        return checkpoint
+        return (
+            self._get_warm_start_checkpoint(self.config)
+            or self._get_checkpoint_directory(self.config, fork_id, self.lineage_run) / "last.ckpt"
+        )
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
