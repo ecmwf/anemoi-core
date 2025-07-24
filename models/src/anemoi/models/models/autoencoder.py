@@ -434,7 +434,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         )
 
         x_encoded_latents = {}
-        skip_connections = {}
 
         ## Downscale
         for i in range(0, self.num_hidden - 1):
@@ -449,9 +448,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     shard_shapes=shard_shapes_hiddens[src_hidden_name],
                     model_comm_group=model_comm_group,
                 )
-
-            # store latents for skip connections
-            skip_connections[src_hidden_name] = curr_latent
 
             # Encode to next hidden level
             x_encoded_latents[src_hidden_name], curr_latent = self._run_mapper(
@@ -481,9 +477,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 x_dst_is_sharded=in_out_sharded,
                 keep_x_dst_sharded=in_out_sharded,
             )
-
-            # Add skip connections
-            curr_latent = curr_latent + skip_connections[dst_hidden_name]
 
             # Processing at same level
             if self.level_process:
