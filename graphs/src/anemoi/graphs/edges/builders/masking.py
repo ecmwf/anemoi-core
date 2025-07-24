@@ -121,14 +121,14 @@ class NodeMaskingMixin:
         torch.Tensor
             Remapped edge_index with original node indices.
         """
-        # Remap target indices (row 0)
-        if self.target_mask_attr_name is not None:
-            target_node_mapping = NodeMaskingMixin.get_unmasking_mapping(mask=target_nodes[self.target_mask_attr_name])
-            edge_index[0] = torch.from_numpy(target_node_mapping(edge_index[0].cpu().numpy())).to(edge_index.device)
-
-        # Remap source indices (row 1)
+        # Remap source indices (row 0)
         if self.source_mask_attr_name is not None:
             source_node_mapping = NodeMaskingMixin.get_unmasking_mapping(mask=source_nodes[self.source_mask_attr_name])
-            edge_index[1] = torch.from_numpy(source_node_mapping(edge_index[1].cpu().numpy())).to(edge_index.device)
+            edge_index[0] = torch.from_numpy(source_node_mapping(edge_index[0].cpu().numpy())).to(edge_index.device)
+
+        # Remap target indices (row 1)
+        if self.target_mask_attr_name is not None:
+            target_node_mapping = NodeMaskingMixin.get_unmasking_mapping(mask=target_nodes[self.target_mask_attr_name])
+            edge_index[1] = torch.from_numpy(target_node_mapping(edge_index[1].cpu().numpy())).to(edge_index.device)
 
         return edge_index
