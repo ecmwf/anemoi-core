@@ -127,3 +127,5 @@ attributes:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength
       norm: unit-std
+
+post_processors: []
