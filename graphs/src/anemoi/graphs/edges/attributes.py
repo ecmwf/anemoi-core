@@ -177,7 +177,7 @@ class GaussianDistanceWeights(EdgeLength):
 
     norm_by_group: bool = True  # normalise the gaussian weights by target node
 
-    def __init__(self, sigma: float = 1.0, norm: str = "l2", **kwargs) -> None:
+    def __init__(self, sigma: float = 1.0, norm: str = "l1", **kwargs) -> None:
         self.sigma = sigma
         super().__init__(norm=norm)
 
