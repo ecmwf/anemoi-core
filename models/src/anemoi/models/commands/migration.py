@@ -210,24 +210,20 @@ class Migration(Command):
             executed_migrations, missing_migrations, extra_migrations = migrator.inspect(ckpt)
             if len(executed_migrations):
                 print("Registered migrations:")
-            else:
-                print("No migration registered.")
             for migration in executed_migrations:
                 rprint(
                     f"[cyan]* [bold]{migration.name} \\[{migration.metadata.versions['anemoi-models']}][/bold][/cyan]"
                 )
             if len(missing_migrations):
-                print("Compatible migration to execute:")
+                print("Missing migrations:")
             else:
-                print("No compatible migration to execute.")
+                print("No missing migration to execute.")
             for migration in missing_migrations:
                 rprint(
                     f"[green]+ [bold]{migration.name} \\[{migration.metadata.versions['anemoi-models']}][/bold][/green]"
                 )
             if len(extra_migrations):
-                print("Extra migration to rollback:")
-            else:
-                print("No extra migration to rollback.")
+                print("Extra migrations to rollback:")
             for migration in extra_migrations:
                 rprint(f"[red]- [bold]{migration}[/red]")
         except IncompatibleCheckpointException:
