@@ -18,6 +18,7 @@ from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
+from torch_geometric.nn import radius
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
@@ -111,8 +112,6 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         return super().prepare_node_data(graph)
 
     def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
-        from torch_cluster.radius import radius
-
         edge_index = radius(source_coords, target_coords, r=self.radius, max_num_neighbors=self.max_num_neighbours)
         edge_index = torch.flip(edge_index, [0])
 

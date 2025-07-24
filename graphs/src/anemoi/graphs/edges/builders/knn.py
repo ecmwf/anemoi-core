@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data.storage import NodeStorage
+from torch_geometric.nn import knn
 
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 
@@ -70,11 +71,8 @@ class KNNEdges(BaseDistanceEdgeBuilders):
         )
 
     def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
-        from torch_cluster.knn import knn
-
         edge_index = knn(source_coords, target_coords, k=self.num_nearest_neighbours)
         edge_index = torch.flip(edge_index, [0])
-
         return edge_index
 
     def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> np.ndarray:
