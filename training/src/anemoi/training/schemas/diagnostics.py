@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 from typing import Literal
-from typing import Optional
 from typing import Union
 
 from pydantic import Field
@@ -209,11 +208,11 @@ class EarlyStoppingSchema(BaseModel):
     "Whether to crash the training if the monitored quantity is not found."
     check_finite: bool = True
     "Whether to check for NaNs and Infs in the monitored quantity."
-    stopping_threshold: Optional[float] = None
+    stopping_threshold: float | None = None
     "Stop training immediately once the monitored quantity reaches this threshold."
-    divergence_threshold: Optional[float] = None
+    divergence_threshold: float | None = None
     "Stop training as soon as the monitored quantity becomes worse than this threshold.."
-    check_on_train_epoch_end: Optional[bool] = None
+    check_on_train_epoch_end: bool | None = None
     "Whether to check the stopping criteria at the end of each training epoch."
 
 
