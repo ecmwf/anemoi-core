@@ -26,7 +26,6 @@ from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
 from matplotlib.colors import Colormap
-from matplotlib.colors import LogNorm
 from matplotlib.colors import Normalize
 from matplotlib.colors import TwoSlopeNorm
 from pyshtools.expand import SHGLQ
@@ -885,7 +884,7 @@ def single_plot(
             rasterized=False,
             transform=transform,
         )
-        
+
         # Add map features
         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
