@@ -77,7 +77,32 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self.cutoff_factor = cutoff_factor
         self.max_num_neighbours = max_num_neighbours
 
-    def get_cutoff_radius(self, graph: HeteroData, mask_attr: torch.Tensor | None = None) -> float:
+    @staticmethod
+    def get_reference_distance(nodes: NodeStorage, mask_attr_name: torch.Tensor | None = None) -> float:
+        """Compute the reference distance.
+
+        Parameters
+        ----------
+        nodes : NodeStorage
+            The nodes.
+        mask_attr_name : str
+            The mask attribute name.
+
+        Returns
+        -------
+        float
+            The nodes reference distance.
+        """
+        if mask_attr_name is not None:
+            # If masking nodes, we have to recompute the grid reference distance only over the masked nodes
+            mask = nodes[mask_attr_name]
+            _grid_reference_distance = get_grid_reference_distance(nodes.x, mask)
+        else:
+            _grid_reference_distance = nodes["_grid_reference_distance"]
+
+        return _grid_reference_distance
+
+    def get_cutoff_radius(self, graph: HeteroData):
         """Compute the cut-off radius.
 
         The cut-off radius is computed as the product of the target nodes
@@ -87,24 +112,16 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         ----------
         graph : HeteroData
             The graph.
-        mask_attr : torch.Tensor
-            The mask attribute.
 
         Returns
         -------
         float
             The cut-off radius.
         """
-        target_nodes = graph[self.target_name]
-        if mask_attr is not None:
-            # If masking target nodes, we have to recompute the grid reference distance only over the masked nodes
-            mask = target_nodes[mask_attr]
-            target_grid_reference_distance = get_grid_reference_distance(target_nodes.x, mask)
-        else:
-            target_grid_reference_distance = target_nodes["_grid_reference_distance"]
-
-        radius = target_grid_reference_distance * self.cutoff_factor
-        return radius
+        reference_dist = CutOffEdges._get_grid_reference_dist(
+            graph[self.target_name], mask_attr_name=self.target_mask_attr_name
+        )
+        return reference_dist * self.cutoff_factor
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
         """Prepare node information and get source and target nodes."""
@@ -211,6 +228,27 @@ class ReversedCutOffEdges(CutOffEdges):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         source_coords, target_coords = super().get_cartesian_node_coordinates(source_nodes, target_nodes)
         return target_coords, source_coords
+
+    def get_cutoff_radius(self, graph: HeteroData):
+        """Compute the cut-off radius.
+
+        The cut-off radius is computed as the product of the target nodes
+        reference distance and the cut-off factor.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            The graph.
+
+        Returns
+        -------
+        float
+            The cut-off radius.
+        """
+        reference_dist = CutOffEdges._get_grid_reference_dist(
+            graph[self.source_name], mask_attr_name=self.source_mask_attr_name
+        )
+        return reference_dist * self.cutoff_factor
 
     def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         adj_matrix = adj_matrix.T
