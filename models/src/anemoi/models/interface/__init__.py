@@ -123,7 +123,6 @@ class AnemoiModelInterface(torch.nn.Module):
         torch.Tensor
             Predicted data.
         """
-        batch = self.pre_processors(batch, in_place=False)
 
         with torch.no_grad():
 
@@ -139,6 +138,8 @@ class AnemoiModelInterface(torch.nn.Module):
                 shard_shapes = get_shard_shapes(x, -2, model_comm_group)
                 grid_shard_shapes = [shape[-2] for shape in shard_shapes]
                 x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+
+            x = self.pre_processors(x, in_place=False)
 
             y_hat = self(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
