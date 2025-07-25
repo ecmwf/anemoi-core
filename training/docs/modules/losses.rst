@@ -8,7 +8,7 @@ Anemoi-training exposes a couple of loss functions by default to be
 used, all of which are subclassed from ``BaseLoss``. This class enables
 scaler multiplication, and graph node weighting.
 
-.. automodule:: anemoi.training.losses.weightedloss
+.. automodule:: anemoi.training.losses.base
    :members:
    :no-undoc-members:
    :show-inheritance:
