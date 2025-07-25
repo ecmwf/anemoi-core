@@ -13,7 +13,7 @@ import logging
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-import numpy as np
+import torch
 
 from anemoi.training.losses.scalers.variable import BaseVariableLossScaler
 
@@ -77,8 +77,8 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         """
         ...
 
-    def get_scaling_values(self, **_kwargs) -> np.ndarray:
-        variable_level_scaling = np.ones((len(self.data_indices.data.output.full),), dtype=np.float32)
+    def get_scaling_values(self, **_kwargs) -> torch.Tensor:
+        variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
         LOGGER.info(
             "Variable Level Scaling: Applying %s scaling to %s variables (%s)",
@@ -102,21 +102,21 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
 class LinearVariableLevelScaler(BaseVariableLevelScaler):
     """Linear with slope self.slope, yaxis shift by self.y_intercept."""
 
-    def get_level_scaling(self, variable_level: float) -> np.ndarray:
+    def get_level_scaling(self, variable_level: float) -> torch.Tensor:
         return variable_level * self.slope + self.y_intercept
 
 
 class ReluVariableLevelScaler(BaseVariableLevelScaler):
     """Linear above self.y_intercept, taking constant value self.y_intercept below."""
 
-    def get_level_scaling(self, variable_level: float) -> np.ndarray:
+    def get_level_scaling(self, variable_level: float) -> torch.Tensor:
         return max(self.y_intercept, variable_level * self.slope)
 
 
 class PolynomialVariableLevelScaler(BaseVariableLevelScaler):
     """Polynomial scaling, (slope * variable_level)^2, yaxis shift by self.y_intercept."""
 
-    def get_level_scaling(self, variable_level: float) -> np.ndarray:
+    def get_level_scaling(self, variable_level: float) -> torch.Tensor:
         return (self.slope * variable_level) ** 2 + self.y_intercept
 
 
@@ -141,7 +141,7 @@ class NoVariableLevelScaler(BaseVariableLevelScaler):
         )
 
     @staticmethod
-    def get_level_scaling(variable_level: float) -> np.ndarray:
+    def get_level_scaling(variable_level: float) -> torch.Tensor:
         del variable_level  # unused
         # no scaling, always return 1.0
         return 1.0
