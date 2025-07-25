@@ -206,9 +206,9 @@ assigned to the default group.
 Custom Scalars
 ==============
 
-To create a custom scalar subclass the `BaseScaler` class and implement
-the `get_scaling_values` method. This method should return an array of
-the scaling values. Set `scale_dims` to the dimensions that the scaling
+To create a custom scalar, subclass the ``BaseScaler`` and implement the
+``get_scaling_values`` method. This method should return an array of the
+scaling values. Set ``scale_dims`` to the dimensions that the scaling
 values should be applied to.
 
 .. code:: python
@@ -223,20 +223,28 @@ values should be applied to.
          return scaling_values
 
 This scalar will only be instantiated once at the start of training, and
-thus cannot adapt throughout training. If you want a scalar that adapts
-throughout training, you can subclass the `BaseUpdatingScaler`.
+thus cannot adapt throughout batches and epochs.
 
-As with the `BaseScaler` you can set the initial scalar values at the
-start of training by implementing the `get_scaling_values` method.
-Currently, only two callbacks to update at are available, at the start
-of training, and at the start of a batch.
+Custom Updating Scalars
+-----------------------
 
-.. autoclass:: anemoi.training.losses.scalers.base_scaler.AvailableCallbacks
+If you want a scalar that adapts throughout the training process, you
+can subclass the ``BaseUpdatingScaler``.
+
+As with the ``BaseScaler``, set the initial scalar values at the start
+of training by implementing the ``get_scaling_values`` method.
+Currently, two callbacks to update at are available, at the start of
+training, and at the start of every batch.
 
 Implementing any of these updating methods will allow for the scaler
-values to be updated at the specified time. None being returned by these
-methods indicates that the scaler values should not be updated at that
-time.
+values to be changed at the specified point. If ``None`` is returned by
+these methods, it indicates that the scaler values should not be updated
+at that time.
+
+An example of this updating scaler is the
+``anemoi.training.losses.scalers.loss_weights_mask.NaNMaskScaler``,
+which updates the loss weights based on the presence of NaN values in
+the input.
 
 ********************
  Validation Metrics
