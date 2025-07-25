@@ -309,7 +309,7 @@ def mock_updating_scalar() -> type[BaseUpdatingScaler]:
 
         scale_dims = (TensorDim.VARIABLE,)
 
-        def initial_scaling_values(self) -> np.ndarray:
+        def get_scaling_values(self) -> np.ndarray:
             """Return initial scaling values."""
             return np.array([1.0])
 
@@ -326,8 +326,8 @@ def test_updating_scalars(mock_updating_scalar: type[BaseUpdatingScaler]) -> Non
     """Test that the updating scalar returns the correct values."""
     scalar = mock_updating_scalar()
 
-    assert scalar.initial_scaling_values() is not None
-    assert isinstance(scalar.initial_scaling_values(), np.ndarray)
+    assert scalar.get_scaling_values() is not None
+    assert isinstance(scalar.get_scaling_values(), np.ndarray)
 
     assert scalar.get_scaling() is not None
     assert scalar.get_scaling()[1][0] == 1.0, "Scalar values should be from the initial scaling values."

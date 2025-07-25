@@ -109,19 +109,9 @@ class BaseUpdatingScaler(BaseScaler):
     The callback methods are expected to return a np.ndarray of scaling values,
     which will be normalised. If they return None, the scaler will not update its values.
 
-    Override `initial_scaling_values` to provide initial scaling values if needed.
+    Override `get_scaling_values` to provide initial scaling values if needed.
     The default implementation returns an array of ones.
     """
-
-    def initial_scaling_values(self) -> np.ndarray:
-        """Get initial scaling values.
-
-        Returns
-        -------
-        np.ndarray
-            Initial scaling values, default is an array of ones.
-        """
-        return np.ones(tuple([1] * len(self.scale_dims)))
 
     def on_training_start(self, model: AnemoiModelInterface) -> np.ndarray | None:  # noqa: ARG002
         """Callback method called at the start of training."""
@@ -139,7 +129,7 @@ class BaseUpdatingScaler(BaseScaler):
         np.ndarray
             Scaling values as a numpy array.
         """
-        return self.initial_scaling_values()
+        return np.ones(tuple([1] * len(self.scale_dims)))
 
     def get_scaling(self) -> SCALER_DTYPE:
         """Get scaling values based on the initial scaling values callback."""
