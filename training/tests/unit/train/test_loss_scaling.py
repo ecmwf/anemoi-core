@@ -10,7 +10,6 @@
 
 from typing import Any
 
-import numpy as np
 import pytest
 import torch
 from _pytest.fixtures import SubRequest
@@ -309,15 +308,15 @@ def mock_updating_scalar() -> type[BaseUpdatingScaler]:
 
         scale_dims = (TensorDim.VARIABLE,)
 
-        def get_scaling_values(self) -> np.ndarray:
+        def get_scaling_values(self) -> torch.Tensor:
             """Return initial scaling values."""
-            return np.array([1.0])
+            return torch.Tensor([1.0])
 
-        def on_training_start(self, model: Any) -> np.ndarray:  # noqa: ARG002
-            return np.array([2.0])
+        def on_training_start(self, model: Any) -> torch.Tensor:  # noqa: ARG002
+            return torch.Tensor([2.0])
 
-        def on_batch_start(self, model: Any) -> np.ndarray:  # noqa: ARG002
-            return np.array([3.0])
+        def on_batch_start(self, model: Any) -> torch.Tensor:  # noqa: ARG002
+            return torch.Tensor([3.0])
 
     return UpdatingScalar
 
@@ -327,21 +326,21 @@ def test_updating_scalars(mock_updating_scalar: type[BaseUpdatingScaler]) -> Non
     scalar = mock_updating_scalar()
 
     assert scalar.get_scaling_values() is not None
-    assert isinstance(scalar.get_scaling_values(), np.ndarray)
+    assert isinstance(scalar.get_scaling_values(), torch.Tensor)
 
     assert scalar.get_scaling() is not None
-    assert scalar.get_scaling()[1][0] == 1.0, "Scalar values should be from the initial scaling values."
+    assert scalar.get_scaling()[1] == torch.Tensor([1.0]), "Scalar values should be from the initial scaling values."
 
-    assert scalar.on_training_start(None) == np.array([2.0])
+    assert scalar.on_training_start(None) == torch.Tensor([2.0])
     updated_scaling = scalar.update_scaling_values(callback="on_training_start", model=None)
-    assert (
-        updated_scaling is not None and updated_scaling[1][0] == 2.0
+    assert updated_scaling is not None and updated_scaling[1] == torch.Tensor(
+        [2.0],
     ), "Scalar values should be updated after on_training_start."
 
-    assert scalar.on_batch_start(None) == np.array([3.0])
+    assert scalar.on_batch_start(None) == torch.Tensor([3.0])
     updated_scaling = scalar.update_scaling_values(callback="on_batch_start", model=None)
-    assert (
-        updated_scaling is not None and updated_scaling[1][0] == 3.0
+    assert updated_scaling is not None and updated_scaling[1] == torch.Tensor(
+        [3.0],
     ), "Scalar values should be updated after on_batch_start."
 
 

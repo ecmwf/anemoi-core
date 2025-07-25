@@ -84,3 +84,12 @@ Inspect Command
     :func: create_parser
     :prog: anemoi-graphs
     :path: inspect
+
+.. _export-to-sparse-command:
+Export To Sparse Command
+------------------------
+.. argparse::
+    :module: anemoi.graphs.__main__
+    :func: create_parser
+    :prog: anemoi-graphs
+    :path: export_to_sparse

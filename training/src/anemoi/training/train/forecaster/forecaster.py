@@ -183,11 +183,7 @@ class GraphForecaster(pl.LightningModule):
             "Please set `model.keep_batch_sharded=False` or set `dataloader.read_group_size` ="
             "`hardware.num_gpus_per_model`.",
         )
-        model_supports_sharding = getattr(self.model.model, "supports_sharded_input", False)
-        assert model_supports_sharding or not self.keep_batch_sharded, (
-            f"Model {self.model.model} does not support sharded inputs, but `model.keep_batch_sharded=True` was set. ",
-            "Please set `model.keep_batch_sharded=False` or use a model that supports sharded inputs.",
-        )
+
         # set flag if loss and metrics support sharding
         self.loss_supports_sharding = getattr(self.loss, "supports_sharding", False)
         self.metrics_support_sharding = all(
@@ -430,8 +426,6 @@ class GraphForecaster(pl.LightningModule):
         ----------
         batch : torch.Tensor
             Batch to transfer
-        dataloader_idx : int
-            Dataloader index
 
         Returns
         -------

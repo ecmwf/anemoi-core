@@ -14,7 +14,7 @@ import warnings
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-import numpy as np
+import torch
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
@@ -64,8 +64,8 @@ class BaseTendencyScaler(BaseScaler):
     @abstractmethod
     def get_level_scaling(self, variable_level: int) -> float: ...
 
-    def get_scaling_values(self, **_kwargs) -> np.ndarray:
-        variable_level_scaling = np.ones((len(self.data_indices.data.output.full),), dtype=np.float32)
+    def get_scaling_values(self, **_kwargs) -> torch.Tensor:
+        variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
         for key, idx in self.data_indices.model.output.name_to_index.items():
             if idx in self.data_indices.model.output.prognostic and self.data_indices.data.output.name_to_index.get(
