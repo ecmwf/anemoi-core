@@ -17,6 +17,25 @@ from sklearn.neighbors import NearestNeighbors
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 
+def get_distributed_device() -> torch.device:
+    """Get the distributed device.
+
+    Returns
+    -------
+    torch.device
+        The distributed device.
+    """
+    if torch.cuda.is_available():
+        import os
+
+        local_rank = int(os.environ.get("SLURM_LOCALID", 0))
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = "cpu"
+
+    return device
+
+
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
     """Get NearestNeighbour object fitted to coordinates.
 
