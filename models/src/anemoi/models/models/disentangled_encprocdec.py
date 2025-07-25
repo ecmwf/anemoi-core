@@ -18,7 +18,10 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.utils.config import DotDict
-from .autoencoder import AnemoiModelAutoEncoder, AnemoiModelHierarchicalAutoEncoder
+from .autoencoder import AnemoiModelAutoEncoder
+from .autoencoder import AnemoiModelHierarchicalAutoEncoder
+from .encoder_processor_decoder import AnemoiModelEncProcDec
+from .hierarchical import AnemoiModelEncProcDecHierarchical
 
 LOGGER = logging.getLogger(__name__)
 
@@ -159,7 +162,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         return x_out
 
 
-class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoEncoder):
+class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelEncProcDecHierarchical, AnemoiModelHierarchicalAutoEncoder):
     """Disnentangled hierarchical graph network."""
 
     def __init__(
@@ -186,7 +189,8 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
         # Monkey-patch _calculate_shapes_and_indices on self before init
         self._calculate_shapes_and_indices = self._calculate_shapes_and_indices.__get__(self)
 
-        super(AnemoiModelHierarchicalAutoEncoder, self).__init__(
+        AnemoiModelEncProcDecHierarchical.__init__(
+            self,
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
@@ -243,8 +247,8 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
             x_t = x[:, i:i+1, ...]  # shape: [B, 1, E, G, D]
 
             # Prepare input
-            x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x, batch_size, grid_shard_shapes, model_comm_group
+            x_data_latent, shard_shapes_data = self._assemble_input(
+                x_t, batch_size, grid_shard_shapes, model_comm_group
             )
 
             # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
@@ -297,10 +301,10 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
                     keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 )
 
-                if x_accum is None:
-                    x_accum = curr_latent
-                else:
-                    x_accum += curr_latent  # accumulates in-place
+            if x_accum is None:
+                x_accum = curr_latent
+            else:
+                x_accum += curr_latent  # accumulates in-place
         
         # Store the last latent for the residual connection
         x_skip = curr_latent
@@ -354,6 +358,6 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
         )
 
-        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
+        x_out = self._assemble_output(x_out, batch_size, ensemble_size, x.dtype)
 
         return x_out

@@ -14,6 +14,7 @@ from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .interpolator import AnemoiModelEncProcDecInterpolator
 from .disentangled_encprocdec import AnemoiModelDisentangledEncProcDec
+from .disentangled_encprocdec import AnemoiModelDisentangledEncProcDecHierarchical
 
 __all__ = [
     "AnemoiModelEncProcDec",
@@ -23,4 +24,5 @@ __all__ = [
     "AnemoiModelAutoEncoder",
     "AnemoiModelHierarchicalAutoEncoder",
     "AnemoiModelDisentangledEncProcDec",
+    "AnemoiModelDisentangledEncProcDecHierarchical",
 ]
