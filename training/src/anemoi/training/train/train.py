@@ -180,6 +180,16 @@ class AnemoiTrainer:
 
         return truncation_data
 
+    def set_compile_flags(self, model, compile_class_paths):
+        from hydra.utils import get_class
+
+        # Convert class paths to actual classes
+        compile_classes = [get_class(path) for path in compile_class_paths]
+
+        for module in model.modules():
+            if type(module) in compile_classes:
+                module.compile = True
+
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
@@ -236,6 +246,9 @@ class AnemoiTrainer:
             for submodule_name in self.config.training.submodules_to_freeze:
                 freeze_submodule_by_name(model, submodule_name)
                 LOGGER.info("%s frozen successfully.", submodule_name.upper())
+
+        if hasattr(self.config.model, "compile"):
+            self.set_compile_flags(model, self.config.model.compile)
 
         return model
 

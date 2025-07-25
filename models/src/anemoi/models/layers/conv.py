@@ -21,6 +21,7 @@ from torch_geometric.typing import Size
 from torch_geometric.utils import scatter
 from torch_geometric.utils import softmax
 
+from anemoi.models.compile.conditional import ConditionalCompile
 from anemoi.models.layers.mlp import MLP
 from anemoi.utils.config import DotDict
 
@@ -97,6 +98,7 @@ class GraphTransformerConv(MessagePassing):
         self.out_channels = out_channels
         self.dropout = dropout
 
+    @ConditionalCompile(dynamic=True)
     def forward(
         self,
         query: Tensor,
