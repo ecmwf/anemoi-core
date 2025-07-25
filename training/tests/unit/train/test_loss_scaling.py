@@ -308,7 +308,7 @@ def mock_updating_scalar() -> type[BaseUpdatingScaler]:
 
         scale_dims = (TensorDim.VARIABLE,)
 
-        def initial_scaling_values(self) -> torch.Tensor:
+        def get_scaling_values(self) -> torch.Tensor:
             """Return initial scaling values."""
             return torch.Tensor([1.0])
 
@@ -325,8 +325,8 @@ def test_updating_scalars(mock_updating_scalar: type[BaseUpdatingScaler]) -> Non
     """Test that the updating scalar returns the correct values."""
     scalar = mock_updating_scalar()
 
-    assert scalar.initial_scaling_values() is not None
-    assert isinstance(scalar.initial_scaling_values(), torch.Tensor)
+    assert scalar.get_scaling_values() is not None
+    assert isinstance(scalar.get_scaling_values(), torch.Tensor)
 
     assert scalar.get_scaling() is not None
     assert scalar.get_scaling()[1] == torch.Tensor([1.0]), "Scalar values should be from the initial scaling values."

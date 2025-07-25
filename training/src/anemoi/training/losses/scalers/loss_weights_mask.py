@@ -38,7 +38,7 @@ class NaNMaskScaler(BaseUpdatingScaler):
         super().__init__(norm=norm)
         del kwargs
 
-    def on_train_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:
+    def on_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:
         """Update loss scaling.
 
         Get  mask multiplying NaN locations with zero.
@@ -57,7 +57,3 @@ class NaNMaskScaler(BaseUpdatingScaler):
                     loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
 
         return loss_weights_mask
-
-    def on_valid_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:
-        """Update loss scaling for validation batch."""
-        return self.on_train_batch_start(model)

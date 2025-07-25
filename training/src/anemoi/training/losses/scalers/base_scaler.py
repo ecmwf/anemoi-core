@@ -110,19 +110,9 @@ class BaseUpdatingScaler(BaseScaler):
     The callback methods are expected to return a np.ndarray of scaling values,
     which will be normalised. If they return None, the scaler will not update its values.
 
-    Override `initial_scaling_values` to provide initial scaling values if needed.
+    Override `get_scaling_values` to provide initial scaling values if needed.
     The default implementation returns an array of ones.
     """
-
-    def initial_scaling_values(self) -> Optional[torch.Tensor]:
-        """Get initial scaling values.
-
-        Returns
-        -------
-        torch.Tensor
-            Initial scaling values, default is an array of ones.
-        """
-        return torch.ones(tuple([1] * len(self.scale_dims)))
 
     def on_training_start(self, model: AnemoiModelInterface) -> Optional[torch.Tensor]:  # noqa: ARG002
         """Callback method called at the start of training."""
@@ -140,7 +130,7 @@ class BaseUpdatingScaler(BaseScaler):
         torch.Tensor
             Scaling values as a torch tensor.
         """
-        return self.initial_scaling_values()
+        return torch.ones(tuple([1] * len(self.scale_dims)))
 
     def get_scaling(self) -> TENSOR_SPEC:
         """Get scaling values based on the initial scaling values callback."""

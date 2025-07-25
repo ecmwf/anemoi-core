@@ -4,7 +4,7 @@
  Limited Area Modeling (LAM)
 #############################
 
-AnemoI Graphs brings another level of flexibility to the user by
+Anemoi Graphs brings another level of flexibility to the user by
 allowing the definition of limited area graphs.
 
 *****************************************
