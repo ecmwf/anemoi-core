@@ -61,7 +61,7 @@ class BaseLoss(nn.Module, ABC):
         """
         super().__init__()
 
-        self.scaler = ScaleTensor()
+        self.add_module("scaler", ScaleTensor())
 
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
@@ -111,8 +111,6 @@ class BaseLoss(nn.Module, ABC):
 
         if len(self.scaler) == 0:
             return x[subset_indices]
-
-        self.scaler.to(x.device)
 
         if TensorDim.GRID not in self.scaler:
             error_msg = (

@@ -141,6 +141,7 @@ class CombinedLoss(BaseLoss):
 
             self.add_module(str(i), self.losses[-1])  # (self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
+        del self.scaler  # Remove scaler property from parent class, as it is not used here
 
     def forward(
         self,
@@ -172,23 +173,6 @@ class CombinedLoss(BaseLoss):
             else:
                 loss = self.loss_weights[i] * loss_fn(pred, target, **kwargs)
         return loss
-
-    @property
-    def scaler(self) -> ScaleTensor:
-        """Get union of underlying scalers."""
-        scalers = {}
-        for loss in self.losses:
-            scalers.update(loss.scaler.tensors)
-        return ScaleTensor(scalers)
-
-    @scaler.setter
-    def scaler(self, _: Any) -> None:
-        """Set underlying loss scalers."""
-        if not self._initial_set_scaler:  # Allow parent class to 'initialise' the scaler
-            self._initial_set_scaler = True
-            return
-        excep_msg = "Cannot set `CombinedLoss` scaler directly, use `add_scaler` or `update_scaler`."
-        raise AttributeError(excep_msg)
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
