@@ -18,6 +18,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.normalise import NormaliserMixin
+from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,13 +31,7 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
     def __init__(self, norm: str | None = None, dtype: str = "float32") -> None:
         self.norm = norm
         self.dtype = getattr(torch, dtype)
-        if torch.cuda.is_available():
-            import os
-
-            local_rank = int(os.environ.get("SLURM_LOCALID", 0))
-            self.device = torch.device(f"cuda:{local_rank}")
-        else:
-            self.device = "cpu"
+        self.device = get_distributed_device()
 
     @abstractmethod
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor: ...

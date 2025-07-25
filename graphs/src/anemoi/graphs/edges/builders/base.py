@@ -20,6 +20,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.utils import concat_edges
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -39,13 +40,7 @@ class BaseEdgeBuilder(ABC):
         self.target_name = target_name
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
-        if torch.cuda.is_available():
-            import os
-
-            local_rank = int(os.environ.get("SLURM_LOCALID", 0))
-            self.device = torch.device(f"cuda:{local_rank}")
-        else:
-            self.device = "cpu"
+        self.device = get_distributed_device()
 
     @property
     def name(self) -> tuple[str, str, str]:
