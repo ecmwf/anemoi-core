@@ -23,6 +23,7 @@ from torch_geometric.typing import Size
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import NodesAxis
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import haversine_distance
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         super().__init__()
         self.norm = norm
         self.dtype = dtype
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = get_distributed_device()
         if self.node_attr_name is None:
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)

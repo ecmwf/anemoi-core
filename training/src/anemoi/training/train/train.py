@@ -148,8 +148,10 @@ class AnemoiTrainer:
             )
 
             if graph_filename.exists() and not self.config.graph.overwrite:
+                from anemoi.graphs.utils import get_distributed_device
+
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, weights_only=False)
+                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
 
         else:
             graph_filename = None
