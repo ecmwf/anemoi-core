@@ -2,6 +2,7 @@ dataset: ???
 graph: ???
 truncation: null
 truncation_inv: null
+truncation_loss: [False]
 checkpoint:
   every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
   every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
