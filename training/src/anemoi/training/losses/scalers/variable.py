@@ -100,13 +100,13 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
                 variable_ref,
                 self.weights.get("default", 1.0),
             )
-            if variable_ref != variable_name:
-                assert (
-                    self.weights.get(
-                        variable_name,
-                        None,
-                    )
-                    is None
-                ), f"Variable {variable_name} is not allowed to have a separate scaling besides {variable_ref}."
+            # if variable_ref != variable_name:
+            #     assert (
+            #         self.weights.get(
+            #             variable_name,
+            #             None,
+            #         )
+            #         is None
+            #     ), f"Variable {variable_name} is not allowed to have a separate scaling besides {variable_ref}."
 
         return variable_loss_scaling
