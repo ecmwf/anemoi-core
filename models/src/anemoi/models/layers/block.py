@@ -823,12 +823,11 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
-        **layer_kwargs,
+        cond: Optional[Tensor] = None,
     ):
         x_skip = x
 
         # In case we have conditionings we pass these to the layer norm
-        cond = layer_kwargs.pop("cond", None)
         cond_kwargs = {"cond": cond} if cond is not None else {}
 
         x = self.layer_norm_attention(x, **cond_kwargs)
