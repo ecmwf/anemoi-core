@@ -96,7 +96,7 @@ class BaseSchema(BaseModel):
         if (
             isinstance(self.model.decoder, GraphTransformerDecoderSchema)
             and self.model.decoder.initialise_data_extractor_zero
-            and self.model.bounding is not None
+            and self.model.bounding
         ):
             error = "bounding_conflict_with_data_extractor_zero"
             msg = (

@@ -91,14 +91,18 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         # Calculate indices using multistep, timeincrement and rollout.
         # Use the maximum rollout to be expected
-        rollout = max(
-            (
-                self.config.training.rollout.max
-                if self.config.training.rollout.epoch_increment > 0
-                else self.config.training.rollout.start
-            ),
-            val_rollout,
-        )
+        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
+
+        rollout_max = getattr(rollout_cfg, "max", None)
+        rollout_start = getattr(rollout_cfg, "start", 1)
+        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
+
+        # Fallback if max is None or rollout_cfg is missing
+        rollout_value = rollout_start
+        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
+            rollout_value = rollout_max
+
+        rollout = max(rollout_value, val_rollout)
 
         multi_step = self.config.training.multistep_input
         return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
@@ -117,10 +121,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
         mr_len = self.config.dataloader.model_run_info.length  # model run length in number of date indices
-        assert (
-            max(self.relative_date_indices(self.config.training.rollout.max)) < mr_len
-        ), f"""Requested data length {max(self.relative_date_indices(self.config.training.rollout.max)) + 1}
-                longer than model run length {mr_len}"""
+        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
+            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
+            assert (
+                max_rollout_index < mr_len
+            ), f"""Requested data length {max_rollout_index + 1}
+                    longer than model run length {mr_len}"""
 
         data_reader.trajectory_ids = (data_reader.dates - mr_start) // np.timedelta64(
             mr_len * frequency_to_seconds(self.config.data.frequency),
