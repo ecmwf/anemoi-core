@@ -63,9 +63,10 @@ limit the maximum number of neighbours each node can connect to.
 
 The reversed cut-off method (``ReversedCutOffEdges``) is similar to the
 standard cut-off method, but instead establishes connections based on
-the neighbourhood of each source node. Given two sets of nodes,
-(`source`, `target`), the ``ReversedCutOffEdges`` method connects all
-sources nodes to all target nodes within a cut-off radius.
+the neighbourhood of each source node. The role of source and target 
+nodes is similarly reversed in :math:`\text{nodes_reference_dist}`. 
+Given two sets of nodes, (`source`, `target`), the ``ReversedCutOffEdges`` 
+method connects all sources nodes to all target nodes within a cut-off radius.
 
 To use this method to create your connections, you can use the following
 YAML configuration:
