@@ -196,7 +196,11 @@ def gnn_config(
     OmegaConf.resolve(cfg)
     return cfg
 
-@pytest.fixture
+@pytest.fixture(
+    params=[
+        ["model=graphtransformer"],
+    ],
+)
 def benchmark_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_paths: callable,
