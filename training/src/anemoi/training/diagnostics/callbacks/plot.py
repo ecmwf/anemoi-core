@@ -812,7 +812,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         # set x-ticks
         x_tick_positions = np.cumsum(group_counts) - group_counts / 2 - 0.5
-        xticks = dict(zip(unique_group_list, x_tick_positions))
+        xticks = dict(zip(unique_group_list, x_tick_positions, strict=False))
 
         legend_patches = []
         for group_idx, group in enumerate(unique_group_list):
