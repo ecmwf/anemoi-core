@@ -167,14 +167,14 @@ def get_performance_metrics():
 # can skip multi-gpu
 # add compute/nccl/memory breakdown from pytorch profiler
 @pytest.mark.longtests
-def test_benchmark_training_cycle(benchmark_config: tuple[DictConfig, str],  get_test_archive: callable) -> None:
+def test_benchmark_training_cycle(benchmark_config: tuple[DictConfig, str],  get_test_archive: callable, update_data=False) -> None:
     cfg, urls = benchmark_config
     for url in urls:
         get_test_archive(url)
 
 
     results = get_performance_metrics()
-    print(results)
+    print(f"Performance benchmarks from server:\n{results}")
     
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
@@ -186,28 +186,30 @@ def test_benchmark_training_cycle(benchmark_config: tuple[DictConfig, str],  get
     av_training_batch_time_s = open_log_file("time_profiler.csv")
 
 
-    print(f"Peak memory: {peak_active_mem_mb:.2f}MB")
-    print(f"Av. training batch time: {av_training_batch_time_s}s")
-    print(f"Av. training throughput: {av_training_throughput}iter/s")
+    print(f"Peak memory: {peak_active_mem_mb:.3f}MB")
+    print(f"Av. training batch time: {av_training_batch_time_s:.2f}s")
+    print(f"Av. training throughput: {av_training_throughput:.2f}iter/s")
 
     if (peak_active_mem_mb > results["peakMemoryMB"] ):
-        raise ValueError(f"Peak memory usage {peak_active_mem_mb}MB is greater than current benchmark peak of {results['peakMemoryMB']}MB")
+        raise ValueError(f"Peak memory usage {peak_active_mem_mb:.3f}MB is greater than current benchmark peak of {peak_active_mem_mb:.3f}MB")
     else:
-        print(f"Peak memory usage of {peak_active_mem_mb}MB is equal to or less than current benchamrk peak of  {results['peakMemoryMB']}MB")
+        print(f"Peak memory usage of {peak_active_mem_mb:.3f}MB is equal to or less than current benchamrk peak of  {peak_active_mem_mb:.3f}MB")
 
 
     throuhput_tolerance_percent=5
     throughput_upper_bound=results["avThroughputIterPerS"] * (100 + throuhput_tolerance_percent)/100
     if (av_training_throughput < throughput_upper_bound):
-        raise ValueError(f"Average throughput of {av_training_throughput} is less than current benchmark throughput of { results['avThroughputIterPerS']}")
+        raise ValueError(f"Average throughput of {av_training_throughput:.2f}iter/s is less than current benchmark throughput of {av_training_throughput:.2f}iter/s")
     else:
-        print(f"Average throughput of {av_training_throughput} is higher than or equal to the current benchmark throughput of { results['avThroughputIterPerS']}")
+        print(f"Average throughput of {av_training_throughput:.2f}iter/s is higher than or equal to the current benchmark throughput of { throughput_upper_bound:.2f}iter/s")
     batch_time_tolerance_percent=5
     batch_time_upper_bound=results["avTimePerBatchS"] * (100 + batch_time_tolerance_percent)/100
     if  ( av_training_batch_time_s > batch_time_upper_bound):
-        raise ValueError(f"Average time per batch of {av_training_batch_time_s} is higher than current benchmark time of {results['avTimePerBatchS']}")
+        raise ValueError(f"Average time per batch of {av_training_batch_time_s:.2f}s is higher than current benchmark time of {batch_time_upper_bound:.2f}s")
     else:
-        print(f"Average time per batch of {av_training_batch_time_s} is less than or equal to than current benchmark time of {results['avTimePerBatchS']}")
+        print(f"Average time per batch of {av_training_batch_time_s:.2f}s is less than or equal to than current benchmark time of {batch_time_upper_bound:.2f}s")
+    if update_data:
+        pass
 
 @skip_if_offline
 @pytest.mark.longtests
