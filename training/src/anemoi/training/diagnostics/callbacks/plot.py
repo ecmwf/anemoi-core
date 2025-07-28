@@ -91,7 +91,7 @@ class BasePlotCallback(Callback, ABC):
     @rank_zero_only
     def _output_figure(
         self,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
         fig: plt.Figure,
         epoch: int,
         tag: str = "gnn",
@@ -122,7 +122,7 @@ class BasePlotCallback(Callback, ABC):
     @rank_zero_only
     def _output_gif(
         self,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
         fig: plt.Figure,
         anim: animation.ArtistAnimation,
         epoch: int,
@@ -501,7 +501,7 @@ class LongRolloutPlots(BasePlotCallback):
         y_pred: torch.Tensor,
         batch_idx: int,
         epoch: int,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
     ) -> None:
         """Plot the predicted output, input, true target and error plots for a given rollout step."""
         # prepare true output tensor for plotting
@@ -561,7 +561,7 @@ class LongRolloutPlots(BasePlotCallback):
         rollout_step: int,
         batch_idx: int,
         epoch: int,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
         animation_interval: int = 400,
     ) -> None:
         """Generate the video animation for the rollout."""
@@ -833,7 +833,7 @@ class PlotLoss(BasePerBatchPlotCallback):
     def _plot(
         self,
         trainer: pl.Trainer,
-        pl_module: pl.Lightning_module,
+        pl_module: pl.LightningModule,
         outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
