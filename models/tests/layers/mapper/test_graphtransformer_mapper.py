@@ -199,6 +199,19 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             x_dst, x_dst_c, atol=1e-4
         ), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
 
+    def test_strategy(self, mapper, pair_tensor):
+        x = pair_tensor
+        batch_size = 1
+        shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
+
+        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+
+        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+
+        assert torch.allclose(
+            out_heads, out_edges, atol=1e-4
+        ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+
 
 class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
     """Test the GraphTransformerBackwardMapper class."""
@@ -275,7 +288,6 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
         batch_size = 1
 
-        # Different size for x_dst, as the Backward mapper changes the channels in shape in pre-processor
         x = (
             torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
@@ -288,3 +300,20 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         out = mapper.forward(x, batch_size, shard_shapes)
 
         assert torch.allclose(out, out_c, atol=1e-4), f"out ({out}) != out_c ({out_c}) when num_chunks is changed"
+
+    def test_strategy(self, mapper_init, mapper, pair_tensor):
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        batch_size = 1
+
+        x = (
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
+        )
+
+        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+
+        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+
+        assert torch.allclose(
+            out_heads, out_edges, atol=1e-4
+        ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
