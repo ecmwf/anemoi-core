@@ -9,18 +9,14 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
+from omegaconf import DictConfig
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
-
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
-
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
 

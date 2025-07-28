@@ -9,14 +9,17 @@
 
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Generator
+from collections.abc import Mapping
 
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from timm.scheduler import CosineLRScheduler
+from torch.distributed.distributed_c10d import ProcessGroup
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
@@ -32,16 +35,6 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-    from collections.abc import Mapping
-
-    from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
-
-    from anemoi.models.data_indices.collection import IndexCollection
-
 
 LOGGER = logging.getLogger(__name__)
 

@@ -12,23 +12,19 @@ import logging
 from collections.abc import Callable
 from collections.abc import Iterable
 from datetime import timedelta
-from typing import TYPE_CHECKING
 from typing import Any
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from pydantic import BaseModel
+from pytorch_lightning.callbacks import Callback
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-
-if TYPE_CHECKING:
-    from pytorch_lightning.callbacks import Callback
-
-    from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +38,7 @@ def nestedget(config: DictConfig, key: str, default: Any) -> Any:
     keys = key.split(".")
     for k in keys:
         config = getattr(config, k, default)
-        if not isinstance(config, (BaseModel, dict, DictConfig)):
+        if not isinstance(config, BaseModel | dict | DictConfig):
             break
     return config
 

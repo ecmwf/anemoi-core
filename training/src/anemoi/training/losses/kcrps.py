@@ -9,15 +9,12 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
 import einops
 import torch
+from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
-
-if TYPE_CHECKING:
-    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 

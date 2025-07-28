@@ -9,18 +9,14 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
+from torch_geometric.data import HeteroData
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.masks import BaseMask
 from anemoi.training.utils.masks import NoOutputMask
-
-if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
-
-    from anemoi.training.utils.masks import BaseMask
 
 LOGGER = logging.getLogger(__name__)
 

@@ -19,6 +19,7 @@ from pydantic import TypeAdapter
 from pydantic import ValidationError
 from pydantic import field_validator
 from pydantic import model_validator
+from typing_extensions import Self
 
 
 class NormalizerSchema(BaseModel):
@@ -72,7 +73,7 @@ class ConstantImputerSchema(RootModel[dict[Any, Any]]):
 
         for k, v in values.items():
             if k == "default":
-                if not isinstance(v, (int, float)):
+                if not isinstance(v, int | float):
                     if v is None or v == "none" or v == "None":
                         continue
                     msg = f'"default" must map to a float or None, got {type(v).__name__}'
@@ -83,8 +84,8 @@ class ConstantImputerSchema(RootModel[dict[Any, Any]]):
                     raise TypeError(msg)
 
             # Accept numeric keys as int or float
-            elif isinstance(k, (int, float)):
-                if not isinstance(v, Iterable) or isinstance(v, (str, bytes)):
+            elif isinstance(k, int | float):
+                if not isinstance(v, Iterable) or isinstance(v, str | bytes):
                     msg = f'Key "{k}" must map to a list of strings, got {v}'
                     raise TypeError(msg)
                 if not all(isinstance(i, str) for i in v):
@@ -141,8 +142,8 @@ class NormalizedReluPostprocessorSchema(RootModel[dict[Any, Any]]):
                     raise ValueError(msg)
 
             # Accept numeric keys as int or float
-            elif isinstance(k, (int, float)):
-                if not isinstance(v, Iterable) or isinstance(v, (str, bytes)):
+            elif isinstance(k, int | float):
+                if not isinstance(v, Iterable) or isinstance(v, str | bytes):
                     msg = f'Key "{k}" must map to a list of strings, got {v}'
                     raise TypeError(msg)
                 if not all(isinstance(i, str) for i in v):
@@ -183,7 +184,7 @@ class ConditionalZeroPostprocessorSchema(RootModel[dict[Any, Any]]):
 
         for k, v in values.items():
             if k == "default":
-                if not isinstance(v, (int, float)):
+                if not isinstance(v, int | float):
                     if v is None or v == "none" or v == "None":
                         continue
                     msg = f'"default" must map to a float or None, got {type(v).__name__}'
@@ -194,8 +195,8 @@ class ConditionalZeroPostprocessorSchema(RootModel[dict[Any, Any]]):
                     raise TypeError(msg)
 
             # Accept numeric keys as int or float
-            elif isinstance(k, (int, float)):
-                if not isinstance(v, Iterable) or isinstance(v, (str, bytes)):
+            elif isinstance(k, int | float):
+                if not isinstance(v, Iterable) or isinstance(v, str | bytes):
                     msg = f'Key "{k}" must map to a list of strings, got {v}'
                     raise TypeError(msg)
                 if not all(isinstance(i, str) for i in v):
@@ -245,7 +246,7 @@ class PreprocessorSchema(BaseModel):
     "Target schema containing processor methods."
 
     @model_validator(mode="after")
-    def schema_consistent_with_target(self) -> PreprocessorSchema:
+    def schema_consistent_with_target(self) -> Self:
         schema_cls = target_to_schema.get(self.target_)
         if schema_cls is None:
             error_msg = f"Unknown target: {self.target_}"

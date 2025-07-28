@@ -10,20 +10,16 @@
 
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING
 
+import numpy as np
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
-
-if TYPE_CHECKING:
-    import numpy as np
-
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.data_indices.tensor import OutputTensorIndex
-    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 LOGGER = logging.getLogger(__name__)

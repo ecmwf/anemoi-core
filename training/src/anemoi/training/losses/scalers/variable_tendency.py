@@ -11,16 +11,12 @@
 import logging
 import warnings
 from abc import abstractmethod
-from typing import TYPE_CHECKING
 
 import numpy as np
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
-
-if TYPE_CHECKING:
-
-    from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 

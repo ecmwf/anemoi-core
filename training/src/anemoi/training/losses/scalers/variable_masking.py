@@ -9,17 +9,12 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.variable import GeneralVariableLossScaler
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-
-if TYPE_CHECKING:
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
 

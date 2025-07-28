@@ -10,7 +10,6 @@
 
 import importlib
 import logging
-from typing import TYPE_CHECKING
 from typing import Type
 
 import networkx as nx
@@ -19,10 +18,7 @@ import torch
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
-
-if TYPE_CHECKING:
-    from anemoi.graphs.generate.multi_scale_edges import BaseIcosahedronEdgeStrategy
-
+from anemoi.graphs.generate.multi_scale_edges import BaseIcosahedronEdgeStrategy
 
 LOGGER = logging.getLogger(__name__)
 

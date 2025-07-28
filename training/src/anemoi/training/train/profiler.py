@@ -15,19 +15,16 @@ from datetime import datetime
 from datetime import timezone
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import hydra
 import pandas as pd
+import pytorch_lightning as pl
+from omegaconf import DictConfig
+from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
-if TYPE_CHECKING:
-    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-    from pytorch_lightning.loggers.logger import Logger
-    from omegaconf import DictConfig
-    import pytorch_lightning as pl
-
+from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.profilers import BenchmarkProfiler
 from anemoi.training.diagnostics.profilers import ProfilerProgressBar
 from anemoi.training.train.train import AnemoiTrainer

@@ -20,16 +20,20 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 import matplotlib.animation as animation
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
+import pytorch_lightning as pl
 import torch
+from matplotlib.colors import Colormap
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
@@ -42,15 +46,6 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.schemas.base_schema import BaseSchema
-
-if TYPE_CHECKING:
-    from typing import Any
-
-    import pytorch_lightning as pl
-    from matplotlib.colors import Colormap
-    from omegaconf import OmegaConf
-
-    from anemoi.models.layers.graph import NamedNodesAttributes
 
 LOGGER = logging.getLogger(__name__)
 

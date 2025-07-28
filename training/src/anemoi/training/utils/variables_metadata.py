@@ -106,7 +106,7 @@ class ExtractVariableGroupAndLevel:
             raise ValueError(error_msg)
 
         for group_name, group_spec in self.variable_groups.items():
-            if isinstance(group_spec, (list, str)):
+            if isinstance(group_spec, list | str):
                 # simple group
                 if self.get_param(variable_name) in (group_spec if isinstance(group_spec, list) else [group_spec]):
                     LOG.debug(

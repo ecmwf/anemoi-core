@@ -12,15 +12,12 @@ import logging
 import time
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
+from omegaconf import DictConfig
 
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
-
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
 
 LOGGER = logging.getLogger(__name__)
 

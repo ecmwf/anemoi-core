@@ -13,12 +13,9 @@ from abc import ABC
 from abc import abstractmethod
 from collections.abc import Sequence
 from functools import cached_property
-from typing import TYPE_CHECKING
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
+from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 

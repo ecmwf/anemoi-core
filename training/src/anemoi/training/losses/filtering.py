@@ -8,19 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 from typing import Any
 
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from anemoi.models.data_indices.collection import IndexCollection
 
 
 # TODO(Harrison): Consider renaming and reworking to a RemappingLossWrapper or similar, as it remaps variables
@@ -56,7 +52,7 @@ class FilteringLossWrapper(BaseLoss):
         if isinstance(loss, str):
             self._loss_scaler_specification = ["*"]
             self.loss = get_loss_function(DictConfig({"_target_": loss}), scalers={}, **dict(kwargs))
-        elif isinstance(loss, (DictConfig, dict)):
+        elif isinstance(loss, DictConfig | dict):
             self._loss_scaler_specification = loss.pop("scalers", ["*"])
             self.loss = get_loss_function(loss, scalers={}, **dict(kwargs))
         elif isinstance(loss, type):

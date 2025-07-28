@@ -21,31 +21,6 @@ from anemoi.utils.schemas import BaseModel
 LOGGER = logging.getLogger(__name__)
 
 
-class LongRolloutPlotsSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots"] = Field(alias="_target_")
-    "LongRolloutPlots object from anemoi training diagnostics callbacks."
-    rollout: list[int]
-    "Rollout steps to plot at."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    video_rollout: int = Field(example=0)
-    "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: list[float] | None = Field(default=None)
-    "Accumulation levels to plot, by default None."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    per_sample: int | None = Field(default=None)
-    "Number of plots per sample, by default 6."
-    every_n_epochs: int = Field(example=1)
-    "Epoch frequency to plot at, by default 1."
-    animation_interval: int | None = Field(default=None)
-    "Delay between frames in the animation in milliseconds, by default 400."
-    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
-    "List of colormaps to use, by default None."
-
-
 class GraphTrainableFeaturesPlotSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
     "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
@@ -95,6 +70,31 @@ ColormapSchema = Annotated[
     MatplotlibColormapSchema | MatplotlibColormapClevelsSchema | DistinctipyColormapSchema,
     Field(discriminator="target_"),
 ]
+
+
+class LongRolloutPlotsSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots"] = Field(alias="_target_")
+    "LongRolloutPlots object from anemoi training diagnostics callbacks."
+    rollout: list[int]
+    "Rollout steps to plot at."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    video_rollout: int = Field(example=0)
+    "Number of rollout steps for video, by default 0 (no video)."
+    accumulation_levels_plot: list[float] | None = Field(default=None)
+    "Accumulation levels to plot, by default None."
+    cmap_accumulation: list[str] | None = Field(default=None)
+    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
+    per_sample: int | None = Field(default=None)
+    "Number of plots per sample, by default 6."
+    every_n_epochs: int = Field(example=1)
+    "Epoch frequency to plot at, by default 1."
+    animation_interval: int | None = Field(default=None)
+    "Delay between frames in the animation in milliseconds, by default 400."
+    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
+    "List of colormaps to use, by default None."
 
 
 class PlotSampleSchema(BaseModel):
@@ -153,6 +153,13 @@ PlotCallbacks = Annotated[
 ]
 
 
+class PlottingFrequency(BaseModel):
+    batch: PositiveInt = Field(example=750)
+    "Frequency of the plotting in number of batches."
+    epoch: PositiveInt = Field(example=5)
+    "Frequency of the plotting in number of epochs."
+
+
 class PlotSchema(BaseModel):
     asynchronous: bool
     "Handle plotting tasks without blocking the model training."
@@ -170,13 +177,6 @@ class PlotSchema(BaseModel):
     "List of colormaps to use."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
-
-
-class PlottingFrequency(BaseModel):
-    batch: PositiveInt = Field(example=750)
-    "Frequency of the plotting in number of batches."
-    epoch: PositiveInt = Field(example=5)
-    "Frequency of the plotting in number of epochs."
 
 
 class TimeLimitSchema(BaseModel):

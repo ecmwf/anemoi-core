@@ -9,14 +9,11 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
 import torch
+from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.mse import MSELoss
-
-if TYPE_CHECKING:
-    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 

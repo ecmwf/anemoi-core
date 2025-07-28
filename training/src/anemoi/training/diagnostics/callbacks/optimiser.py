@@ -9,15 +9,12 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
+from omegaconf import DictConfig
 from pytorch_lightning.callbacks import LearningRateMonitor as pl_LearningRateMonitor
 from pytorch_lightning.callbacks.stochastic_weight_avg import StochasticWeightAveraging as pl_StochasticWeightAveraging
 
 LOGGER = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
 
 
 class LearningRateMonitor(pl_LearningRateMonitor):

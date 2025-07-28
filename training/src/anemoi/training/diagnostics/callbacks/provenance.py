@@ -9,14 +9,11 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
+import pytorch_lightning as pl
+import torch
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
-
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    import torch
-    from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 

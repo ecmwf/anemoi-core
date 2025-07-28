@@ -9,15 +9,12 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 
+from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
 from anemoi.training.utils.enums import TensorDim
-
-if TYPE_CHECKING:
-    from anemoi.models.interface import AnemoiModelInterface
 
 LOGGER = logging.getLogger(__name__)
 

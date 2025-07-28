@@ -17,6 +17,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import model_validator
+from typing_extensions import Self
 
 from anemoi.utils.schemas import BaseModel
 
@@ -112,7 +113,7 @@ class NormalizedReluBoundingSchema(BaseModel):
     normalizer: list[str]
 
     @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBoundingSchema:
+    def check_num_normalizers_and_min_val_matches_num_variables(self) -> Self:
         error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
         match the number of variables ({len(self.variables)})"""
         assert len(self.normalizer) == len(self.variables), error_msg

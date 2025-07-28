@@ -20,6 +20,7 @@ from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 from pydantic import field_validator
 from pydantic import model_validator
+from typing_extensions import Self
 
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
@@ -264,7 +265,7 @@ class CombinedLossSchema(BaseLossSchema):
         return losses
 
     @model_validator(mode="after")
-    def check_length_of_weights_and_losses(self) -> CombinedLossSchema:
+    def check_length_of_weights_and_losses(self) -> Self:
         """Check that the number of losses and weights match, or if not set, skip."""
         losses, loss_weights = self.losses, self.loss_weights
         if loss_weights is not None and len(losses) != len(loss_weights):

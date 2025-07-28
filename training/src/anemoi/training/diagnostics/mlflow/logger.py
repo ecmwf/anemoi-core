@@ -14,13 +14,16 @@ import os
 import re
 import sys
 import time
+from argparse import Namespace
+from collections.abc import Mapping
 from pathlib import Path
 from threading import Thread
-from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
 from weakref import WeakValueDictionary
 
+import mlflow
+from mlflow.tracking import MlflowClient
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
@@ -32,14 +35,6 @@ from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.utils.mlflow.auth import TokenAuth
 from anemoi.utils.mlflow.utils import health_check
-
-if TYPE_CHECKING:
-    from argparse import Namespace
-    from collections.abc import Mapping
-
-    import mlflow
-    from mlflow.tracking import MlflowClient
-
 
 LOGGER = logging.getLogger(__name__)
 

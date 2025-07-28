@@ -19,6 +19,7 @@ from pydantic import model_validator
 from pydantic._internal import _model_construction
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
+from typing_extensions import Self
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
@@ -64,13 +65,13 @@ class BaseSchema(BaseModel):
     """Flag to disable validation of the configuration"""
 
     @model_validator(mode="after")
-    def set_read_group_size_if_not_provided(self) -> BaseSchema:
+    def set_read_group_size_if_not_provided(self) -> Self:
         if not self.dataloader.read_group_size:
             self.dataloader.read_group_size = self.hardware.num_gpus_per_model
         return self
 
     @model_validator(mode="after")
-    def check_log_paths_available_for_loggers(self) -> BaseSchema:
+    def check_log_paths_available_for_loggers(self) -> Self:
         logger = []
         if self.diagnostics.log.wandb.enabled and (not self.hardware.paths.logs or not self.hardware.paths.logs.wandb):
             logger.append("wandb")
@@ -89,7 +90,7 @@ class BaseSchema(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def check_bounding_not_used_with_data_extractor_zero(self) -> BaseSchema:
+    def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
         if (
             isinstance(self.model.decoder, GraphTransformerDecoderSchema)

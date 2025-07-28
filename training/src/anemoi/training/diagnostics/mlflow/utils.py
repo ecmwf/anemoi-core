@@ -103,7 +103,7 @@ def expand_iterables(
     expanded_params = {}
 
     for key, value in params.items():
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             if should_be_expanded(value):
                 for i, v in enumerate(value):
                     expanded_params[f"{key}{delimiter}{i}"] = expand(v)

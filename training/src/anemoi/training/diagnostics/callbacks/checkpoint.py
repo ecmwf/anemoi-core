@@ -12,18 +12,15 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytorch_lightning as pl
 import torch
 import torchinfo
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.utils.checkpoints import save_metadata
-
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 

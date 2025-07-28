@@ -11,15 +11,12 @@
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytorch_lightning as pl
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    from anemoi.training.schemas.base_schema import BaseSchema
-
+from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
 LOGGER = logging.getLogger(__name__)

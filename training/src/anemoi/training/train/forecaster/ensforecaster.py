@@ -9,22 +9,18 @@
 
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Generator
 
 import torch
+from omegaconf import DictConfig
+from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
 from .forecaster import GraphForecaster
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
-    from omegaconf import DictConfig
-    from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 
