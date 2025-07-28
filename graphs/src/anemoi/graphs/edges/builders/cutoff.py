@@ -245,7 +245,7 @@ class ReversedCutOffEdges(CutOffEdges):
         float
             The cut-off radius.
         """
-        reference_dist = CutOffEdges._get_grid_reference_dist(
+        reference_dist = CutOffEdges.get_reference_distance(
             graph[self.source_name], mask_attr_name=self.source_mask_attr_name
         )
         return reference_dist * self.cutoff_factor
