@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 import torch
 
@@ -30,8 +29,8 @@ class Postprocessor(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the Postprocessor.
 
@@ -162,8 +161,8 @@ class NormalizedReluPostprocessor(Postprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
 
         self.statistics = statistics
@@ -224,8 +223,8 @@ class ConditionalZeroPostprocessor(Postprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 

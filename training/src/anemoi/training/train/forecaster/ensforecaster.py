@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import logging
 from typing import TYPE_CHECKING
 
@@ -207,7 +205,7 @@ class GraphEnsForecaster(GraphForecaster):
         ----------
         batch : torch.Tensor
             Batch to use for rollout
-        rollout : Optional[int], optional
+        rollout : int, optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
         training_mode : bool, optional
@@ -219,7 +217,7 @@ class GraphEnsForecaster(GraphForecaster):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+        Generator[tuple[torch.Tensor | None, dict, list], None, None]
             Loss value, metrics, and predictions (per step)
 
         Returns

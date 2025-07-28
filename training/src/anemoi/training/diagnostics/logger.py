@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import os
@@ -113,7 +112,7 @@ def get_tensorboard_logger(config: DictConfig) -> pl.loggers.TensorBoardLogger |
 
     Returns
     -------
-    Optional[pl.loggers.TensorBoardLogger]
+    pl.loggers.TensorBoardLogger | None
         Logger object, or None
 
     """
@@ -141,7 +140,7 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
 
     Returns
     -------
-    Optional[pl.loggers.WandbLogger]
+    pl.loggers.WandbLogger | None
         Logger object
 
     Raises

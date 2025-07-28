@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import asyncio
 import copy
 import logging
@@ -43,7 +41,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
+from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     from typing import Any

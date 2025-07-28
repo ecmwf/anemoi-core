@@ -7,14 +7,11 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 from enum import Enum
 from functools import partial
 from typing import Annotated
 from typing import Any
 from typing import Literal
-from typing import Union
 
 from pydantic import AfterValidator
 from pydantic import Field
@@ -177,7 +174,7 @@ class GraphNodeAttributeScalerSchema(BaseModel):
     "Name of the nodes to take the attribute from."
     nodes_attribute_name: str = Field(example="area_weight")
     "Name of the node attribute to return."
-    norm: Union[Literal["unit-max", "unit-sum"], None] = Field(example="unit-sum")
+    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
 
@@ -195,19 +192,19 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     weight_frac_of_total: float = Field(example=0.5)
     "Fraction of total weight to assign to nodes within the scaling mask. The remaining weight is distributed among "
     "nodes outside the mask."
-    norm: Union[Literal["unit-max", "unit-sum"], None] = Field(example="unit-sum")
+    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
 
-ScalerSchema = Union[
-    GeneralVariableLossScalerSchema,
-    VariableLevelScalerSchema,
-    VariableMaskingScalerSchema,
-    TendencyScalerSchema,
-    NaNMaskScalerSchema,
-    GraphNodeAttributeScalerSchema,
-    ReweightedGraphNodeAttributeScalerSchema,
-]
+ScalerSchema = (
+    GeneralVariableLossScalerSchema
+    | VariableLevelScalerSchema
+    | VariableMaskingScalerSchema
+    | TendencyScalerSchema
+    | NaNMaskScalerSchema
+    | GraphNodeAttributeScalerSchema
+    | ReweightedGraphNodeAttributeScalerSchema
+)
 
 
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
@@ -251,7 +248,7 @@ class CombinedLossSchema(BaseLossSchema):
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     losses: list[BaseLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
-    loss_weights: Union[list[Union[int, float]], None] = None
+    loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
 
     @field_validator("losses", mode="before")
@@ -276,7 +273,7 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = Union[BaseLossSchema, HuberLossSchema, CombinedLossSchema, AlmostFairKernelCRPSSchema, KernelCRPSSchema]
+LossSchemas = BaseLossSchema | HuberLossSchema | CombinedLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
@@ -301,15 +298,15 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
     "Number of GPUs per ensemble."
 
 
-StrategySchemas = Union[BaseDDPStrategySchema, DDPEnsGroupStrategyStrategySchema]
+StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
 
 
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    run_id: Union[str, None] = Field(example=None)
+    run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
-    fork_run_id: Union[str, None] = Field(example=None)
+    fork_run_id: str | None = Field(example=None)
     "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
     load_weights_only: bool = Field(example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
@@ -343,11 +340,11 @@ class BaseTrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations."
-    variable_groups: dict[str, Union[str, list[str], dict[str, Union[str, bool, list[str]]]]]
+    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str]]]
     "Groups for variable loss scaling"
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
-    max_epochs: Union[PositiveInt, None] = None
+    max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
     max_steps: PositiveInt = 150000
     "Maximum number of steps, stops earlier if max_epochs is reached first."
@@ -380,4 +377,4 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
-TrainingSchema = Union[ForecasterSchema, ForecasterEnsSchema, InterpolationSchema]
+TrainingSchema = ForecasterSchema | ForecasterEnsSchema | InterpolationSchema

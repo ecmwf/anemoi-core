@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
@@ -32,7 +31,7 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
-def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:
+def load_layer_kernels(kernel_config: DotDict | None = None, instance: bool = True) -> DotDict["str" : nn.Module]:
     """Load layer kernels from the config.
 
     This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.

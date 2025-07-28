@@ -7,10 +7,8 @@
 # nor does it submit to any jurisdiction.
 #
 
-from __future__ import annotations
 
 import logging
-from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
@@ -30,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 class NodeSchema(BaseModel):
     node_builder: NodeBuilderSchemas
     "Node builder schema."
-    attributes: Union[dict[str, NodeAttributeSchemas], None] = None
+    attributes: dict[str, NodeAttributeSchemas] | None = None
     "Dictionary of attributes with names as keys and anemoi.graphs.nodes.attributes objects as values."
 
 
@@ -46,16 +44,16 @@ class EdgeSchema(BaseModel):
 
 
 class BaseGraphSchema(PydanticBaseModel):
-    nodes: Union[dict[str, NodeSchema], None] = Field(default=None)
+    nodes: dict[str, NodeSchema] | None = Field(default=None)
     "Nodes schema for all types of nodes (ex. data, hidden)."
-    edges: Union[list[EdgeSchema], None] = Field(default=None)
+    edges: list[EdgeSchema] | None = Field(default=None)
     "List of edges schema."
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)
     data: str = Field(example="data")
     "Key name for the data nodes. Default to 'data'."
-    hidden: Union[str, list[str]] = Field(example="hidden")
+    hidden: str | list[str] = Field(example="hidden")
     "Key name for the hidden nodes. Default to 'hidden'."
     # TODO(Helen): Needs to be adjusted for more complex graph setups
 

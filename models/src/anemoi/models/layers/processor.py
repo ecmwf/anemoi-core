@@ -9,7 +9,6 @@
 
 
 from abc import ABC
-from typing import Optional
 
 from torch import Tensor
 from torch import nn
@@ -102,7 +101,7 @@ class TransformerProcessor(BaseProcessor):
         attention_implementation: str = "flash_attention",
         softcap: float = 0,
         use_alibi_slopes: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -173,7 +172,7 @@ class TransformerProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], ...],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -267,7 +266,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -376,7 +375,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         *args,
         **kwargs,
     ) -> Tensor:

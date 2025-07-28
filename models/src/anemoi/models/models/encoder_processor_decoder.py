@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 import einops
 import numpy as np
@@ -249,7 +248,7 @@ class AnemoiModelEncProcDec(nn.Module):
         batch_size: int,
         ensemble_size: int,
         in_out_sharded: bool,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> None:
         assert not (
             in_out_sharded and model_comm_group is None
@@ -270,7 +269,7 @@ class AnemoiModelEncProcDec(nn.Module):
         data: tuple[Tensor],
         batch_size: int,
         shard_shapes: tuple[tuple[int, int], tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -323,8 +322,8 @@ class AnemoiModelEncProcDec(nn.Module):
         self,
         x: Tensor,
         *,
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[list] = None,
+        model_comm_group: ProcessGroup | None = None,
+        grid_shard_shapes: list = None,
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
@@ -333,7 +332,7 @@ class AnemoiModelEncProcDec(nn.Module):
         ----------
         x : Tensor
             Input data
-        model_comm_group : Optional[ProcessGroup], optional
+        model_comm_group : ProcessGroup | None, optional
             Model communication group, by default None
         grid_shard_shapes : list, optional
             Shard shapes of the grid, by default None

@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 import einops
 import torch
@@ -105,8 +104,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x: torch.Tensor,
         *,
         fcstep: int,
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[tuple] = None,
+        model_comm_group: ProcessGroup | None = None,
+        grid_shard_shapes: tuple = None,
         **kwargs,
     ) -> torch.Tensor:
         """Forward operator.
@@ -116,7 +115,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 Input tensor, shape (bs, m, e, n, f)
             fcstep: int
                 Forecast step
-            model_comm_group: Optional[ProcessGroup], optional
+            model_comm_group: ProcessGroup | None, optional
                 Model communication group
             grid_shard_shapes : list, optional
                 Shard shapes of the grid, by default None

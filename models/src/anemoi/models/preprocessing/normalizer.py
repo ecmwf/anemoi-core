@@ -10,7 +10,6 @@
 
 import logging
 import warnings
-from typing import Optional
 
 import numpy as np
 import torch
@@ -27,8 +26,8 @@ class InputNormalizer(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the normalizer.
 
@@ -131,9 +130,7 @@ class InputNormalizer(BasePreprocessor):
                 "none",
             ], f"{method} is not a valid normalisation method"
 
-    def transform(
-        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+    def transform(self, x: torch.Tensor, in_place: bool = True, data_index: torch.Tensor | None = None) -> torch.Tensor:
         """Normalizes an input tensor x of shape [..., nvars].
 
         Normalization done in-place unless specified otherwise.
@@ -168,7 +165,7 @@ class InputNormalizer(BasePreprocessor):
         return x
 
     def inverse_transform(
-        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
+        self, x: torch.Tensor, in_place: bool = True, data_index: torch.Tensor | None = None
     ) -> torch.Tensor:
         """Denormalizes an input tensor x of shape [..., nvars | nvars_pred].
 

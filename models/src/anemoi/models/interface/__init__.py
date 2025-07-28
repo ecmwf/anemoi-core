@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import uuid
-from typing import Optional
 
 import torch
 from hydra.utils import instantiate
@@ -105,7 +104,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.forward = self.model.forward
 
     def predict_step(
-        self, batch: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, gather_out: bool = True, **kwargs
+        self, batch: torch.Tensor, model_comm_group: ProcessGroup | None = None, gather_out: bool = True, **kwargs
     ) -> torch.Tensor:
         """Prediction step for the model.
 
@@ -113,7 +112,7 @@ class AnemoiModelInterface(torch.nn.Module):
         ----------
         batch : torch.Tensor
             Input batched data.
-        model_comm_group : Optional[ProcessGroup], optional
+        model_comm_group : ProcessGroup, optional
             model communication group, specifies which GPUs work together
         gather_out : str | None, optional
             Specifies how to gather the output, by default None.

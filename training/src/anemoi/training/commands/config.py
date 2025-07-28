@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import contextlib
 import importlib.resources as pkg_resources
 import logging

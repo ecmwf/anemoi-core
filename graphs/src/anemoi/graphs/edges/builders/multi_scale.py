@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import importlib
 import logging
@@ -40,7 +39,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
     x_hops : int
         Number of hops (in the refined icosahedron) between two nodes to connect
         them with an edge.
-    scale_resolutions : Union[int, List[int], None]
+    scale_resolutions : int, list[int], optional
         Defines the refinement levels at which edges are computed. If an integer is provided, edges are computed for all
         levels up to and including that level. For instance, `scale_resolutions=4` includes edges at levels 1 through 4,
         whereas `scale_resolutions=[4]` only includes edges at level 4.

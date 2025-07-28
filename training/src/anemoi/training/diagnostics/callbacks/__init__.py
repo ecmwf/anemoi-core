@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from collections.abc import Callable
@@ -176,7 +175,7 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     Returns
     -------
-    List[Callback]
+    list[Callback]
         A list of PyTorch Lightning callbacks
 
     """

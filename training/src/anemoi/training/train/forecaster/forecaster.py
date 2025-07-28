@@ -6,7 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from __future__ import annotations
+
 
 import logging
 from typing import TYPE_CHECKING
@@ -352,7 +352,7 @@ class GraphForecaster(pl.LightningModule):
         ----------
         batch : torch.Tensor
             Batch to use for rollout
-        rollout : Optional[int], optional
+        rollout : int, optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
         training_mode : bool, optional
@@ -364,7 +364,7 @@ class GraphForecaster(pl.LightningModule):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+        Generator[tuple[torch.Tensor | None, dict, list], None, None]
             Loss value, metrics, and predictions (per step)
 
         """
@@ -568,7 +568,7 @@ class GraphForecaster(pl.LightningModule):
         ----------
         scheduler : CosineLRScheduler
             Learning rate scheduler object.
-        metric : Optional[Any]
+        metric : Any
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """

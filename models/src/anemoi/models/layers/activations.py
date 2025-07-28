@@ -7,9 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
-
-from typing import Optional
 
 import torch
 from torch import nn
@@ -107,7 +104,7 @@ class GLU(nn.Module):
         Whether to apply a bias term in the linear layers, by default True.
     """
 
-    def __init__(self, *, dim: int, variation: Optional[nn.Module] = None, bias: bool = True):
+    def __init__(self, *, dim: int, variation: nn.Module | None = None, bias: bool = True):
         super().__init__()
 
         self.variation = variation if variation is not None else nn.Sigmoid()

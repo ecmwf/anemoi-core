@@ -12,8 +12,6 @@ import logging
 import os
 from abc import ABC
 from abc import abstractmethod
-from typing import Optional
-from typing import Union
 
 import einops
 import torch
@@ -57,8 +55,8 @@ class BaseBlock(nn.Module, ABC):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
-        size: Optional[Size] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        size: Size | None = None,
+        model_comm_group: ProcessGroup | None = None,
         **layer_kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
@@ -77,7 +75,7 @@ class TransformerProcessorBlock(BaseBlock):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -112,7 +110,7 @@ class TransformerProcessorBlock(BaseBlock):
         x: Tensor,
         shapes: list,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         **layer_kwargs,
     ) -> Tensor:
         x = x + self.attention(
@@ -141,7 +139,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -185,7 +183,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         x: OptPairTensor,
         shapes: list,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
         x_src = self.layer_norm_attention_src(x[0])
         x_dst = self.layer_norm_attention_dst(x[1])
@@ -253,8 +251,8 @@ class GraphConvBaseBlock(BaseBlock):
         edge_attr: Tensor,
         edge_index: Adj,
         shapes: tuple,
-        model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
+        model_comm_group: ProcessGroup | None = None,
+        size: Size | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]: ...
 
@@ -266,8 +264,8 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         edge_attr: Tensor,
         edge_index: Adj,
         shapes: tuple,
-        model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
+        model_comm_group: ProcessGroup | None = None,
+        size: Size | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
@@ -343,8 +341,8 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         edge_attr: Tensor,
         edge_index: Adj,
         shapes: tuple,
-        model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
+        model_comm_group: ProcessGroup | None = None,
+        size: Size | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
@@ -478,7 +476,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edges: Tensor,
         shapes: tuple,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Shards qkv and edges along head dimension."""
         if model_comm_group is not None:
@@ -516,7 +514,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         value: Tensor,
         edges: Tensor,
         edge_index: Adj,
-        size: Union[int, tuple[int, int]],
+        size: int | tuple[int, int],
         num_chunks: int,
     ) -> Tensor:
         # self.conv requires size to be a tuple
@@ -548,7 +546,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         out: Tensor,
         shapes: tuple,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
         """Shards Tensor sequence dimension."""
         shape_dst_nodes = shapes[1]
@@ -567,8 +565,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None = None,
         **kwargs,
     ): ...
 
@@ -678,8 +676,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None = None,
         **layer_kwargs,
     ):
         x_skip = x
@@ -790,8 +788,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None = None,
         **layer_kwargs,
     ):
         x_skip = x

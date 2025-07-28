@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -68,7 +67,7 @@ class NoiseInjector(nn.Module):
         x: Tensor,
         noise_ref: Tensor,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, Tensor]:
 
         noise = self.make_noise(noise_ref)
@@ -119,7 +118,7 @@ class NoiseConditioning(NoiseInjector):
         x: Tensor,
         noise_ref: Tensor,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, Tensor]:
 
         noise = self.make_noise(noise_ref)

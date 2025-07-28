@@ -7,16 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
-from typing import Optional
-
 import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 
-def get_shard_shapes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> list:
+def get_shard_shapes(tensor: Tensor, dim: int, model_comm_group: ProcessGroup | None = None) -> list:
     """Get shape of tensor shards split along a specific dimension."""
     assert dim < tensor.dim(), f"Error, tensor dimension is {tensor.dim()} which cannot be split along {dim}"
 

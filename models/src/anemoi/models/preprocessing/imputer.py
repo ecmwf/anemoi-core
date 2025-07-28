@@ -11,7 +11,6 @@
 import logging
 import warnings
 from abc import ABC
-from typing import Optional
 
 import torch
 
@@ -27,8 +26,8 @@ class BaseImputer(BasePreprocessor, ABC):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the imputer.
 
@@ -199,8 +198,8 @@ class InputImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -228,8 +227,8 @@ class ConstantImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -251,8 +250,8 @@ class CopyImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -397,8 +396,8 @@ class DynamicInputImputer(DynamicMixin, InputImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         InputImputer.__init__(self, config, data_indices, statistics)
         warnings.warn(
@@ -413,8 +412,8 @@ class DynamicConstantImputer(DynamicMixin, ConstantImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         ConstantImputer.__init__(self, config, data_indices, statistics)
         warnings.warn(
@@ -429,8 +428,8 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         CopyImputer.__init__(self, config, data_indices, statistics)
         warnings.warn(

@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -25,8 +24,8 @@ class BasePreprocessor(nn.Module):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the preprocessor.
 

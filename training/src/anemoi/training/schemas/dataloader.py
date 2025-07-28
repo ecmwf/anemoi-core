@@ -8,15 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
-import datetime  # noqa: TC003
-from pathlib import Path  # noqa: TC003
+import datetime
+from pathlib import Path
 from typing import Any
 from typing import Literal
-from typing import Union
 
-from omegaconf import DictConfig  # noqa: TC002
+from omegaconf import DictConfig
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -61,24 +58,24 @@ class Frequency(RootModel):
 class DatasetSchema(PydanticBaseModel):
     """Dataset configuration schema."""
 
-    dataset: Union[str, dict, Path, list[dict]] | None = None
+    dataset: str | dict | Path | list[dict] | None = None
     "Dataset, see anemoi-datasets"
-    start: Union[str, int, None] = Field(default=None)
+    start: str | int | None = Field(default=None)
     "Starting datetime for sample of the dataset."
-    end: Union[str, int, None] = Field(default=None)
+    end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
     frequency: Frequency
     "Temporal resolution, frequency must be >= to dataset frequency."
-    drop: Union[list, None] = Field(default=None)
+    drop: list | None = Field(default=None)
     "List of variables to drop from dataset"
 
 
 class LoaderSet(BaseModel):
-    training: Union[PositiveInt, None] = Field(example=None)
+    training: PositiveInt | None = Field(example=None)
     "Value for training dataset"
-    validation: Union[PositiveInt, None] = Field(example=None)
+    validation: PositiveInt | None = Field(example=None)
     "Value for validation dataset"
-    test: Union[PositiveInt, None] = Field(example=None)
+    test: PositiveInt | None = Field(example=None)
     "Value for test dataset"
 
 
@@ -118,16 +115,16 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: Union[DatasetSchema, DictConfig]
+    training: DatasetSchema | DictConfig
     "Training DatasetSchema."
-    validation: Union[DatasetSchema, DictConfig]
+    validation: DatasetSchema | DictConfig
     "Validation DatasetSchema."
-    test: Union[DatasetSchema, DictConfig]
+    test: DatasetSchema | DictConfig
     "Test DatasetSchema."
     validation_rollout: PositiveInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
     # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
-    grid_indices: Union[FullGridIndicesSchema, MaskedGridIndicesSchema]
+    grid_indices: FullGridIndicesSchema | MaskedGridIndicesSchema
     "Grid indice schema."

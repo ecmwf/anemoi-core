@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -40,11 +38,11 @@ class FilteringLossWrapper(BaseLoss):
 
         Parameters
         ----------
-        loss : Union[Type[torch.nn.Module], Dict[str, Any]]
+        loss : Type[torch.nn.Module] | dict[str, Any]
             wrapped loss
-        predicted_variables : List[str] | None
+        predicted_variables : list[str] | None
             predicted variables to keep, if None, all variables are kept
-        target_variables : List[str] | None
+        target_variables : list[str] | None
             target variables to keep, if None, all variables are kept
         """
         if predicted_variables and target_variables:
