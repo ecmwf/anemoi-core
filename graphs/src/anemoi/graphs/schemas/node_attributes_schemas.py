@@ -26,6 +26,8 @@ class PlanarAreaWeightSchema(BaseModel):
         "anemoi.graphs.nodes.attributes.AreaWeights",
         "anemoi.graphs.nodes.attributes.PlanarAreaWeights",
         "anemoi.graphs.nodes.attributes.UniformWeights",
+        "anemoi.graphs.nodes.attributes.CosineLatWeightedAttribute",
+        "anemoi.graphs.nodes.attributes.IsolatitudeAreaWeights",
     ] = Field(..., alias="_target_")
     "Implementation of the area of the nodes as the weights from anemoi.graphs.nodes.attributes."
     norm: Literal["unit-max", "l1", "l2", "unit-sum", "unit-std"] = Field(example="unit-max")
@@ -55,6 +57,13 @@ class CutOutMaskSchema(BaseModel):
     "Implementation of the cutout mask from anemoi.graphs.nodes.attributes."
 
 
+class GridsMaskSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.GridsMask"] = Field(..., alias="_target_")
+    "Implementation of the grids mask from anemoi.graphs.nodes.attributes."
+    grids: Union[list[int], int] = Field(examples=[0, [0]])
+    "Position of the grids to consider as True."
+
+
 class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable"] = Field(..., alias="_target_")
     (
@@ -70,6 +79,7 @@ SingleAttributeSchema = Union[
     MaskedPlanarAreaWeightsSchema,
     SphericalAreaWeightSchema,
     CutOutMaskSchema,
+    GridsMaskSchema,
     NonmissingAnemoiDatasetVariableSchema,
 ]
 

@@ -21,24 +21,28 @@ from threading import Thread
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
+from typing import Optional
 from weakref import WeakValueDictionary
 
-from packaging.version import Version
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from typing_extensions import override
 
-from anemoi.training.diagnostics.mlflow.auth import TokenAuth
+from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
-from anemoi.training.diagnostics.mlflow.utils import health_check
+from anemoi.utils.mlflow.auth import TokenAuth
+from anemoi.utils.mlflow.utils import health_check
 
 if TYPE_CHECKING:
     from argparse import Namespace
+    from collections.abc import Mapping
 
     import mlflow
     from mlflow.tracking import MlflowClient
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -349,6 +353,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
             run_id=run_id,
         )
 
+        # Track logged metrics to prevent duplicate logs
+        # 2000 has been chosen as this should contain metrics form many steps
+        self._logged_metrics = FixedLengthSet(maxlen=2000)  # Track (key, step)
+
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
         """Check if the parent run is a dry run.
 
@@ -454,11 +462,24 @@ class AnemoiMLflowLogger(MLFlowLogger):
 
         return run_id, run_name, tags
 
+    @override
     @property
     def experiment(self) -> MLFlowLogger.experiment:
         if rank_zero_only.rank == 0:
             self.auth.authenticate()
         return super().experiment
+
+    @override
+    @rank_zero_only
+    def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
+        cleaned_metrics = metrics.copy()
+        for k in metrics:
+            metric_id = (k, step or 0)
+            if metric_id in self._logged_metrics:
+                cleaned_metrics.pop(k)
+                continue
+            self._logged_metrics.add(metric_id)
+        return super().log_metrics(metrics=cleaned_metrics, step=step)
 
     @rank_zero_only
     def log_system_metrics(self) -> None:
@@ -491,6 +512,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
                     LOGGER.warning("Failed to init AMD GPU Monitor: %s", e)
 
         mlflow.enable_system_metrics_logging()
+        # https://mlflow.org/docs/latest/system-metrics/
+        # By default, system metrics are sampled every 10 seconds
+        # we choose to update this to 100 - system metrics are logged every 1 min 30 seconds
+        mlflow.set_system_metrics_sampling_interval(interval=100)
         system_monitor = CustomSystemMetricsMonitor(
             self.run_id,
             resume_logging=self.run_id is not None,
@@ -594,10 +619,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
             import mlflow
             from mlflow.entities import Param
 
-            truncation_length = 250
-
-            if Version(mlflow.VERSION) >= Version("1.28.0"):
-                truncation_length = 500
+            try:  # Check maximum param value length is available and use it
+                truncation_length = mlflow.utils.validation.MAX_PARAM_VAL_LENGTH
+            except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
+                truncation_length = 250  # Historical default value
 
             AnemoiMLflowLogger.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
 

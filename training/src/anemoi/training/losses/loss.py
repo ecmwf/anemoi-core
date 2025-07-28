@@ -17,13 +17,13 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     import numpy as np
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.models.data_indices.tensor import OutputTensorIndex
+    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 LOGGER = logging.getLogger(__name__)
@@ -83,13 +83,16 @@ def get_loss_function(
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
             raise ValueError(error_msg)
         if key in ["stdev_tendency", "var_tendency"]:
-            for var_key, idx in data_indices.internal_model.output.name_to_index.items():
-                if idx in data_indices.internal_model.output.prognostic and data_indices.data.output.name_to_index.get(
+            for var_key, idx in data_indices.model.output.name_to_index.items():
+                if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
                     var_key,
                 ):
                     scaling = scalers[key][1][idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
+
+        if hasattr(loss_function, "set_data_indices"):
+            loss_function.set_data_indices(data_indices)
 
     return loss_function
 
@@ -119,23 +122,13 @@ def _get_metric_ranges(
 def get_metric_ranges(
     config: DictConfig,
     data_indices: IndexCollection,
-    metadata_variables: dict | None = None,
+    metadata_extractor: ExtractVariableGroupAndLevel,
 ) -> tuple[METRIC_RANGE_DTYPE, METRIC_RANGE_DTYPE]:
 
-    metric_ranges = defaultdict(list)
-    metric_ranges_validation = defaultdict(list)
-    variable_groups = config.training.variable_groups
     metrics_to_log = config.training.metrics or []
 
-    extract_variable_group_and_level = ExtractVariableGroupAndLevel(variable_groups, metadata_variables)
-    metric_ranges = _get_metric_ranges(
-        extract_variable_group_and_level,
-        data_indices.internal_model.output,
-        metrics_to_log,
-    )
-    metric_ranges_validation = _get_metric_ranges(
-        extract_variable_group_and_level,
+    return _get_metric_ranges(
+        metadata_extractor,
         data_indices.model.output,
         metrics_to_log,
     )
-    return metric_ranges, metric_ranges_validation

@@ -16,8 +16,10 @@ hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:
-    dataset: anemoi-integration-tests/regional-use-cases/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
-    forcing_dataset: anemoi-integration-tests/regional-use-cases/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    # We only use the graph file in test_training_cycle_lam_with_existing_graph, not in test_training_cycle_lam
+    graph: anemoi-integration-tests/training/graphs/lam-graph.pt
 
 # need this modification since some variables set in the default zarr config are not part of the dataset
 data:

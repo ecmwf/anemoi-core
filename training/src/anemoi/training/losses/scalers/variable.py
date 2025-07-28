@@ -16,12 +16,12 @@ import numpy as np
 
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
-from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,9 +33,8 @@ class BaseVariableLossScaler(BaseScaler):
 
     def __init__(
         self,
-        group_config: DictConfig,
         data_indices: IndexCollection,
-        metadata_variables: dict | None = None,
+        metadata_extractor: ExtractVariableGroupAndLevel,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -45,15 +44,15 @@ class BaseVariableLossScaler(BaseScaler):
         ----------
         data_indices : IndexCollection
             Collection of data indices.
-        metadata_variables : dict, optional
-            Dictionary with variable names as keys and metadata as values, by default None
+        metadata_extractor : ExtractVariableGroupAndLevel
+            Metadata extractor for variable groups and levels.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
         super().__init__(norm=norm)
         del kwargs
         self.data_indices = data_indices
-        self.variable_metadata_extractor = ExtractVariableGroupAndLevel(group_config, metadata_variables)
+        self.variable_metadata_extractor = metadata_extractor
 
 
 class GeneralVariableLossScaler(BaseVariableLossScaler):
@@ -61,10 +60,9 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
 
     def __init__(
         self,
-        group_config: DictConfig,
         data_indices: IndexCollection,
         weights: DictConfig,
-        metadata_variables: dict | None = None,
+        metadata_extractor: ExtractVariableGroupAndLevel,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -72,20 +70,18 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
 
         Parameters
         ----------
-        group_config : DictConfig
-            Configuration of groups for variable loss scaling.
         data_indices : IndexCollection
             Collection of data indices.
         weights : DictConfig
             Configuration for variable loss scaling.
         scale_dim : int
             Dimension to scale
-        metadata_variables : dict, optional
-            Dictionary with variable names as keys and metadata as values, by default None
+        metadata_extractor : ExtractVariableGroupAndLevel
+            Metadata extractor for variable groups and levels.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(group_config, data_indices, metadata_variables=metadata_variables, norm=norm)
+        super().__init__(data_indices, metadata_extractor=metadata_extractor, norm=norm)
         self.weights = weights
         del kwargs
 
@@ -94,17 +90,15 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
 
         Retrieve the loss scaling for each variable from the config file.
         """
-        variable_loss_scaling = (
-            np.ones((len(self.data_indices.internal_data.output.full),), dtype=np.float32) * self.weights.default
-        )
+        variable_loss_scaling = np.empty((len(self.data_indices.data.output.full),), dtype=np.float32)
 
-        for variable_name, idx in self.data_indices.internal_model.output.name_to_index.items():
+        for variable_name, idx in self.data_indices.model.output.name_to_index.items():
             _, variable_ref, _ = self.variable_metadata_extractor.get_group_and_level(variable_name)
             # Apply variable scaling by variable name
             # or base variable name (variable_ref: variable name without variable level)
             variable_loss_scaling[idx] = self.weights.get(
                 variable_ref,
-                1.0,
+                self.weights.get("default", 1.0),
             )
             if variable_ref != variable_name:
                 assert (

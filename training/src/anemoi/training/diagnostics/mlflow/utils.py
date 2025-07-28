@@ -9,41 +9,36 @@
 from __future__ import annotations
 
 import functools
-import os
+from collections import deque
 from typing import Any
 
-import requests
 
-from anemoi.utils.remote import robust
+class FixedLengthSet:
+    def __init__(self, maxlen: int):
+        self.maxlen = maxlen
+        self._deque = deque(maxlen=maxlen)
+        self._set = set()
 
+    def add(self, item: float) -> None:
+        if item in self._set:
+            return  # Already present, do nothing
+        if len(self._deque) == self.maxlen:
+            oldest = self._deque.popleft()
+            self._set.remove(oldest)
+        self._deque.append(item)
+        self._set.add(item)
 
-def health_check(tracking_uri: str) -> None:
-    """Query the health endpoint of an MLflow server.
+    def __contains__(self, item: float):
+        return item in self._set
 
-    If the server is not reachable, raise an error and remind the user that authentication may be required.
+    def __len__(self):
+        return len(self._set)
 
-    Raises
-    ------
-    ConnectionError
-        If the server is not reachable.
+    def __iter__(self):
+        return iter(self._deque)
 
-    """
-    token = os.getenv("MLFLOW_TRACKING_TOKEN")
-
-    headers = {"Authorization": f"Bearer {token}"}
-    response = robust(requests.get, retry_after=30, maximum_tries=10)(
-        f"{tracking_uri}/health",
-        headers=headers,
-        timeout=60,
-    )
-
-    if response.text == "OK":
-        return
-
-    error_msg = f"Could not connect to MLflow server at {tracking_uri}. "
-    if not token:
-        error_msg += "The server may require authentication, did you forget to turn it on?"
-    raise ConnectionError(error_msg)
+    def __repr__(self):
+        return f"{list(self._deque)}"
 
 
 def expand_iterables(

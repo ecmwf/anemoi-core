@@ -8,7 +8,7 @@ Anemoi-training exposes a couple of loss functions by default to be
 used, all of which are subclassed from ``BaseLoss``. This class enables
 scaler multiplication, and graph node weighting.
 
-.. automodule:: anemoi.training.losses.weightedloss
+.. automodule:: anemoi.training.losses.base
    :members:
    :no-undoc-members:
    :show-inheritance:
@@ -66,6 +66,27 @@ deterministic:
       # loss class to initialise
       _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
       # loss function kwargs here
+
+************************
+ Spatial Loss Functions
+************************
+
+The following spatial loss functions are available (**to be used only
+with regular 2D fields, i.e. fields that can be written as [`n_lat`,
+`n_lon`]**):
+
+-  ``LogFFT2Distance``: log spectral distance from the 2D fast Fourier
+   transform.
+
+-  ``FourierCorrelationLoss``: Fourier correlation loss, also computed
+   from the 2D fast Fourier transform see `Yan et al. (2024)
+   <https://arxiv.org/pdf/2410.23159.pdf>`_.
+
+Both of these loss functions are defined in the
+``anemoi.training.losses.spatial`` module, and can be configured in the
+config file at ``config.training.training_loss`` in the same way as the
+deterministic loss functions with additional kwargs `x_dim` and `y_dim`
+specifying the field shape of the input tensors.
 
 *********
  Scalers
@@ -152,11 +173,35 @@ level scalers.
 If working with upper-air variables from variable levels, the
 temperature fields start with the variable reference `t` followed by the
 level, i.e. `t_500`, `t_850`, etc. Since `t` is specified under variable
-group `pl`, all temperature fields are considered group `pl`. If the
-datasets are build from mars the variable reference is etracted from
-metadata, otherwise by splitting the variable name by `_` and taking the
-first part, see class
+group `pl`, all temperature fields are considered group `pl`.
+
+If the datasets are built from mars the variable reference is extracted
+from metadata, otherwise it is found by splitting the variable name by
+`_` and taking the first part, see class
 `anemoi.training.utils.ExtractVariableGroupAndLevel`.
+
+If more complex variable groups are required, it is possible to define
+the group values as a dictionary, such that the variable's metadata must
+contain the key and value pair. See
+`anemoi.transforms.variable.Variable` for the metadata attributes that
+are available.
+
+.. code:: yaml
+
+   variable_groups:
+     default: sfc
+     pl:
+        is_pressure_level: True
+     z_ml:
+        is_model_level: True
+        param: 'z'
+
+If metadata is not available, complex variable groups cannot be defined,
+and an error will be raised.
+
+If multiple groups are defined for a variable, the first group in the
+`variable_groups` is used. If the variable is not in any group, it is
+assigned to the default group.
 
 ********************
  Validation Metrics
@@ -186,7 +231,7 @@ By default, only `all` is kept in the normalised space and scaled.
    # List of validation metrics to keep in normalised space, and scalers to be applied
    # Use '*' in reference all metrics, or a list of metric names.
    # Unlike above, variable scaling is possible due to these metrics being
-   # calculated in the same way as the training loss, within the internal model space.
+   # calculated in the same way as the training loss, within the model space.
    scale_validation_metrics:
    scalers_to_apply: ['variable']
    metrics:
