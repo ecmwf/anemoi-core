@@ -660,15 +660,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         key: Tensor,
         value: Tensor,
         edges: Tensor,
-        batch_size: int,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         return (
             einops.rearrange(
                 t,
-                "(batch grid) (heads vars) -> (batch grid) heads vars",
+                "nodes (heads vars) -> nodes heads vars",
                 heads=self.num_heads,
                 vars=self.out_channels_conv,
-                batch=batch_size,
             )
             for t in (query, key, value, edges)
         )
@@ -700,7 +698,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
                 query, key, value, edges, shapes, batch_size, model_comm_group
             )
         else:
-            query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges, batch_size)
+            query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
 
         if self.qk_norm:
             query = self.q_norm(query)
@@ -711,7 +709,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         if self.shard_strategy == "heads":
             out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
         else:
-            out = einops.rearrange(out, "(batch grid) heads vars -> (batch grid) (heads vars)", batch=batch_size)
+            out = einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
 
         out = self.projection(out + x_r)
         out = out + x_skip[1]
