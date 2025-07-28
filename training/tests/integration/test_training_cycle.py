@@ -144,9 +144,13 @@ def open_log_file(filename):
 # can skip multi-gpu
 # add compute/nccl/memory breakdown from pytorch profiler
 @pytest.mark.longtests
-def test_benchmark_training_cycle(benchmark_config_with_data: DictConfig) -> None:
+def test_benchmark_training_cycle(benchmark_config: tuple[DictConfig, str],  get_test_archive: callable) -> None:
+    cfg, urls = benchmark_config
+    for url in urls:
+        get_test_archive(url)
+    
     reset_peak_memory_stats()
-    AnemoiProfiler(benchmark_config_with_data).profile()
+    AnemoiProfiler(cfg).profile()
     
     #read memory and mlflow stats
     stats=memory_stats(device=0)

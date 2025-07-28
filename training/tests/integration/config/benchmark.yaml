@@ -2,7 +2,7 @@
 hardware:
   files:
   #TODO change to n320-o96 (transformer?)
-    dataset: anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+    dataset:  anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
 
@@ -24,6 +24,8 @@ diagnostics:
       enabled: false
     snapshot:
       enabled: true
+    system:
+      enabled: false #some error about metric key in extract_gpu_metrics being invalid
   log:
     mlflow:
       enabled: true
