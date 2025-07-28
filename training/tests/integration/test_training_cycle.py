@@ -134,7 +134,30 @@ def open_log_file(filename):
                 result=row.get(return_val)
                 break
     return float(result)
-                
+
+
+#reads a remote server to get past performance metrics to compare against
+def get_performance_metrics():
+
+    #ls public/anemoi-integration-tests/training/benchmarks/
+    #    avThroughputIterPerS  avTimePerBatchS  peakMemoryMB
+    #https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr.tgz
+
+    from urllib.request import urlopen
+    results={}
+    base_url="https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
+    benchmarks=["avThroughputIterPerS", "avTimePerBatchS", "peakMemoryMB"]
+    for benchmark in benchmarks:
+        url=f"{base_url}/{benchmark}"
+        print(f"Fetching benchmark data from {url}...")
+        data = urlopen(url) # it's a file like object and works just like a file
+        for line in data: # files are iterable
+            line=float(line.strip())
+            #print(line)
+            results[benchmark] = line
+
+    return results
+
 
 #@skip_if_offline
 #add flag to save snapshot
@@ -148,6 +171,10 @@ def test_benchmark_training_cycle(benchmark_config: tuple[DictConfig, str],  get
     cfg, urls = benchmark_config
     for url in urls:
         get_test_archive(url)
+
+
+    results = get_performance_metrics()
+    print(results)
     
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
@@ -157,10 +184,30 @@ def test_benchmark_training_cycle(benchmark_config: tuple[DictConfig, str],  get
     peak_active_mem_mb=stats['active_bytes.all.peak']/1024/1024 
     av_training_throughput = open_log_file("speed_profiler.csv")
     av_training_batch_time_s = open_log_file("time_profiler.csv")
-    
+
+
     print(f"Peak memory: {peak_active_mem_mb:.2f}MB")
     print(f"Av. training batch time: {av_training_batch_time_s}s")
     print(f"Av. training throughput: {av_training_throughput}iter/s")
+
+    if (peak_active_mem_mb > results["peakMemoryMB"] ):
+        raise ValueError(f"Peak memory usage {peak_active_mem_mb}MB is greater than current benchmark peak of {results['peakMemoryMB']}MB")
+    else:
+        print(f"Peak memory usage of {peak_active_mem_mb}MB is equal to or less than current benchamrk peak of  {results['peakMemoryMB']}MB")
+
+
+    throuhput_tolerance_percent=5
+    throughput_upper_bound=results["avThroughputIterPerS"] * (100 + throuhput_tolerance_percent)/100
+    if (av_training_throughput < throughput_upper_bound):
+        raise ValueError(f"Average throughput of {av_training_throughput} is less than current benchmark throughput of { results['avThroughputIterPerS']}")
+    else:
+        print(f"Average throughput of {av_training_throughput} is higher than or equal to the current benchmark throughput of { results['avThroughputIterPerS']}")
+    batch_time_tolerance_percent=5
+    batch_time_upper_bound=results["avTimePerBatchS"] * (100 + batch_time_tolerance_percent)/100
+    if  ( av_training_batch_time_s > batch_time_upper_bound):
+        raise ValueError(f"Average time per batch of {av_training_batch_time_s} is higher than current benchmark time of {results['avTimePerBatchS']}")
+    else:
+        print(f"Average time per batch of {av_training_batch_time_s} is less than or equal to than current benchmark time of {results['avTimePerBatchS']}")
 
 @skip_if_offline
 @pytest.mark.longtests
