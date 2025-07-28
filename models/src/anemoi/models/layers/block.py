@@ -38,9 +38,8 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
-# Number of chunks used in inference (https://github.com/ecmwf/anemoi-models/pull/46)
+# Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/66)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
-NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
 NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
 
 
@@ -589,7 +588,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         hidden_dim: int,
         out_channels: int,
         num_heads: int,
-        num_chunks: int,
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
@@ -610,8 +608,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Number of output channels.
         num_heads : int,
             Number of heads
-        num_chunks : int,
-            Number of chunks
         edge_dim : int,
             Edge dimension
         bias : bool
@@ -635,7 +631,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             bias=bias,
-            num_chunks=num_chunks,
+            num_chunks=1,
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             **kwargs,
@@ -669,15 +665,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         key: Tensor,
         value: Tensor,
         edges: Tensor,
-        batch_size: int,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         return (
             einops.rearrange(
                 t,
-                "(batch grid) (heads vars) -> (batch grid) heads vars",
+                "nodes (heads vars) -> nodes heads vars",
                 heads=self.num_heads,
                 vars=self.out_channels_conv,
-                batch=batch_size,
             )
             for t in (query, key, value, edges)
         )
@@ -714,41 +708,26 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
                 query, key, value, edges, shapes, batch_size, model_comm_group
             )
         else:
-            query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges, batch_size)
+            query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
 
         if self.qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
-
-        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
+        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks=1)
 
         if self.shard_strategy == "heads":
             out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
         else:
-            out = einops.rearrange(out, "(batch grid) heads vars -> (batch grid) (heads vars)", batch=batch_size)
+            out = einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
 
-        # out = self.projection(out + x_r) in chunks:
-        out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)
-
+        out = self.projection(out + x_r)
         out = out + x_skip[1]
 
-        # compute nodes_new_dst = self.run_node_dst_mlp(out) + out in chunks:
-        nodes_new_dst = torch.cat(
-            [self.run_node_dst_mlp(chunk, **cond_dst_kwargs) + chunk for chunk in out.tensor_split(num_chunks, dim=0)],
-            dim=0,
-        )
+        nodes_new_dst = self.run_node_dst_mlp(out, **cond_dst_kwargs) + out
 
         if self.update_src_nodes:
-            # compute nodes_new_src = self.run_node_src_mlp(out) + out in chunks:
-            nodes_new_src = torch.cat(
-                [
-                    self.run_node_src_mlp(chunk, **cond_src_kwargs) + chunk
-                    for chunk in x_skip[0].tensor_split(num_chunks, dim=0)
-                ],
-                dim=0,
-            )
+            nodes_new_src = self.run_node_src_mlp(x_skip[0], **cond_dst_kwargs) + x_skip[0]
         else:
             nodes_new_src = x_skip[0]
 

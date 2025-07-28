@@ -299,6 +299,12 @@ class AnemoiModelEncProcDec(nn.Module):
         model_comm_group : ProcessGroup
             model communication group, specifies which GPUs work together
             in one model instance
+        x_src_is_sharded : bool, optional
+            Source data is sharded, by default False
+        x_dst_is_sharded : bool, optional
+            Destination data is sharded, by default False
+        keep_x_dst_sharded : bool, optional
+            Keep destination data sharded, by default False
         use_reentrant : bool, optional
             Use reentrant, by default False
 
