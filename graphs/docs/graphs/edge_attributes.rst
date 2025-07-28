@@ -45,6 +45,51 @@ latitude and longitude coordinates of the source and target nodes.
          edge_length:
             _target_: anemoi.graphs.edges.attributes.EdgeDirection
 
+******************
+ Gaussian Weights
+******************
+
+The `Gaussian Weights` attribute assigns a weight to each edge based on
+the distance between its source and target nodes, using a Gaussian
+(normal) function of the edge length. This is useful for encoding
+spatial locality or for constructing weighted adjacency matrices.
+
+The Gaussian weight for an edge is computed as:
+
+.. math::
+
+   w_{ij} = \exp\left(-\frac{(\ell_{ij})^2}{2\sigma^2}\right)
+
+where:
+
+-  :math:`w_{ij}` is the weight assigned to the edge from node :math:`i`
+   to node :math:`j`
+-  :math:`\ell_{ij}` is the edge length (distance between nodes, as
+   computed by the ``EdgeLength`` attribute)
+-  :math:`\sigma` is a configurable parameter controlling the width of
+   the Gaussian (the "spread" of the weights)
+
+This means that edges connecting closer nodes will have higher weights,
+while those connecting distant nodes will have lower weights.
+
+Example configuration:
+
+.. code:: yaml
+
+   edges:
+     - source_name: ...
+       target_name: ...
+       edge_builders: ...
+       attributes:
+         gaus_weight:
+            _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+            sigma: 1.0
+
+.. note::
+
+   This edge attribute normalisation is applied independently for each
+   target node, and the default normalisation is :math:`L_1` for this.
+
 *********************
  Attribute from Node
 *********************
