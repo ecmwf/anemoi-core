@@ -44,6 +44,7 @@ class FilesSchema(PydanticBaseModel):
     checkpoint: dict[str, str]
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
     warm_start: Union[str, None] = None
+    "Name of the checkpoint file to use for warm starting the training"
 
 
 class Logs(PydanticBaseModel):
@@ -72,6 +73,8 @@ class PathsSchema(BaseModel):
     "Path to the plots directory."
     profiler: Union[Path, None]
     "Path to the profiler directory."
+    warm_start: Union[str, None] = None
+    "Path to the checkpoint to use for warm starting the training. Default is the checkpoint's path and the fork run_id"
 
 
 class HardwareSchema(BaseModel):

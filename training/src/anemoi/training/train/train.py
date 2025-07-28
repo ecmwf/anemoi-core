@@ -289,33 +289,24 @@ class AnemoiTrainer:
         """TensorBoard logger."""
         return get_tensorboard_logger(self.config)
 
-    def _get_warm_start_checkpoint(self, fork_id: str) -> str | None:
+    def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        warm_start = self.config.hardware.files.warm_start
-        if warm_start:
-            warm_start_path = Path(warm_start)
-            # Use absolute path if provided, otherwise assume it's in a warm start directory
-            if warm_start_path.is_absolute():
-                return warm_start_path
-            if Path(self.config.hardware.paths.warm_starts):
-                return Path(self.config.hardware.paths.warm_starts) / warm_start
-            if Path.isfile(
-                Path(self.config.hardware.paths.checkpoints.parent, fork_id or self.lineage_run) / warm_start,
-            ):
-                return Path(self.config.hardware.paths.checkpoints.parent, fork_id or self.lineage_run) / warm_start
+        warm_start_dir = self.config.hardware.paths.warm_start
+        warm_start_file = self.config.hardware.files.warm_start
+        warm_start_path = None
+
+        if warm_start_dir and warm_start_file:
+            warm_start_path = Path(warm_start_dir) / Path(warm_start_file)
             msg = "Warm start checkpoint not found: %s", warm_start_path
-            raise FileNotFoundError(msg)
-        return None  # No warm start specified
+            assert Path.is_file(warm_start_path), msg
+        return warm_start_path
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
         """Returns the directory where checkpoints are stored."""
         return Path(self.config.hardware.paths.checkpoints.parent, fork_id or self.lineage_run)
 
     def get_checkpoint(self, fork_id: str) -> Path:
-        return (
-            self._get_warm_start_checkpoint(self.config)
-            or self._get_checkpoint_directory(self.config, fork_id, self.lineage_run) / "last.ckpt"
-        )
+        return self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id) / "last.ckpt"
 
     @cached_property
     def last_checkpoint(self) -> Path | None:

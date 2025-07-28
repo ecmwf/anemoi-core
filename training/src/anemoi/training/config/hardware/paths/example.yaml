@@ -10,3 +10,4 @@ checkpoints: ${hardware.paths.output}checkpoint/
 plots: ${hardware.paths.output}plots/
 profiler: ${hardware.paths.output}profiler/
 graph: ${hardware.paths.output}graphs/
+warm_start: ${hardware.paths.checkpoints}/${training.fork_run_id}
