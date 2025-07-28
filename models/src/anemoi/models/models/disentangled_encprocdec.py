@@ -10,6 +10,7 @@
 
 import logging
 from typing import Optional
+from hydra.utils import instantiate
 
 import torch
 from torch import Tensor
@@ -59,6 +60,22 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             graph_data=graph_data,
             truncation_data=truncation_data,
         )
+
+        model_config = DotDict(model_config)
+        self.use_latent_blending = model_config.model.get("use_latent_blending", False)
+
+        if self.use_latent_blending:
+            # Encoder data -> hidden
+            self.latent_blender = instantiate(
+                model_config.model.encoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.num_channels * self.multi_step,
+                in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
+                hidden_dim=self.num_channels,
+                sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+                src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            )
     
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         return AnemoiModelAutoEncoder._assemble_input(self, x, batch_size, grid_shard_shapes, model_comm_group)
@@ -126,14 +143,36 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
+           
             if x_accum is None:
-                x_accum = x_latent
+                if self.use_latent_blending:
+                    x_accum = [x_latent]
+                else:
+                    x_accum = x_latent
             else:
-                x_accum += x_latent  # accumulates in-place
+                if self.use_latent_blending:
+                    x_accum.append(x_latent)
+                else:
+                    x_accum += x_latent  # accumulates in-place
             
         # Store the last latent for the residual connection
         x_skip = x_latent
 
+        if self.use_latent_blending:
+            x_accum = torch.cat(x_accum, dim=1)
+
+            # Latent blending network
+            _, x_accum = self._run_mapper(
+                self.latent_blender,
+                (x_accum, x_hidden_latent),
+                batch_size=batch_size,
+                shard_shapes=(shard_shapes_hidden, shard_shapes_hidden),
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                x_dst_is_sharded=False,  # x_latent does not come sharded
+                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            )
+        
         # Processor
         x_latent_proc = self.processor(
             x_accum,

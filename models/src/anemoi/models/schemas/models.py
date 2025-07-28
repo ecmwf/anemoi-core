@@ -225,5 +225,8 @@ class HierarchicalModelSchema(BaseModelSchema):
     level_process_num_layers: NonNegativeInt = Field(default=1)
     "Number of message passing steps at each level"
 
-
-ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema]
+class DisentangledModelSchema(BaseModelSchema):
+    use_latent_blending: bool = Field(default=False)
+    "Toggle to do enable latent blending network. If false, the latent space is not blended and multi step latents will be added directly."
+    
+ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DisentangledModelSchema]
