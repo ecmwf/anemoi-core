@@ -220,7 +220,7 @@ class GraphForecaster(pl.LightningModule):
             grid_shard_shapes=self.grid_shard_shapes,
         )
 
-    def on_load_checkpoint(self, checkpoint: torch.nn.module) -> None:
+    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
     def define_delayed_scalers(self) -> None:
