@@ -130,7 +130,9 @@ def open_log_file(filename):
     user = os.getenv("USER")  # TODO should use a more portable and secure way
     file_path = next(
         iter(
-            glob.glob(f"{tmpdir}/pytest-of-{user}/pytest-0/test_benchmark_training_cycle0profiler/[a-z0-9]*/{filename}"),
+            glob.glob(
+                f"{tmpdir}/pytest-of-{user}/pytest-0/test_benchmark_training_cycle0profiler/[a-z0-9]*/{filename}",
+            ),
         ),
     )
     with Path(file_path).open(newline="") as csvfile:
@@ -175,7 +177,9 @@ def get_performance_metrics():
 # add compute/nccl/memory breakdown from pytorch profiler
 @pytest.mark.longtests
 def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str], get_test_archive: callable, update_data=False,
+    benchmark_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+    update_data=False,
 ) -> None:
     cfg, urls = benchmark_config
     for url in urls:

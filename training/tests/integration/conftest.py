@@ -196,6 +196,7 @@ def gnn_config(
     OmegaConf.resolve(cfg)
     return cfg
 
+
 @pytest.fixture(
     params=[
         ["model=graphtransformer"],
