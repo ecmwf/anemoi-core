@@ -8,12 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
-
 import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Type
-
 
 import torch
 from torch_geometric.data.storage import NodeStorage
