@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import Annotated
 from typing import Literal
 from typing import Union
@@ -22,13 +21,10 @@ from pydantic import PositiveInt
 from anemoi.utils.schemas import BaseModel
 
 
-class ImplementedKNNSchema(str, Enum):
-    knn = "anemoi.graphs.edges.KNNEdges"
-    reverse_knn = "anemoi.graphs.ReversedKNNEdges"
-
-
 class KNNEdgeSchema(BaseModel):
-    target_: ImplementedKNNSchema = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.edges.KNNEdges", "anemoi.graphs.edges.ReversedKNNEdges"] = Field(
+        ..., alias="_target_"
+    )
     "KNN based edges implementation from anemoi.graphs.edges."
     num_nearest_neighbours: PositiveInt = Field(example=3)
     "Number of nearest neighbours. Default to 3."
@@ -38,13 +34,10 @@ class KNNEdgeSchema(BaseModel):
     "Mask to apply to target nodes of the edges. Default to None."
 
 
-class ImplementedCutOffSchema(str, Enum):
-    cutoff = "anemoi.graphs.edges.CutOffEdges"
-    reverse_cutoff = "anemoi.graphs.edges.ReversedCutOffEdges"
-
-
 class CutoffEdgeSchema(BaseModel):
-    target_: ImplementedCutOffSchema = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.edges.CutOffEdges", "anemoi.graphs.edges.ReversedCutOffEdges"] = Field(
+        ..., alias="_target_"
+    )
     "Cut-off based edges implementation from anemoi.graphs.edges."
     cutoff_factor: PositiveFloat = Field(example=0.6)
     "Factor to multiply the grid reference distance to get the cut-off radius. Default to 0.6."
