@@ -196,18 +196,18 @@ def gnn_config(
     OmegaConf.resolve(cfg)
     return cfg
 
+
 @pytest.fixture
 def benchmark_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_paths: callable,
 ) -> tuple[OmegaConf, str]:
 
-
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
         template = compose(config_name="config")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/benchmark.yaml")
-    tmp_dir, rel_paths, dataset_urls =  get_tmp_paths(use_case_modifications, ["dataset"])
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = rel_paths[0]
 
