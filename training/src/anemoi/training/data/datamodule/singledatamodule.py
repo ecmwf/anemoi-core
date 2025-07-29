@@ -102,6 +102,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
             rollout_value = rollout_max
 
+        else:
+            LOGGER.warning(
+                "Falling back rollout to: %s",
+                rollout_value,
+            )
+
         rollout = max(rollout_value, val_rollout)
 
         multi_step = self.config.training.multistep_input
