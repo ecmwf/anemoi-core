@@ -22,9 +22,8 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
-
-from .encoder_processor_decoder import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +82,6 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         self.supports_sharded_input = True
 
         # Encoder data -> hidden
-
         self.encoder = instantiate(
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -100,7 +98,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             model_config.model.decoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.num_channels,
-            in_channels_dst=self.input_dim,
+            in_channels_dst=self.target_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.num_output_channels,
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
@@ -120,6 +118,10 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 for cfg in getattr(model_config.model, "bounding", [])
             ]
         )
+
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        super()._calculate_shapes_and_indices(data_indices)
+        self.target_dim = self.num_input_channels_prognostic + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
 
@@ -157,6 +159,26 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             x_out = bounding(x_out)
 
         return x_out
+
+    def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
+        node_attributes_target = self.node_attributes(self._graph_name_data, batch_size=batch_size)
+        if grid_shard_shapes is not None:
+            shard_shapes_nodes = self._get_shard_shapes(node_attributes_target, 0, grid_shard_shapes, model_comm_group)
+            node_attributes_target = shard_tensor(node_attributes_target, 0, shard_shapes_nodes, model_comm_group)
+
+        # normalize and add data positional info (lat/lon)
+        x_target_latent = torch.cat(
+            (
+                einops.rearrange(
+                    x[..., self._internal_input_idx],
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                ),
+                node_attributes_target,
+            ),
+            dim=-1,  # feature dimension
+        )
+        shard_shapes_target = self._get_shard_shapes(x_target_latent, 0, grid_shard_shapes, model_comm_group)
+        return x_target_latent, shard_shapes_target
 
     def forward(
         self,
@@ -209,14 +231,17 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
         # Do not pass x_data_latent to the decoder
         # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
-        x_target_latent = torch.zeros_like(x_data_latent)
+        # Only pass data and forcing coordinates to the decoder
+        x_target_latent, shard_shapes_target = self._assemble_forcings(
+            x, batch_size, grid_shard_shapes, model_comm_group
+        )
 
         # Decoder
         x_out = self._run_mapper(
             self.decoder,
             (x_latent, x_target_latent),
             batch_size=batch_size,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            shard_shapes=(shard_shapes_hidden, shard_shapes_target),
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
@@ -354,7 +379,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             model_config.model.decoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.hidden_dims[self._graph_hidden_names[0]],
-            in_channels_dst=self.input_dim,
+            in_channels_dst=self.num_input_channels_prognostic + self.node_attributes.attr_ndims[self._graph_name_data],
             hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
             out_channels_dst=self.num_output_channels,
             sub_graph=self._graph_data[(self._graph_hidden_names[0], "to", self._graph_name_data)],
@@ -380,6 +405,9 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
     def _assemble_output(self, x_out, batch_size, ensemble_size, dtype):
         return super()._assemble_output(x_out, batch_size, ensemble_size, dtype)
+
+    def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
+        return super()._assemble_forcings(x, batch_size, grid_shard_shapes, model_comm_group)
 
     def forward(
         self,
@@ -473,7 +501,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             # Decode to next level
             curr_latent = self._run_mapper(
                 self.upscale[src_hidden_name],
-                (curr_latent, x_encoded_latents[dst_hidden_name]),
+                (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
                 model_comm_group=model_comm_group,
@@ -491,12 +519,19 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     model_comm_group=model_comm_group,
                 )
 
+        # Do not pass x_data_latent to the decoder
+        # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
+        # Only pass data and forcing coordinates to the decoder
+        x_target_latent, shard_shapes_target = self._assemble_forcings(
+            x, batch_size, grid_shard_shapes, model_comm_group
+        )
+
         # Run decoder
         x_out = self._run_mapper(
             self.decoder,
-            (curr_latent, x_data_latent),
+            (curr_latent, x_target_latent),
             batch_size=batch_size,
-            shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_data),
+            shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_target),
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
