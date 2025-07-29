@@ -41,6 +41,8 @@ class FilesSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Union[Path, None] = None
     "Path to the inverse truncation matrix file."
+    truncation_loss: Union[list[Union[Path, bool, None]], None] = None
+    "List of paths to truncation loss files for multi-scale loss computation."
     checkpoint: dict[str, str]
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
     warm_start: Union[str, None] = None

@@ -13,10 +13,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import einops
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import shard_channels
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
 from .forecaster import GraphForecaster
@@ -105,6 +109,21 @@ class GraphEnsForecaster(GraphForecaster):
 
         self.ensemble_ic_generator = EnsembleInitialConditions(config=config, data_indices=data_indices)
 
+        self.loss_trunc_matrices = self.build_loss_truncation_matrices(truncation_data)
+
+    def build_loss_truncation_matrices(self, truncation_data: dict) -> None:
+        # we can't register these as buffers because DDP does not support sparse tensors
+        # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
+        loss_matrices = []
+        for i, interp_data_loss in enumerate(truncation_data["loss"]):
+            if interp_data_loss is not None:
+                loss_matrices.append(self.model.model._make_truncation_matrix(interp_data_loss))
+                LOGGER.info("Loss truncation: %s %s", i, loss_matrices[i].shape)
+            else:
+                loss_matrices.append(None)
+                LOGGER.info("Loss truncation: %s %s", i, None)
+        return loss_matrices
+
     def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
         return self.model(
             x,
@@ -140,6 +159,48 @@ class GraphEnsForecaster(GraphForecaster):
         self.ens_comm_subgroup_rank = ens_comm_subgroup_rank
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
+
+    def _prepare_for_truncation(
+        self,
+        y_pred_ens: torch.Tensor,
+        y: torch.Tensor,
+        model_comm_group: ProcessGroup,
+    ) -> tuple[torch.Tensor, torch.Tensor, tuple | None]:
+        """Prepare tensors for interpolation/smoothing.
+
+        Args:
+            y_pred_ens: torch.Tensor
+                Ensemble predictions
+            y: torch.Tensor
+                Ground truth
+            model_comm_group: ProcessGroup
+                Model communication group
+
+        Returns
+        -------
+            y_pred_ens_interp: torch.Tensor
+                Predictions for interpolation
+            y_interp: torch.Tensor
+                Ground truth for interpolation
+            shard_info: tuple
+                Shard shapes for later gathering
+        """
+        batch_size, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1]
+
+        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b e g c -> (b e) g c")
+        shard_shapes = apply_shard_shapes(y_pred_ens_interp, self.grid_dim, self.grid_shard_shapes)
+        y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, model_comm_group)
+        y_pred_ens_interp = einops.rearrange(
+            y_pred_ens_interp,
+            "(b e) g c -> b e g c",
+            b=batch_size,
+            e=ensemble_size,
+        )
+
+        shard_shapes_y = apply_shard_shapes(y, self.grid_dim, self.grid_shard_shapes)
+        y_interp = shard_channels(y, shard_shapes_y, model_comm_group)
+
+        return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
 
     def gather_and_compute_loss(
         self,
@@ -178,8 +239,7 @@ class GraphEnsForecaster(GraphForecaster):
             y_pred_ens:
                 Predictions if validation mode
         """
-        # gather ensemble members,
-        # full ensemble is only materialised on GPU in checkpointed region
+        # gather ensemble members
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=1,
@@ -187,10 +247,69 @@ class GraphEnsForecaster(GraphForecaster):
             mgroup=ens_comm_subgroup,
         )
 
-        # compute the loss
-        loss_inc = loss(y_pred_ens, y, squash=True, grid_shard_slice=self.grid_shard_slice, group=model_comm_group)
+        is_multi_scale_loss = any(x is not None for x in self.loss_trunc_matrices)
+        if self.keep_batch_sharded and is_multi_scale_loss:
+            # go to full sequence dimension for interpolation / smoothing
+            y_pred_ens_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
+                y_pred_ens,
+                y,
+                model_comm_group,
+            )
+        else:
+            y_pred_ens_interp = y_pred_ens
+            y_for_interp = y
+
+        loss_inc = []
+        y_preds_ens = []
+        ys = []
+        for i, trunc_matrix in enumerate(self.loss_trunc_matrices):
+            LOGGER.debug(
+                "Loss: %s %s %s",
+                i,
+                trunc_matrix.shape if trunc_matrix is not None else None,
+                trunc_matrix.device if trunc_matrix is not None else None,
+            )
+
+            # interpolate / smooth the predictions and the truth for loss computation
+            y_pred_ens_tmp, y_tmp = self._interp_for_loss(y_pred_ens_interp, y_for_interp, i)
+
+            if self.keep_batch_sharded and is_multi_scale_loss:
+                y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, model_comm_group)
+                y_tmp = gather_channels(y_tmp, shard_shapes_y, model_comm_group)
+
+            # save for next loss scale
+            y_preds_ens.append(y_pred_ens_tmp)
+            ys.append(y_tmp)
+
+            if i > 0:  # assumption, resol 0 < 1 < 2 < ... < n
+                y_pred_ens_tmp = y_pred_ens_tmp - y_preds_ens[i - 1]
+                y_tmp = y_tmp - ys[i - 1]
+
+            # compute the loss
+            loss_inc.append(
+                loss(
+                    y_pred_ens_tmp,
+                    y_tmp,
+                    squash=True,
+                    grid_shard_slice=self.grid_shard_slice,
+                    group=model_comm_group,
+                ),
+            )
 
         return loss_inc, y_pred_ens if return_pred_ens else None
+
+    def _interp_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.loss_trunc_matrices[i] is not None:
+            self.loss_trunc_matrices[i] = self.loss_trunc_matrices[i].to(x.device)
+            x = self._interpolate_batch(x, self.loss_trunc_matrices[i])
+            y = self._interpolate_batch(y, self.loss_trunc_matrices[i])
+        return x, y
+
+    def _interpolate_batch(self, batch: torch.Tensor, intp_matrix: torch.Tensor) -> torch.Tensor:
+        input_shape = batch.shape  # e.g. (batch steps ensemble grid vars) or (batch steps grid vars)
+        batch = batch.reshape(-1, *input_shape[-2:])
+        batch = self.model.model._truncate_fields(batch, intp_matrix)  # to coarse resolution
+        return batch.reshape(*input_shape)
 
     def rollout_step(
         self,
@@ -267,7 +386,7 @@ class GraphEnsForecaster(GraphForecaster):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, y_pred_ens_group = (
+            mloss, y_pred_ens_group = (
                 checkpoint(
                     self.gather_and_compute_loss,
                     y_pred,
@@ -282,6 +401,8 @@ class GraphEnsForecaster(GraphForecaster):
                 if training_mode
                 else None
             )
+            loss = torch.stack(mloss).sum()
+            mloss = [x.detach() for x in mloss]
 
             x = self.advance_input(x, y_pred, batch[0], rollout_step)
 
@@ -293,7 +414,9 @@ class GraphEnsForecaster(GraphForecaster):
                     rollout_step,
                     grid_shard_slice=self.grid_shard_slice,
                 )
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
+            yield loss, mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
+                x if validation_mode else None
+            )
 
     def _step(
         self,
@@ -311,10 +434,14 @@ class GraphEnsForecaster(GraphForecaster):
         )
 
         loss = torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+        mloss = [
+            torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+            for _ in self.loss_trunc_matrices
+        ]
         metrics = {}
         y_preds = []
 
-        for loss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
+        for loss_next, mloss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
             batch,
             rollout=self.rollout,
             training_mode=True,
@@ -324,8 +451,14 @@ class GraphEnsForecaster(GraphForecaster):
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
+            for i in range(len(mloss)):
+                mloss[i] += mloss_next[i]
+
         loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds, _ens_ic
+        for i in range(len(mloss)):
+            mloss[i] *= 1.0 / self.rollout
+
+        return loss, mloss, metrics, y_preds, _ens_ic
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         batch[0] = super().allgather_batch(batch[0])
@@ -349,7 +482,7 @@ class GraphEnsForecaster(GraphForecaster):
             train_loss:
                 Training loss
         """
-        train_loss, _, _, _ = self._step(batch, batch_idx)
+        train_loss, _, _, _, _ = self._step(batch, batch_idx)
 
         self.log(
             "train_" + self.loss.name,
@@ -390,7 +523,7 @@ class GraphEnsForecaster(GraphForecaster):
             Tuple containing the validation loss, the predictions, and the ensemble initial conditions
         """
         with torch.no_grad():
-            val_loss, metrics, y_preds, ens_ic = self._step(batch, batch_idx, validation_mode=True)
+            val_loss, val_mloss, metrics, y_preds, ens_ic = self._step(batch, batch_idx, validation_mode=True)
         self.log(
             "val_" + self.loss.name,
             val_loss,
@@ -401,6 +534,19 @@ class GraphEnsForecaster(GraphForecaster):
             batch_size=batch[0].shape[0],
             sync_dist=True,
         )
+
+        for i, loss_scale in enumerate(val_mloss):
+            self.log(
+                f"val_{self.loss.name}_scale{i}",
+                loss_scale,
+                on_epoch=True,
+                on_step=True,
+                prog_bar=True,
+                logger=self.logger_enabled,
+                batch_size=batch[0].shape[0],
+                sync_dist=True,
+            )
+
         for mname, mvalue in metrics.items():
             self.log(
                 "val_" + mname,
