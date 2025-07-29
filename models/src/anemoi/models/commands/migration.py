@@ -60,6 +60,12 @@ class Migration(Command):
             default=False,
             help="Set this as the final migration. Older checkpoints cannot be migrated past this.",
         )
+        create_parser.add_argument(
+            "--no-rollback",
+            action="store_true",
+            default=False,
+            help="Set this if you do not plan to support rollbacking.",
+        )
 
         help_sync = "Apply migrations to a checkpoint."
         sync_parser = subparsers.add_parser("sync", help=help_sync, description=help_sync)
@@ -108,15 +114,11 @@ class Migration(Command):
 
         name = _get_migration_name(args.name)
 
-        imports_items = ["from anemoi.models.migrations import CkptType"]
-        if args.final:
-            imports_items.append("from anemoi.models.migrations import IncompatibleCheckpointException")
+        imports_items: list[str] = []
+        if not args.final:
+            imports_items.append("from anemoi.models.migrations import CkptType")
         imports_items.append("from anemoi.models.migrations import MigrationMetadata")
         imports = "\n".join(imports_items)
-
-        content = "return ckpt"
-        if args.final:
-            content = "raise IncompatibleCheckpointException"
 
         with open(args.path / name, "w") as f:
             f.write(
@@ -150,21 +152,35 @@ class Migration(Command):
                 f.write(f",\n    final={args.final},")
             f.write(
                 dedent(
-                    f"""
+                    """
                     )
-
-
-                    def migrate(ckpt: CkptType) -> CkptType:
-                        \"\"\"Migrate the checkpoint.\"\"\"
-                        {content}
-
-
-                    def rollback(ckpt: CkptType) -> CkptType:
-                        \"\"\"Rollback the migration.\"\"\"
-                        {content}
                 """
                 )
             )
+
+            if not args.final:
+                f.write(
+                    dedent(
+                        """
+
+                        def migrate(ckpt: CkptType) -> CkptType:
+                            \"\"\"Migrate the checkpoint.\"\"\"
+                            return ckpt
+                    """
+                    )
+                )
+            if not args.no_rollback and not args.final:
+                f.write(
+                    dedent(
+                        """
+
+                        def rollback(ckpt: CkptType) -> CkptType:
+                            \"\"\"Rollback the migration.\"\"\"
+                            return ckpt
+                    """
+                    )
+                )
+
         print(f"Created migration {args.path}/{name}")
 
     def run_sync(self, args: Namespace) -> None:

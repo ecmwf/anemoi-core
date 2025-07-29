@@ -85,17 +85,20 @@ class Migration:
 
     name: str
     """Name of the migration"""
-    migrate: Callable[[CkptType], CkptType]
+    migrate: Callable[[CkptType], CkptType] | None
     """Callback to execute the migration"""
-    rollback: Callable[[CkptType], CkptType]
+    rollback: Callable[[CkptType], CkptType] | None
     """Callback to execute a migration rollback"""
     metadata: MigrationMetadata
     """Tracked metadata"""
 
     def serialize(self) -> dict[str, Any]:
-        cloudpickle.register_pickle_by_value(sys.modules[self.rollback.__module__])
-        rollback_bytes = cloudpickle.dumps(self.rollback)
-        return {"name": self.name, "rollback": _SerializedRollback(rollback_bytes)}
+        serialized_rollback = None
+        if self.rollback is not None:
+            cloudpickle.register_pickle_by_value(sys.modules[self.rollback.__module__])
+            rollback_bytes = cloudpickle.dumps(self.rollback)
+            serialized_rollback = _SerializedRollback(rollback_bytes)
+        return {"name": self.name, "rollback": serialized_rollback}
 
 
 def registered_migrations(ckpt: CkptType) -> list[dict[str, Any]]:
@@ -142,11 +145,12 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
             LOGGER.warning("Error loading %s: %s", file.name, str(e))
             continue
 
-        migrations.append(
-            Migration(
-                name=file.stem, migrate=migration.migrate, rollback=migration.rollback, metadata=migration.metadata
-            )
-        )
+        args: dict[str, Any] = dict(name=file.stem, migrate=None, rollback=None, metadata=migration.metadata)
+        if hasattr(migration, "migrate"):
+            args["migrate"] = migration.migrate
+        if hasattr(migration, "rollback"):
+            args["rollback"] = migration.rollback
+        migrations.append(Migration(**args))
     return migrations
 
 
@@ -330,6 +334,10 @@ class Migrator:
             missing_migrations = missing_migrations[:steps]
         migrated: list[str] = []
         for migration in missing_migrations:
+            if migration.migrate is None:
+                raise IncompatibleCheckpointException(
+                    f"Migration {migration.name} cannot be executed. Missing migrate function."
+                )
             ckpt = migration.migrate(ckpt)
             ckpt[_ckpt_migration_key].append(migration.serialize())
             migrated.append(migration.name)
@@ -359,6 +367,8 @@ class Migrator:
         for _ in range(steps):
             migration = ckpt[_ckpt_migration_key].pop()
             rollbacks = [migration["name"]] + rollbacks
+            if migration["rollback"] is None:
+                raise IncompatibleCheckpointException(f"{migration['name']} cannot bo rollbacked.")
             ckpt = migration["rollback"](ckpt)
         return ckpt, rollbacks
 
