@@ -63,6 +63,21 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         )
 
         model_config = DotDict(model_config)
+
+        # Overwrite decoder to only use prognostic data in the decoder
+        self.decoder = instantiate(
+            model_config.model.decoder,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            in_channels_src=self.num_channels,
+            in_channels_dst=self.target_dim,
+            hidden_dim=self.num_channels,
+            out_channels_dst=self.num_output_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+        )
+
+        model_config = DotDict(model_config)
         self.use_latent_blending = model_config.model.get("use_latent_blending", False)
 
         if self.use_latent_blending:
@@ -79,16 +94,23 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             )
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return AnemoiModelAutoEncoder._assemble_input(self, x, batch_size, grid_shard_shapes, model_comm_group)
+        return super()._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
 
     def _assemble_output(self, x_out, batch_size, ensemble_size, dtype):
-        return AnemoiModelAutoEncoder._assemble_output(self, x_out, batch_size, ensemble_size, dtype)
+        return super()._assemble_output(x_out, batch_size, ensemble_size, dtype)
+
+    def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
+        return super()._assemble_forcings(x, batch_size, grid_shard_shapes, model_comm_group)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        AnemoiModelAutoEncoder._calculate_shapes_and_indices(self, data_indices)
+        super()._calculate_shapes_and_indices(data_indices)
 
         # only 1 timestep per time to the encoder
         self.input_dim = self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        self.target_dim = (
+            self.multi_step * self.num_input_channels_prognostic
+            + self.node_attributes.attr_ndims[self._graph_name_data]
+        )
 
     def forward(
         self,
@@ -183,12 +205,18 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         # Residual learning over the latent space
         x_latent_proc = x_latent_proc + x_skip
 
+        # Only pass data and forcing coordinates to the decoder
+        # Autoencoder is trained like this, if model freezing this has to be equal
+        x_target_latent, shard_shapes_target = self._assemble_forcings(
+            x, batch_size, grid_shard_shapes, model_comm_group
+        )
+
         # Decoder
         x_out = self._run_mapper(
             self.decoder,
-            (x_latent_proc, x_data_latent),
+            (x_latent_proc, x_target_latent),
             batch_size=batch_size,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            shard_shapes=(shard_shapes_hidden, shard_shapes_target),
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
