@@ -44,6 +44,10 @@ YAML configuration:
          edge_builders:
          -  _target_: anemoi.graphs.edges.CutOffEdges
             cutoff_factor: 0.6
+            # max_num_neighbours: 64
+
+The optional argument ``max_num_neighbours`` (default: 64) can be set to
+limit the maximum number of neighbours each node can connect to.
 
 .. note::
 
@@ -52,3 +56,27 @@ YAML configuration:
    will be the lowest value without isolated nodes. This optimal value
    depends on the node distribution, so it is recommended to tune it for
    each case.
+
+#########################
+ Reversed Cut-off radius
+#########################
+
+The reversed cut-off method (``ReversedCutOffEdges``) is similar to the
+standard cut-off method, but instead establishes connections based on
+the neighbourhood of each source node. The role of source and target
+nodes is similarly reversed in :math:`\text{nodes_reference_dist}`.
+Given two sets of nodes, (`source`, `target`), the
+``ReversedCutOffEdges`` method connects all sources nodes to all target
+nodes within a cut-off radius.
+
+To use this method to create your connections, you can use the following
+YAML configuration:
+
+.. code:: yaml
+
+   edges:
+      -  source_name: source
+         target_name: destination
+         edge_builders:
+         -  _target_: anemoi.graphs.edges.ReversedCutOffEdges
+            cutoff_factor: 0.6

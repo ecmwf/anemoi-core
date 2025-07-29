@@ -20,7 +20,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
-    module = GraphForecaster.load_from_checkpoint(lightning_checkpoint_path)
+    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path)
     model = module.model
 
     metadata = dict(**model.metadata)

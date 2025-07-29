@@ -867,7 +867,9 @@ class PlotLoss(BasePerBatchPlotCallback):
                 RuntimeWarning,
             )
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+
+        for rollout_step in range(rollout):
             y_hat = outputs[1][rollout_step]
             y_true = batch[
                 :,
@@ -989,7 +991,9 @@ class PlotSample(BasePerBatchPlotCallback):
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+
+        for rollout_step in range(rollout):
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
                 self.per_sample,
@@ -1097,7 +1101,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
         data, output_tensor = self.process(pl_module, outputs, batch)
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+        for rollout_step in range(rollout):
             # Build dictionary of inidicies and parameters to be plotted
 
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
@@ -1180,7 +1185,9 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
         data, output_tensor = self.process(pl_module, outputs, batch)
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+
+        for rollout_step in range(rollout):
 
             # Build dictionary of inidicies and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
