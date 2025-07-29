@@ -14,7 +14,7 @@ from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
 
-from rich import print as rprint
+from rich.console import Console
 
 from .. import __version__ as version_anemoi_models
 from ..migrations import MIGRATION_PATH
@@ -30,6 +30,12 @@ def _get_migration_name(name: str) -> str:
     name = name.lower().replace("-", "_").replace(" ", "_")
     now = int(datetime.now().timestamp())
     return f"{now}_{name}.py"
+
+
+def maybe_plural(count: int, text: str) -> str:
+    if count >= 2:
+        return text + "s"
+    return text
 
 
 class Migration(Command):
@@ -67,10 +73,12 @@ class Migration(Command):
                 "Defaults to execute all migrations."
             ),
         )
+        sync_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
         help_inspect = "Inspect migrations in a checkpoint."
         inspect_parser = subparsers.add_parser("inspect", help=help_inspect, description=help_inspect)
         inspect_parser.add_argument("ckpt", help="Path to the checkpoint to inspect.")
+        inspect_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
     def run(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
@@ -170,6 +178,7 @@ class Migration(Command):
         import torch
 
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+        console = Console(force_terminal=not args.no_color)
         try:
             new_ckpt, done_migrations, done_rollbacks = Migrator().sync(ckpt, steps=args.steps)
             if len(done_migrations) or len(done_rollbacks):
@@ -182,11 +191,11 @@ class Migration(Command):
             if len(done_migrations):
                 print(f"Executed {len(done_migrations)} migration(s):")
             for migration in done_migrations:
-                rprint(f"[green]+ [bold]{migration}[/bold][/green]")
+                console.print(f"[green]+ [bold]{migration}[/bold][/green]")
             if len(done_rollbacks):
                 print(f"Executed {len(done_rollbacks)} rollback(s):")
             for migration in done_rollbacks:
-                rprint(f"[red]- [bold]{migration}[/red]")
+                console.print(f"[red]- [bold]{migration}[/red]")
         except IncompatibleCheckpointException as e:
             LOGGER.error(str(e))
 
@@ -206,28 +215,52 @@ class Migration(Command):
 
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
         migrator = Migrator()
+        console = Console(force_terminal=not args.no_color, highlight=False)
         try:
             executed_migrations, missing_migrations, extra_migrations = migrator.inspect(ckpt)
             if len(executed_migrations):
-                print("Registered migrations:")
-            for migration in executed_migrations:
-                rprint(
-                    f"[cyan]* [bold]{migration.name} \\[{migration.metadata.versions['anemoi-models']}][/bold][/cyan]"
+                print(
+                    len(executed_migrations),
+                    " registered ",
+                    maybe_plural(len(executed_migrations), "migration"),
+                    ":",
+                    sep="",
                 )
+            for migration in executed_migrations:
+                console.print(
+                    f"  [cyan]* [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/cyan]"
+                )
+            if len(executed_migrations):
+                console.print("  [italic]These migrations are already executed and part of the checkpoint[/italic]")
             if len(missing_migrations):
-                print("Missing migrations:")
+                print(
+                    len(missing_migrations),
+                    " missing ",
+                    maybe_plural(len(missing_migrations), "migration"),
+                    ":",
+                    sep="",
+                )
             else:
-                print("No missing migration to execute.")
+                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
             for migration in missing_migrations:
-                rprint(
-                    f"[green]+ [bold]{migration.name} \\[{migration.metadata.versions['anemoi-models']}][/bold][/green]"
+                console.print(
+                    f"  [green]+ [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
                 )
             if len(extra_migrations):
+                print(
+                    len(executed_migrations),
+                    "extra",
+                    maybe_plural(len(executed_migrations), "migration"),
+                    "to rollback:",
+                )
                 print("Extra migrations to rollback:")
             for migration in extra_migrations:
-                rprint(f"[red]- [bold]{migration}[/red]")
+                console.print(f"  [red]- [bold]{migration}[/red]")
+            if len(missing_migrations) or len(extra_migrations):
+                console.print("[italic]To update your checkpoint, run:[/italic]")
+                console.print(f"[italic]anemoi-models migration sync {args.ckpt}[/italic]")
         except IncompatibleCheckpointException:
-            print("No compatible migrations available. (Checkpoint too old).")
+            print("No compatible migration available: the checkpoint is too old.")
 
 
 command = Migration
