@@ -108,8 +108,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         # only 1 timestep per time to the encoder
         self.input_dim = self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
         self.target_dim = (
-            self.multi_step * self.num_input_channels_prognostic
-            + self.node_attributes.attr_ndims[self._graph_name_data]
+            self.multi_step * self.num_input_channels_forcings + self.node_attributes.attr_ndims[self._graph_name_data]
         )
 
     def forward(

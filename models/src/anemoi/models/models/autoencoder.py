@@ -121,7 +121,10 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         super()._calculate_shapes_and_indices(data_indices)
-        self.target_dim = self.num_input_channels_prognostic + self.node_attributes.attr_ndims[self._graph_name_data]
+        forcing_names = data_indices.model._forcing
+        self._forcing_input_idx = [data_indices.name_to_index[name] for name in forcing_names]
+        self.num_input_channels_forcings = len(self._forcing_input_idx)
+        self.target_dim = self.num_input_channels_forcings + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
 
@@ -170,7 +173,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         x_target_latent = torch.cat(
             (
                 einops.rearrange(
-                    x[..., self._internal_input_idx],
+                    x[..., self._forcing_input_idx],
                     "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
                 ),
                 node_attributes_target,
