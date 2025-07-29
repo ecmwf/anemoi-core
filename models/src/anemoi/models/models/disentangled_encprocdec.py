@@ -10,21 +10,22 @@
 
 import logging
 from typing import Optional
-from hydra.utils import instantiate
 
 import torch
+from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.utils.config import DotDict
+
 from .autoencoder import AnemoiModelAutoEncoder
 from .autoencoder import AnemoiModelHierarchicalAutoEncoder
-from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
 
 LOGGER = logging.getLogger(__name__)
+
 
 class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
     """Disnentangled graph network."""
@@ -76,7 +77,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
                 src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             )
-    
+
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         return AnemoiModelAutoEncoder._assemble_input(self, x, batch_size, grid_shard_shapes, model_comm_group)
 
@@ -87,9 +88,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         AnemoiModelAutoEncoder._calculate_shapes_and_indices(self, data_indices)
 
         # only 1 timestep per time to the encoder
-        self.input_dim = (
-            self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        )
+        self.input_dim = self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def forward(
         self,
@@ -123,7 +122,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         # Encode each time step separately and then accumulate them
         x_accum = None
         for i in range(self.multi_step):
-            x_t = x[:, i:i+1, ...]  # shape: [B, 1, E, G, D]
+            x_t = x[:, i : i + 1, ...]  # shape: [B, 1, E, G, D]
 
             x_data_latent, shard_shapes_data = self._assemble_input(
                 x_t, batch_size, grid_shard_shapes, model_comm_group
@@ -132,7 +131,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
             shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
-            # Encode timestep 
+            # Encode timestep
             x_data_latent, x_latent = self._run_mapper(
                 self.encoder,
                 (x_data_latent, x_hidden_latent),
@@ -143,7 +142,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
-           
+
             if x_accum is None:
                 if self.use_latent_blending:
                     x_accum = [x_latent]
@@ -154,7 +153,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
                     x_accum.append(x_latent)
                 else:
                     x_accum += x_latent  # accumulates in-place
-            
+
         # Store the last latent for the residual connection
         x_skip = x_latent
 
@@ -172,7 +171,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
-        
+
         # Processor
         x_latent_proc = self.processor(
             x_accum,
@@ -201,7 +200,9 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         return x_out
 
 
-class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelEncProcDecHierarchical, AnemoiModelHierarchicalAutoEncoder):
+class AnemoiModelDisentangledEncProcDecHierarchical(
+    AnemoiModelEncProcDecHierarchical, AnemoiModelHierarchicalAutoEncoder
+):
     """Disnentangled hierarchical graph network."""
 
     def __init__(
@@ -236,9 +237,11 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelEncProcDecHierarc
             graph_data=graph_data,
             truncation_data=truncation_data,
         )
-    
+
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return AnemoiModelHierarchicalAutoEncoder._assemble_input(self, x, batch_size, grid_shard_shapes, model_comm_group)
+        return AnemoiModelHierarchicalAutoEncoder._assemble_input(
+            self, x, batch_size, grid_shard_shapes, model_comm_group
+        )
 
     def _assemble_output(self, x_out, batch_size, ensemble_size, dtype):
         return AnemoiModelHierarchicalAutoEncoder._assemble_output(self, x_out, batch_size, ensemble_size, dtype)
@@ -247,9 +250,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelEncProcDecHierarc
         AnemoiModelHierarchicalAutoEncoder._calculate_shapes_and_indices(self, data_indices)
 
         # only 1 timestep per time to the encoder
-        self.input_dim = (
-            self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        )
+        self.input_dim = self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def forward(
         self,
@@ -283,7 +284,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelEncProcDecHierarc
         # Encode each time step separately and then accumulate them
         x_accum = None
         for i in range(self.multi_step):
-            x_t = x[:, i:i+1, ...]  # shape: [B, 1, E, G, D]
+            x_t = x[:, i : i + 1, ...]  # shape: [B, 1, E, G, D]
 
             # Prepare input
             x_data_latent, shard_shapes_data = self._assemble_input(
@@ -299,8 +300,8 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelEncProcDecHierarc
             shard_shapes_hiddens = {}
             for hidden, x_latent in x_hidden_latents.items():
                 shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group)
-            
-            # Encode timestep 
+
+            # Encode timestep
             x_data_latent, curr_latent = self._run_mapper(
                 self.encoder,
                 (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
@@ -344,7 +345,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelEncProcDecHierarc
                 x_accum = curr_latent
             else:
                 x_accum += curr_latent  # accumulates in-place
-        
+
         # Store the last latent for the residual connection
         x_skip = curr_latent
 

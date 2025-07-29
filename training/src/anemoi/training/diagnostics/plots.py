@@ -31,7 +31,6 @@ from matplotlib.colors import TwoSlopeNorm
 from pyshtools.expand import SHGLQ
 from pyshtools.expand import SHExpandGLQ
 from scipy.interpolate import griddata
-from scipy.spatial import cKDTree
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection

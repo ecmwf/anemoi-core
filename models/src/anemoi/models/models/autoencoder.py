@@ -207,10 +207,14 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
 
+        # Do not pass x_data_latent to the decoder
+        # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
+        x_target_latent = torch.zeros_like(x_data_latent)
+
         # Decoder
         x_out = self._run_mapper(
             self.decoder,
-            (x_latent, x_data_latent),
+            (x_latent, x_target_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
             model_comm_group=model_comm_group,
