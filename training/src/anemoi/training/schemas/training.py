@@ -18,6 +18,7 @@ from typing import Union
 
 from pydantic import AfterValidator
 from pydantic import Discriminator
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -308,6 +309,7 @@ StrategySchemas = Union[BaseDDPStrategySchema, DDPEnsGroupStrategyStrategySchema
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
     run_id: Union[str, None] = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
     fork_run_id: Union[str, None] = Field(example=None)
@@ -383,11 +385,17 @@ class InterpolationSchema(BaseTrainingSchema):
     "Forcing parameters for target output times."
 
 
+class AutoencoderSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
+    "Training objective."
+
+
 TrainingSchema = Annotated[
     Union[
         ForecasterSchema,
         ForecasterEnsSchema,
         InterpolationSchema,
+        AutoencoderSchema,
     ],
     Discriminator("model_task"),
 ]

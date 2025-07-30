@@ -12,6 +12,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+from typing import Optional
 
 import pytorch_lightning as pl
 import torch
@@ -131,18 +132,18 @@ class BaseGraphModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
+        truncation_data: Optional[dict] = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
-        config : DictConfig
+        config : BaseSchema
             Job configuration
         graph_data : HeteroData
             Graph object
