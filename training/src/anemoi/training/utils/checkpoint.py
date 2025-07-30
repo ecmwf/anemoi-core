@@ -119,7 +119,7 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
 
 class LoggingUnpickler(pickle.Unpickler):
     def find_class(self, module: str, name: str) -> str:
-        if "anemoi.training.schemas" in module:
+        if "anemoi.training" in module:
             msg = (
                 f"anemoi-training Pydantic schemas found in model's metadata: "
                 f"({module}, {name}) Please review Pydantic schemas to avoid this."
