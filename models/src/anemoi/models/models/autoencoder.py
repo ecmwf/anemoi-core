@@ -369,7 +369,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
-                in_channels_dst=self.hidden_dims[dst_nodes_name],
+                in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
                 sub_graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
@@ -382,7 +382,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             model_config.model.decoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.hidden_dims[self._graph_hidden_names[0]],
-            in_channels_dst=self.num_input_channels_prognostic + self.node_attributes.attr_ndims[self._graph_name_data],
+            in_channels_dst=self.target_dim,
             hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
             out_channels_dst=self.num_output_channels,
             sub_graph=self._graph_data[(self._graph_hidden_names[0], "to", self._graph_name_data)],
@@ -403,14 +403,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             ]
         )
 
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return super()._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
-
-    def _assemble_output(self, x_out, batch_size, ensemble_size, dtype):
-        return super()._assemble_output(x_out, batch_size, ensemble_size, dtype)
-
-    def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return super()._assemble_forcings(x, batch_size, grid_shard_shapes, model_comm_group)
 
     def forward(
         self,
