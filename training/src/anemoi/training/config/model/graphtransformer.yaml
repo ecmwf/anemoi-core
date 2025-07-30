@@ -37,7 +37,7 @@ encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 1
+  num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
@@ -49,7 +49,7 @@ decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 1
+  num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
   initialise_data_extractor_zero: False
