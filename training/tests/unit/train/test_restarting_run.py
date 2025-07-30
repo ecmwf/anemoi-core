@@ -24,12 +24,14 @@ def tmp_checkpoint_factory(tmp_path_factory: pytest.TempPathFactory) -> (Path, P
         rid: Optional[str] = None,
         ckpt_path_name: str = "mock_checkpoints",
         ckpt_file_name: str = "last.ckpt",
+        skip_creation: bool = False,
     ) -> (Path, Path):
         base = tmp_path_factory.mktemp(ckpt_path_name)
         checkpoint_dir = base / rid if rid else base
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         ckpt_file = checkpoint_dir / ckpt_file_name
-        ckpt_file.write_text("fake checkpoint")
+        if not skip_creation:
+            ckpt_file.write_text("fake checkpoint")
         return ckpt_file, base  # full path to the .ckpt
 
     return _create_checkpoint
@@ -202,3 +204,119 @@ def test_restart_warm_start_run_id(
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id == run_id
     assert trainer.last_checkpoint == expected_path
+
+
+def test_restart_warm_start_misconfiguration_path(
+    trainer_factory: AnemoiTrainer,
+    tmp_checkpoint_factory: pytest.TempPathFactory,
+) -> None:
+    """Test to assert misconfiguration is missing path for warm_start."""
+    warm_start = "checkpoint_10.ckpt"
+    run_id = "id-222"
+    _, checkpoints_path = tmp_checkpoint_factory()
+
+    config = build_mock_config(
+        checkpoints_path=checkpoints_path,
+        warm_start=warm_start,
+        run_id=run_id,
+    )
+
+    trainer = trainer_factory(config)
+
+    assert trainer.start_from_checkpoint is True
+    assert trainer.run_id == run_id
+
+    # This should raise because the warm start file is not in the expected location
+    with pytest.raises(
+        AssertionError,
+        match=r"Please configure config.hardware.paths.warm_start correctly, found: None",
+    ):
+        _ = trainer.last_checkpoint
+
+
+def test_restart_warm_start_misconfiguration_filename(
+    trainer_factory: AnemoiTrainer,
+    tmp_checkpoint_factory: pytest.TempPathFactory,
+) -> None:
+    """Test to assert misconfiguration is missing file for warm_start."""
+    run_id = "id-222"
+    warm_start_path = "mock-checkpoints"
+    _, warm_start_path = tmp_checkpoint_factory(
+        rid=run_id,
+        ckpt_path_name=warm_start_path,
+    )
+    _, checkpoints_path = tmp_checkpoint_factory(
+        ckpt_path_name=warm_start_path,
+    )  # path where writing the checkpoints it's different
+
+    config = build_mock_config(
+        checkpoints_path=checkpoints_path,
+        warm_start_path=warm_start_path / Path(run_id),  #
+        run_id=run_id,
+    )
+
+    trainer = trainer_factory(config)
+
+    assert trainer.start_from_checkpoint is True
+    assert trainer.run_id == run_id
+    # This should raise because the warm start file is not in the expected location
+    with pytest.raises(
+        AssertionError,
+        match=r"Please configure config.hardware.files.warm_start correctly, found: None",
+    ):
+        _ = trainer.last_checkpoint
+
+
+def test_warm_start_file_not_found(
+    trainer_factory: AnemoiTrainer,
+    tmp_checkpoint_factory: pytest.TempPathFactory,
+) -> None:
+    """Test to assert file not found for warm_start."""
+    warm_start = "checkpoint_10.ckpt"
+    run_id = "id-222"
+    warm_start_path = "mock-checkpoints"
+    _, warm_start_path = tmp_checkpoint_factory(
+        rid=run_id,
+        ckpt_file_name=warm_start,
+        ckpt_path_name=warm_start_path,
+        skip_creation=True,
+    )
+    _, checkpoints_path = tmp_checkpoint_factory(
+        ckpt_path_name=warm_start_path,
+    )  # path where writing the checkpoints it's different
+
+    config = build_mock_config(
+        checkpoints_path=checkpoints_path,
+        warm_start_path=warm_start_path / Path(run_id),  #
+        warm_start=warm_start,
+        run_id=run_id,
+    )
+
+    trainer = trainer_factory(config)
+
+    assert trainer.start_from_checkpoint is True
+    assert trainer.run_id == run_id
+    with pytest.raises(AssertionError, match=r"Warm start checkpoint not found"):
+        _ = trainer.last_checkpoint
+
+
+def test_restart_run_id_file_not_found(
+    trainer_factory: AnemoiTrainer,
+    tmp_checkpoint_factory: pytest.TempPathFactory,
+) -> None:
+    """Test to assert file not found for resuming."""
+    run_id = "run-id-123"
+    _, checkpoints_path = tmp_checkpoint_factory(rid=run_id, ckpt_path_name="mock_checkpoints", skip_creation=True)
+
+    config = build_mock_config(
+        run_id=run_id,
+        checkpoints_path=checkpoints_path,
+        warm_start_path=None,
+    )
+
+    trainer = trainer_factory(config)
+
+    assert trainer.start_from_checkpoint is True
+    assert trainer.run_id == run_id
+    with pytest.raises(RuntimeError, match=r"Could not find last checkpoint"):
+        _ = trainer.last_checkpoint
