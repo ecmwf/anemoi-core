@@ -194,7 +194,15 @@ class BaseImputer(BasePreprocessor, ABC):
             # training input
 
             # save nan locations for input variables from training input, select first timestep whose nan locations are used for the loss mask and postprocessing
-            self.nan_locations = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+            # if batch size and grid sharding hasn't changed, use the allocated tensor. otherwise, reregister buffer.
+            if (
+                len(self.nan_locations.shape) > 1
+                and self.nan_locations.shape[0] == nan_locations.shape[0]
+                and self.nan_locations.shape[1] == nan_locations.shape[2]
+            ):
+                self.nan_locations[:] = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+            else:
+                self.nan_locations = nan_locations[:, 0, ..., self.data_indices.data.input.full]
 
             # data indices for training input
             index = self.index_training_input
