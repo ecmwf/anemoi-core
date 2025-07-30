@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-    from anemoi.training.train.forecaster import GraphForecaster
+    from anemoi.training.train.tasks.base import BaseGraphModule
 
     if importlib.util.find_spec("ipywidgets") is not None:
         from tqdm.auto import tqdm as _tqdm
@@ -498,7 +498,7 @@ class BenchmarkProfiler(Profiler):
             f.write(model_summary)
             f.close()
 
-    def get_model_summary(self, model: GraphForecaster, example_input_array: np.ndarray) -> str:
+    def get_model_summary(self, model: BaseGraphModule, example_input_array: np.ndarray) -> str:
 
         from torchinfo import summary
 
