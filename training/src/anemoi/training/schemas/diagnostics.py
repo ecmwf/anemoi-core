@@ -246,7 +246,7 @@ class WandbSchema(BaseModel):
     "Username or team name where to send runs. This entity must exist before you can send runs there."
 
     @root_validator(pre=True)
-    def clean_entity(cls: type[WandbSchema], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805,F821
+    def clean_entity(cls: type["WandbSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["entity"] = None
         return values
@@ -285,7 +285,7 @@ class MlflowSchema(BaseModel):
     "Maximum number of hpParams to be logged with mlflow"
 
     @root_validator(pre=True)
-    def clean_entity(cls: type[MlflowSchema], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805,F821
+    def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["tracking_uri"] = None
         return values
