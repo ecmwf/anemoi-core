@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+import io
 import logging
+import pickle
 from pathlib import Path
 
 import torch
@@ -113,3 +115,21 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
         else:
             # Recursively search within children
             freeze_submodule_by_name(child, target_name)
+
+
+class LoggingUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> str:
+        if "anemoi.training" in module:
+            msg = (
+                f"anemoi-training Pydantic schemas found in model's metadata: "
+                f"({module}, {name}) Please review Pydantic schemas to avoid this."
+            )
+            raise ValueError(msg)
+        return super().find_class(module, name)
+
+
+def check_classes(model: torch.nn.Module) -> None:
+    buffer = io.BytesIO()
+    pickle.dump(model, buffer)
+    buffer.seek(0)
+    _ = LoggingUnpickler(buffer).load()
