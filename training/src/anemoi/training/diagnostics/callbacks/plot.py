@@ -432,7 +432,7 @@ class LongRolloutPlots(BasePlotCallback):
             for name in self.parameters
         }
         if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
 
         assert batch.shape[1] >= self.max_rollout + pl_module.multi_step, (
             "Batch length not sufficient for requested validation rollout length! "
@@ -441,12 +441,16 @@ class LongRolloutPlots(BasePlotCallback):
 
         # prepare input tensor for plotting
         # the batch is already preprocessed in-place
-        input_tensor_0 = batch[
-            :,
-            pl_module.multi_step - 1,
-            ...,
-            pl_module.data_indices.data.output.full,
-        ].cpu()
+        input_tensor_0 = (
+            batch[
+                :,
+                pl_module.multi_step - 1,
+                ...,
+                pl_module.data_indices.data.output.full,
+            ]
+            .detach()
+            .cpu()
+        )
         data_0 = self.post_processors(input_tensor_0)[self.sample_idx]
 
         if self.video_rollout:
@@ -519,15 +523,19 @@ class LongRolloutPlots(BasePlotCallback):
     ) -> None:
         """Plot the predicted output, input, true target and error plots for a given rollout step."""
         # prepare true output tensor for plotting
-        input_tensor_rollout_step = input_batch[
-            :,
-            pl_module.multi_step + rollout_step,  # (pl_module.multi_step - 1) + (rollout_step + 1)
-            ...,
-            pl_module.data_indices.data.output.full,
-        ].cpu()
+        input_tensor_rollout_step = (
+            input_batch[
+                :,
+                pl_module.multi_step + rollout_step,  # (pl_module.multi_step - 1) + (rollout_step + 1)
+                ...,
+                pl_module.data_indices.data.output.full,
+            ]
+            .detach()
+            .cpu()
+        )
         data_rollout_step = self.post_processors(input_tensor_rollout_step)[self.sample_idx]
         # predicted output tensor
-        output_tensor = self.post_processors(y_pred.cpu())[self.sample_idx : self.sample_idx + 1]
+        output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
 
         fig = plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
@@ -557,7 +565,7 @@ class LongRolloutPlots(BasePlotCallback):
     ) -> tuple[list, np.ndarray, np.ndarray]:
         """Store the data for each frame of the video."""
         # prepare predicted output tensors for video
-        output_tensor = self.post_processors(y_pred.cpu())[self.sample_idx : self.sample_idx + 1]
+        output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
         data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
         # update min and max values for each variable for the colorbar
         vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=1))
@@ -888,7 +896,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
-            loss = pl_module.loss(y_hat, y_true, squash=False).cpu().numpy()
+            loss = pl_module.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
@@ -977,19 +985,23 @@ class PlotSample(BasePerBatchPlotCallback):
         }
 
         if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
         local_rank = pl_module.local_rank
 
-        input_tensor = batch[
-            :,
-            pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-            ...,
-            pl_module.data_indices.data.output.full,
-        ].cpu()
+        input_tensor = (
+            batch[
+                :,
+                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+                ...,
+                pl_module.data_indices.data.output.full,
+            ]
+            .detach()
+            .cpu()
+        )
         data = self.post_processors(input_tensor)[self.sample_idx]
 
         output_tensor = self.post_processors(
-            torch.cat(tuple(x[:, ...].cpu() for x in outputs[1])),
+            torch.cat(tuple(x[:, ...].detach().cpu() for x in outputs[1])),
             in_place=False,
         )[self.sample_idx : self.sample_idx + 1]
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
@@ -1029,17 +1041,21 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         batch: torch.Tensor,
     ) -> tuple[np.ndarray, np.ndarray]:
         if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
 
-        input_tensor = batch[
-            :,
-            pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-            ...,
-            pl_module.data_indices.data.output.full,
-        ].cpu()
+        input_tensor = (
+            batch[
+                :,
+                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+                ...,
+                pl_module.data_indices.data.output.full,
+            ]
+            .detach()
+            .cpu()
+        )
         data = self.post_processors(input_tensor)[self.sample_idx]
         output_tensor = self.post_processors(
-            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
+            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].detach().cpu() for x in outputs[1])),
             in_place=False,
         )
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
