@@ -872,6 +872,9 @@ class PlotLoss(BasePerBatchPlotCallback):
         rollout = getattr(pl_module, "rollout", 0)
 
         for rollout_step in range(rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+
+        for rollout_step in range(rollout):
             y_hat = outputs[1][rollout_step]
             y_true = batch[
                 :,
