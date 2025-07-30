@@ -167,3 +167,38 @@ def test_restart_warm_start_fork_run_id(
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id != fork_run_id
     assert trainer.last_checkpoint == expected_path
+
+
+def test_restart_warm_start_run_id(
+    trainer_factory: AnemoiTrainer,
+    tmp_checkpoint_factory: pytest.TempPathFactory,
+) -> None:
+    """Test by assuming warm start is linked to run id.
+
+    This resembles the case where we want to resume run
+    using a checkpoint different from last.ckpt.
+    """
+    warm_start = "checkpoint_10.ckpt"
+    run_id = "id-222"
+    warm_start_path = "mock-checkpoints"
+    expected_path, warm_start_path = tmp_checkpoint_factory(
+        rid=run_id,
+        ckpt_file_name=warm_start,
+        ckpt_path_name=warm_start_path,
+    )
+    _, checkpoints_path = tmp_checkpoint_factory(
+        ckpt_path_name=warm_start_path,
+    )  # path where writing the checkpoints it's different
+
+    config = build_mock_config(
+        checkpoints_path=checkpoints_path,
+        warm_start_path=warm_start_path / Path(run_id),  #
+        warm_start=warm_start,
+        run_id=run_id,
+    )
+
+    trainer = trainer_factory(config)
+
+    assert trainer.start_from_checkpoint is True
+    assert trainer.run_id == run_id
+    assert trainer.last_checkpoint == expected_path
