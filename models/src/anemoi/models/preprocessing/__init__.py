@@ -25,8 +25,7 @@ class BasePreprocessor(nn.Module):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        dataset: Optional = None,
     ) -> None:
         """Initialize the preprocessor.
 
@@ -38,8 +37,6 @@ class BasePreprocessor(nn.Module):
             Data indices for input and output variables
         statistics : dict
             Data statistics dictionary
-        data_indices : dict
-            Data indices for input and output variables
 
         Attributes
         ----------
@@ -60,7 +57,7 @@ class BasePreprocessor(nn.Module):
         self.default, self.remap, self.normalizer, self.method_config = self._process_config(config)
         self.methods = self._invert_key_value_list(self.method_config)
 
-        self.data_indices = data_indices
+        self.dataset = dataset
 
     @classmethod
     def _process_config(cls, config):
@@ -141,10 +138,10 @@ class BasePreprocessor(nn.Module):
         return x
 
 
-class Processors(nn.Module):
+class _Processors(nn.Module):
     """A collection of processors."""
 
-    def __init__(self, processors: list, inverse: bool = False) -> None:
+    def __init__(self, processors: list[BasePreprocessor], inverse: bool = False) -> None:
         """Initialize the processors.
 
         Parameters
@@ -197,3 +194,21 @@ class Processors(nn.Module):
             assert not torch.isnan(
                 x
             ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+
+
+class Processors(nn.Module):
+    def __init__(self, processors: dict[str, list[BasePreprocessor]], inverse: bool = False) -> None:
+        super().__init__()
+        self.dic = nn.ModuleDict({k: _Processors(v, inverse) for k, v in processors.items()})
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.dic})"
+
+    def forward(self, x, in_place: bool = True):
+        assert isinstance(x, dict), type(x)
+        if in_place:
+            for k in x.keys():
+                x[k] = self.dic[k].forward(x[k], in_place=in_place)
+            return x
+        else:
+            return {k: self.dic[k].forward(x[k], in_place=in_place) for k in x.keys()}

@@ -29,6 +29,7 @@ from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 
+from anemoi.training.data.refactor.structure import structure_factory
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
@@ -93,7 +94,7 @@ class AnemoiTrainer:
         self._check_dry_run()
 
         # Check for dry run, i.e. run id without data
-        self._log_information()
+        # self._log_information()
 
     @cached_property
     def datamodule(self) -> Any:
@@ -101,20 +102,11 @@ class AnemoiTrainer:
         datamodule = instantiate(
             convert_to_omegaconf(self.config).datamodule,
             convert_to_omegaconf(self.config),
-            self.graph_data,
         )
-        self.config.data.num_features = len(datamodule.ds_train.data.variables)
-        LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
-        LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
+        # self.config.data.num_features = len(datamodule.ds_train.data.variables)
+        # LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
+        # LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
         return datamodule
-
-    @cached_property
-    def data_indices(self) -> dict:
-        """Returns a dictionary of data indices.
-
-        This is used to slice the data.
-        """
-        return self.datamodule.data_indices
 
     @cached_property
     def initial_seed(self) -> int:
@@ -199,15 +191,20 @@ class AnemoiTrainer:
         ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
         "Please use a different activation function."
 
+        sample_info = {
+            "name_to_index": self.datamodule.training_samples.name_to_index,
+            "statistics": self.datamodule.training_samples.statistics,
+            "processors": self.datamodule.training_samples.processors,
+            "extra": self.datamodule.training_samples.extra,
+            "dataspecs": self.datamodule.training_samples.dataspecs,
+        }
+
         kwargs = {
             "config": self.config,
-            "data_indices": self.data_indices,
+            # "data_indices": self.data_indices,
+            "sample_provider": structure_factory(**sample_info),
             "graph_data": self.graph_data,
-            "truncation_data": self.truncation_data,
             "metadata": self.metadata,
-            "statistics": self.datamodule.statistics,
-            "statistics_tendencies": self.datamodule.statistics_tendencies,
-            "supporting_arrays": self.supporting_arrays,
         }
 
         model_task = get_class(self.config.training.model_task)
@@ -320,8 +317,8 @@ class AnemoiTrainer:
                 "config": convert_to_omegaconf(self.config),
                 "seed": self.initial_seed,
                 "run_id": self.run_id,
-                "dataset": self.datamodule.metadata,
-                "data_indices": self.datamodule.data_indices,
+                # "dataset": self.datamodule.metadata,
+                # "data_indices": self.datamodule.data_indices,
                 "provenance_training": gather_provenance_info(),
                 "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
             },
@@ -514,7 +511,7 @@ class AnemoiTrainer:
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path="../config", config_name="debug_downscaling")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

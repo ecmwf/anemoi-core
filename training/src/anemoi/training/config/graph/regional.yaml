@@ -1,26 +1,38 @@
 ---
 overwrite: True
 
-data: "era5"
+data: "regional"
 hidden: "hidden"
 
 nodes:
   # Data nodes
-  era5:
+  regional:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
-      dataset: ${data.data_handlers.era5.dataset}
+      dataset: ${data.data_handlers.regional.dataset}
     attributes: ${graph.attributes.nodes}
+  global:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
+      dataset: ${data.data_handlers.global.dataset}
   # Hidden nodes
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.TriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
       resolution: 5 # grid resolution for npz (o32, o48, ...)
-    attributes: ${graph.attributes.nodes}
 
 edges:
 # Encoder configuration
-- source_name: ${graph.data}
+- source_name: "global"
+  target_name: ${graph.hidden}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 0.6 # only for cutoff method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+# Encoder configuration
+- source_name: "regional"
   target_name: ${graph.hidden}
   edge_builders:
   - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
@@ -40,7 +52,7 @@ edges:
   attributes: ${graph.attributes.edges}
   # Decoder configuration
 - source_name: ${graph.hidden}
-  target_name: ${graph.data}
+  target_name: "regional"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
     num_nearest_neighbours: 3 # only for knn method

@@ -16,7 +16,7 @@ debug:
 # remember to also activate the tensorboard logger (below)
 profiler: False
 
-enable_checkpointing: True
+enable_checkpointing: False
 checkpoint:
   every_n_minutes:
     save_frequency: 30 # Approximate, as this is checked at the end of training steps

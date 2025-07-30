@@ -33,12 +33,16 @@ class BaseGridIndices(ABC):
     def __init__(self, nodes_name: str, reader_group_size: int) -> None:
         self.nodes_name = nodes_name
         self.reader_group_size = reader_group_size
+        self.grid_size = None
 
     def setup(self, graph: HeteroData) -> None:
         self.grid_size = self.compute_grid_size(graph)
 
     def split_seq_in_shards(self, reader_group_rank: int) -> slice:
         """Get the grid shard slice according to the reader rank."""
+        if self.grid_size is None:
+            return slice(0, None)
+
         assert (
             0 <= reader_group_rank < self.reader_group_size
         ), f"Invalid reader group rank {reader_group_rank}, expected in [0, {self.reader_group_size})"

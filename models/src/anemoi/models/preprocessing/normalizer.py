@@ -15,7 +15,6 @@ from typing import Optional
 import numpy as np
 import torch
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
 
 LOGGER = logging.getLogger(__name__)
@@ -27,8 +26,9 @@ class InputNormalizer(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        name_to_index=None,
+        statistics=None,
+        dataset: Optional = None,
     ) -> None:
         """Initialize the normalizer.
 
@@ -41,9 +41,7 @@ class InputNormalizer(BasePreprocessor):
         statistics : dict
             Data statistics dictionary
         """
-        super().__init__(config, data_indices, statistics)
-
-        name_to_index_training_input = self.data_indices.data.input.name_to_index
+        super().__init__(config, dataset)
 
         minimum = statistics["minimum"]
         maximum = statistics["maximum"]
@@ -53,19 +51,19 @@ class InputNormalizer(BasePreprocessor):
         # Optionally reuse statistic of one variable for another variable
         statistics_remap = {}
         for remap, source in self.remap.items():
-            idx_src, idx_remap = name_to_index_training_input[source], name_to_index_training_input[remap]
+            idx_src, idx_remap = name_to_index[source], name_to_index[remap]
             statistics_remap[idx_remap] = (minimum[idx_src], maximum[idx_src], mean[idx_src], stdev[idx_src])
 
         # Two-step to avoid overwriting the original statistics in the loop (this reduces dependence on order)
         for idx, new_stats in statistics_remap.items():
             minimum[idx], maximum[idx], mean[idx], stdev[idx] = new_stats
 
-        self._validate_normalization_inputs(name_to_index_training_input, minimum, maximum, mean, stdev)
+        self._validate_normalization_inputs(name_to_index, minimum, maximum, mean, stdev)
 
         _norm_add = np.zeros((minimum.size,), dtype=np.float32)
         _norm_mul = np.ones((minimum.size,), dtype=np.float32)
 
-        for name, i in name_to_index_training_input.items():
+        for name, i in name_to_index.items():
             method = self.methods.get(name, self.default)
 
             if method == "mean-std":
@@ -103,8 +101,8 @@ class InputNormalizer(BasePreprocessor):
         # register buffer - this will ensure they get copied to the correct device(s)
         self.register_buffer("_norm_mul", torch.from_numpy(_norm_mul), persistent=True)
         self.register_buffer("_norm_add", torch.from_numpy(_norm_add), persistent=True)
-        self.register_buffer("_input_idx", data_indices.data.input.full, persistent=True)
-        self.register_buffer("_output_idx", self.data_indices.data.output.full, persistent=True)
+        # self.register_buffer("_input_idx", data_indices.data.full, persistent=True)
+        # self.register_buffer("_output_idx", self.data_indices.data.output.full, persistent=True)
 
     def _validate_normalization_inputs(self, name_to_index_training_input: dict, minimum, maximum, mean, stdev):
         assert len(self.methods) == sum(len(v) for v in self.method_config.values()), (
@@ -121,7 +119,7 @@ class InputNormalizer(BasePreprocessor):
         # Check for typos in method config
         assert isinstance(self.methods, dict)
         for name, method in self.methods.items():
-            assert name in name_to_index_training_input, f"{name} is not a valid variable name"
+            # assert name in name_to_index_training_input, f"{name} is not a valid variable name"
             assert method in [
                 "mean-std",
                 "std",
@@ -158,10 +156,9 @@ class InputNormalizer(BasePreprocessor):
         if not in_place:
             x = x.clone()
 
+        assert x.ndim == 5, "x should be (batch, time, n_vars, ens, latlons)"
         if data_index is not None:
             x.mul_(self._norm_mul[data_index]).add_(self._norm_add[data_index])
-        elif x.shape[-1] == len(self._input_idx):
-            x.mul_(self._norm_mul[self._input_idx]).add_(self._norm_add[self._input_idx])
         else:
             x.mul_(self._norm_mul).add_(self._norm_add)
 
@@ -199,8 +196,6 @@ class InputNormalizer(BasePreprocessor):
         # hence, we mask out the forcing indices
         if data_index is not None:
             x.subtract_(self._norm_add[data_index]).div_(self._norm_mul[data_index])
-        elif x.shape[-1] == len(self._output_idx):
-            x.subtract_(self._norm_add[self._output_idx]).div_(self._norm_mul[self._output_idx])
         else:
             x.subtract_(self._norm_add).div_(self._norm_mul)
         return x

@@ -199,7 +199,7 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     trainer_callbacks.extend(
         (
             ParentUUIDCallback(config),
-            CheckVariableOrder(),
+            # CheckVariableOrder(), TODO: Bring back
         ),
     )
 

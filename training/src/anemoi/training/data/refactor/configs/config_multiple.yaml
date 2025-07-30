@@ -1,0 +1,53 @@
+sample:
+  dictionary:
+    input:
+      dictionary:
+        era5:
+          tensor:
+            - variables:
+              - cos_latitude
+              - sin_latitude
+              - cos_longitude
+              - sin_longitude
+              - 10u
+              - 2t
+              - 2d
+              - q_100
+              - q_1000
+              data: era5
+            - offset: ["-6h", "0h"]
+        cerra:
+          tensor:
+            - variables:
+              - cos_latitude
+              - sin_latitude
+              - cos_longitude
+              - sin_longitude
+              data: cerra
+            - offset: ["-6h", "0h"]
+    target:
+      dictionary:
+        cerra:
+          tensor:
+            - variables:
+              - tp
+              - t_100
+              data: cerra
+            - offset: ["6h"]
+
+data:
+  era5:
+    dataset:
+      dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+      set_group: era5
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: mean-std
+          std:
+            - tp
+  cerra:
+    dataset:
+      dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
+      set_group: cerra

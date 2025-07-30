@@ -50,27 +50,14 @@ grid_indices:
 # See https://anemoi-datasets.readthedocs.io
 # ============
 
-dataset: ${hardware.paths.data}/${hardware.files.dataset}
-
-training:
-  dataset: ${dataloader.dataset}
-  start: null
-  end: 2020
-  frequency: ${data.frequency}
-  drop:  []
+sampler:
+  training:
+    start: 2015
+    end: 2018
+    frequency: 6h
+  validation:
+    start: 2019
+    end: 2020
+    frequency: 6h
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
-
-validation:
-  dataset: ${dataloader.dataset}
-  start: 2021
-  end: 2021
-  frequency: ${data.frequency}
-  drop:  []
-
-test:
-  dataset: ${dataloader.dataset}
-  start: 2022
-  end: null
-  frequency: ${data.frequency}
-  drop:  []
