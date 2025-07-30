@@ -56,5 +56,11 @@ def recent_ckpt() -> CkptType:
         "foo": "foo",
         "bar": "bar",
         "test": "baz",
-        "migrations": [{"name": "1751895180_final", "rollback": final_rollback}],
+        "migrations": [
+            {
+                "name": "1751895180_final",
+                "rollback": final_rollback,
+                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"}},
+            }
+        ],
     }

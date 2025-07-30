@@ -18,6 +18,8 @@ from collections.abc import MutableMapping
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from enum import Enum
+from enum import auto
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
@@ -59,6 +61,12 @@ class MigrationMetadata:
     final: bool = False
 
 
+class SerializedMigration(TypedDict):
+    name: str
+    rollback: Callable[[CkptType], CkptType] | None
+    metadata: MigrationMetadata
+
+
 class _SerializedRollback:
     """Use cloudpickle to serialize the rollback function by value and not reference.
     When doing rollbacks, migration files might not exist anymore, and we need to
@@ -92,30 +100,22 @@ class Migration:
     metadata: MigrationMetadata
     """Tracked metadata"""
 
-    def serialize(self) -> dict[str, Any]:
+    @classmethod
+    def from_serialized(cls, migration: SerializedMigration) -> Migration:
+        return Migration(migration["name"], None, migration["rollback"], migration["metadata"])
+
+    def serialize(self) -> SerializedMigration:
         serialized_rollback = None
         if self.rollback is not None:
             cloudpickle.register_pickle_by_value(sys.modules[self.rollback.__module__])
             rollback_bytes = cloudpickle.dumps(self.rollback)
             serialized_rollback = _SerializedRollback(rollback_bytes)
-        return {"name": self.name, "rollback": serialized_rollback}
+        return {"name": self.name, "rollback": serialized_rollback, "metadata": self.metadata}
 
 
-def registered_migrations(ckpt: CkptType) -> list[dict[str, Any]]:
-    """Return all registered migrations from a checkpoint.
-    Parameters
-    ----------
-    ckpt : CkptType
-        The checkpoint
-
-    Returns
-    -------
-    list[dict[str, Any]]
-        The registered migrations
-    """
-    if _ckpt_migration_key not in ckpt:
-        return []
-    return ckpt[_ckpt_migration_key]
+class OpType(Enum):
+    migration = auto()
+    rollback = auto()
 
 
 def _migrations_from_path(location: str | PathLike, package: str) -> list[Migration]:
@@ -231,43 +231,38 @@ class Migrator:
             return True
         return False
 
-    def _get_missing_migrations(self, ckpt: CkptType, migrations: list[Migration]) -> list[Migration]:
-        """Get missing migrations from a checkpoint
-
-        Parameters
-        ----------
-        ckpt : CkptType
-            The loaded checkpoint
-        migrations : Sequence[Migration]
-            List of migration to execute
-
-        Returns
-        -------
-        list[Migration]
-                Missing migrations from the checkpoint to execute
-        """
-        if _ckpt_migration_key not in ckpt:
-            raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
-        done_migrations = [mig["name"] for mig in ckpt[_ckpt_migration_key]]
-        # Migration should be done in order, we look for the the last done migration and
-        # execute the rest. This is to allow havind removed migrations in a checkpoint and
-        # not complain.
-        key_rest_migration = 0
-        num_migrations = len(migrations)
-        for k, mig in enumerate(reversed(migrations)):
-            if mig.name in done_migrations:
-                key_rest_migration = num_migrations - k
+    def _resolve_ops(self, ckpt: CkptType, migrations: list[Migration]) -> list[tuple[OpType, Migration]]:
+        ckpt_migrations = self.registered_migrations(ckpt)
+        ops: list[tuple[OpType, Migration]] = []
+        n_ckpt_migrations = len(ckpt_migrations)
+        for k, ckpt_migration in enumerate(reversed(ckpt_migrations), 1):
+            if (
+                len(migrations) > n_ckpt_migrations - k
+                and migrations[n_ckpt_migrations - k].name == ckpt_migration.name
+            ):
                 break
 
-        if self._raise_missing_migrations:
-            for migration in migrations[:key_rest_migration]:
-                if migration.name not in done_migrations:
-                    raise MissingMigrationException(
-                        f"{migration.name} is not part of the checkpoint but cannot be executed (out of order)."
-                    )
-        return migrations[key_rest_migration:]
+            if ckpt_migration.rollback is None:
+                raise IncompatibleCheckpointException(
+                    f"{ckpt_migration.name} cannot bo rollbacked. Missing rollback function."
+                )
+            ops.append((OpType.rollback, ckpt_migration))
 
-    def sync(self, ckpt: CkptType, steps: int | None = None) -> tuple[CkptType, list[str], list[str]]:
+        num_rollbacks = len(ops)
+        for k, migration in enumerate(migrations):
+            if (
+                len(ckpt_migrations[: len(ckpt_migrations) - num_rollbacks]) > k
+                and migration.name == ckpt_migrations[k].name
+            ):
+                continue
+            if migration.migrate is None:
+                raise IncompatibleCheckpointException(
+                    f"Migration {migration.name} cannot be executed. Missing migrate function."
+                )
+            ops.append((OpType.migration, migration))
+        return ops
+
+    def sync(self, ckpt: CkptType, steps: int | None = None) -> tuple[CkptType, list[tuple[OpType, Migration]]]:
         """Migrate or rollbacks the checkpoint using provided migrations
 
         Parameters
@@ -275,104 +270,36 @@ class Migrator:
         ckpt : CkptType
             The checkpoint to migrate.
         steps : int | None, default None
-            Number of relative migration step to execute. If negative, will rollback the provided number of steps.
-            Mutually exclusive with steps and target. Defaults to migrate all missing migrations.
+            Number of steps to execute. Cannot be negative.
 
         Returns
         -------
-        tuple[CkptType, list[str], list[str]]
+        tuple[CkptType, list[tuple[OpType, Migration]]]
             * The migrated checkpoint
-            * The list of migrations that were applied to the checkpoint
-            * The list of rollbacks that were applied
+            * The list of migrations or rollbacks
         """
         ckpt = deepcopy(ckpt)
 
         if not self.is_compatible_ckpt(ckpt):
             raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
         compatible_migrations = self._grouped_migrations[-1]
-
-        if len(compatible_migrations) < len(ckpt[_ckpt_migration_key]):
-            # We should rollback, set a negative steps
-            steps = len(compatible_migrations) - len(ckpt[_ckpt_migration_key])
-
-        if steps is not None and steps <= 0:
-            ckpt, rollbacks = self._rollback(ckpt, -steps)
-            return ckpt, [], rollbacks
-        ckpt, missing_migrations = self._migrate(ckpt, compatible_migrations, steps)
-        return ckpt, missing_migrations, []
-
-    def _migrate(
-        self,
-        ckpt: CkptType,
-        compatible_migrations: list[Migration],
-        steps: int | None = None,
-    ) -> tuple[CkptType, list[str]]:
-        """Rollbacks the checkpoint using provided migrations
-
-        Parameters
-        ----------
-        ckpt : CkptType
-            The checkpoint to migrate.
-        steps : int | None, default None
-            Number of migration step to execute. Defaults to all missing migrations.
-        Returns
-        -------
-        tuple[CkptType, list[str]]
-            * The migrated checkpoint
-            * The list of migrations that were applied to the checkpoint
-        """
+        ops = self._resolve_ops(ckpt, compatible_migrations)
         if steps is not None and steps < 0:
-            raise ValueError("Cannot migrate negative number of steps. Use sync instead")
-
-        assert _ckpt_migration_key in ckpt
-        missing_migrations = self._get_missing_migrations(ckpt, compatible_migrations)
+            raise ValueError("steps should be positive.")
         if steps is not None:
-            if steps > len(missing_migrations):
-                raise IncompatibleCheckpointException(
-                    f"Checkpoint cannot be migrated {steps} steps. (Max: {len(missing_migrations)})."
-                )
-            missing_migrations = missing_migrations[:steps]
-        migrated: list[str] = []
-        for migration in missing_migrations:
-            if migration.migrate is None:
-                raise IncompatibleCheckpointException(
-                    f"Migration {migration.name} cannot be executed. Missing migrate function."
-                )
-            ckpt = migration.migrate(ckpt)
-            ckpt[_ckpt_migration_key].append(migration.serialize())
-            migrated.append(migration.name)
-        return ckpt, migrated
+            ops = ops[:steps]
+        for op_type, callback in ops:
+            if op_type is OpType.rollback:
+                assert callback.rollback is not None
+                ckpt = callback.rollback(ckpt)
+                ckpt[_ckpt_migration_key].pop()
+            else:
+                assert callback.migrate is not None
+                ckpt = callback.migrate(ckpt)
+                ckpt[_ckpt_migration_key].append(callback.serialize())
+        return ckpt, ops
 
-    def _rollback(self, ckpt: CkptType, steps: int) -> tuple[CkptType, list[str]]:
-        """Rollbacks the checkpoint using provided migrations
-
-        Parameters
-        ----------
-        ckpt : CkptType
-            The checkpoint to rollback.
-        steps : int
-            Number of rollback steps to execute.
-
-        Returns
-        -------
-        Tuple[CkptType, Sequence[Migration], List[str]]
-            * The migrated checkpoint
-            * The list of rollbacks that were applied
-        """
-        if steps is not None and steps < 0:
-            raise ValueError("Cannot rollback negative number of steps. Use sync instead")
-
-        assert _ckpt_migration_key in ckpt
-        rollbacks: list[str] = []
-        for _ in range(steps):
-            migration = ckpt[_ckpt_migration_key].pop()
-            rollbacks = [migration["name"]] + rollbacks
-            if migration["rollback"] is None:
-                raise IncompatibleCheckpointException(f"{migration['name']} cannot bo rollbacked.")
-            ckpt = migration["rollback"](ckpt)
-        return ckpt, rollbacks
-
-    def inspect(self, ckpt: CkptType) -> tuple[list[Migration], list[Migration], list[str]]:
+    def inspect(self, ckpt: CkptType) -> tuple[list[Migration], list[Migration], list[Migration]]:
         """Inspect migration information in checkpoint
 
         Parameters
@@ -382,7 +309,7 @@ class Migrator:
 
         Returns
         -------
-        tuple[list[Migration], list[Migration], list[str]]
+        tuple[list[Migration], list[Migration], list[Migration]]
             * The list of already executed migrations
             * The list of missing migrations
             * The list of extra migrations in the checkpoint (to rollback)
@@ -391,22 +318,18 @@ class Migrator:
             raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
         compatible_migrations = self._grouped_migrations[-1]
         registered_migrations = self.registered_migrations(ckpt)
-        common_migrations: list[Migration] = []
-        extra_migrations: list[str] = []
+        ops = self._resolve_ops(ckpt, compatible_migrations)
         missing_migrations: list[Migration] = []
-        k = 0
-        for migration in compatible_migrations:
-            if migration.name in registered_migrations:
-                common_migrations.append(migration)
+        extra_migrations: list[Migration] = []
+        for op_type, op in ops:
+            if op_type is OpType.rollback:
+                extra_migrations.append(op)
+                registered_migrations.pop()
             else:
-                missing_migrations.append(migration)
-            k += 1
-        if len(registered_migrations) > k:
-            for migration in registered_migrations[k:]:
-                extra_migrations.append(migration)
-        return common_migrations, missing_migrations, extra_migrations
+                missing_migrations.append(op)
+        return registered_migrations, missing_migrations, extra_migrations
 
-    def registered_migrations(self, ckpt: CkptType) -> list[str]:
+    def registered_migrations(self, ckpt: CkptType) -> list[Migration]:
         """Registered migrations in a ckpt
 
         Parameters
@@ -421,7 +344,7 @@ class Migrator:
         """
         if _ckpt_migration_key not in ckpt:
             return []
-        return [migration["name"] for migration in ckpt[_ckpt_migration_key]]
+        return [Migration.from_serialized(migration) for migration in ckpt[_ckpt_migration_key]]
 
     def register_migrations(self, ckpt: CkptType) -> CkptType:
         """Registers a list of migration to the checkpoint.
@@ -445,4 +368,15 @@ class Migrator:
         return ckpt
 
 
-__all__ = ["MIGRATION_PATH", "CkptType", "Migration", "Migrator", "registered_migrations"]
+__all__ = [
+    "CkptType",
+    "IncompatibleCheckpointException",
+    "Migration",
+    "Migrator",
+    "MigrationMetadata",
+    "MigrationVersions",
+    "MIGRATION_PATH",
+    "MissingMigrationException",
+    "OpType",
+    "SerializedMigration",
+]

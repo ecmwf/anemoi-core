@@ -37,6 +37,16 @@ of anemoi-models. If your checkpoint is too old and migrating is not supported, 
 Your old checkpoint is still available with the name ``OLD_NAME-v{version}.ckpt``.
 
 
+********
+ Dry-run
+********
+
+You can check which migration will be executed with a dry-run, without updating your checkpoint:
+
+.. code:: bash
+
+   anemoi-models migration sync --dry-run PATH_TO_CKPT
+
 ********************************
  Migrating to a specific version
 ********************************
@@ -54,10 +64,10 @@ older version.
 *******************
  Manually migrating
 *******************
-You can decide to manually migrate a certain number of steps with
+You can decide to manually execute a certain number of steps with
 
 .. code:: bash
 
    anemoi-models migration sync PATH_TO_CKPT --steps STEPS
 
-``STEPS`` can be both positive (migrating) or negative (rollback).
+``STEPS`` must be positive.

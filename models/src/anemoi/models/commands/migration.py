@@ -20,7 +20,7 @@ from .. import __version__ as version_anemoi_models
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
 from ..migrations import Migrator
-from ..migrations import registered_migrations
+from ..migrations import OpType
 from . import Command
 
 LOGGER = logging.getLogger(__name__)
@@ -74,10 +74,13 @@ class Migration(Command):
             "--steps",
             default=None,
             type=int,
-            help=(
-                "Relative number of steps to execute. Positive migrates, negative rollbacks. "
-                "Defaults to execute all migrations."
-            ),
+            help="Number of steps to execute. Defaults to execute all migrations. Cannot be negative.",
+        )
+        sync_parser.add_argument(
+            "--dry-run",
+            default=False,
+            action="store_true",
+            help="Perform a dry-run, without saving the updated checkpoint.",
         )
         sync_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
@@ -194,24 +197,32 @@ class Migration(Command):
         import torch
 
         ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-        console = Console(force_terminal=not args.no_color)
+        console = Console(force_terminal=not args.no_color, highlight=False)
+        migrator = Migrator()
         try:
-            new_ckpt, done_migrations, done_rollbacks = Migrator().sync(ckpt, steps=args.steps)
-            if len(done_migrations) or len(done_rollbacks):
-                version = len(registered_migrations(ckpt))
+            new_ckpt, done_ops = migrator.sync(ckpt, steps=args.steps)
+            if len(done_ops) and not args.dry_run:
+                registerd_migrations = migrator.registered_migrations(ckpt)
+                version = registerd_migrations[-1].metadata.versions["anemoi-models"] + f"-{len(registerd_migrations)}"
                 ckpt_path = Path(args.ckpt)
                 new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
                 torch.save(ckpt, new_path)
                 print("Saved backed-up checkpoint here:", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
-            if len(done_migrations):
-                print(f"Executed {len(done_migrations)} migration(s):")
-            for migration in done_migrations:
-                console.print(f"[green]+ [bold]{migration}[/bold][/green]")
-            if len(done_rollbacks):
-                print(f"Executed {len(done_rollbacks)} rollback(s):")
-            for migration in done_rollbacks:
-                console.print(f"[red]- [bold]{migration}[/red]")
+                print("Executed ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
+            if len(done_ops) and args.dry_run:
+                print("Would execute ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
+            if not len(done_ops):
+                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
+            for op_type, migration in done_ops:
+                if op_type is OpType.rollback:
+                    console.print(
+                        f"  [red]+ ROLLBACK [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/red]"
+                    )
+                else:
+                    console.print(
+                        f"  [green]+ MIGRATE [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
+                    )
         except IncompatibleCheckpointException as e:
             LOGGER.error(str(e))
 
@@ -242,12 +253,22 @@ class Migration(Command):
                     ":",
                     sep="",
                 )
+                console.print("  [italic]These migrations are already executed and part of the checkpoint[/italic]")
             for migration in executed_migrations:
                 console.print(
                     f"  [cyan]* [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/cyan]"
                 )
-            if len(executed_migrations):
-                console.print("  [italic]These migrations are already executed and part of the checkpoint[/italic]")
+            if len(extra_migrations):
+                print(
+                    len(extra_migrations),
+                    "extra",
+                    maybe_plural(len(extra_migrations), "migration"),
+                    "to rollback:",
+                )
+            for migration in extra_migrations:
+                console.print(
+                    f"  [red]+ [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/red]"
+                )
             if len(missing_migrations):
                 print(
                     len(missing_migrations),
@@ -256,25 +277,15 @@ class Migration(Command):
                     ":",
                     sep="",
                 )
-            else:
-                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
             for migration in missing_migrations:
                 console.print(
                     f"  [green]+ [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
                 )
-            if len(extra_migrations):
-                print(
-                    len(executed_migrations),
-                    "extra",
-                    maybe_plural(len(executed_migrations), "migration"),
-                    "to rollback:",
-                )
-                print("Extra migrations to rollback:")
-            for migration in extra_migrations:
-                console.print(f"  [red]- [bold]{migration}[/red]")
             if len(missing_migrations) or len(extra_migrations):
-                console.print("[italic]To update your checkpoint, run:[/italic]")
-                console.print(f"[italic]anemoi-models migration sync {args.ckpt}[/italic]")
+                console.print("\n[italic]To update your checkpoint, run:[/italic]")
+                console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
+            else:
+                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
         except IncompatibleCheckpointException:
             print("No compatible migration available: the checkpoint is too old.")
 
