@@ -42,3 +42,19 @@ model:
 
 training:
   max_epochs: 2
+
+data:
+  processors:
+    normalizer:
+      _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+      config: ${data.normalizer}
+    const_imputer:
+      _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+      _convert_: all
+      config: ${data.const_imputer}
+  normalizer:
+    default: "mean-std"
+  const_imputer:
+    default: "none"
+    0:
+      - 2t
