@@ -18,3 +18,14 @@ anemoi-models include unit tests that can be executed locally using
 pytest. For more information on testing, please refer to the
 :ref:`general Anemoi testing guidelines
 <anemoi-docs:testing-guidelines>`.
+
+*******************************
+ Provide checkpoint Migrations
+*******************************
+
+If your changes break existing checkpoints, you must provide a
+checkpoint migration that will migrate old checkpoint so that they are
+still usable with the newer version.
+
+See :ref:`create checkpoint migrations <create-migrations>` for
+information.

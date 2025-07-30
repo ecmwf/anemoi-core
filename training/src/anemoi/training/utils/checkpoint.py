@@ -11,10 +11,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
+from pytorch_lightning import Callback
+from pytorch_lightning import LightningModule
+from pytorch_lightning import Trainer
 
+from anemoi.models.migrations import Migrator
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
 
@@ -71,7 +76,6 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
-
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
 
@@ -113,3 +117,18 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
         else:
             # Recursively search within children
             freeze_submodule_by_name(child, target_name)
+
+
+class RegisterMigrations(Callback):
+    """Callback that register all existing migrations to a checkpoint before storing it."""
+
+    def __init__(self):
+        self.migrator = Migrator()
+
+    def on_save_checkpoint(
+        self,
+        trainer: Trainer,  # noqa: ARG002
+        pl_module: LightningModule,  # noqa: ARG002
+        checkpoint: dict[str, Any],
+    ) -> None:
+        self.migrator.register_migrations(checkpoint)
