@@ -7,6 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
+
+from typing import Union
 
 from torch import Size
 from torch import Tensor
@@ -37,7 +40,7 @@ class ConditionalLayerNorm(nn.Module):
 
     def __init__(
         self,
-        normalized_shape: int | list | Size,
+        normalized_shape: Union[int, list, Size],
         condition_shape: int = 16,
         w_one_bias_zero_init: bool = True,
         autocast: bool = True,
@@ -59,7 +62,7 @@ class ConditionalLayerNorm(nn.Module):
 
         Parameters
         ----------
-        input : list[Tensor, Tensor]
+        input : List[Tensor, Tensor]
             A list of two tensors (x, cond),
             the first is the input tensor and
             the second is the condition tensor.

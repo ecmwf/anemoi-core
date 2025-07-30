@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Optional
+
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -16,7 +18,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.utils import get_memory_format
 
 
-def _headsalltoall(input_: Tensor, shapes: list, group: ProcessGroup | None = None) -> Tensor:
+def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the head dimension.
 
     Split input along dimension dim_split and join after all_to_all along dimesion
@@ -56,7 +58,7 @@ def _headsalltoall(input_: Tensor, shapes: list, group: ProcessGroup | None = No
     return torch.cat(output_list, dim=-2).contiguous(memory_format=input_format)
 
 
-def _seqalltoall(input_: Tensor, shapes: list, group: ProcessGroup | None = None) -> Tensor:
+def _seqalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the sequence dimension.
 
     Split input along dimension dim_split and join after all_to_all along dimesion

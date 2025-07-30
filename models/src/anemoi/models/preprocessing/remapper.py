@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Optional
 
 import torch
 
@@ -40,8 +41,8 @@ class Remapper(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: IndexCollection | None = None,
-        statistics: dict | None = None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
         self._create_remapping_indices(statistics)

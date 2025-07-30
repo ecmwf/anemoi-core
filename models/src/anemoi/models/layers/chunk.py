@@ -11,6 +11,7 @@
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import Optional
 
 from torch import Tensor
 from torch import nn
@@ -62,7 +63,7 @@ class BaseProcessorChunk(nn.Module, ABC):
         x: Tensor,
         shapes: list,
         batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> Tensor: ...
 
@@ -81,8 +82,8 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
-        softcap: float | None = None,
-        use_alibi_slopes: bool | None = None,
+        softcap: float = None,
+        use_alibi_slopes: bool = None,
     ) -> None:
         """Initialize TransformerProcessor.
 
@@ -134,7 +135,7 @@ class TransformerProcessorChunk(BaseProcessorChunk):
         x: Tensor,
         shapes: list,
         batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> Tensor:
         for i in range(self.num_layers):
@@ -152,7 +153,7 @@ class GNNProcessorChunk(BaseProcessorChunk):
         num_layers: int,
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
-        edge_dim: int | None = None,
+        edge_dim: Optional[int] = None,
     ) -> None:
         """Initialize GNNProcessorChunk.
 
@@ -199,8 +200,8 @@ class GNNProcessorChunk(BaseProcessorChunk):
         edge_attr: Tensor,
         edge_index: Adj,
         shapes: tuple,
-        model_comm_group: ProcessGroup | None = None,
-        size: Size | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        size: Optional[Size] = None,
         **kwargs,
     ) -> OptPairTensor:
         x_out = x * 1.0  # required for pytorch >= 2.1
@@ -226,7 +227,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         num_heads: int = 16,
         mlp_hidden_ratio: int = 4,
         qk_norm: bool = False,
-        edge_dim: int | None = None,
+        edge_dim: Optional[int] = None,
     ) -> None:
         """Initialize GraphTransformerProcessorChunk.
 
@@ -269,8 +270,8 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         edge_index: Adj,
         shapes: tuple,
         batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
-        size: Size | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        size: Optional[Size] = None,
         **kwargs,
     ) -> OptPairTensor:
         for i in range(self.num_layers):

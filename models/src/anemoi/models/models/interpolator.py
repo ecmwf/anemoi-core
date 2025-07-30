@@ -8,6 +8,7 @@
 #
 
 import logging
+from typing import Optional
 
 import einops
 import torch
@@ -126,8 +127,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         x: Tensor,
         *,
         target_forcing: torch.Tensor,
-        model_comm_group: ProcessGroup | None = None,
-        grid_shard_shapes: list | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> Tensor:
         batch_size = x.shape[0]

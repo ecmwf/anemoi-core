@@ -7,9 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from typing import Optional
 
 import torch
 from torch import nn
@@ -30,8 +32,8 @@ class BaseBounding(nn.Module, ABC):
         *,
         variables: list[str],
         name_to_index: dict,
-        statistics: dict | None = None,
-        name_to_index_stats: dict | None = None,
+        statistics: Optional[dict] = None,
+        name_to_index_stats: Optional[dict] = None,
     ) -> None:
         """Initializes the bounding strategy.
         Parameters
@@ -220,8 +222,8 @@ class HardtanhBounding(BaseBounding):
         name_to_index: dict,
         min_val: float,
         max_val: float,
-        statistics: dict | None = None,
-        name_to_index_stats: dict | None = None,
+        statistics: Optional[dict] = None,
+        name_to_index_stats: Optional[dict] = None,
     ) -> None:
         super().__init__(variables=variables, name_to_index=name_to_index)
         self.min_val = min_val
@@ -272,8 +274,8 @@ class FractionBounding(BaseBounding):
         min_val: float,
         max_val: float,
         total_var: str,
-        statistics: dict | None = None,
-        name_to_index_stats: dict | None = None,
+        statistics: Optional[dict] = None,
+        name_to_index_stats: Optional[dict] = None,
     ) -> None:
         super().__init__(variables=variables, name_to_index=name_to_index)
         self.min_val = min_val

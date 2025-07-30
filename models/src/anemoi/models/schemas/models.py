@@ -7,17 +7,18 @@
 # nor does it submit to any jurisdiction.
 #
 
+from __future__ import annotations
 
 import logging
 from enum import Enum
 from typing import Annotated
 from typing import Literal
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import model_validator
-from typing_extensions import Self
 
 from anemoi.utils.schemas import BaseModel
 
@@ -113,7 +114,7 @@ class NormalizedReluBoundingSchema(BaseModel):
     normalizer: list[str]
 
     @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(self) -> Self:
+    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBoundingSchema:
         error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
         match the number of variables ({len(self.variables)})"""
         assert len(self.normalizer) == len(self.variables), error_msg
@@ -129,14 +130,16 @@ class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
 
 
 Bounding = Annotated[
-    ReluBoundingSchema
-    | LeakyReluBoundingSchema
-    | FractionBoundingSchema
-    | LeakyFractionBoundingSchema
-    | HardtanhBoundingSchema
-    | LeakyHardtanhBoundingSchema
-    | NormalizedReluBoundingSchema
-    | NormalizedLeakyReluBoundingSchema,
+    Union[
+        ReluBoundingSchema,
+        LeakyReluBoundingSchema,
+        FractionBoundingSchema,
+        LeakyFractionBoundingSchema,
+        HardtanhBoundingSchema,
+        LeakyHardtanhBoundingSchema,
+        NormalizedReluBoundingSchema,
+        NormalizedLeakyReluBoundingSchema,
+    ],
     Field(discriminator="target_"),
 ]
 
@@ -151,7 +154,7 @@ class Boolean1DSchema(BaseModel):
     attribute_name: str = Field(example="cutout_mask")
 
 
-OutputMaskSchemas = NoOutputMaskSchema | Boolean1DSchema
+OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
 class BaseModelSchema(PydanticBaseModel):
@@ -169,19 +172,19 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
-    grid_skip: int | None = 0  # !TODO set default to -1 if added to standard forecaster.
+    grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
     "Index of grid residual connection, or use none. Currently only in interpolator."
-    processor: GNNProcessorSchema | GraphTransformerProcessorSchema | TransformerProcessorSchema = Field(
+    processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
         ...,
         discriminator="target_",
     )
     "GNN processor schema."
-    encoder: GNNEncoderSchema | GraphTransformerEncoderSchema | TransformerEncoderSchema = Field(
+    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema] = Field(
         ...,
         discriminator="target_",
     )
     "GNN encoder schema."
-    decoder: GNNDecoderSchema | GraphTransformerDecoderSchema | TransformerDecoderSchema = Field(
+    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema, TransformerDecoderSchema] = Field(
         ...,
         discriminator="target_",
     )
@@ -199,7 +202,7 @@ class NoiseInjectorSchema(BaseModel):
     "Hidden dimension of the MLP used to process the noise."
     inject_noise: bool = Field(default=True)
     "Whether to inject noise or not."
-    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
@@ -215,4 +218,4 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Number of message passing steps at each level"
 
 
-ModelSchema = BaseModelSchema | EnsModelSchema | HierarchicalModelSchema
+ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema]

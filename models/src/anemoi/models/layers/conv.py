@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.nn.functional import dropout
@@ -58,19 +60,19 @@ class GraphConv(MessagePassing):
             n_extra_layers=mlp_extra_layers,
         )
 
-    def forward(self, x: OptPairTensor, edge_attr: Tensor, edge_index: Adj, size: Size | None = None):
+    def forward(self, x: OptPairTensor, edge_attr: Tensor, edge_index: Adj, size: Optional[Size] = None):
         dim_size = x.shape[0] if isinstance(x, Tensor) else x[1].shape[0]
 
         out, edges_new = self.propagate(edge_index, x=x, edge_attr=edge_attr, size=size, dim_size=dim_size)
 
         return out, edges_new
 
-    def message(self, x_i: Tensor, x_j: Tensor, edge_attr: Tensor, dim_size: int | None = None) -> Tensor:
+    def message(self, x_i: Tensor, x_j: Tensor, edge_attr: Tensor, dim_size: Optional[int] = None) -> Tensor:
         edges_new = self.edge_mlp(torch.cat([x_i, x_j, edge_attr], dim=1)) + edge_attr
 
         return edges_new
 
-    def aggregate(self, edges_new: Tensor, edge_index: Adj, dim_size: int | None = None) -> tuple[Tensor, Tensor]:
+    def aggregate(self, edges_new: Tensor, edge_index: Adj, dim_size: Optional[int] = None) -> tuple[Tensor, Tensor]:
         out = scatter(edges_new, edge_index[1], dim=0, dim_size=dim_size, reduce="sum")
 
         return out, edges_new
@@ -102,7 +104,7 @@ class GraphTransformerConv(MessagePassing):
         value: Tensor,
         edge_attr: OptTensor,
         edge_index: Adj,
-        size: Size | None = None,
+        size: Optional[Size] = None,
     ):
         dim_size = query.shape[0]
         heads = query.shape[1]
@@ -129,7 +131,7 @@ class GraphTransformerConv(MessagePassing):
         edge_attr: OptTensor,
         index: Tensor,
         ptr: OptTensor,
-        size_i: int | None,
+        size_i: Optional[int],
     ) -> Tensor:
         if edge_attr is not None:
             key_j = key_j + edge_attr

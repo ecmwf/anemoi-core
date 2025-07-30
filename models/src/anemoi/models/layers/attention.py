@@ -8,8 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 
+from __future__ import annotations
+
 import logging
 import math
+from typing import Optional
 
 import einops
 import torch
@@ -42,10 +45,10 @@ class MultiHeadSelfAttention(nn.Module):
         qkv_bias: bool = False,
         qk_norm: bool = False,
         is_causal: bool = False,
-        window_size: int | None = None,
+        window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
-        softcap: float | None = None,
+        softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -70,7 +73,7 @@ class MultiHeadSelfAttention(nn.Module):
             normalize q and k, by default False
         is_causal : bool, optional
             apply causal attention mask, by default False
-        window_size : int, optional
+        window_size : Optional[int], optional
             window_size, by default None
         dropout_p : float, optional
             dropout probability, by default 0.0
@@ -146,7 +149,7 @@ class MultiHeadSelfAttention(nn.Module):
         value: Tensor,
         shapes: list,
         batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         if model_comm_group:
             assert (
@@ -191,7 +194,9 @@ class MultiHeadSelfAttention(nn.Module):
 
         return out
 
-    def forward(self, x: Tensor, shapes: list, batch_size: int, model_comm_group: ProcessGroup | None = None) -> Tensor:
+    def forward(
+        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    ) -> Tensor:
 
         query = self.lin_q(x)
         key = self.lin_k(x)
@@ -291,7 +296,7 @@ class FlashAttentionWrapper(nn.Module):
         causal: bool = False,
         window_size: int = None,
         dropout_p: float = 0.0,
-        softcap: float | None = None,
+        softcap: Optional[float] = None,
         alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (
@@ -331,7 +336,7 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         super().__init__(*args, **kwargs)
 
     def forward(
-        self, x: PairTensor, shapes: list, batch_size: int, model_comm_group: ProcessGroup | None = None
+        self, x: PairTensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
     ) -> Tensor:
         query = self.lin_q(x[1])
         key = self.lin_k(x[0])

@@ -8,6 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Optional
+from typing import Union
+
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -23,7 +26,7 @@ def get_k_hop_edges(
     edge_attr: Tensor,
     edge_index: Adj,
     num_hops: int = 1,
-    num_nodes: int | None = None,
+    num_nodes: Optional[int] = None,
 ) -> tuple[Adj, Tensor]:
     """Return 1 hop subgraph.
 
@@ -35,7 +38,7 @@ def get_k_hop_edges(
         edge attributes
     edge_index : Adj
         edge index
-    num_hops: int, optional, by default 1
+    num_hops: int, Optional, by default 1
         number of required hops
 
     Returns
@@ -55,17 +58,17 @@ def get_k_hop_edges(
 
 
 def sort_edges_1hop_sharding(
-    num_nodes: int | tuple[int, int],
+    num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,
     edge_index: Adj,
-    mgroup: ProcessGroup | None = None,
+    mgroup: Optional[ProcessGroup] = None,
     relabel_dst_nodes: bool = False,
 ) -> tuple[Adj, Tensor, list, list]:
     """Rearanges edges into 1 hop neighbourhoods for sharding across GPUs.
 
     Parameters
     ----------
-    num_nodes : int | tuple[int, int]
+    num_nodes : Union[int, tuple[int, int]]
         Number of (target) nodes in Graph
     edge_attr : Tensor
         edge attributes
@@ -98,7 +101,7 @@ def sort_edges_1hop_sharding(
 
 
 def sort_edges_1hop_chunks(
-    num_nodes: int | tuple[int, int],
+    num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,
     edge_index: Adj,
     num_chunks: int,
@@ -108,7 +111,7 @@ def sort_edges_1hop_chunks(
 
     Parameters
     ----------
-    num_nodes : int | tuple[int, int]
+    num_nodes : Union[int, tuple[int, int]]
         Number of (target) nodes in Graph, tuple for bipartite graph
     edge_attr : Tensor
         edge attributes

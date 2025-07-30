@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Optional
 
 from hydra.utils import instantiate
 from torch import Tensor
@@ -198,8 +199,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     def forward(
         self,
         x: Tensor,
-        model_comm_group: ProcessGroup | None = None,
-        grid_shard_shapes: list = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
@@ -208,7 +209,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         ----------
         x : Tensor
             Input data
-        model_comm_group : ProcessGroup | None, optional
+        model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
         grid_shard_shapes : list, optional
             Shard shapes of the grid, by default None

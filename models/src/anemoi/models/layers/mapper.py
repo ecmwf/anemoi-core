@@ -11,6 +11,7 @@
 import logging
 import os
 from abc import ABC
+from typing import Optional
 
 import numpy as np
 import torch
@@ -55,7 +56,7 @@ class BaseMapper(nn.Module, ABC):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -87,16 +88,16 @@ class BaseMapper(nn.Module, ABC):
 
         Parameters
         ----------
-        x : tuple[Tensor]
+        x : Tuple[Tensor]
             Data containing source and destination nodes and edges.
-        shard_shapes : tuple[tuple[int], tuple[int]]
+        shard_shapes : Tuple[Tuple[int], Tuple[int]]
             Shapes of the sharded source and destination nodes.
         model_comm_group : ProcessGroup
             Groups which GPUs work together on one model instance
 
         Return
         ------
-        tuple[Tensor, Tensor, tuple[int], tuple[int]]
+        Tuple[Tensor, Tensor, Tuple[int], Tuple[int]]
             Source nodes, destination nodes, sharded source node shapes, sharded destination node shapes
         """
         shapes_src, shapes_dst = shard_shapes
@@ -202,7 +203,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         trainable_size: int,
         num_chunks: int,
         num_heads: int,
@@ -298,7 +299,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         self,
         size: tuple[int, int],
         batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Adj]:
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
@@ -316,7 +317,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x: PairTensor,
         shard_shapes: tuple[tuple[int], tuple[int]],
         batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
     ):
@@ -348,7 +349,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         shapes: tuple[tuple[int], tuple[int]],
         batch_size: int,
         size: tuple[int],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         x_src, x_dst = x
 
@@ -389,7 +390,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -436,7 +437,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -470,7 +471,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -501,7 +502,6 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
         trainable_size: int,
         num_chunks: int,
         num_heads: int,
@@ -525,8 +525,6 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        out_channels_dst : int, optional
-            Output channels of the destination node, by default None
         trainable_size : int
             Trainable tensor of edge
         num_chunks : int
@@ -556,7 +554,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
-            out_channels_dst=out_channels_dst,
+            out_channels_dst=None,
             trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -578,7 +576,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = True,
@@ -598,7 +596,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         trainable_size: int,
         num_chunks: int,
         num_heads: int,
@@ -703,7 +701,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -774,7 +772,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         self,
         size: tuple[int, int],
         batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Adj]:
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
@@ -792,7 +790,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -829,7 +827,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -850,7 +848,7 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        out_channels_dst : int, optional
+        out_channels_dst : int
             Output channels of the destination node, by default None
         trainable_size : int
             Trainable tensor of edge
@@ -925,7 +923,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -1018,7 +1016,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -1039,15 +1037,15 @@ class TransformerBaseMapper(BaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        window_size: int | None = None,
+        window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
-        softcap: float | None = None,
+        softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
@@ -1119,7 +1117,7 @@ class TransformerBaseMapper(BaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -1150,7 +1148,7 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
@@ -1160,7 +1158,7 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         softcap: float = None,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
-        window_size: int | None = None,
+        window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
@@ -1224,7 +1222,7 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int], tuple[int], tuple[int]],
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
@@ -1244,7 +1242,7 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: int | None = None,
+        out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
@@ -1254,7 +1252,7 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         softcap: float = None,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
-        window_size: int | None = None,
+        window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.

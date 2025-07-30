@@ -7,6 +7,7 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
@@ -35,7 +36,7 @@ class TransformerModelComponent(PydanticBaseModel):
     "Ratio of mlp hidden dimension to embedding dimension. Default to 4."
     num_heads: NonNegativeInt = Field(example=16)
     "Number of attention heads. Default to 16."
-    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
@@ -52,5 +53,5 @@ class GNNModelComponent(BaseModel):
     "Edge attributes to consider in the model component features."
     mlp_extra_layers: NonNegativeInt = Field(example=0)
     "The number of extra hidden layers in MLP. Default to 0."
-    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"

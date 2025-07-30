@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Optional
+
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -16,7 +18,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.utils import get_memory_format
 
 
-def _split(input_: Tensor, dim_: int, shapes_: tuple, group: ProcessGroup | None = None) -> Tensor:
+def _split(input_: Tensor, dim_: int, shapes_: tuple, group: Optional[ProcessGroup] = None) -> Tensor:
     """Split the tensor along dim and keep the relevant slice."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -57,7 +59,7 @@ def _gather(
     dim_: int,
     shapes: tuple,
     gather_in_backward: bool = True,
-    group: ProcessGroup | None = None,
+    group: Optional[ProcessGroup] = None,
 ) -> Tensor:
     """Gather tensors and concatenate along the last dimension."""
     # Modified from
@@ -120,7 +122,7 @@ def _gather(
     return output
 
 
-def _reduce(input_: Tensor, use_fp32: bool = True, group: ProcessGroup | None = None) -> Tensor:
+def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
     """All-reduce the input tensor across model parallel group."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -154,7 +156,7 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: ProcessGroup | None = 
     return input_
 
 
-def _gather_channels_alltoall(input_: Tensor, shapes: list, group: ProcessGroup | None = None) -> Tensor:
+def _gather_channels_alltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all to go from channel-parallel to sequence-parallel.
 
     Split input along sequence dimension and join after all_to_all along channel dimension.
@@ -192,7 +194,7 @@ def _gather_channels_alltoall(input_: Tensor, shapes: list, group: ProcessGroup 
     return torch.cat(output_list, dim=-1).contiguous(memory_format=input_format)
 
 
-def _split_channels_alltoall(input_: Tensor, shapes: list, group: ProcessGroup | None = None) -> Tensor:
+def _split_channels_alltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the head dimension.
 
     Split input along dimension dim_split and join after all_to_all along last dimesion.
