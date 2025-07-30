@@ -291,11 +291,17 @@ class AnemoiTrainer:
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        warm_start_dir = self.config.hardware.paths.warm_start
+        warm_start_dir = getattr(self.config.hardware.paths, "warm_start", None)  # avoid breaking change
         warm_start_file = self.config.hardware.files.warm_start
         warm_start_path = None
 
-        if warm_start_dir and warm_start_file:
+        if warm_start_dir or warm_start_file:
+            assert (
+                warm_start_dir is not None
+            ), f"Please configure config.hardware.paths.warm_start correctly, found: {warm_start_dir}"
+            assert (
+                warm_start_file is not None
+            ), f"Please configure config.hardware.files.warm_start correctly, found: {warm_start_file}"
             warm_start_path = Path(warm_start_dir) / Path(warm_start_file)
             msg = "Warm start checkpoint not found: %s", warm_start_path
             assert Path.is_file(warm_start_path), msg
