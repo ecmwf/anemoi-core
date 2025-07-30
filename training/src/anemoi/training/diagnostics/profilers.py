@@ -8,31 +8,37 @@
 # nor does it submit to any jurisdiction.
 
 
-import importlib
+from __future__ import annotations
+
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 
 import numpy as np
 import pandas as pd
-import pytorch_lightning as pl
 import torch
 import torch.distributed as dist
-from omegaconf import DictConfig
 from pytorch_lightning.callbacks import TQDMProgressBar
 from pytorch_lightning.profilers import Profiler
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.profilers import SimpleProfiler
 from pytorch_lightning.utilities import rank_zero_only
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from anemoi.training.train.forecaster import GraphForecaster
+if TYPE_CHECKING:
+    import importlib
 
-if importlib.util.find_spec("ipywidgets") is not None:
-    from tqdm.auto import tqdm as _tqdm
-else:
-    from tqdm import tqdm as _tqdm
+    import pytorch_lightning as pl
+    from omegaconf import DictConfig
+    from pytorch_lightning.utilities.types import STEP_OUTPUT
+
+    from anemoi.training.train.tasks.base import BaseGraphModule
+
+    if importlib.util.find_spec("ipywidgets") is not None:
+        from tqdm.auto import tqdm as _tqdm
+    else:
+        from tqdm import tqdm as _tqdm
 
 from torch.profiler import profile
 
@@ -493,7 +499,7 @@ class BenchmarkProfiler(Profiler):
             f.write(model_summary)
             f.close()
 
-    def get_model_summary(self, model: GraphForecaster, example_input_array: np.ndarray) -> str:
+    def get_model_summary(self, model: BaseGraphModule, example_input_array: np.ndarray) -> str:
 
         from torchinfo import summary
 

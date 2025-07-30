@@ -10,12 +10,15 @@
 
 import logging
 from typing import Annotated
+from typing import Any
 from typing import Literal
 
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import root_validator
 
+from anemoi.training.diagnostics.mlflow.logger import MAX_PARAMS_LENGTH
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
@@ -242,18 +245,25 @@ class WandbSchema(BaseModel):
     entity: str | None = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
 
+    @root_validator(pre=True)
+    def clean_entity(cls: type[WandbSchema], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805,F821
+        if values["enabled"] is False:
+            values["entity"] = None
+        return values
+
 
 class MlflowSchema(BaseModel):
+
     enabled: bool
     "Use MLflow logger."
     offline: bool
     "Run MLflow offline. Necessary if no internet access available."
     authentication: bool
     "Whether to authenticate with server or not"
-    log_model: bool | Literal["all"]
+    log_model: bool | Literal["all"] | None = None
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
-    tracking_uri: str | None
+    tracking_uri: str | None = None
     "Address of local or remote tracking server."
     experiment_name: str
     "Name of experiment."
@@ -271,6 +281,14 @@ class MlflowSchema(BaseModel):
     "Keys to expand within params. Any key being expanded will have lists converted according to `expand_iterables`."
     http_max_retries: PositiveInt = Field(example=35)
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
+    max_params_length: int = MAX_PARAMS_LENGTH
+    "Maximum number of hpParams to be logged with mlflow"
+
+    @root_validator(pre=True)
+    def clean_entity(cls: type[MlflowSchema], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805,F821
+        if values["enabled"] is False:
+            values["tracking_uri"] = None
+        return values
 
 
 class TensorboardSchema(BaseModel):

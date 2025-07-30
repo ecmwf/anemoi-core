@@ -8,13 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
+import io
 import logging
+import pickle
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
-    module = GraphForecaster.load_from_checkpoint(lightning_checkpoint_path)
+    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path)
     model = module.model
 
     metadata = dict(**model.metadata)
@@ -112,3 +114,21 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
         else:
             # Recursively search within children
             freeze_submodule_by_name(child, target_name)
+
+
+class LoggingUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> str:
+        if "anemoi.training" in module:
+            msg = (
+                f"anemoi-training Pydantic schemas found in model's metadata: "
+                f"({module}, {name}) Please review Pydantic schemas to avoid this."
+            )
+            raise ValueError(msg)
+        return super().find_class(module, name)
+
+
+def check_classes(model: torch.nn.Module) -> None:
+    buffer = io.BytesIO()
+    pickle.dump(model, buffer)
+    buffer.seek(0)
+    _ = LoggingUnpickler(buffer).load()
