@@ -212,7 +212,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             scalers=self.scalers,
             data_indices=self.data_indices,
         )
-        self._scaling_values = print_variable_scaling(self.loss, data_indices)
+        self._scaling_values_log = print_variable_scaling(
+            self.loss,
+            data_indices,
+        )
 
         self.metrics = torch.nn.ModuleDict(
             {
@@ -764,7 +767,18 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
-        # Log variable scaling on rank 0
         # The two ifs should be separate, but are combined due to pre-commit hook
         if stage == "fit" and self.trainer.is_global_zero:
-            self.logger.log_hyperparams({"variable_loss_scaling": self._scaling_values})
+            # Log variable scaling on rank 0
+            max_variables_to_log = (
+                self.config.diagnostics.log.mlflow.max_num_variable_scalings
+                if hasattr(self.config.diagnostics.log.mlflow, "max_num_variable_scalings")
+                else 200
+            )
+            if len(self._scaling_values_log) < max_variables_to_log:
+                self.logger.log_hyperparams({"variable_loss_scaling": self._scaling_values_log})
+            else:
+                LOGGER.info(
+                    "Number of logged variables exceeds limit set in "
+                    "config.diagnostics.log.mlflow.max_variable_scalings.",
+                )

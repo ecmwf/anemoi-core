@@ -35,7 +35,8 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     Returns
     -------
     Dict[str, float]
-        Dictionary mapping variable names to their scaling values.
+        Dictionary mapping variable names to their scaling values. If max_variables is specified,
+        only the top N variables plus 'total_sum' will be included.
     """
     variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).reshape(-1)
     log_text = "Final Variable Scaling: "
@@ -50,4 +51,5 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     log_text += f"Total scaling sum: {scaling_sum:.4g}, "
     scaling_values["total_sum"] = scaling_sum
     LOGGER.debug(log_text)
+
     return scaling_values
