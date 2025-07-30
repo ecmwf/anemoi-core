@@ -100,7 +100,7 @@ class GraphInterpolator(GraphForecaster):
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
-            self.update_scalars(callback=AvailableCallbacks.ON_TRAINING_START)
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
