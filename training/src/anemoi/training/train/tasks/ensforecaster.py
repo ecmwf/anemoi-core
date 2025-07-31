@@ -236,7 +236,7 @@ class GraphEnsForecaster(BaseGraphModule):
         rollout: int | None = None,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
+    ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
         """Rollout step for the forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
