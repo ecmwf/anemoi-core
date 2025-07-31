@@ -232,5 +232,10 @@ class DisentangledModelSchema(BaseModelSchema):
     use_latent_blending: bool = Field(default=False)
     "Toggle to do enable latent blending network. If false, the latent space is not blended and multi step latents will be added directly."
 
+class DisentangledHierarchicalModelSchema(HierarchicalModelSchema, DisentangledModelSchema):
+    """
+    Inherits fields from both `HierarchicalModelSchema` and `DisentangledModelSchema`.
+    """
+    pass
 
-ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DisentangledModelSchema]
+ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DisentangledModelSchema, DisentangledHierarchicalModelSchema]
