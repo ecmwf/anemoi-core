@@ -11,3 +11,18 @@ dataloader:
     end: 1979-01-08 12:00:00
   validation:
     start: 1979-01-08 18:00:00
+
+data:
+  normalizer:
+    default: "mean-std"
+  const_imputer:
+    default: "none"
+    0:
+      - 2t
+  processors:
+    normalizer:
+      _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+      config: ${data.normalizer}
+    const_imputer:
+      _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+      config: ${data.const_imputer}
