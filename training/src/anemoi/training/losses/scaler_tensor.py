@@ -66,6 +66,7 @@ A tuple of (dimension, tensor) where:
 - tensor is a torch.Tensor that will be applied to the specified dimensions.
 """
 
+
 class Shape:
     """Shape resolving object."""
 

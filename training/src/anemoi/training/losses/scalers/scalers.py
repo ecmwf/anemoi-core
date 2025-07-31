@@ -12,10 +12,9 @@ import logging
 
 from hydra.utils import instantiate
 
-from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.utils.config import DotDict
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 
 LOGGER = logging.getLogger(__name__)
 

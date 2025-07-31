@@ -11,7 +11,6 @@
 import logging
 from collections import defaultdict
 
-import numpy as np
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
