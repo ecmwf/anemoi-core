@@ -24,3 +24,5 @@ model:
     _target_: anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical
   enable_hierarchical_level_processing: True
   level_process_num_layers: 2
+  processor:
+    num_chunks: 2
