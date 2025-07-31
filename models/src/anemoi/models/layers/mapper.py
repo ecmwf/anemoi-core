@@ -320,6 +320,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
     ):
         x_src, x_dst = x
         shapes_src, shapes_dst = shard_shapes
@@ -333,12 +334,18 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         # at this point, x_src is synced i.e. full, x_dst is sharded, edges are sharded (incoming edges to x_dst)
         size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
-        x_src, edge_index, _ = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
+        x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
+
+        if cond is not None:  # reshard cond_src to match x_src:
+            cond_src, cond_dst = cond
+            shapes_cond_src = change_channels_in_shape(shapes_src, cond_src.shape[-1])
+            cond_src_full = sync_tensor(cond_src, 0, shapes_cond_src, model_comm_group, gather_in_fwd=True)
+            cond = (cond_src_full[nodes_src], cond_dst)
 
         if not x_dst_is_sharded:
             x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
 
-        return x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst
+        return x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond
 
     def run_processor_chunk_edge_sharding(
         self,
@@ -402,9 +409,10 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> PairTensor:
-        x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst = checkpoint(
+        x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond = checkpoint(
             self.pre_process_edge_sharding_wrapper,
             x,
             shard_shapes,
@@ -412,6 +420,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             model_comm_group,
             x_src_is_sharded,
             x_dst_is_sharded,
+            cond,
             use_reentrant=False,
         )
 
@@ -434,6 +443,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
                 batch_size,
                 size,
                 model_comm_group,
+                cond,
                 **kwargs,
                 use_reentrant=False,
             ).to(dtype=out_type)
