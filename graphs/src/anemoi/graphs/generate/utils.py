@@ -104,4 +104,4 @@ def selection_matrix(idx: np.ndarray, num_diagonals: int) -> scipy.sparse.csr_ma
     scipy.sparse.csr_matrix
         diagonal matrix with ones at selected indices (idx,idx).
     """
-    return scipy.sparse.csr_matrix((np.ones((len(idx))), (idx, idx)), dtype=bool, shape=(num_diagonals, num_diagonals))
+    return scipy.sparse.csr_matrix((np.ones(len(idx)), (idx, idx)), dtype=bool, shape=(num_diagonals, num_diagonals))

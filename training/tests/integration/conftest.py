@@ -172,7 +172,7 @@ def get_tmp_paths(temporary_directory_for_test_data: callable) -> callable:
             return tmp_paths[0], dataset_names, archive_urls
 
         tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
-        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths)]
+        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths, strict=False)]
         return tmp_dir, rel_paths, archive_urls
 
     return _get_tmp_paths

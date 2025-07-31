@@ -8,10 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
 import datashader as dsh
 import matplotlib.cm as cm
@@ -26,19 +24,16 @@ from matplotlib.colors import BoundaryNorm
 from matplotlib.colors import Colormap
 from matplotlib.colors import Normalize
 from matplotlib.colors import TwoSlopeNorm
+from matplotlib.figure import Figure
 from pyshtools.expand import SHGLQ
 from pyshtools.expand import SHExpandGLQ
 from scipy.interpolate import griddata
+from torch import Tensor
+from torch import nn
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-
-if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-    from torch import nn, Tensor
-
-from dataclasses import dataclass
 
 LOGGER = logging.getLogger(__name__)
 

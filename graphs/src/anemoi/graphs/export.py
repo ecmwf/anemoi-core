@@ -8,10 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
-from typing import Tuple
-from typing import Union
 
 import scipy.sparse as sp
 import torch
@@ -24,9 +22,9 @@ class GraphExporter:
 
     def __init__(
         self,
-        graph: Union[str, Path],
-        output_path: Union[str, Path],
-        edges_name: Iterable[Tuple[str, str, str]] = None,
+        graph: str | Path,
+        output_path: str | Path,
+        edges_name: Iterable[tuple[str, str, str]] = None,
         edge_attribute_name: str = None,
         **kwargs,
     ):
@@ -42,7 +40,7 @@ class GraphExporter:
         self.edge_attribute_name = edge_attribute_name
         self.output_path = output_path
 
-    def get_edges_info(self, source_name: str, target_name: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_edges_info(self, source_name: str, target_name: str) -> tuple[torch.Tensor, torch.Tensor]:
         """Get the edges info from the graph."""
         edge_index = self.graph[(source_name, "to", target_name)]["edge_index"]
 
@@ -57,7 +55,7 @@ class GraphExporter:
         assert edge_attribute.ndim == 1, f"Edge attribute {self.edge_attribute_name} should be 1D."
         return edge_index, edge_attribute
 
-    def get_nodes_info(self, source_name: str, target_name: str) -> Tuple[int, int]:
+    def get_nodes_info(self, source_name: str, target_name: str) -> tuple[int, int]:
         """Get the nodes info from the graph."""
         num_source_nodes = self.graph[source_name].num_nodes
         num_target_nodes = self.graph[target_name].num_nodes
