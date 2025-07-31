@@ -10,8 +10,6 @@
 import math
 from itertools import chain
 from pathlib import Path
-from typing import Optional
-from typing import Union
 
 import torch
 
@@ -22,7 +20,7 @@ from anemoi.utils.text import table
 class GraphDescriptor:
     """Class for descripting the graph."""
 
-    def __init__(self, path: Union[str, Path], **kwargs):
+    def __init__(self, path: str | Path, **kwargs):
         self.path = path
         self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
 
@@ -154,7 +152,7 @@ class GraphDescriptor:
         attribute_table.extend(self.get_edge_attribute_table())
         return attribute_table
 
-    def describe(self, show_attribute_distributions: Optional[bool] = True) -> None:
+    def describe(self, show_attribute_distributions: bool = True) -> None:
         """Describe the graph."""
         print()
         print(f"📦 Path       : {self.path}")

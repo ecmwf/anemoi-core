@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-from typing import Union
-
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
@@ -31,13 +29,13 @@ class DataSchema(PydanticBaseModel):
         The frequency of the data.
     timestep : str
         The timestep of the data.
-    forcing : List[str]
+    forcing : list[str]
         The list of features used as forcing to generate the forecast state.
-    diagnostic : List[str]
+    diagnostic : list[str]
         The list of features that are only part of the forecast state.
     processors : Dict[str, Processor]
         The Processors configuration.
-    num_features : Optional[int]
+    num_features : int, optional
         The number of features in the forecast state. To be set in the code.
     """
 
@@ -54,5 +52,5 @@ class DataSchema(PydanticBaseModel):
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
     diagnostic: list[str]
     "Features that are only part of the forecast state and are not used as an input to the model."
-    num_features: Union[int, None]
+    num_features: int | None
     "Number of features in the forecast state. To be set in the code."
