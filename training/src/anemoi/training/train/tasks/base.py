@@ -348,7 +348,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
         """Prepare tensors for loss computation, handling sharding if necessary.
@@ -371,7 +370,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         is_sharded = self.grid_shard_slice is not None
 
-        sharding_supported = (self.loss_supports_sharding or not training_mode) and (
+        sharding_supported = (self.loss_supports_sharding or validation_mode) and (
             self.metrics_support_sharding or not validation_mode
         )
 
@@ -455,7 +454,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         rollout_step: int,
-        training_mode: bool = True,
         validation_mode: bool = False,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
@@ -469,8 +467,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Target values
         rollout_step : int
             Current rollout step
-        training_mode : bool
-            Whether to compute training loss
         validation_mode : bool
             Whether to compute validation metrics
         **kwargs
@@ -485,14 +481,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,
             y,
-            training_mode,
             validation_mode,
         )
 
-        # Compute loss if in training mode
-        loss = None
-        if training_mode:
-            loss = self._compute_loss(y_pred=y_pred_full, y=y_full, grid_shard_slice=grid_shard_slice, **kwargs)
+        loss = self._compute_loss(y_pred=y_pred_full, y=y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
         # Compute metrics if in validation mode
         metrics_next = {}
@@ -503,6 +495,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
+
+        Also normalize the batch in-place if needed.
 
         Parameters
         ----------
