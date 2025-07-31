@@ -7,33 +7,26 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from functools import cached_property
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pytorch_lightning as pl
 from hydra.utils import instantiate
 from torch.utils.data import DataLoader
+from torch_geometric.data import HeteroData
 
 from anemoi.datasets.data import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from torch_geometric.data import HeteroData
-
-    from anemoi.training.data.grid_indices import BaseGridIndices
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -101,6 +94,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout_value = rollout_start
         if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
             rollout_value = rollout_max
+
+        else:
+            LOGGER.warning(
+                "Falling back rollout to: %s",
+                rollout_value,
+            )
 
         rollout = max(rollout_value, val_rollout)
 

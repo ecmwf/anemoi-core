@@ -7,24 +7,21 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytorch_lightning as pl
 import torch
 import torchinfo
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.training.utils.checkpoint import check_classes
 from anemoi.utils.checkpoints import save_metadata
-
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 
@@ -150,6 +147,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
     def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
         """Defines the filepath for the inference checkpoint."""
         return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Check that model's metadata does not contain Pydantic schemas references."""
+        del pl_module
+
+        if trainer.is_global_zero:
+            model = self._torch_drop_down(trainer)
+            check_classes(model)
 
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:

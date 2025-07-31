@@ -137,8 +137,8 @@ class NormalizedReluBoundingSchema(BaseModel):
         return self
 
 
-class LeakyNormalizedReluBoundingSchema(NormalizedReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyNormalizedReluBounding"] = Field(..., alias="_target_")
+class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
+    target_: Literal["anemoi.models.layers.bounding.NormalizedLeakyReluBounding"] = Field(..., alias="_target_")
     "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
 
 
@@ -151,7 +151,7 @@ Bounding = Annotated[
         HardtanhBoundingSchema,
         LeakyHardtanhBoundingSchema,
         NormalizedReluBoundingSchema,
-        LeakyNormalizedReluBoundingSchema,
+        NormalizedLeakyReluBoundingSchema,
     ],
     Field(discriminator="target_"),
 ]

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import h3
 import networkx as nx
@@ -167,7 +166,7 @@ def add_edges_to_children(
         graph to which the edges will be added
     refinement_levels : tuple[int]
         set of refinement levels
-    depth_children : Optional[int], optional
+    depth_children : int, optional
         The number of resolution levels to consider for the connections of children. Defaults to 1, which includes
         connections up to the next resolution level, by default None.
 

@@ -7,18 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+from torch_geometric.data import HeteroData
 
-if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
-
-    from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.data_indices.collection import IndexCollection
 
 
 class BaseMask:

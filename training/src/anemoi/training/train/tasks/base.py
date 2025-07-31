@@ -6,6 +6,8 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
+
 from __future__ import annotations
 
 import logging
@@ -298,7 +300,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             grid_shard_shapes=self.grid_shard_shapes,
         )
 
-    def on_load_checkpoint(self, checkpoint: torch.nn.module) -> None:
+    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
     def define_delayed_scalers(self) -> None:
@@ -411,7 +413,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
+        rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -627,7 +629,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         ----------
         scheduler : CosineLRScheduler
             Learning rate scheduler object.
-        metric : Optional[Any]
+        metric : Any
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """

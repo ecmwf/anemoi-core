@@ -7,21 +7,72 @@
 # nor does it submit to any jurisdiction.
 #
 
-from __future__ import annotations
 
 import logging
 from typing import Annotated
+from typing import Any
 from typing import Literal
-from typing import Optional
-from typing import Union
 
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import root_validator
 
+from anemoi.training.diagnostics.mlflow.logger import MAX_PARAMS_LENGTH
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
+
+
+class GraphTrainableFeaturesPlotSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
+    "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
+    every_n_epochs: int | None
+    "Epoch frequency to plot at."
+
+
+class PlotLossSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
+    "PlotLoss object from anemoi training diagnostics callbacks."
+    parameter_groups: dict[str, list[str]]
+    "Dictionary with parameter groups with parameter names as key."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at."
+
+
+class MatplotlibColormapSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormap"] = Field(..., alias="_target_")
+    "CustomColormap object from anemoi training utils."
+    name: str
+    "Name of the Matplotlib colormap."
+    variables: list[str] | None = Field(default=None)
+    "A list of strings representing the variables for which the colormap is used, by default None."
+
+
+class MatplotlibColormapClevelsSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels"] = Field(..., alias="_target_")
+    "CustomColormap object from anemoi training utils."
+    clevels: list
+    "The custom color levels for the colormap."
+    variables: list[str] | None = Field(default=None)
+    "A list of strings representing the variables for which the colormap is used, by default None."
+
+
+class DistinctipyColormapSchema(BaseModel):
+    target_: Literal["anemoi.training.utils.custom_colormaps.DistinctipyColormap"] = Field(..., alias="_target_")
+    "CustomColormap object from anemoi training utils."
+    n_colors: int
+    "The number of colors in the colormap."
+    variables: list[str] | None = Field(default=None)
+    "A list of strings representing the variables for which the colormap is used, by default None."
+    colorblind_type: str | None = Field(default=None)
+    "The type of colorblindness to simulate. If None, the default colorblindness from distinctipy is applied."
+
+
+ColormapSchema = Annotated[
+    MatplotlibColormapSchema | MatplotlibColormapClevelsSchema | DistinctipyColormapSchema,
+    Field(discriminator="target_"),
+]
 
 
 class LongRolloutPlotsSchema(BaseModel):
@@ -35,69 +86,18 @@ class LongRolloutPlotsSchema(BaseModel):
     "List of parameters to plot."
     video_rollout: int = Field(example=0)
     "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: Union[list[float], None] = Field(default=None)
+    accumulation_levels_plot: list[float] | None = Field(default=None)
     "Accumulation levels to plot, by default None."
-    cmap_accumulation: Union[list[str], None] = Field(default=None)
+    cmap_accumulation: list[str] | None = Field(default=None)
     "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    per_sample: Union[int, None] = Field(default=None)
+    per_sample: int | None = Field(default=None)
     "Number of plots per sample, by default 6."
     every_n_epochs: int = Field(example=1)
     "Epoch frequency to plot at, by default 1."
-    animation_interval: Union[int, None] = Field(default=None)
+    animation_interval: int | None = Field(default=None)
     "Delay between frames in the animation in milliseconds, by default 400."
-    colormaps: Union[dict[str, ColormapSchema], None] = Field(default=None)
+    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
-
-
-class GraphTrainableFeaturesPlotSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
-    "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
-    every_n_epochs: Union[int, None]
-    "Epoch frequency to plot at."
-
-
-class PlotLossSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
-    "PlotLoss object from anemoi training diagnostics callbacks."
-    parameter_groups: dict[str, list[str]]
-    "Dictionary with parameter groups with parameter names as key."
-    every_n_batches: Union[int, None] = Field(default=None)
-    "Batch frequency to plot at."
-
-
-class MatplotlibColormapSchema(BaseModel):
-    target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormap"] = Field(..., alias="_target_")
-    "CustomColormap object from anemoi training utils."
-    name: str
-    "Name of the Matplotlib colormap."
-    variables: Union[list[str], None] = Field(default=None)
-    "A list of strings representing the variables for which the colormap is used, by default None."
-
-
-class MatplotlibColormapClevelsSchema(BaseModel):
-    target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels"] = Field(..., alias="_target_")
-    "CustomColormap object from anemoi training utils."
-    clevels: list
-    "The custom color levels for the colormap."
-    variables: Union[list[str], None] = Field(default=None)
-    "A list of strings representing the variables for which the colormap is used, by default None."
-
-
-class DistinctipyColormapSchema(BaseModel):
-    target_: Literal["anemoi.training.utils.custom_colormaps.DistinctipyColormap"] = Field(..., alias="_target_")
-    "CustomColormap object from anemoi training utils."
-    n_colors: int
-    "The number of colors in the colormap."
-    variables: Union[list[str], None] = Field(default=None)
-    "A list of strings representing the variables for which the colormap is used, by default None."
-    colorblind_type: Union[str, None] = Field(default=None)
-    "The type of colorblindness to simulate. If None, the default colorblindness from distinctipy is applied."
-
-
-ColormapSchema = Annotated[
-    Union[MatplotlibColormapSchema, MatplotlibColormapClevelsSchema, DistinctipyColormapSchema],
-    Field(discriminator="target_"),
-]
 
 
 class PlotSampleSchema(BaseModel):
@@ -109,15 +109,15 @@ class PlotSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: Union[list[str], None] = Field(default=None)
+    cmap_accumulation: list[str] | None = Field(default=None)
     "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    precip_and_related_fields: Union[list[str], None] = Field(default=None)
+    precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
-    every_n_batches: Union[int, None] = Field(default=None)
+    every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
-    colormaps: Union[dict[str, ColormapSchema], None] = Field(default=None)
+    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
 
 
@@ -128,7 +128,7 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    every_n_batches: Union[int, None] = Field(default=None)
+    every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
@@ -139,23 +139,28 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    precip_and_related_fields: Union[list[str], None] = Field(default=None)
+    precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
-    every_n_batches: Union[int, None] = Field(default=None)
+    every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
 
 
 PlotCallbacks = Annotated[
-    Union[
-        LongRolloutPlotsSchema,
-        GraphTrainableFeaturesPlotSchema,
-        PlotLossSchema,
-        PlotSampleSchema,
-        PlotSpectrumSchema,
-        PlotHistogramSchema,
-    ],
+    LongRolloutPlotsSchema
+    | GraphTrainableFeaturesPlotSchema
+    | PlotLossSchema
+    | PlotSampleSchema
+    | PlotSpectrumSchema
+    | PlotHistogramSchema,
     Field(discriminator="target_"),
 ]
+
+
+class PlottingFrequency(BaseModel):
+    batch: PositiveInt = Field(example=750)
+    "Frequency of the plotting in number of batches."
+    epoch: PositiveInt = Field(example=5)
+    "Frequency of the plotting in number of epochs."
 
 
 class PlotSchema(BaseModel):
@@ -177,19 +182,12 @@ class PlotSchema(BaseModel):
     "List of plotting functions to call."
 
 
-class PlottingFrequency(BaseModel):
-    batch: PositiveInt = Field(example=750)
-    "Frequency of the plotting in number of batches."
-    epoch: PositiveInt = Field(example=5)
-    "Frequency of the plotting in number of epochs."
-
-
 class TimeLimitSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.stopping.TimeLimit"] = Field(alias="_target_")
     "TimeLimit object from anemoi training diagnostics callbacks."
-    limit: Union[int, str]
+    limit: int | str
     "Time limit, if int, assumed to be hours, otherwise must be a string with units (e.g. '1h', '30m')."
-    record_file: Union[str, None] = Field(default=None)
+    record_file: str | None = Field(default=None)
     "File to record the last checkpoint to on exit, if set."
 
 
@@ -209,11 +207,11 @@ class EarlyStoppingSchema(BaseModel):
     "Whether to crash the training if the monitored quantity is not found."
     check_finite: bool = True
     "Whether to check for NaNs and Infs in the monitored quantity."
-    stopping_threshold: Optional[float] = None
+    stopping_threshold: float | None = None
     "Stop training immediately once the monitored quantity reaches this threshold."
-    divergence_threshold: Optional[float] = None
+    divergence_threshold: float | None = None
     "Stop training as soon as the monitored quantity becomes worse than this threshold.."
-    check_on_train_epoch_end: Optional[bool] = None
+    check_on_train_epoch_end: bool | None = None
     "Whether to check the stopping criteria at the end of each training epoch."
 
 
@@ -223,7 +221,7 @@ class Debug(BaseModel):
 
 
 class CheckpointSchema(BaseModel):
-    save_frequency: Union[int, None]
+    save_frequency: int | None
     "Frequency at which to save the checkpoints."
     num_models_saved: int
     "Number of model checkpoint to save. Only the last num_models_saved checkpoints will be kept. \
@@ -235,7 +233,7 @@ class WandbSchema(BaseModel):
     "Use Weights & Biases logger."
     offline: bool
     "Run W&B offline."
-    log_model: Union[bool, Literal["all"]]
+    log_model: bool | Literal["all"]
     "Log checkpoints created by ModelCheckpoint as W&B artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
     project: str
@@ -244,21 +242,28 @@ class WandbSchema(BaseModel):
     "Whether to log the gradients."
     parameters: bool
     "Whether to log the hyper parameters."
-    entity: Union[str, None] = None
+    entity: str | None = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
+
+    @root_validator(pre=True)
+    def clean_entity(cls: type["WandbSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+        if values["enabled"] is False:
+            values["entity"] = None
+        return values
 
 
 class MlflowSchema(BaseModel):
+
     enabled: bool
     "Use MLflow logger."
     offline: bool
     "Run MLflow offline. Necessary if no internet access available."
     authentication: bool
     "Whether to authenticate with server or not"
-    log_model: Union[bool, Literal["all"]]
+    log_model: bool | Literal["all"] | None = None
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
-    tracking_uri: Union[str, None]
+    tracking_uri: str | None = None
     "Address of local or remote tracking server."
     experiment_name: str
     "Name of experiment."
@@ -268,7 +273,7 @@ class MlflowSchema(BaseModel):
     "Activate system metrics."
     terminal: bool
     "Log terminal logs to MLflow."
-    run_name: Union[str, None]
+    run_name: str | None
     "Name of run."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
@@ -276,6 +281,14 @@ class MlflowSchema(BaseModel):
     "Keys to expand within params. Any key being expanded will have lists converted according to `expand_iterables`."
     http_max_retries: PositiveInt = Field(example=35)
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
+    max_params_length: int = MAX_PARAMS_LENGTH
+    "Maximum number of hpParams to be logged with mlflow"
+
+    @root_validator(pre=True)
+    def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+        if values["enabled"] is False:
+            values["tracking_uri"] = None
+        return values
 
 
 class TensorboardSchema(BaseModel):
@@ -319,7 +332,7 @@ class Snapshot(BaseModel):
 class Profiling(BaseModel):
     enabled: bool = Field(example=False)
     "Enable component profiler. Default to false."
-    verbose: Union[bool, None] = None
+    verbose: bool | None = None
     "Set to true to include the full list of profiled action or false to keep it concise."
 
 
@@ -339,7 +352,7 @@ class BenchmarkProfilerSchema(BaseModel):
 
 
 class DiagnosticsSchema(BaseModel):
-    plot: Union[PlotSchema, None] = None
+    plot: PlotSchema | None = None
     "Plot schema."
     callbacks: list = Field(default_factory=list, example=[])
     "Callbacks schema."

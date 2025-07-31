@@ -6,7 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from __future__ import annotations
+
 
 import functools
 from collections import deque
@@ -103,7 +103,7 @@ def expand_iterables(
     expanded_params = {}
 
     for key, value in params.items():
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             if should_be_expanded(value):
                 for i, v in enumerate(value):
                     expanded_params[f"{key}{delimiter}{i}"] = expand(v)
