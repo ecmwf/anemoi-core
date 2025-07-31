@@ -9,7 +9,6 @@
 
 
 from pathlib import Path
-from typing import Optional
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -21,7 +20,7 @@ from anemoi.training.train.train import AnemoiTrainer
 @pytest.fixture(scope="session")
 def tmp_checkpoint_factory(tmp_path_factory: pytest.TempPathFactory) -> (Path, Path):
     def _create_checkpoint(
-        rid: Optional[str] = None,
+        rid: str | None = None,
         ckpt_path_name: str = "mock_checkpoints",
         ckpt_file_name: str = "last.ckpt",
         skip_creation: bool = False,
@@ -39,11 +38,11 @@ def tmp_checkpoint_factory(tmp_path_factory: pytest.TempPathFactory) -> (Path, P
 
 def build_mock_config(
     *,
-    run_id: Optional[str] = None,
-    fork_run_id: Optional[str] = None,
-    warm_start: Optional[str] = None,
-    checkpoints_path: Optional[Path] = None,
-    warm_start_path: Optional[Path] = None,
+    run_id: str | None = None,
+    fork_run_id: str | None = None,
+    warm_start: str | None = None,
+    checkpoints_path: Path | None = None,
+    warm_start_path: Path | None = None,
 ) -> MagicMock:
     config = MagicMock()
     config.config_validation = False
