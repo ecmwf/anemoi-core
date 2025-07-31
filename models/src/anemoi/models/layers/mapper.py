@@ -336,7 +336,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
         x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
 
-        if cond is not None:  # reshard cond_src to match x_src:
+        if cond is not None:  # sync cond_src to match x_src:
             cond_src, cond_dst = cond
             shapes_cond_src = change_channels_in_shape(shapes_src, cond_src.shape[-1])
             cond_src_full = sync_tensor(cond_src, 0, shapes_cond_src, model_comm_group, gather_in_fwd=True)
