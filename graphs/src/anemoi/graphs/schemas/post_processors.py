@@ -8,12 +8,9 @@
 #
 
 
-from __future__ import annotations
-
 import logging
 from typing import Annotated
 from typing import Literal
-from typing import Union
 
 from pydantic import Field
 
@@ -61,10 +58,6 @@ class SortEdgeIndexSchema(BaseModel):
 
 
 ProcessorSchemas = Annotated[
-    Union[
-        RemoveUnconnectedNodesSchema,
-        RestrictEdgeLengthSchema,
-        SortEdgeIndexSchema,
-    ],
+    RemoveUnconnectedNodesSchema | RestrictEdgeLengthSchema | SortEdgeIndexSchema,
     Field(discriminator="target_"),
 ]

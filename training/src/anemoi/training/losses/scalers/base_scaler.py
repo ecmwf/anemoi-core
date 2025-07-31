@@ -7,17 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import sys
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
-from typing import Optional
 
 import torch
 
+from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:

@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 from __future__ import annotations
 
 import logging
@@ -246,7 +245,7 @@ class GraphEnsForecaster(BaseGraphModule):
         ----------
         batch : torch.Tensor
             Batch to use for rollout
-        rollout : Optional[int], optional
+        rollout : int, optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
         training_mode : bool, optional
@@ -258,7 +257,7 @@ class GraphEnsForecaster(BaseGraphModule):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+        Generator[tuple[torch.Tensor | None, dict, list], None, None]
             Loss value, metrics, and predictions (per step)
 
         Returns

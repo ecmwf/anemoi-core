@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import Tuple
 
 import torch
 
@@ -22,7 +21,7 @@ class NormaliserMixin:
     Supported normalisation methods: None, 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std'.
     """
 
-    def compute_nongrouped_statistics(self, values: torch.Tensor, *_args) -> Tuple[torch.Tensor, ...]:
+    def compute_nongrouped_statistics(self, values: torch.Tensor, *_args) -> tuple[torch.Tensor, ...]:
         if self.norm == "l1":
             return (torch.sum(values),)
 
@@ -44,7 +43,7 @@ class NormaliserMixin:
 
     def compute_grouped_statistics(
         self, values: torch.Tensor, index: torch.Tensor, num_groups: int, dtype, device
-    ) -> Tuple[torch.Tensor, ...]:
+    ) -> tuple[torch.Tensor, ...]:
         if self.norm == "l1":
             group_sum = torch.zeros(num_groups, values.shape[1], dtype=dtype, device=device)
             group_sum = group_sum.index_add(0, index, values)

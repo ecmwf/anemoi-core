@@ -7,25 +7,21 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytorch_lightning as pl
 import torch
 import torchinfo
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.utils.checkpoint import check_classes
 from anemoi.utils.checkpoints import save_metadata
-
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 

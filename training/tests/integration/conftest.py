@@ -172,7 +172,7 @@ def get_tmp_paths(temporary_directory_for_test_data: callable) -> callable:
             return tmp_paths[0], dataset_names, archive_urls
 
         tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
-        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths)]
+        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths, strict=False)]
         return tmp_dir, rel_paths, archive_urls
 
     return _get_tmp_paths
@@ -201,7 +201,7 @@ def gnn_config(
 def gnn_config_with_checkpoint(gnn_config: OmegaConf, get_test_data: callable) -> OmegaConf:
     cfg, dataset_url = gnn_config
     existing_ckpt = get_test_data(
-        "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-06-24.ckpt",
+        "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-07-31.ckpt",
     )
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)

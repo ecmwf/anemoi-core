@@ -7,19 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from hydra.utils import instantiate
 
-from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
-
-if TYPE_CHECKING:
-    from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-    from anemoi.utils.config import DotDict
+from anemoi.utils.config import DotDict
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 
 LOGGER = logging.getLogger(__name__)
 
