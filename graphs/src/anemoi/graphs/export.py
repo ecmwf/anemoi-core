@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import scipy.sparse as sp
 import torch

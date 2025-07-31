@@ -11,7 +11,6 @@
 import logging
 from abc import ABC
 from abc import abstractmethod
-from typing import Type
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -19,7 +18,7 @@ from torch_geometric.data.storage import NodeStorage
 from anemoi.graphs.nodes.attributes.base_attributes import BooleanBaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
-MaskAttributeType = str | Type["BooleanBaseNodeAttribute"]
+MaskAttributeType = str | type["BooleanBaseNodeAttribute"]
 
 
 class BooleanOperation(BooleanBaseNodeAttribute, ABC):
