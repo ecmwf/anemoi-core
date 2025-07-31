@@ -291,6 +291,12 @@ class AnemoiModelEncProcDec(nn.Module):
         model_comm_group : ProcessGroup
             model communication group, specifies which GPUs work together
             in one model instance
+        x_src_is_sharded : bool, optional
+            Source data is sharded, by default False
+        x_dst_is_sharded : bool, optional
+            Destination data is sharded, by default False
+        keep_x_dst_sharded : bool, optional
+            Keep destination data sharded, by default False
         use_reentrant : bool, optional
             Use reentrant, by default False
 
@@ -299,28 +305,19 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Mapped data
         """
-        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
-            return mapper(  # finer grained checkpointing inside GTM with edge sharding
-                data,
-                batch_size=batch_size,
-                shard_shapes=shard_shapes,
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=x_src_is_sharded,
-                x_dst_is_sharded=x_dst_is_sharded,
-                keep_x_dst_sharded=keep_x_dst_sharded,
-            )
+        kwargs = {
+            "batch_size": batch_size,
+            "shard_shapes": shard_shapes,
+            "model_comm_group": model_comm_group,
+            "x_src_is_sharded": x_src_is_sharded,
+            "x_dst_is_sharded": x_dst_is_sharded,
+            "keep_x_dst_sharded": keep_x_dst_sharded,
+        }
 
-        return checkpoint(
-            mapper,
-            data,
-            batch_size=batch_size,
-            shard_shapes=shard_shapes,
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=x_src_is_sharded,
-            x_dst_is_sharded=x_dst_is_sharded,
-            keep_x_dst_sharded=keep_x_dst_sharded,
-            use_reentrant=use_reentrant,
-        )
+        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
+            return mapper(data, **kwargs)
+
+        return checkpoint(mapper, data, **kwargs, use_reentrant=use_reentrant)
 
     def forward(
         self,

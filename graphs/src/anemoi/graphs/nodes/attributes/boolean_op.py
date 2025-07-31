@@ -7,13 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Type
-from typing import Union
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -21,7 +19,7 @@ from torch_geometric.data.storage import NodeStorage
 from anemoi.graphs.nodes.attributes.base_attributes import BooleanBaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
-MaskAttributeType = Union[str, Type["BooleanBaseNodeAttribute"]]
+MaskAttributeType = str | Type["BooleanBaseNodeAttribute"]
 
 
 class BooleanOperation(BooleanBaseNodeAttribute, ABC):

@@ -8,13 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import datetime
 import logging
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
 from typing import Any
 
 import hydra
@@ -28,6 +25,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
+from torch_geometric.data import HeteroData
 
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -41,9 +39,6 @@ from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
-
-if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 
@@ -406,7 +401,6 @@ class AnemoiTrainer:
             "Effective learning rate: %.3e",
             int(total_number_of_model_instances) * self.config.training.lr.rate,
         )
-        LOGGER.debug("Rollout window length: %d", self.config.training.rollout.start)
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
             LOGGER.info(

@@ -21,7 +21,7 @@ authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 
-requires-python = ">=3.9,<3.13" # Unable to use 3.13 until pyshtools updates
+requires-python = ">=3.10,<3.13" # Unable to use 3.13 until pyshtools updates
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -29,7 +29,6 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -111,7 +110,7 @@ version_file = "src/anemoi/training/_version.py"
 fallback_version = "0.0.0"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 120
 src = [ "src" ]
 exclude = [ "docs/" ]
@@ -193,6 +192,3 @@ lint.ignore = [
 ]
 lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
 lint.pydocstyle.convention = "numpy"
-# Preserve types, even if a file imports `from __future__ import annotations`.
-# Necessary for supporting PEP 604 and pydantic with python 3.9
-lint.pyupgrade.keep-runtime-typing = true

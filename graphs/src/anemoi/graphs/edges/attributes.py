@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import ABC
@@ -104,7 +103,7 @@ class Azimuth(BasePositionalBuilder):
 
     Attributes
     ----------
-    norm : Optional[str]
+    norm : str | None
         Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
     invert : bool
         Whether to invert the edge lengths, i.e. 1 - edge_length. Defaults to False.

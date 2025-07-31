@@ -7,17 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
+import pytorch_lightning as pl
+import torch
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
-
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    import torch
-    from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 

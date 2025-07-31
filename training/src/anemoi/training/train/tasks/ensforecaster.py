@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 from __future__ import annotations
 
 import logging
@@ -17,9 +16,8 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.inicond import EnsembleInitialConditions
-
-from .forecaster import GraphForecaster
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -31,7 +29,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphEnsForecaster(GraphForecaster):
+class GraphEnsForecaster(BaseGraphModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
     def __init__(
@@ -69,6 +67,14 @@ class GraphEnsForecaster(GraphForecaster):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
+
+        self.rollout = config.training.rollout.start
+        self.rollout_epoch_increment = config.training.rollout.epoch_increment
+        self.rollout_max = config.training.rollout.max
+
+        LOGGER.debug("Rollout window length: %d", self.rollout)
+        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
+        LOGGER.debug("Rollout max : %d", self.rollout_max)
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
         self.model_comm_group_size = config.hardware.num_gpus_per_model
@@ -192,6 +198,37 @@ class GraphEnsForecaster(GraphForecaster):
 
         return loss_inc, y_pred_ens if return_pred_ens else None
 
+    def advance_input(
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        batch: torch.Tensor,
+        rollout_step: int,
+    ) -> torch.Tensor:
+        x = x.roll(-1, dims=1)
+
+        # Get prognostic variables
+        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
+            ...,
+            self.data_indices.model.output.prognostic,
+        ]
+
+        x[:, -1] = self.output_mask.rollout_boundary(
+            x[:, -1],
+            batch[:, self.multi_step + rollout_step],
+            self.data_indices,
+        )
+
+        # get new "constants" needed for time-varying fields
+        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
+            :,
+            self.multi_step + rollout_step,
+            :,
+            :,
+            self.data_indices.data.input.forcing,
+        ]
+        return x
+
     def rollout_step(
         self,
         batch: torch.Tensor,
@@ -207,7 +244,7 @@ class GraphEnsForecaster(GraphForecaster):
         ----------
         batch : torch.Tensor
             Batch to use for rollout
-        rollout : Optional[int], optional
+        rollout : int, optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
         training_mode : bool, optional
@@ -219,7 +256,7 @@ class GraphEnsForecaster(GraphForecaster):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+        Generator[tuple[torch.Tensor | None, dict, list], None, None]
             Loss value, metrics, and predictions (per step)
 
         Returns
@@ -371,6 +408,12 @@ class GraphEnsForecaster(GraphForecaster):
         )
 
         return train_loss
+
+    def on_train_epoch_end(self) -> None:
+        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
+            self.rollout += 1
+            LOGGER.debug("Rollout window length: %d", self.rollout)
+        self.rollout = min(self.rollout, self.rollout_max)
 
     def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Perform a validation step.

@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import asyncio
 import copy
 import logging
@@ -22,16 +20,20 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 import matplotlib.animation as animation
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
+import pytorch_lightning as pl
 import torch
+from matplotlib.colors import Colormap
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
@@ -43,16 +45,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
-
-if TYPE_CHECKING:
-    from typing import Any
-
-    import pytorch_lightning as pl
-    from matplotlib.colors import Colormap
-    from omegaconf import OmegaConf
-
-    from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -98,7 +91,7 @@ class BasePlotCallback(Callback, ABC):
     @rank_zero_only
     def _output_figure(
         self,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
         fig: plt.Figure,
         epoch: int,
         tag: str = "gnn",
@@ -129,7 +122,7 @@ class BasePlotCallback(Callback, ABC):
     @rank_zero_only
     def _output_gif(
         self,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
         fig: plt.Figure,
         anim: animation.ArtistAnimation,
         epoch: int,
@@ -508,7 +501,7 @@ class LongRolloutPlots(BasePlotCallback):
         y_pred: torch.Tensor,
         batch_idx: int,
         epoch: int,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
     ) -> None:
         """Plot the predicted output, input, true target and error plots for a given rollout step."""
         # prepare true output tensor for plotting
@@ -568,7 +561,7 @@ class LongRolloutPlots(BasePlotCallback):
         rollout_step: int,
         batch_idx: int,
         epoch: int,
-        logger: pl.loggers.base.LightningLoggerBase,
+        logger: pl.loggers.logger.Logger,
         animation_interval: int = 400,
     ) -> None:
         """Generate the video animation for the rollout."""
@@ -814,7 +807,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         # set x-ticks
         x_tick_positions = np.cumsum(group_counts) - group_counts / 2 - 0.5
-        xticks = dict(zip(unique_group_list, x_tick_positions))
+        xticks = dict(zip(unique_group_list, x_tick_positions, strict=False))
 
         legend_patches = []
         for group_idx, group in enumerate(unique_group_list):
@@ -840,7 +833,7 @@ class PlotLoss(BasePerBatchPlotCallback):
     def _plot(
         self,
         trainer: pl.Trainer,
-        pl_module: pl.Lightning_module,
+        pl_module: pl.LightningModule,
         outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
@@ -867,7 +860,9 @@ class PlotLoss(BasePerBatchPlotCallback):
                 RuntimeWarning,
             )
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+
+        for rollout_step in range(rollout):
             y_hat = outputs[1][rollout_step]
             y_true = batch[
                 :,
@@ -989,7 +984,9 @@ class PlotSample(BasePerBatchPlotCallback):
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+
+        for rollout_step in range(rollout):
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
                 self.per_sample,
@@ -1097,7 +1094,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
         data, output_tensor = self.process(pl_module, outputs, batch)
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+        for rollout_step in range(rollout):
             # Build dictionary of inidicies and parameters to be plotted
 
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
@@ -1180,7 +1178,9 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
         data, output_tensor = self.process(pl_module, outputs, batch)
 
-        for rollout_step in range(pl_module.rollout):
+        rollout = getattr(pl_module, "rollout", 0)
+
+        for rollout_step in range(rollout):
 
             # Build dictionary of inidicies and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
