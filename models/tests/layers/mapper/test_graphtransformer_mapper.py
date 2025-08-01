@@ -17,8 +17,8 @@ from torch import nn
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
-from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
+from anemoi.models.layers.mapper.static import GraphTransformerBaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 

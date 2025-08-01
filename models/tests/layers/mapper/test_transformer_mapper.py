@@ -13,7 +13,7 @@ import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.mapper import TransformerBaseMapper
+from anemoi.models.layers.mapper.static import TransformerBaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
 
 
