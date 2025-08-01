@@ -119,3 +119,60 @@ class RolloutEval(Callback):
 
             with context:
                 self._eval(pl_module, batch)
+
+
+class RolloutEvalEns(RolloutEval):
+    """Evaluates the model performance over a (longer) rollout window."""
+
+    def _eval(self, pl_module: pl.LightningModule, batch: torch.Tensor) -> None:
+        """Rolls out the model and calculates the validation metrics.
+
+        Parameters
+        ----------
+        pl_module : pl.LightningModule
+            Lightning module object
+        batch: torch.Tensor
+            Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
+        """
+        loss = torch.zeros(1, dtype=batch[0].dtype, device=pl_module.device, requires_grad=False)
+        assert (
+            batch[0].shape[1] >= self.rollout + pl_module.multi_step
+        ), "Batch length not sufficient for requested rollout length!"
+
+        metrics = {}
+        with torch.no_grad():
+            for loss_next, metrics_next, _, _ in pl_module.rollout_step(
+                batch=batch,
+                rollout=self.rollout,
+                training_mode=True,
+                validation_mode=True,
+            ):
+                loss += loss_next
+                metrics.update(metrics_next)
+
+            # scale loss
+            loss *= 1.0 / self.rollout
+            self._log(pl_module, loss, metrics, batch[0].shape[0])
+
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: list,
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
+        del outputs  # outputs are not used
+        if batch_idx % self.every_n_batches == 0 and pl_module.ens_comm_group_rank == 0:
+            precision_mapping = {
+                "16-mixed": torch.float16,
+                "bf16-mixed": torch.bfloat16,
+            }
+            prec = trainer.precision
+            dtype = precision_mapping.get(prec)
+            context = (
+                torch.autocast(device_type=batch[0].device.type, dtype=dtype) if dtype is not None else nullcontext()
+            )
+
+            with context:
+                self._eval(pl_module, batch)

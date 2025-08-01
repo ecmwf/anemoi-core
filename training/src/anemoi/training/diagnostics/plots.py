@@ -884,6 +884,7 @@ def plot_graph_edge_features(
 
     return fig
 
+
 def plot_rank_histograms(
     parameters: dict[int, str],
     rh: np.ndarray,
@@ -928,8 +929,8 @@ def plot_predicted_ensemble(
     clevels: float,
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    datashader: Optional[bool] = True,
-    initial_condition: Optional[bool] = False,
+    datashader: bool = True,
+    initial_condition: bool = False,
 ) -> Figure:
     """Plots data for one ensemble member.
 
@@ -998,20 +999,17 @@ def plot_predicted_ensemble(
 
 
 def plot_ensemble_sample(
-    fig,
-    ax,
+    fig: Figure,
+    ax: plt.Axes,
     pc_lon: np.ndarray,
     pc_lat: np.ndarray,
     truth: np.ndarray,
     ens_arr: np.ndarray,
     vname: np.ndarray,
-    clevels: float,
     ens_dim: int = 0,
-    datashader: Optional[bool] = True,
+    datashader: bool = True,
     precip_and_related_fields: list | None = None,
-    cmap: Colormap | None = None,
-    error_cmap: Colormap | None = None,    
-    initial_condition: Optional[bool] = False,
+    initial_condition: bool = False,
 ) -> None:
     """Use this when plotting ensembles.
 
@@ -1083,7 +1081,17 @@ def plot_ensemble_sample(
         plot_index = 4
 
         # ensemble mean
-        single_plot(fig, ax[0], pc_lon, pc_lat, truth, cmap=cmap_plt, norm=norm, title=f"{vname[0]} target", datashader=datashader)
+        single_plot(
+            fig,
+            ax[0],
+            pc_lon,
+            pc_lat,
+            truth,
+            cmap=cmap_plt,
+            norm=norm,
+            title=f"{vname[0]} target",
+            datashader=datashader,
+        )
         # ensemble mean
         single_plot(
             fig,

@@ -929,7 +929,43 @@ class PlotLoss(BasePerBatchPlotCallback):
             )
 
 
-class PlotSample(BasePerBatchPlotCallback):
+class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
+    """Base processing class for additional metrics."""
+
+    def process(
+        self,
+        pl_module: pl.LightningModule,
+        outputs: list,
+        batch: torch.Tensor,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        # When running in Async mode, it might happen that in the last epoch these tensors
+        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
+        # but internal ones would be on the cpu), The lines below allow to address this problem
+        if self.post_processors is None:
+            # Copy to be used across all the training cycle
+            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
+        if self.latlons is None:
+            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+
+        input_tensor = batch[
+            self.sample_idx,
+            pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+            ...,
+            pl_module.data_indices.data.output.full,
+        ].cpu()
+
+        data = self.post_processors(input_tensor)
+        output_tensor = self.post_processors(
+            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in outputs[1])),
+            in_place=False,
+        )
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
+        data = data.numpy()
+        return data, output_tensor
+
+
+class PlotSample(BasePlotAdditionalMetrics):
     """Plots a post-processed sample: input, target and prediction."""
 
     def __init__(
@@ -1002,33 +1038,10 @@ class PlotSample(BasePerBatchPlotCallback):
             for name in self.parameters
         }
 
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
+        data, output_tensor = self.process(pl_module, outputs, batch)
+
         local_rank = pl_module.local_rank
-
-        input_tensor = (
-            batch[
-                :,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data = self.post_processors(input_tensor)[self.sample_idx]
-        output_tensor = torch.cat(
-            tuple(
-                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
-                for x in outputs[1]
-            ),
-        )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
-
         rollout = getattr(pl_module, "rollout", 0)
-
         for rollout_step in range(rollout):
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
