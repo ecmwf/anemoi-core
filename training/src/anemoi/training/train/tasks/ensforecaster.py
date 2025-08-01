@@ -300,6 +300,7 @@ class GraphEnsForecaster(BaseGraphModule):
                 self.ens_comm_subgroup_size,
                 self.ens_comm_subgroup,
                 self.model_comm_group,
+                validation_mode,
                 use_reentrant=False,
             )
 
