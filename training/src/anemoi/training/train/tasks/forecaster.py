@@ -98,6 +98,34 @@ class GraphForecaster(BaseGraphModule):
             LOGGER.debug("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
 
+    def on_after_batch_transfer(self, batch: torch.Tensor, dataloader_idx: int) -> torch.Tensor:
+        """Assemble batch after transfer to GPU and apply preprocessing.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to transfer
+        dataloader_idx : int
+            Dataloader index
+
+        Returns
+        -------
+        torch.Tensor
+            Batch after transfer and preprocessing
+        """
+        # First handle batch gathering/sharding from parent class
+        batch = super().on_after_batch_transfer(batch, dataloader_idx)
+
+        # Apply preprocessing (normalization) to the batch
+        self.model.pre_processors(batch)  # normalized in-place
+
+        # Initialize delayed scalers after first preprocessing
+        if self.is_first_step:
+            self.define_delayed_scalers()
+            self.is_first_step = False
+
+        return batch
+
     def advance_input(
         self,
         x: torch.Tensor,
@@ -133,23 +161,17 @@ class GraphForecaster(BaseGraphModule):
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
         """Rollout step for the forecaster.
 
-        Will run pre_processors on batch, but not post_processors on predictions.
-
         Parameters
         ----------
         batch : torch.Tensor
-            Batch to use for rollout
+            Batch to use for rollout (assumed to be already preprocessed)
         rollout : Optional[int], optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -160,13 +182,6 @@ class GraphForecaster(BaseGraphModule):
             Loss value, metrics, and predictions (per step)
 
         """
-        batch = self.model.pre_processors(batch)  # normalized in-place
-
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.define_delayed_scalers()
-            self.is_first_step = False
-
         # start rollout of preprocessed batch
         x = batch[
             :,
@@ -191,7 +206,6 @@ class GraphForecaster(BaseGraphModule):
                 y_pred,
                 y,
                 rollout_step,
-                training_mode,
                 validation_mode,
                 use_reentrant=False,
             )
@@ -215,7 +229,6 @@ class GraphForecaster(BaseGraphModule):
         for loss_next, metrics_next, y_preds_next in self.rollout_step(
             batch,
             rollout=self.rollout,
-            training_mode=True,
             validation_mode=validation_mode,
         ):
             loss += loss_next

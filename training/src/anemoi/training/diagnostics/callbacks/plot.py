@@ -446,8 +446,7 @@ class LongRolloutPlots(BasePlotCallback):
                 pl_module.rollout_step(
                     batch,
                     rollout=self.max_rollout,
-                    validation_mode=False,
-                    training_mode=False,
+                    validation_mode=True,
                 ),
             ):
                 # plot only if the current rollout step is in the list of rollout steps
