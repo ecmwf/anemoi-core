@@ -233,23 +233,17 @@ class GraphEnsForecaster(BaseGraphModule):
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
         """Rollout step for the forecaster.
 
-        Will run pre_processors on batch, but not post_processors on predictions.
-
         Parameters
         ----------
         batch : torch.Tensor
-            Batch to use for rollout
+            Batch to use for rollout (assumed to be already preprocessed)
         rollout : int, optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -264,19 +258,11 @@ class GraphEnsForecaster(BaseGraphModule):
         None
             None
         """
-        # for validation not normalized in-place because remappers cannot be applied in-place
-        batch[0] = self.model.pre_processors(batch[0], in_place=not validation_mode)
-
         x = self.ensemble_ic_generator(
             batch[0],
-            self.model.pre_processors(batch[1], in_place=not validation_mode) if len(batch) == 2 else None,
+            batch[1] if len(batch) == 2 else None,
         )
         LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(x.shape))
-
-        # Scalers which are delayed need to be initialized after the pre-processors
-        if self.is_first_step:
-            self.define_delayed_scalers()
-            self.is_first_step = False
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -304,20 +290,16 @@ class GraphEnsForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, y_pred_ens_group = (
-                checkpoint(
-                    self.gather_and_compute_loss,
-                    y_pred,
-                    y,
-                    self.loss,
-                    self.ens_comm_subgroup_size,
-                    self.ens_comm_subgroup,
-                    self.model_comm_group,
-                    validation_mode,
-                    use_reentrant=False,
-                )
-                if training_mode
-                else None
+            loss, y_pred_ens_group = checkpoint(
+                self.gather_and_compute_loss,
+                y_pred,
+                y,
+                self.loss,
+                self.ens_comm_subgroup_size,
+                self.ens_comm_subgroup,
+                self.model_comm_group,
+                validation_mode,
+                use_reentrant=False,
             )
 
             x = self.advance_input(x, y_pred, batch[0], rollout_step)
@@ -331,6 +313,38 @@ class GraphEnsForecaster(BaseGraphModule):
                     grid_shard_slice=self.grid_shard_slice,
                 )
             yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
+
+    def on_after_batch_transfer(self, batch: torch.Tensor, dataloader_idx: int) -> torch.Tensor:
+        """Assemble batch after transfer to GPU and apply preprocessing for ensemble batches.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to transfer (tuple for ensemble)
+        dataloader_idx : int
+            Dataloader index
+
+        Returns
+        -------
+        torch.Tensor
+            Batch after transfer and preprocessing
+        """
+        # First handle batch gathering/sharding from parent class
+        batch = super().on_after_batch_transfer(batch, dataloader_idx)
+
+        # Apply preprocessing (normalization) to the ensemble batch
+        self.model.pre_processors(batch[0])  # normalized in-place
+
+        # If we have EDA perturbations, preprocess them too
+        if len(batch) == 2:
+            self.model.pre_processors(batch[1])
+
+        # Initialize delayed scalers after first preprocessing
+        if self.is_first_step:
+            self.define_delayed_scalers()
+            self.is_first_step = False
+
+        return batch
 
     def _step(
         self,
@@ -354,7 +368,6 @@ class GraphEnsForecaster(BaseGraphModule):
         for loss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
             batch,
             rollout=self.rollout,
-            training_mode=True,
             validation_mode=validation_mode,
         ):
             loss += loss_next

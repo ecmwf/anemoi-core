@@ -339,14 +339,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         rollout_step: int = 0,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> torch.Tensor:
         is_sharded = self.grid_shard_slice is not None
 
-        sharding_supported = (self.loss_supports_sharding or not training_mode) and (
-            self.metrics_support_sharding or not validation_mode
-        )
+        sharding_supported = self.loss_supports_sharding and (self.metrics_support_sharding or not validation_mode)
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
             shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, self.grid_shard_shapes)
             y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
@@ -356,15 +353,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y_pred_full, y_full = y_pred, y
             grid_shard_slice = self.grid_shard_slice
 
-        loss = (
-            self.loss(
-                y_pred_full,
-                y_full,
-                grid_shard_slice=grid_shard_slice,
-                group=self.model_comm_group,
-            )
-            if training_mode
-            else None
+        loss = self.loss(
+            y_pred_full,
+            y_full,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
         )
 
         metrics_next = {}
@@ -380,6 +373,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
+
+        Also normalize the batch in-place if needed.
 
         Parameters
         ----------
