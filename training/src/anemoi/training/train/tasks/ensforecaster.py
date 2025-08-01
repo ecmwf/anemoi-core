@@ -292,20 +292,15 @@ class GraphEnsForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, y_pred_ens_group = (
-                checkpoint(
-                    self.gather_and_compute_loss,
-                    y_pred,
-                    y,
-                    self.loss,
-                    self.ens_comm_subgroup_size,
-                    self.ens_comm_subgroup,
-                    self.model_comm_group,
-                    validation_mode,
-                    use_reentrant=False,
-                )
-                if not validation_mode
-                else None
+            loss, y_pred_ens_group = checkpoint(
+                self.gather_and_compute_loss,
+                y_pred,
+                y,
+                self.loss,
+                self.ens_comm_subgroup_size,
+                self.ens_comm_subgroup,
+                self.model_comm_group,
+                use_reentrant=False,
             )
 
             x = self.advance_input(x, y_pred, batch[0], rollout_step)
