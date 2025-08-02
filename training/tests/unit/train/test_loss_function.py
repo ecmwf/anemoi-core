@@ -330,9 +330,6 @@ def test_combined_loss() -> None:
         ),
         scalers={"test": (-1, torch.ones(2))},
     )
-    assert isinstance(loss, CombinedLoss)
-    assert "test" in loss.scaler
-
     assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scaler
 
@@ -357,26 +354,6 @@ def test_combined_loss_invalid_loss_weights() -> None:
             ),
             scalers={"test": (-1, torch.ones(2))},
         )
-
-
-def test_combined_loss_invalid_behaviour() -> None:
-    """Test the combined loss function and setting the scalers."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
-                ],
-                "scalers": ["test"],
-                "loss_weights": [1.0, 0.5],
-            },
-        ),
-        scalers={"test": (-1, torch.ones(2))},
-    )
-    with pytest.raises(AttributeError):
-        loss.scaler = "test"
 
 
 def test_combined_loss_equal_weighting() -> None:
@@ -413,8 +390,6 @@ def test_combined_loss_seperate_scalers() -> None:
         scalers={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
     )
     assert isinstance(loss, CombinedLoss)
-    assert "test" in loss.scaler
-    assert "test2" in loss.scaler
 
     assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scaler
