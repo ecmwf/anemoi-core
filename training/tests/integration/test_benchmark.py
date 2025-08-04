@@ -21,6 +21,11 @@ from anemoi.training.train.profiler import AnemoiProfiler
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import skip_if_offline
 
+import json
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
+import subprocess
+
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
 
@@ -59,6 +64,36 @@ def open_log_file(filename):
                 break
     return float(result)
 
+def set_performance_metrics(metrics):
+    """
+    Send performance metrics to a remote server via ssh.
+
+    Parameters:
+    - metrics (dict): A dictionary with benchmark names as keys and their values (e.g. {"avThroughputIterPerS": 10.5})
+    """
+
+    for benchmark, value in metrics.items():
+         upload_metric_via_scp(benchmark, value)
+
+def upload_metric_via_scp(metric_name, value):
+    local_file = f"/tmp/{metric_name}"
+    with open(local_file, "w") as f:
+        f.write(str(value))
+
+    remote_path="/home/data/public/anemoi-integration-tests/training/benchmarks"
+    host="data@anemoi.ecmwf.int"
+    scp_cmd = [
+        "scp",
+        local_file,
+        f"{host}:{remote_path}/{metric_name}"
+    ]
+    LOGGER.debug(f"Scp command: {scp_cmd}")
+
+    try:
+        subprocess.run(scp_cmd, check=True)
+        LOGGER.debug(f"Uploaded {metric_name} to {host}")
+    except subprocess.CalledProcessError as e:
+        print(f"SCP failed: {e}")
 
 # reads a remote server to get past performance metrics to compare against
 def get_performance_metrics():
@@ -66,8 +101,6 @@ def get_performance_metrics():
     # ls public/anemoi-integration-tests/training/benchmarks/
     #    avThroughputIterPerS  avTimePerBatchS  peakMemoryMB
     # https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr.tgz
-
-    from urllib.request import urlopen
 
     results = {}
     base_url = "https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
@@ -78,7 +111,6 @@ def get_performance_metrics():
         data = urlopen(url)  # it's a file like object and works just like a file
         for line in data:  # files are iterable
             line = float(line.strip())
-            # print(line)
             results[benchmark] = line
 
     return results
@@ -95,14 +127,14 @@ def get_performance_metrics():
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],
     get_test_archive: callable,
-    update_data=False,
+    update_data=True,
 ) -> None:
     cfg, urls = benchmark_config
     for url in urls:
         get_test_archive(url)
 
     results = get_performance_metrics()
-    print(f"Performance benchmarks from server:\n{results}")
+    LOGGER.debug(f"Performance benchmarks from server:\n{results}")
 
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
@@ -117,32 +149,31 @@ def test_benchmark_training_cycle(
     print(f"Av. training batch time: {av_training_batch_time_s:.2f}s")
     print(f"Av. training throughput: {av_training_throughput:.2f}iter/s")
 
-    if peak_active_mem_mb > results["peakMemoryMB"]:
-        raise ValueError(
-            f"Peak memory usage {peak_active_mem_mb:.3f}MB is greater than current benchmark peak of {results['peakMemoryMB']:.3f}MB",
-        )
-    print(
-        f"Peak memory usage of {peak_active_mem_mb:.3f}MB is equal to or less than current benchamrk peak of  {peak_active_mem_mb:.3f}MB",
-    )
-
-    throuhput_tolerance_percent = 5
-    throughput_upper_bound = results["avThroughputIterPerS"] * (100 + throuhput_tolerance_percent) / 100
-    if av_training_throughput < throughput_upper_bound:
-        raise ValueError(
-            f"Average throughput of {av_training_throughput:.2f}iter/s is less than current benchmark throughput of {av_training_throughput:.2f}iter/s",
-        )
-    print(
-        f"Average throughput of {av_training_throughput:.2f}iter/s is higher than or equal to the current benchmark throughput of { throughput_upper_bound:.2f}iter/s",
-    )
-    batch_time_tolerance_percent = 5
-    batch_time_upper_bound = results["avTimePerBatchS"] * (100 + batch_time_tolerance_percent) / 100
-    if av_training_batch_time_s > batch_time_upper_bound:
-        raise ValueError(
-            f"Average time per batch of {av_training_batch_time_s:.2f}s is higher than current benchmark time of {batch_time_upper_bound:.2f}s",
-        )
-    print(
-        f"Average time per batch of {av_training_batch_time_s:.2f}s is less than or equal to than current benchmark time of {batch_time_upper_bound:.2f}s",
-    )
+    # either update the data on the server, or compare it against existing results
     if update_data:
-        pass
+        metrics={"avThroughputIterPerS":av_training_throughput, "avTimePerBatchS": av_training_batch_time_s, "peakMemoryMB": peak_active_mem_mb}
+        print(f"Updating metrics on server with {metrics}")
+        set_performance_metrics(metrics)
+    else:
+        if peak_active_mem_mb > results["peakMemoryMB"]:
+            raise ValueError(
+                f"Peak memory usage {peak_active_mem_mb:.3f}MB is greater than current benchmark peak of {results['peakMemoryMB']:.3f}MB",
+            )
+        else:
+            print(f"Peak memory usage of {peak_active_mem_mb:.3f}MB is equal to or less than current benchamrk peak of  {results['peakMemoryMB']:.3f}MB")
+
+        throuhput_tolerance_percent = 5
+        throughput_upper_bound = results["avThroughputIterPerS"] * (100 + throuhput_tolerance_percent) / 100
+        if av_training_throughput < throughput_upper_bound:
+            raise ValueError(
+                f"Average throughput of {av_training_throughput:.2f}iter/s is less than current benchmark throughput of {av_training_throughput:.2f}iter/s",
+            )
+        else:
+            print(f"Average throughput of {av_training_throughput:.2f}iter/s is higher than or equal to the current benchmark throughput of { throughput_upper_bound:.2f}iter/s")
+        batch_time_tolerance_percent = 5
+        batch_time_upper_bound = results["avTimePerBatchS"] * (100 + batch_time_tolerance_percent) / 100
+        if av_training_batch_time_s > batch_time_upper_bound:
+            raise ValueError(f"Average time per batch of {av_training_batch_time_s:.2f}s is higher than current benchmark time of {batch_time_upper_bound:.2f}s")
+        else:
+            print(f"Average time per batch of {av_training_batch_time_s:.2f}s is less than or equal to than current benchmark time of {batch_time_upper_bound:.2f}s")
 
