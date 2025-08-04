@@ -16,15 +16,13 @@ from omegaconf import DictConfig
 from torch.cuda import memory_stats
 from torch.cuda import reset_peak_memory_stats
 
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.profiler import AnemoiProfiler
-from anemoi.training.train.train import AnemoiTrainer
-from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
 
 LOGGER = logging.getLogger(__name__)
+
 
 # return_val = value for speed profiler or 'avg_time' for time_profiler
 def open_log_file(filename):
@@ -145,4 +143,3 @@ def test_benchmark_training_cycle(
     )
     if update_data:
         pass
-
