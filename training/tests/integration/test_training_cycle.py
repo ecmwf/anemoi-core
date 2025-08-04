@@ -58,7 +58,8 @@ def test_training_cycle_without_config_validation(
 @skip_if_offline
 @pytest.mark.longtests
 def test_training_cycle_stretched(
-    stretched_config: tuple[DictConfig, list[str]], get_test_archive: GetTestArchive,
+    stretched_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
 ) -> None:
     cfg, urls = stretched_config
     for url in urls:
@@ -157,7 +158,8 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
 @skip_if_offline
 @pytest.mark.longtests
 def test_restart_from_existing_checkpoint(
-    gnn_config_with_checkpoint: tuple[DictConfig, str], get_test_archive: GetTestArchive,
+    gnn_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
 ) -> None:
     cfg, url = gnn_config_with_checkpoint
     get_test_archive(url)
@@ -167,7 +169,8 @@ def test_restart_from_existing_checkpoint(
 @skip_if_offline
 @pytest.mark.longtests
 def test_training_cycle_interpolator(
-    interpolator_config: tuple[DictConfig, str], get_test_archive: GetTestArchive,
+    interpolator_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
 ) -> None:
     """Full training-cycle smoke-test for the temporal interpolation task."""
     cfg, url = interpolator_config
