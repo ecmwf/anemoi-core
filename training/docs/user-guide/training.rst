@@ -497,10 +497,26 @@ run_id. The user might want to do this if they want to start multiple
 new runs from 1 old run.
 
 The above will restart the model training from where the old run
-finished training. However if the user wants to restart the model from a
-specific point they can do this by setting
-``config.hardware.files.warm_start`` to be the checkpoint they want to
-restart from..
+finished training. It's also possible to restart the model training from
+a specific checkpoint. This can either be a checkpoint from the same run
+or a checkpoint from a different run that you have run in the past or
+that you using for transfer learning. To do this, set
+``config.hardware.files.warm_start`` to be the checkpoint filename they
+want to restart from and ``config.hardware.paths.warm_start`` to be the
+path to the checkpoint. See the example below.
+
+.. code:: yaml
+
+   # This is a sample YAML block
+   hardware:
+      files:
+         warm_start: checkpoint_epoch_10.ckpt
+      paths:
+         warm_start: /path/to/checkpoint/folder/
+
+The above can be adapted depending on the use case and taking advantage
+of hydra, you can also reuse ``config.training.run_id`` or
+``config.training.fork_run_id`` to define the path to the checkpoint.
 
 *******************
  Transfer Learning

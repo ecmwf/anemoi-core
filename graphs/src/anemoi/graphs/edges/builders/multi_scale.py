@@ -10,7 +10,6 @@
 
 import importlib
 import logging
-from typing import Type
 
 import networkx as nx
 import numpy as np
@@ -72,7 +71,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
         self.scale_resolutions = scale_resolutions
 
     @staticmethod
-    def get_edge_builder_class(node_type: str) -> Type[BaseIcosahedronEdgeStrategy]:
+    def get_edge_builder_class(node_type: str) -> type[BaseIcosahedronEdgeStrategy]:
         # All node builders inheriting from IcosahedronNodes have an attribute multi_scale_edge_cls
         module = importlib.import_module("anemoi.graphs.nodes.builders.from_refined_icosahedron")
         node_cls = getattr(module, node_type, None)
