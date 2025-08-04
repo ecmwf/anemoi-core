@@ -303,10 +303,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
-    def define_delayed_scalers(self) -> None:
-        """Update delayed scalers such as the loss weights mask for imputed variables."""
+    def define_delayed_scalers(self, use_processors_tendencies: bool = False) -> None:
+        """Update delayed scalers such as the loss weights mask for imputed variables.
+
+        Parameters
+        ----------
+        use_processors_tendencies : bool, optional
+            Whether to include pre_processors_tendencies in the scalers. Default is False.
+        """
         for name, scaler_builder in self.delayed_scaler_builders.items():
-            self.scalers[name] = scaler_builder.get_delayed_scaling(model=self.model)
+            # Collect processors from the model
+            processors = []
+            processors.extend(self.model.pre_processors.processors.values())
+            if use_processors_tendencies and hasattr(self.model, "pre_processors_tendencies"):
+                processors.extend(self.model.pre_processors_tendencies.processors.values())
+
+            self.scalers[name] = scaler_builder.get_delayed_scaling(processors)
             self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
 
     def set_model_comm_group(

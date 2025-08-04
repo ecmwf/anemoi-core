@@ -14,7 +14,7 @@ from abc import abstractmethod
 
 import numpy as np
 
-from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.preprocessing import BasePreprocessor
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
@@ -91,8 +91,8 @@ class BaseDelayedScaler(BaseScaler):
     @abstractmethod
     def get_delayed_scaling_values(self, **kwargs) -> np.ndarray: ...
 
-    def get_delayed_scaling(self, model: AnemoiModelInterface) -> SCALER_DTYPE:
-        scaler_values = self.get_delayed_scaling_values(model)
+    def get_delayed_scaling(self, processors: list[BasePreprocessor]) -> SCALER_DTYPE:
+        scaler_values = self.get_delayed_scaling_values(processors)
         scaler_values = self.normalise(scaler_values)
         scale_dims = tuple(x.value for x in self.scale_dims)
         return scale_dims, scaler_values

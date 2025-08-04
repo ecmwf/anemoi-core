@@ -12,7 +12,7 @@ import logging
 
 import numpy as np
 
-from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.preprocessing import BasePreprocessor
 from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
 from anemoi.training.utils.enums import TensorDim
 
@@ -37,22 +37,22 @@ class NaNMaskScaler(BaseDelayedScaler):
     def get_scaling_values(self) -> np.ndarray:
         return np.ones(tuple([1] * len(self.scale_dims)))
 
-    # SL: why does this go via numpy and cpu??? Here we should pass the processors directly instead of the model
-    def get_delayed_scaling_values(self, model: AnemoiModelInterface) -> np.ndarray:
+    def get_delayed_scaling_values(self, processors: list[BasePreprocessor]) -> np.ndarray:
         """Get loss scaling.
 
-        Get  mask multiplying NaN locations with zero.
+        Get mask multiplying NaN locations with zero.
         At this stage, returns a loss slicing mask with all values set to 1.
         When calling the imputer for the first time, the NaN positions are available.
         Before first application of loss function, the mask is replaced.
+
+        Parameters
+        ----------
+        processors : list[BasePreprocessor]
+            List of pre-processors to check for loss_mask_training attribute.
         """
         loss_weights_mask = np.ones((1, 1))
-        # iterate over all pre-processors and check if they have a loss_mask_training attribute
-        for pre_processor in model.pre_processors.processors.values():
+        # iterate over all provided pre-processors and check if they have a loss_mask_training attribute
+        for pre_processor in processors:
             if hasattr(pre_processor, "loss_mask_training"):
                 loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training.cpu().numpy()
-        if hasattr(model, "pre_processors_tendencies"):
-            for pre_processor in model.pre_processors_tendencies.processors.values():
-                if hasattr(pre_processor, "loss_mask_training"):
-                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training.cpu().numpy()
         return loss_weights_mask

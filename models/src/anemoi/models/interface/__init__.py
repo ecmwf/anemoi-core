@@ -130,8 +130,8 @@ class AnemoiModelInterface(torch.nn.Module):
             Input batched data.
         model_comm_group : Optional[ProcessGroup], optional
             model communication group, specifies which GPUs work together
-        gather_out : str | None, optional
-            Specifies how to gather the output, by default None.
+        gather_out : bool, optional
+            Whether to gather the output, by default True.
 
         Returns
         -------
