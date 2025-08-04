@@ -24,6 +24,8 @@ from urllib.error import URLError, HTTPError
 import subprocess
 from datetime import date
 import operator
+import pandas as pd
+import io 
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -50,6 +52,10 @@ class BenchmarkValue():
 
     def __str__(self):
         return f"{self.name}: {self.value}{self.unit}"
+
+    #header="testName,unit,date,commit,value" 
+    def to_csv(self):
+        return f"{self.name},{self.unit},{self.date},{self.commit},{self.value}"
 
 class BenchmarkServer():
     def __init__(self, 
@@ -91,8 +97,10 @@ class BenchmarkServer():
             if self.local:
                 local_file = f"./server/{benchmarkName}"
                 try:
-                    with open(local_file, "r") as f:
-                        data=f.read()
+                    df = pd.read_csv(local_file)
+                    #with open(local_file, "r") as f:
+                        #data=f.read()
+
                 except FileNotFoundError as e:
                     print(f"Could not open file at {local_file}. Got error {e}")
                     return None
@@ -100,14 +108,16 @@ class BenchmarkServer():
                 url = f"{self.get_url}/{benchmarkName}"
                 print(f"Fetching benchmark data from {url}...")
                 try:
-                    data = urlopen(url)  # it's a file like object and works just like a file
+                    df = pandas.read_csv(url) #requires pandas 0.19.2, see comments for alternative
+                    #data = urlopen(url)  
+                    #df=pd.read_csv(io.StringIO(data))
                 except URLError as e: #TODO test this
                     print(f"Could not open file at {url}. Got error {e}")
                     return None
-            for line in data:  # files are iterable
-                value = float(line.strip())
 
-            benchmarkValue = BenchmarkValue(name=benchmarkName,value=value, unit="", date="", commit="")
+            #header="testName,unit,date,commit,value"
+            assert df["testName"].iloc[-1] == benchmarkName
+            benchmarkValue = BenchmarkValue(name=benchmarkName,value=df["value"].iloc[-1], unit=df["unit"].iloc[-1], date=df["date"].iloc[-1], commit=df["commit"].iloc[-1])
             LOGGER.debug( benchmarkValue)
             #update dict of results
             self.benchmarkValues[benchmarkValue.name] = benchmarkValue
@@ -186,10 +196,15 @@ class BenchmarkServer():
         #    raise ValueError(f"Error. couldn't find an existing benchmark result for {benchmarkValue.name}")
 
         #update remote server with new value
+
+        header="testName,unit,date,commit,value"
+        #TODO append to existing file, but never apend header
+        #if file doesnt exist, write header
+        #append line
         local_file = f"./{value.name}"
         with open(local_file, "w") as f:
-            f.write(str(value.value))
-
+            f.write(header + "\n")
+            f.write(value.to_csv() + "\n")
 
         cp_cmd = [
             "scp",
