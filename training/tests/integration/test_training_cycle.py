@@ -13,11 +13,8 @@ from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
-from torch.cuda import memory_stats
-from torch.cuda import reset_peak_memory_stats
 
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.train.profiler import AnemoiProfiler
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import skip_if_offline
 
@@ -108,6 +105,7 @@ def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_te
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
     BaseSchema(**cfg)
+
 
 @skip_if_offline
 @pytest.mark.longtests

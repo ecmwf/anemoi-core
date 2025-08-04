@@ -196,6 +196,7 @@ def gnn_config(
     OmegaConf.resolve(cfg)
     return cfg
 
+
 @pytest.fixture
 def benchmark_config(
     testing_modifications_with_temp_dir: OmegaConf,
@@ -203,7 +204,7 @@ def benchmark_config(
 ) -> tuple[OmegaConf, str]:
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
-        #to run with this, you need to remove 'shard_strategy' from the GT config
+        # to run with this, you need to remove 'shard_strategy' from the GT config
         template = compose(config_name="config", overrides=["model=graphtransformer", "graph=multi_scale"])
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/benchmark.yaml")

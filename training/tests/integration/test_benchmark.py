@@ -16,10 +16,7 @@ from omegaconf import DictConfig
 from torch.cuda import memory_stats
 from torch.cuda import reset_peak_memory_stats
 
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.profiler import AnemoiProfiler
-from anemoi.training.train.train import AnemoiTrainer
-from anemoi.utils.testing import skip_if_offline
 
 import json
 from urllib.request import Request, urlopen
@@ -284,4 +281,3 @@ def test_benchmark_training_cycle(
 
         if len(failedTests) > 0:
             on_test_fail(f"The following tests failed: {failedTests}")
-            
