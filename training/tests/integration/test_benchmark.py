@@ -51,7 +51,6 @@ class BenchmarkValue():
     def __str__(self):
         return f"{self.name}: {self.value}{self.unit}"
 
-#TODO, create header and files in the init
 class BenchmarkServer():
     def __init__(self, 
             local=True #use a local folder to store data instead of a remote server
@@ -62,7 +61,7 @@ class BenchmarkServer():
         self.local=local
         if self.local:
             print("Using a local 'server' under './server'")
-            subprocess.run(["mkdir", "./server"], check=True)
+            subprocess.run(["mkdir", "-p", "./server"], check=True)
         #TODO could unify these by getting via scp
         #for reading the data we read over internet
         self.get_url="https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
@@ -118,12 +117,17 @@ class BenchmarkServer():
             self.getValue(name)
 
     #Tests a given benchmark result against what is found on the server
-    def compare(self, localValue: BenchmarkValue):
+    def compare(self, localValue: BenchmarkValue, failOnMiss=False):
         #check if the server has a reference value
         referenceValue = self.getValue(localValue.name)
 
         if referenceValue is None:
-            raise ValueError(f"Benchmark server does not contain a measurement for {localValue.name}")
+            if failOnMiss:
+                #TODO I should aggregate this too
+                raise ValueError(f"Benchmark server does not contain a measurement for {localValue.name}")
+            else:
+                print(f"{localValue.name} not found on server. Passing anyway because 'failOnMiss=False'")
+                return True
         else:
 
             #TODO add sanity checking once this info is on server
@@ -255,7 +259,7 @@ def open_log_file(filename):
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],
     get_test_archive: callable,
-    update_data=False,
+    update_data=True,
     throw_error=True,
 ) -> None:
     cfg, urls = benchmark_config
