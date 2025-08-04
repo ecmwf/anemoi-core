@@ -51,10 +51,18 @@ class BenchmarkValue():
     def __str__(self):
         return f"{self.name}: {self.value}{self.unit}"
 
+#TODO, create header and files in the init
 class BenchmarkServer():
-    def __init__(self):
+    def __init__(self, 
+            local=True #use a local folder to store data instead of a remote server
+            ):
         self.benchmarkValues={}
 
+
+        self.local=local
+        if self.local:
+            print("Using a local 'server' under './server'")
+            subprocess.run(["mkdir", "./server"], check=True)
         #TODO could unify these by getting via scp
         #for reading the data we read over internet
         self.get_url="https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
@@ -81,9 +89,22 @@ class BenchmarkServer():
             LOGGER.debug(f"entry for {benchmarkName} found locally, not retrieving from server")
             return self.benchmarkValues[benchmarkName]
         else:
-            url = f"{self.get_url}/{benchmarkName}"
-            print(f"Fetching benchmark data from {url}...")
-            data = urlopen(url)  # it's a file like object and works just like a file
+            if self.local:
+                local_file = f"./server/{benchmarkName}"
+                try:
+                    with open(local_file, "r") as f:
+                        data=f.read()
+                except FileNotFoundError as e:
+                    print(f"Could not open file at {local_file}. Got error {e}")
+                    return None
+            else:
+                url = f"{self.get_url}/{benchmarkName}"
+                print(f"Fetching benchmark data from {url}...")
+                try:
+                    data = urlopen(url)  # it's a file like object and works just like a file
+                except URLError as e: #TODO test this
+                    print(f"Could not open file at {url}. Got error {e}")
+                    return None
             for line in data:  # files are iterable
                 value = float(line.strip())
 
@@ -115,7 +136,7 @@ class BenchmarkServer():
             comp=localValue.op
             
             refVal=referenceValue.value
-            localVal=localValue.value
+            localVal=cplocalValue.value
             tolerance=localValue.tolerance
 
             #This code is complicated because we need to account for
@@ -165,26 +186,32 @@ class BenchmarkServer():
         with open(local_file, "w") as f:
             f.write(str(value.value))
 
-        scp_cmd = [
+
+        cp_cmd = [
             "scp",
             local_file,
             f"{self.set_host}:{self.set_remote_path}/{value.name}"
         ]
+        if self.local:
+            cp_cmd = ["cp", local_file, "./server/"]
         cleanup_cmd = [
             "rm",
             local_file,
                 ]
-        LOGGER.debug(f"Scp command: {scp_cmd}")
+        LOGGER.debug(f"cp command: {cp_cmd}")
 
         try:
-            subprocess.run(scp_cmd, check=True)
+            subprocess.run(cp_cmd, check=True)
             LOGGER.debug(f"Uploaded {value.name} to {self.set_host}")
             subprocess.run(cleanup_cmd, check=True)
         except subprocess.CalledProcessError as e:
-            print(f"SCP failed: {e}")
+            print(f"cp failed: {e}")
 
         #update dict of results
         self.benchmarkValues[value.name] = value
+
+def get_git_revision_hash() -> str:
+    return subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
 
 def raise_error(x):
     raise ValueError(x)
@@ -235,7 +262,6 @@ def test_benchmark_training_cycle(
     for url in urls:
         get_test_archive(url)
 
-
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
@@ -246,10 +272,12 @@ def test_benchmark_training_cycle(
     av_training_batch_time_s = open_log_file("time_profiler.csv")
 
     #create Benchmark value objects
+    commit=get_git_revision_hash() #TODO check what happens if this cant find git hash
+    yyyy_mm_dd=date.today().strftime('%Y-%m-%d')
     localBenchmarkResults=[]
-    localBenchmarkResults.append(BenchmarkValue(name="avThroughputIterPerS", value=av_training_throughput, unit="iter/s", date="", commit="", op=operator.lt, tolerance=5))
-    localBenchmarkResults.append(BenchmarkValue(name="avTimePerBatchS", value=av_training_batch_time_s, unit="s", date="", commit="", tolerance=5))
-    localBenchmarkResults.append(BenchmarkValue(name="peakMemoryMB", value=peak_active_mem_mb, unit="MB", date="", commit=""))
+    localBenchmarkResults.append(BenchmarkValue(name="avThroughputIterPerS", value=av_training_throughput, unit="iter/s", date=yyyy_mm_dd, commit=commit, op=operator.lt, tolerance=5))
+    localBenchmarkResults.append(BenchmarkValue(name="avTimePerBatchS", value=av_training_batch_time_s, unit="s", date=yyyy_mm_dd, commit=commit, tolerance=5))
+    localBenchmarkResults.append(BenchmarkValue(name="peakMemoryMB", value=peak_active_mem_mb, unit="MB", date=yyyy_mm_dd, commit=commit))
 
     #Get reference benchmark results
     benchmarkServer=BenchmarkServer()
