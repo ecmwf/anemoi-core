@@ -9,6 +9,7 @@
 
 import logging
 import os
+import os.path
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,8 @@ class BenchmarkServer():
 
             #header="testName,unit,date,commit,value"
             assert df["testName"].iloc[-1] == benchmarkName
+            #TODO instead of finding last element, find last element with a commit present in this branch
+            # If no such can be found, error and recomend merging main to get a new enough commit
             benchmarkValue = BenchmarkValue(name=benchmarkName,value=df["value"].iloc[-1], unit=df["unit"].iloc[-1], date=df["date"].iloc[-1], commit=df["commit"].iloc[-1])
             LOGGER.debug( benchmarkValue)
             #update dict of results
@@ -185,46 +188,43 @@ class BenchmarkServer():
 
     #trys to update a metric on a remote server, with a given benchmarkValue
     def setValue(self, value:BenchmarkValue):
-       
-        #find the benchmark with the matching name
-        #benchmark=None
-        #for benchmarkValue in self.benchmarkValues:
-        #    if benchmarkValue.name == name:
-        #        benchmark=benchmarkValue
-        #        break
-        #if benchmark == None:
-        #    raise ValueError(f"Error. couldn't find an existing benchmark result for {benchmarkValue.name}")
 
         #update remote server with new value
-
         header="testName,unit,date,commit,value"
-        #TODO append to existing file, but never apend header
-        #if file doesnt exist, write header
-        #append line
+        #append to existing file, but never apend header
+        #TODO get it working for remote
+
         local_file = f"./{value.name}"
-        with open(local_file, "w") as f:
-            f.write(header + "\n")
-            f.write(value.to_csv() + "\n")
-
-        cp_cmd = [
-            "scp",
-            local_file,
-            f"{self.set_host}:{self.set_remote_path}/{value.name}"
-        ]
+        
+        #if file doesnt exist, write header
         if self.local:
-            cp_cmd = ["cp", local_file, "./server/"]
-        cleanup_cmd = [
-            "rm",
-            local_file,
-                ]
-        LOGGER.debug(f"cp command: {cp_cmd}")
+            if not os.path.isfile(f"./server/{value.name}"):
+                with open(local_file, "w") as f:
+                    f.write(header + "\n")
+                    f.write(value.to_csv() + "\n")
+            else: 
+                LOGGER.debug("existing file found... appending")
+                with open(f"./server/{value.name}", "a") as f:
+                    f.write(value.to_csv() + "\n")
+        else:
 
-        try:
-            subprocess.run(cp_cmd, check=True)
-            LOGGER.debug(f"Uploaded {value.name} to {self.set_host}")
-            subprocess.run(cleanup_cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"cp failed: {e}")
+            cp_cmd = [
+                "scp",
+                local_file,
+                f"{self.set_host}:{self.set_remote_path}/{value.name}"
+            ]
+            cleanup_cmd = [
+                "rm",
+                local_file,
+                    ]
+            LOGGER.debug(f"cp command: {cp_cmd}")
+
+            try:
+                subprocess.run(cp_cmd, check=True)
+                LOGGER.debug(f"Uploaded {value.name} to {self.set_host}")
+                subprocess.run(cleanup_cmd, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"cp failed: {e}")
 
         #update dict of results
         self.benchmarkValues[value.name] = value
