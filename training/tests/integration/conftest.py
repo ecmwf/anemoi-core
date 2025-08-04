@@ -78,7 +78,7 @@ def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestDa
     ],
 )
 def architecture_config(
-    request: pytest.FixtureRequest, testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths
+    request: pytest.FixtureRequest, testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str]:
     overrides = request.param
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
@@ -102,7 +102,7 @@ def architecture_config(
 
 @pytest.fixture
 def stretched_config(
-    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths
+    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
         template = compose(config_name="stretched")
@@ -124,7 +124,7 @@ def stretched_config(
 
 @pytest.fixture
 def lam_config(
-    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths
+    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, list[str]]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_lam"):
         template = compose(config_name="lam")
@@ -146,7 +146,7 @@ def lam_config(
 
 @pytest.fixture
 def lam_config_with_graph(
-    lam_config: tuple[DictConfig, list[str]], get_test_data: GetTestData
+    lam_config: tuple[DictConfig, list[str]], get_test_data: GetTestData,
 ) -> tuple[DictConfig, list[str]]:
     existing_graph_config = OmegaConf.load(Path.cwd() / "training/src/anemoi/training/config/graph/existing.yaml")
     cfg, urls = lam_config
@@ -162,7 +162,7 @@ def lam_config_with_graph(
 
 @pytest.fixture
 def ensemble_config(
-    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths
+    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
@@ -223,7 +223,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 
 @pytest.fixture
 def gnn_config_with_checkpoint(
-    gnn_config: tuple[DictConfig, str], get_test_data: GetTestData
+    gnn_config: tuple[DictConfig, str], get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
     cfg, dataset_url = gnn_config
     existing_ckpt = get_test_data(
@@ -240,7 +240,7 @@ def gnn_config_with_checkpoint(
 
 @pytest.fixture
 def interpolator_config(
-    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths
+    testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str]:
     """Compose a runnable configuration for the temporal-interpolation model.
 
