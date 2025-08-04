@@ -25,15 +25,175 @@ import json
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 import subprocess
+from datetime import date
+import operator
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
-
 LOGGER = logging.getLogger(__name__)
 
-def raise_error(x):
-    raise ValueError(xx)
+class BenchmarkValue():
+    def __init__(
+        self,
+        name: str,
+        value: float,
+        unit: str,
+        date: date,
+        commit: str,
+        op=operator.le,
+        tolerance:int=0 #percentage 
+            ):
+        self.name=name
+        self.value=value
+        self.unit=unit
+        self.date=date
+        self.commit=commit
+        self.op=op
+        self.tolerance=tolerance
 
+    def __str__(self):
+        return f"{self.name}: {self.value}{self.unit}"
+
+class BenchmarkServer():
+    def __init__(self):
+        self.benchmarkValues={}
+
+        #TODO could unify these by getting via scp
+        #for reading the data we read over internet
+        self.get_url="https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
+        #for setting the data, we scp
+        self.set_remote_path="/home/data/public/anemoi-integration-tests/training/benchmarks"
+        self.set_host="data@anemoi.ecmwf.int"
+
+    def __str__(self):
+        #TODO should do this properly with string builders
+        string =""
+        string += "-"*20 + "\n"
+        #benchmark values is a dict of "benchmarkName: BenchmarkValue"
+        for benchmark in self.benchmarkValues.values():
+            string += str(benchmark) + "\n"
+        string += "-"*20 + "\n"
+        return string
+
+    #trys to read a metric from 'self.get_url'
+    #If the metric exists, update list of benchmark values
+    #assumes file is just a single line with a single value
+    # TODO return none if value cant be found
+    def getValue(self, benchmarkName:str, forceGetFromServer:bool = False):
+        if not forceGetFromServer and benchmarkName in self.benchmarkValues:
+            LOGGER.debug(f"entry for {benchmarkName} found locally, not retrieving from server")
+            return self.benchmarkValues[benchmarkName]
+        else:
+            url = f"{self.get_url}/{benchmarkName}"
+            print(f"Fetching benchmark data from {url}...")
+            data = urlopen(url)  # it's a file like object and works just like a file
+            for line in data:  # files are iterable
+                value = float(line.strip())
+
+            benchmarkValue = BenchmarkValue(name=benchmarkName,value=value, unit="", date="", commit="")
+            LOGGER.debug( benchmarkValue)
+            #update dict of results
+            self.benchmarkValues[benchmarkValue.name] = benchmarkValue
+
+    def getValues(self, names: list[str]):
+        for name in names:
+            self.getValue(name)
+
+    #Tests a given benchmark result against what is found on the server
+    def compare(self, localValue: BenchmarkValue):
+        #check if the server has a reference value
+        referenceValue = self.getValue(localValue.name)
+
+        if referenceValue is None:
+            raise ValueError(f"Benchmark server does not contain a measurement for {localValue.name}")
+        else:
+
+            #TODO add sanity checking once this info is on server
+            #assert localValue.op == referenceValue.op #wont work, need to pass some inputs
+            #assert localValue.tolerance == referenceValue.tolerance
+            #assert localValue.unit == referenceValue.unit
+
+            #select correct comparison operation and optionally apply tolerance
+            #e.g. memory is 'local > ref => fail', throughput is 'local < (ref + tol) => fail'
+            comp=localValue.op
+            
+            refVal=referenceValue.value
+            localVal=localValue.value
+            tolerance=localValue.tolerance
+
+            #This code is complicated because we need to account for
+            # different comparsions >,<,<= etc
+            # the possibility of tolerance 
+            # so we apply the comparison and then if that doesnt pass we check for absolute tolerance difference
+            # In this way, we dont need to encode which value to apply the tolerance too
+            #I'd be open to hardcoding '>=' and '<=' tho
+
+            percent_diff = 1 - (refVal / localVal )
+            if comp(percent_diff, 0):
+                LOGGER.debug("passed outright")
+                passed=True
+            #didnt pass straight away, try pass within tolerance
+            elif tolerance != 0 and tolerance/100 >= abs(percent_diff):
+                LOGGER.debug(f"Passed within {tolerance}% tolerance")
+                passed=True
+            else:
+                LOGGER.debug("didnt pass")
+                passed=False
+
+            result_str=""
+            if passed:
+                result_str += f"PASS. Local  value for {localValue.name} is within tolerance of the reference value "
+            else:
+                result_str += f"FAIL. Local value for {localValue.name} has degraded compared to the reference value "
+            #TODO replace with referenceValue.unit once i have that on the server
+            result_str += f"({localVal:.2f}{localValue.unit} local vs {refVal:.2f}{localValue.unit} reference)"
+            print(result_str)
+
+            return passed
+
+    #trys to update a metric on a remote server, with a given benchmarkValue
+    def setValue(self, value:BenchmarkValue):
+       
+        #find the benchmark with the matching name
+        #benchmark=None
+        #for benchmarkValue in self.benchmarkValues:
+        #    if benchmarkValue.name == name:
+        #        benchmark=benchmarkValue
+        #        break
+        #if benchmark == None:
+        #    raise ValueError(f"Error. couldn't find an existing benchmark result for {benchmarkValue.name}")
+
+        #update remote server with new value
+        local_file = f"./{value.name}"
+        with open(local_file, "w") as f:
+            f.write(str(value.value))
+
+        scp_cmd = [
+            "scp",
+            local_file,
+            f"{self.set_host}:{self.set_remote_path}/{value.name}"
+        ]
+        cleanup_cmd = [
+            "rm",
+            local_file,
+                ]
+        LOGGER.debug(f"Scp command: {scp_cmd}")
+
+        try:
+            subprocess.run(scp_cmd, check=True)
+            LOGGER.debug(f"Uploaded {value.name} to {self.set_host}")
+            subprocess.run(cleanup_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"SCP failed: {e}")
+
+        #update dict of results
+        self.benchmarkValues[value.name] = value
+
+def raise_error(x):
+    raise ValueError(x)
+
+
+#this functon will find and open the profiler logs from the most recent benchmarking training run
 # return_val = value for speed profiler or 'avg_time' for time_profiler
 def open_log_file(filename):
     import csv
@@ -67,78 +227,17 @@ def open_log_file(filename):
                 break
     return float(result)
 
-def set_performance_metrics(metrics):
-    """
-    Send performance metrics to a remote server via ssh.
-
-    Parameters:
-    - metrics (dict): A dictionary with benchmark names as keys and their values (e.g. {"avThroughputIterPerS": 10.5})
-    """
-
-    for benchmark, value in metrics.items():
-         upload_metric_via_scp(benchmark, value)
-
-def upload_metric_via_scp(metric_name, value):
-    local_file = f"/tmp/{metric_name}"
-    with open(local_file, "w") as f:
-        f.write(str(value))
-
-    remote_path="/home/data/public/anemoi-integration-tests/training/benchmarks"
-    host="data@anemoi.ecmwf.int"
-    scp_cmd = [
-        "scp",
-        local_file,
-        f"{host}:{remote_path}/{metric_name}"
-    ]
-    LOGGER.debug(f"Scp command: {scp_cmd}")
-
-    try:
-        subprocess.run(scp_cmd, check=True)
-        LOGGER.debug(f"Uploaded {metric_name} to {host}")
-    except subprocess.CalledProcessError as e:
-        print(f"SCP failed: {e}")
-
-# reads a remote server to get past performance metrics to compare against
-def get_performance_metrics():
-
-    # ls public/anemoi-integration-tests/training/benchmarks/
-    #    avThroughputIterPerS  avTimePerBatchS  peakMemoryMB
-    # https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr.tgz
-
-    results = {}
-    base_url = "https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
-    benchmarks = ["avThroughputIterPerS", "avTimePerBatchS", "peakMemoryMB"]
-    for benchmark in benchmarks:
-        url = f"{base_url}/{benchmark}"
-        print(f"Fetching benchmark data from {url}...")
-        data = urlopen(url)  # it's a file like object and works just like a file
-        for line in data:  # files are iterable
-            line = float(line.strip())
-            results[benchmark] = line
-
-    return results
-
-
-# @skip_if_offline
-# add flag to save snapshot
-# add multi-gpu support
-# read from database on the s3 bucket, of a csv
-# complain if any of the values differ by more than 10%
-# can skip multi-gpu
-# add compute/nccl/memory breakdown from pytorch profiler
 @pytest.mark.longtests
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],
     get_test_archive: callable,
     update_data=False,
-    throw_error=False,
+    throw_error=True,
 ) -> None:
     cfg, urls = benchmark_config
     for url in urls:
         get_test_archive(url)
 
-    results = get_performance_metrics()
-    LOGGER.debug(f"Performance benchmarks from server:\n{results}")
 
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
@@ -149,38 +248,40 @@ def test_benchmark_training_cycle(
     av_training_throughput = open_log_file("speed_profiler.csv")
     av_training_batch_time_s = open_log_file("time_profiler.csv")
 
-    print(f"Peak memory: {peak_active_mem_mb:.3f}MB")
-    print(f"Av. training batch time: {av_training_batch_time_s:.2f}s")
-    print(f"Av. training throughput: {av_training_throughput:.2f}iter/s")
+    #create Benchmark value objects
+    localBenchmarkResults=[]
+    localBenchmarkResults.append(BenchmarkValue(name="avThroughputIterPerS", value=av_training_throughput, unit="iter/s", date="", commit="", op=operator.lt, tolerance=5))
+    localBenchmarkResults.append(BenchmarkValue(name="avTimePerBatchS", value=av_training_batch_time_s, unit="s", date="", commit="", tolerance=5))
+    localBenchmarkResults.append(BenchmarkValue(name="peakMemoryMB", value=peak_active_mem_mb, unit="MB", date="", commit=""))
+
+    #Get reference benchmark results
+    benchmarkServer=BenchmarkServer()
+    benchmarks = ["avThroughputIterPerS", "avTimePerBatchS", "peakMemoryMB"]
+    benchmarkServer.getValues(benchmarks)
+
+    print(f"Reference benchmark results:\n{benchmarkServer}")
+    print("Local benchmark results:")
+    for benchmarkValue in localBenchmarkResults:
+        print(benchmarkValue)
 
     # either update the data on the server, or compare it against existing results
     if update_data:
-        metrics={"avThroughputIterPerS":av_training_throughput, "avTimePerBatchS": av_training_batch_time_s, "peakMemoryMB": peak_active_mem_mb}
-        print(f"Updating metrics on server with {metrics}")
-        set_performance_metrics(metrics)
+        print(f"Updating metrics on server")
+        for localBenchmarkValue in localBenchmarkResults:
+            benchmarkServer.setValue(localBenchmarkValue)
     else:
+        print(f"Comparing local benchmark results against reference values from the server")
+
         on_test_fail=print
         if throw_error:
             on_test_fail=raise_error
-        if peak_active_mem_mb > results["peakMemoryMB"]:
-            on_test_fail(
-                f"FAIL. Peak memory usage {peak_active_mem_mb:.3f}MB is greater than current benchmark peak of {results['peakMemoryMB']:.3f}MB",
-            )
-        else:
-            print(f"PASS. Peak memory usage of {peak_active_mem_mb:.3f}MB is equal to or less than current benchamrk peak of  {results['peakMemoryMB']:.3f}MB")
 
-        throuhput_tolerance_percent = 5
-        throughput_upper_bound = results["avThroughputIterPerS"] * (100 + throuhput_tolerance_percent) / 100
-        if av_training_throughput < throughput_upper_bound:
-            on_test_fail(
-                f"FAIL. Average throughput of {av_training_throughput:.2f}iter/s is less than current benchmark throughput of {throughput_upper_bound:.2f}iter/s",
-            )
-        else:
-            print(f"PASS. Average throughput of {av_training_throughput:.2f}iter/s is higher than or equal to the current benchmark throughput of { throughput_upper_bound:.2f}iter/s")
-        batch_time_tolerance_percent = 5
-        batch_time_upper_bound = results["avTimePerBatchS"] * (100 + batch_time_tolerance_percent) / 100
-        if av_training_batch_time_s > batch_time_upper_bound:
-            on_test_fail(f"FAIL. Average time per batch of {av_training_batch_time_s:.2f}s is higher than current benchmark time of {batch_time_upper_bound:.2f}s")
-        else:
-            print(f"PASS. Average time per batch of {av_training_batch_time_s:.2f}s is less than or equal to than current benchmark time of {batch_time_upper_bound:.2f}s")
+        failedTests=[]
+        for localBenchmarkValue in localBenchmarkResults:
+            passed = benchmarkServer.compare(localBenchmarkValue)
+            if not passed:
+                failedTests.append(localBenchmarkValue.name)
 
+        if len(failedTests) > 0:
+            on_test_fail(f"The following tests failed: {failedTests}")
+            
