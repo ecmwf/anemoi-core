@@ -62,6 +62,7 @@ normalizer:
 
 const_imputer:
   default: "none"
+  0: []
 
 # processors including imputers and normalizers are applied in order of definition
 processors:
