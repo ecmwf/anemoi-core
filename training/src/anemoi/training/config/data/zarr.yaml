@@ -69,9 +69,9 @@ processors:
   normalizer:
     _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
     config: ${data.normalizer}
-  # const_imputer:
-  #   _target_: anemoi.models.preprocessing.imputer.ConstantImputer
-  #   config: ${data.const_imputer}
+  const_imputer:
+    _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+    config: ${data.const_imputer}
 
 # Values set in the code
 num_features: null # number of features in the forecast state
