@@ -92,7 +92,7 @@ class BaseImputer(BasePreprocessor, ABC):
                 # if the variable is not in inference input (diagnostic variable), we cannot place NaNs in its inference output
                 if method != self.default:
                     LOGGER.warning(
-                        "Placement of NaNs for diagnostic variables in inference output is not supported: {name}"
+                        f"Placement of NaNs for diagnostic variables in inference output is not supported: {name}"
                     )
 
             self.index_training_input.append(name_to_index_training_input[name])
