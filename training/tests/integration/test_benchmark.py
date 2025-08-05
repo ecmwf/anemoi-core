@@ -403,8 +403,10 @@ def test_benchmark_training_cycle(
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, urls = benchmark_config
-    for url in urls:
-        get_test_archive(url)
+    #print(cfg)
+    #exit()
+    #for url in urls:
+    #    get_test_archive(url)
 
     # Run model with profiler
     reset_peak_memory_stats()

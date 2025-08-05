@@ -1,15 +1,19 @@
 # Modifications for the basic template "config.yaml"
 hardware:
   files:
-    dataset:  anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-1979-19-6h-v6-testset.zarr
+          #dataset:  aifs-ea-an-oper-0001-mars-n320-2020-2020-6h-v6.zarr #q50
+    dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr #q50
   paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+    data:  /home/mlx/ai-ml/datasets/
 
 dataloader:
+  limit_batches:
+    training: 100
+    validation: 1
   training:
-    end: 1979-01-08 12:00:00
+    end: 2020-11-30
   validation:
-    start: 1979-01-08 18:00:00
+    start: 2020-12-31
 
 diagnostics:
   print_memory_summary: true
