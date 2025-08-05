@@ -11,6 +11,7 @@ import logging
 import operator
 import os
 import os.path
+import io
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -126,7 +127,7 @@ def _findLatestSharedCommitRow(df) -> str | None:
 
 
 class BenchmarkServer:
-    def __init__(self, local=True):  # use a local folder to store data instead of a remote server
+    def __init__(self, local=False):  # use a local folder to store data instead of a remote server
         self.benchmarkValues = {}
 
         self.local = local
@@ -172,7 +173,7 @@ class BenchmarkServer:
                 df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
                 # data = urlopen(url)
                 # df=pd.read_csv(io.StringIO(data))
-            except URLError as e:  # TODO test this
+            except URLError as e:  
                 print(f"Could not open file at {url}. Got error {e}")
                 return None
 
@@ -248,17 +249,16 @@ class BenchmarkServer:
         return passed
 
     # trys to update a metric on a remote server, with a given benchmarkValue
-    def setValue(self, value: BenchmarkValue):
+    #if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
+    def setValue(self, value: BenchmarkValue, overwrite=False):
 
         # update remote server with new value
         # append to existing file, but never apend header
-        # TODO get append working for remote
-
         local_file = f"./{value.name}"
 
         # if file doesnt exist, write header
         if self.local:
-            if not os.path.isfile(f"./server/{value.name}"):
+            if not os.path.isfile(f"./server/{value.name}") or overwrite:
                 with open(local_file, "w") as f:
                     f.write(value.to_csv(include_header=True) + "\n")
             else:
@@ -266,6 +266,22 @@ class BenchmarkServer:
                 with open(f"./server/{value.name}", "a") as f:
                     f.write(value.to_csv() + "\n")
         else:
+            #Get existing csv
+            url = f"{self.get_url}/{value.name}"
+            print(f"Fetching benchmark data from {url}...")
+            try:
+                df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
+            except URLError as e: 
+                print(f"Could not open file at {url}. Got error {e}")
+                df = None
+
+            if df is None or overwrite:
+                df = pd.read_csv(io.StringIO(value.to_csv(include_header=True))) #, index_col="testName") #index_col to prevent adding a seperate index col
+            else:
+                new_row = pd.read_csv(io.StringIO(value.to_csv()), header=None)
+                new_row.columns = df.columns
+                df = pd.concat([df, new_row], ignore_index=True)
+            df.to_csv(local_file, index=False)
 
             cp_cmd = ["scp", local_file, f"{self.set_host}:{self.set_remote_path}/{value.name}"]
             cleanup_cmd = [
@@ -383,7 +399,7 @@ def getLocalBenchmarkResults():
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],
     get_test_archive: callable,
-    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, urls = benchmark_config
@@ -434,3 +450,6 @@ def test_benchmark_training_cycle(
 
         if len(failedTests) > 0:
             on_test_fail(f"The following tests failed: {failedTests}")
+
+#TODO increase benchmark size and add multigpu
+#TODO add graph function to BenchmarkServer?
