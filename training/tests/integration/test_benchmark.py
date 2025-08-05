@@ -8,9 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import operator
 import os
-import os.path
 from pathlib import Path
+from urllib.request import urlopen
 
 import pytest
 from omegaconf import DictConfig
@@ -19,6 +20,7 @@ from torch.cuda import reset_peak_memory_stats
 
 from anemoi.training.train.profiler import AnemoiProfiler
 
+import os.path
 import json
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -29,12 +31,12 @@ import pandas as pd
 import io 
 from git import Repo, InvalidGitRepositoryError, GitCommandError
 
-
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
 LOGGER = logging.getLogger(__name__)
 
-class BenchmarkValue():
+
+class BenchmarkValue:
     def __init__(
         self,
         name: str,
@@ -43,15 +45,15 @@ class BenchmarkValue():
         date: date,
         commit: str,
         op=operator.le,
-        tolerance:int=0 #percentage 
-            ):
-        self.name=name
-        self.value=value
-        self.unit=unit
-        self.date=date
-        self.commit=commit
-        self.op=op
-        self.tolerance=tolerance
+        tolerance: int = 0,  # percentage
+    ):
+        self.name = name
+        self.value = value
+        self.unit = unit
+        self.date = date
+        self.commit = commit
+        self.op = op
+        self.tolerance = tolerance
 
     def __str__(self):
         return f"{self.name}: {self.value}{self.unit}"
@@ -146,13 +148,13 @@ class BenchmarkServer():
         self.set_host="data@anemoi.ecmwf.int"
 
     def __str__(self):
-        #TODO should do this properly with string builders
-        string =""
-        string += "-"*20 + "\n"
-        #benchmark values is a dict of "benchmarkName: BenchmarkValue"
+        # TODO should do this properly with string builders
+        string = ""
+        string += "-" * 20 + "\n"
+        # benchmark values is a dict of "benchmarkName: BenchmarkValue"
         for benchmark in self.benchmarkValues.values():
             string += str(benchmark) + "\n"
-        string += "-"*20 + "\n"
+        string += "-" * 20 + "\n"
         return string
 
     #trys to read a row from a csv stored on a server and create a benchmark value from that
@@ -212,25 +214,18 @@ class BenchmarkServer():
                 print(f"{localValue.name} not found on server. Passing anyway because 'failOnMiss=False'")
                 return True
         else:
+            LOGGER.debug("didnt pass")
+            passed = False
 
-            #Sanity checking that benchmark metadata matches
-            #assert localValue.op == referenceValue.op #wont work, need to pass some inputs
-            assert localValue.unit == referenceValue.unit
 
-            #select correct comparison operation and optionally apply tolerance
-            #e.g. memory is 'local > ref => fail', throughput is 'local < (ref + tol) => fail'
             comp=localValue.op
-            
             refVal=referenceValue.value
             localVal=localValue.value
             tolerance=localValue.tolerance
 
-            #This code is complicated because we need to account for
-            # different comparsions >,<,<= etc
-            # the possibility of tolerance 
-            # so we apply the comparison and then if that doesnt pass we check for absolute tolerance difference
-            # In this way, we dont need to encode which value to apply the tolerance too
-            #I'd be open to hardcoding '>=' and '<=' tho
+            #Sanity checking that benchmark metadata matches
+            #assert localValue.op == referenceValue.op #wont work, need to pass some inputs
+            assert localValue.unit == referenceValue.unit
 
             percent_diff = 1 - (refVal / localVal )
             passedWithinTolerance=False
@@ -295,7 +290,7 @@ class BenchmarkServer():
             except subprocess.CalledProcessError as e:
                 print(f"cp failed: {e}")
 
-        #update dict of results
+        # update dict of results
         self.benchmarkValues[value.name] = value
 
 def get_git_revision_hash() -> str:
@@ -309,7 +304,7 @@ def raise_error(x):
     raise ValueError(x)
 
 
-#this functon will find and open the profiler logs from the most recent benchmarking training run
+# this functon will find and open the profiler logs from the most recent benchmarking training run
 # return_val = value for speed profiler or 'avg_time' for time_profiler
 def open_log_file(filename):
     import csv
@@ -399,19 +394,18 @@ def test_benchmark_training_cycle(
 
     # either update the data on the server, or compare reference results against local results
     if update_data:
-        print(f"Updating metrics on server")
+        print("Updating metrics on server")
         for localBenchmarkValue in localBenchmarkResults:
             benchmarkServer.setValue(localBenchmarkValue)
     else:
-        print(f"Comparing local benchmark results against reference values from the server")
+        print("Comparing local benchmark results against reference values from the server")
 
         #Controls if error or not if a test fails
-        on_test_fail=print
+        on_test_fail = print
         if throw_error:
-            on_test_fail=raise_error
+            on_test_fail = raise_error
 
-        #Compare the benchmark values against reference values
-        failedTests=[]
+        failedTests = []
         for localBenchmarkValue in localBenchmarkResults:
             passed = benchmarkServer.compare(localBenchmarkValue)
             if not passed:
