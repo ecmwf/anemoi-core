@@ -72,6 +72,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
 
+        self.input_dim = self._calculate_input_dim(model_config)
+        self.input_dim_latent = self._calculate_input_dim_latent(model_config)
+
         # we can't register these as buffers because DDP does not support sparse tensors
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
         self.A_down, self.A_up = None, None
@@ -87,7 +90,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.input_dim,
-            in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[0]],
+            in_channels_dst=self.input_dim_latent,
             hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_hidden_names[0])],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -195,6 +198,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 for cfg in getattr(model_config.model, "bounding", [])
             ]
         )
+
+    def _calculate_input_dim_latent(self, model_config):
+        return self.node_attributes.attr_ndims[self._graph_hidden_names[0]]
 
     def forward(
         self,

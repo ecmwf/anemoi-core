@@ -372,6 +372,23 @@ class ForecasterEnsSchema(BaseTrainingSchema):
     "Number of ensemble member per device"
 
 
+class DiffusionForecasterSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+    "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
+
+
+class DiffusionTendForecasterSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
+        ...,
+        alias="model_task",
+    )
+    "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
+
+
 class InterpolationSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
     "Training objective."
@@ -382,6 +399,10 @@ class InterpolationSchema(BaseTrainingSchema):
 
 
 TrainingSchema = Annotated[
-    ForecasterSchema | ForecasterEnsSchema | InterpolationSchema,
+    ForecasterSchema
+    | ForecasterEnsSchema
+    | InterpolationSchema
+    | DiffusionForecasterSchema
+    | DiffusionTendForecasterSchema,
     Discriminator("model_task"),
 ]

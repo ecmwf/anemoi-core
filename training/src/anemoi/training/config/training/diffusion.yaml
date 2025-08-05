@@ -12,7 +12,7 @@ load_weights_only: False # only load model weights, do not restore optimiser sta
 deterministic: False
 
 # miscellaneous
-precision: 16-mixed
+precision: bf16-mixed
 
 # multistep input
 # 1 = single step scheme, X(t-1) used to predict X(t)
@@ -28,8 +28,8 @@ num_sanity_val_steps: 6
 
 # clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
 gradient_clip:
-  val: 32.
-  algorithm: value
+  val: 1.
+  algorithm: norm
 
 # stochastic weight averaging
 # https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
@@ -39,12 +39,14 @@ swa:
 
 # Optimizer settings
 optimizer:
-  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
+  zero: False
   kwargs:
+    weight_decay: 0.1
     betas: [0.9, 0.95]
+    eps: 1e-7
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
 
 # select strategy
 strategy:
@@ -130,7 +132,7 @@ rollout:
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
-max_steps: 150000
+max_steps: 1000000
 
 lr:
   warmup: 1000 # number of warmup iterations
