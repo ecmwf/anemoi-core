@@ -57,8 +57,13 @@ class BenchmarkValue():
         return f"{self.name}: {self.value}{self.unit}"
 
     #header="testName,unit,date,commit,value" 
-    def to_csv(self):
-        return f"{self.name},{self.unit},{self.date},{self.commit},{self.value}"
+    def to_csv(self, include_header=False):
+        header="testName,unit,date,commit,value"
+
+        result=f"{self.name},{self.unit},{self.date},{self.commit},{self.value}"
+        if include_header:
+            result = header + "\n" + result
+        return result
 
 
 #This function should be called from inside a git repo
@@ -134,6 +139,7 @@ class BenchmarkServer():
             subprocess.run(["mkdir", "-p", "./server"], check=True)
         #TODO could unify these by getting via scp
         #for reading the data we read over internet
+        #TODO should certainly not hardcode these
         self.get_url="https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
         #for setting the data, we scp
         self.set_remote_path="/home/data/public/anemoi-integration-tests/training/benchmarks"
@@ -200,24 +206,23 @@ class BenchmarkServer():
 
         if referenceValue is None:
             if failOnMiss:
-                #TODO I should aggregate this too
-                raise ValueError(f"Benchmark server does not contain a measurement for {localValue.name}")
+                print(f"Benchmark server does not contain a measurement for {localValue.name}")
+                return False
             else:
                 print(f"{localValue.name} not found on server. Passing anyway because 'failOnMiss=False'")
                 return True
         else:
 
-            #TODO add sanity checking once this info is on server
+            #Sanity checking that benchmark metadata matches
             #assert localValue.op == referenceValue.op #wont work, need to pass some inputs
-            #assert localValue.tolerance == referenceValue.tolerance
-            #assert localValue.unit == referenceValue.unit
+            assert localValue.unit == referenceValue.unit
 
             #select correct comparison operation and optionally apply tolerance
             #e.g. memory is 'local > ref => fail', throughput is 'local < (ref + tol) => fail'
             comp=localValue.op
             
             refVal=referenceValue.value
-            localVal=cplocalValue.value
+            localVal=localValue.value
             tolerance=localValue.tolerance
 
             #This code is complicated because we need to account for
@@ -228,24 +233,26 @@ class BenchmarkServer():
             #I'd be open to hardcoding '>=' and '<=' tho
 
             percent_diff = 1 - (refVal / localVal )
+            passedWithinTolerance=False
             if comp(percent_diff, 0):
-                LOGGER.debug("passed outright")
                 passed=True
             #didnt pass straight away, try pass within tolerance
             elif tolerance != 0 and tolerance/100 >= abs(percent_diff):
-                LOGGER.debug(f"Passed within {tolerance}% tolerance")
                 passed=True
+                passedWithinTolerance=True
             else:
-                LOGGER.debug("didnt pass")
                 passed=False
 
             result_str=""
             if passed:
-                result_str += f"PASS. Local  value for {localValue.name} is within tolerance of the reference value "
+                if passedWithinTolerance:
+                    result_str += f"PASS. Local value for {localValue.name} is within {tolerance}% tolerance of the reference value "
+                else:
+                    result_str += f"PASS. Local value for {localValue.name} has improved compared to the reference value "
+
             else:
                 result_str += f"FAIL. Local value for {localValue.name} has degraded compared to the reference value "
-            #TODO replace with referenceValue.unit once i have that on the server
-            result_str += f"({localVal:.2f}{localValue.unit} local vs {refVal:.2f}{localValue.unit} reference)"
+            result_str += f"({localVal:.2f}{localValue.unit} local vs {refVal:.2f}{referenceValue.unit} reference)"
             print(result_str)
 
             return passed
@@ -254,9 +261,8 @@ class BenchmarkServer():
     def setValue(self, value:BenchmarkValue):
 
         #update remote server with new value
-        header="testName,unit,date,commit,value"
         #append to existing file, but never apend header
-        #TODO get it working for remote
+        #TODO get append working for remote
 
         local_file = f"./{value.name}"
         
@@ -264,8 +270,7 @@ class BenchmarkServer():
         if self.local:
             if not os.path.isfile(f"./server/{value.name}"):
                 with open(local_file, "w") as f:
-                    f.write(header + "\n")
-                    f.write(value.to_csv() + "\n")
+                    f.write(value.to_csv(include_header=True) + "\n")
             else: 
                 LOGGER.debug("existing file found... appending")
                 with open(f"./server/{value.name}", "a") as f:
@@ -338,45 +343,61 @@ def open_log_file(filename):
                 break
     return float(result)
 
-@pytest.mark.longtests
-def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str],
-    get_test_archive: callable,
-    update_data=True,
-    throw_error=True,
-) -> None:
-    cfg, urls = benchmark_config
-    for url in urls:
-        get_test_archive(url)
-
-    reset_peak_memory_stats()
-    AnemoiProfiler(cfg).profile()
-
+#Function which runs after a profiler run
+# It parses the profiler logs and creates BenchmarkValue objects from them
+# Returns [BenchmarkValue]
+# If you want to add more benchmarks add them here
+def getLocalBenchmarkResults():
     # read memory and mlflow stats
     stats = memory_stats(device=0)
     peak_active_mem_mb = stats["active_bytes.all.peak"] / 1024 / 1024
     av_training_throughput = open_log_file("speed_profiler.csv")
     av_training_batch_time_s = open_log_file("time_profiler.csv")
 
-    #create Benchmark value objects
-    commit=get_git_revision_hash() 
+    #get metadata
+    commit=get_git_revision_hash()
     yyyy_mm_dd=date.today().strftime('%Y-%m-%d')
+
+    #create Benchmark value objects
     localBenchmarkResults=[]
     localBenchmarkResults.append(BenchmarkValue(name="avThroughputIterPerS", value=av_training_throughput, unit="iter/s", date=yyyy_mm_dd, commit=commit, op=operator.lt, tolerance=5))
     localBenchmarkResults.append(BenchmarkValue(name="avTimePerBatchS", value=av_training_batch_time_s, unit="s", date=yyyy_mm_dd, commit=commit, tolerance=5))
-    localBenchmarkResults.append(BenchmarkValue(name="peakMemoryMB", value=peak_active_mem_mb, unit="MB", date=yyyy_mm_dd, commit=commit))
+    localBenchmarkResults.append(BenchmarkValue(name="peakMemoryMB", value=peak_active_mem_mb, unit="MB", date=yyyy_mm_dd, commit=commit, tolerance=1)) # added 1% tolerance here so it doesnt fail over a few stray kilobytes
+
+    return localBenchmarkResults
+
+@pytest.mark.longtests
+def test_benchmark_training_cycle(
+    benchmark_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+    update_data=False, # if true, the server will be updated with local values. if false the server values will be compared to local values
+    throw_error=True, #if true, an error will be thrown when a benchmark test is failed
+) -> None:
+    cfg, urls = benchmark_config
+    for url in urls:
+        get_test_archive(url)
+
+    #Run model with profiler
+    reset_peak_memory_stats()
+    AnemoiProfiler(cfg).profile()
+
+    #Get local benchmark results
+    localBenchmarkResults = getLocalBenchmarkResults()
 
     #Get reference benchmark results
     benchmarkServer=BenchmarkServer()
-    benchmarks = ["avThroughputIterPerS", "avTimePerBatchS", "peakMemoryMB"]
+    benchmarks = ["avThroughputIterPerS", "avTimePerBatchS", "peakMemoryMB"] #TODO get name keys from localBenchmarkResults instead of hardcoding
     benchmarkServer.getValues(benchmarks)
 
+  
+    #print local and reference results
     print(f"Reference benchmark results:\n{benchmarkServer}")
     print("Local benchmark results:")
     for benchmarkValue in localBenchmarkResults:
         print(benchmarkValue)
+    print("")
 
-    # either update the data on the server, or compare it against existing results
+    # either update the data on the server, or compare reference results against local results
     if update_data:
         print(f"Updating metrics on server")
         for localBenchmarkValue in localBenchmarkResults:
@@ -384,10 +405,12 @@ def test_benchmark_training_cycle(
     else:
         print(f"Comparing local benchmark results against reference values from the server")
 
+        #Controls if error or not if a test fails
         on_test_fail=print
         if throw_error:
             on_test_fail=raise_error
 
+        #Compare the benchmark values against reference values
         failedTests=[]
         for localBenchmarkValue in localBenchmarkResults:
             passed = benchmarkServer.compare(localBenchmarkValue)
