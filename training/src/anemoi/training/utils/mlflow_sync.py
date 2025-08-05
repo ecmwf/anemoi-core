@@ -14,9 +14,13 @@ import shutil
 import tempfile
 from itertools import starmap
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import mlflow.entities
+
+from anemoi.training.diagnostics.mlflow.logger import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 
 
 def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
@@ -64,7 +68,7 @@ try:
     from mlflow_export_import.run.import_run import _import_inputs
     from mlflow_export_import.run.run_data_importer import _log_data
     from mlflow_export_import.run.run_data_importer import _log_metrics
-    from mlflow_export_import.run.run_data_importer import _log_params
+
 except ImportError:
     msg = "The 'mlflow-export-import' package is not installed. Please install it from https://github.com/mlflow/mlflow-export-import"
     raise ImportError(msg) from None
@@ -93,7 +97,27 @@ def _log_tags(client: mlflow.MlflowClient, run_dct: dict, run_id: str, batch_siz
     _log_data(run_dct, run_id, batch_size, get_data, log_data, args_get)
 
 
+def _log_params(client: mlflow.MlflowClient, run_dct: dict[str, Any], run_id: str, batch_size: int) -> None:
+    def get_data(run_dct: dict[str, Any]) -> list[mlflow.entities.Param]:
+        cleaned_run_dct = clean_config_params(run_dct["params"])
+        LOGGER.info("Logging %s parameters", len(cleaned_run_dct))
+        if len(cleaned_run_dct) > MAX_PARAMS_LENGTH:
+            msg = (
+                f"Too many params: {len(cleaned_run_dct)} > {MAX_PARAMS_LENGTH}",
+                "Please revisit the fields being logged and add redundant or irrelevant "
+                "ones to the clean_config_params function.",
+            )
+            raise ValueError(msg)
+        return [mlflow.entities.Param(k, v) for k, v in cleaned_run_dct.items()]
+
+    def log_data(run_id: str, params: dict[str, Any]) -> None:
+        client.log_batch(run_id, params=params)
+
+    _log_data(run_dct, run_id, batch_size, get_data, log_data)
+
+
 def import_run_data(mlflow_client: mlflow.MlflowClient, run_dct: dict, run_id: str, src_user_id: str) -> None:
+
     _log_params(mlflow_client, run_dct, run_id, MAX_PARAMS_TAGS_PER_BATCH)
     _log_metrics(mlflow_client, run_dct, run_id, MAX_METRICS_PER_BATCH)
     _log_tags(
