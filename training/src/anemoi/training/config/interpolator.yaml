@@ -31,7 +31,17 @@ model:
 training:
   model_task: anemoi.training.train.forecaster.GraphInterpolator
 
-# Instead of inferred using multistep and timeincrement, specify time indices explicitly
+  # ─────────────────────────────────────────────────────────────
+  # New section – per-variable accumulation handling
+  # ─────────────────────────────────────────────────────────────
+  accumulated_vars:
+    tp:
+      input_accum_period: 6        # hours represented by the input accumulation
+      output_accum_period: 1       # desired (interpolated) period
+      energy_conservation: true    # enforce mass-conserving interpolation
+
+
+  # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0,6]
     target: [1,2,3,4,5]
