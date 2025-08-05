@@ -202,23 +202,11 @@ class NormalizedReluPostprocessor(Postprocessor):
         return postprocessor_function
 
 
-class ConditionalZeroPostprocessor(Postprocessor):
-    """Sets values to specified value where another variable is zero.
+class ConditionalPostprocessor(Postprocessor):
+    """Base class for postprocessors that conditionally apply a transformation based on another variable.
 
-    Expects the config to have keys corresponding to customizable values and lists of variables to postprocess and a variable to use for postprocessing.:
-
-    ```
-    default: "none"
-    remap: "x"
-    0:
-        - y
-    5.0:
-        - x
-    3.14:
-        - q
-    ```
-
-    If "x" is zero, "y" will be postprocessed with 0, "x" with 5.0 and "q" with 3.14.
+    This class is intended to be subclassed for specific implementations.
+    It expects the config to have keys corresponding to customizable values and lists of variables to postprocess.
     """
 
     def __init__(
@@ -243,24 +231,9 @@ class ConditionalZeroPostprocessor(Postprocessor):
             self.masking_variable, None
         )
 
-    def _get_postprocessor_function(self, method: float, name: str):
-        """For ConditionalZeroPostprocessor, the 'method' is the constant value to fill
-        when the masking variable is zero. This function simply returns the value.
-        """
-        LOGGER.info(
-            f"ConditionalZeroPostprocessor: replacing valus in {name} with value {method} if {self.masking_variable} is zero."
-        )
-        return method
-
     def _expand_subset_mask(self, x: torch.Tensor, mask: torch.tensor) -> torch.Tensor:
         """Expand the subset of the mask to the correct shape."""
         return mask.expand(*x.shape[:-2], -1)
-
-    def get_zeros(self, x: torch.Tensor) -> torch.Tensor:
-        """Get zero mask from data"""
-        # The mask is only saved for the last dimension (grid)
-        idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
-        return (x[idx] == 0).squeeze()
 
     def fill_with_value(self, x: torch.Tensor, index: list[int], fill_mask: torch.tensor):
         for idx_dst, value in zip(index, self.postprocessorfunctions):
@@ -286,7 +259,73 @@ class ConditionalZeroPostprocessor(Postprocessor):
                 f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
             )
 
-        zero_mask = self.get_zeros(x[..., masking_variable])
+        postprocessor_mask = self.get_locations(x[..., masking_variable])
 
         # Replace values
-        return self.fill_with_value(x, index, zero_mask)
+        return self.fill_with_value(x, index, postprocessor_mask)
+
+
+class ConditionalZeroPostprocessor(ConditionalPostprocessor):
+    """Sets values to specified value where another variable is zero.
+
+    Expects the config to have keys corresponding to customizable values and lists of variables to postprocess and a variable to use for postprocessing.:
+
+    ```
+    default: "none"
+    remap: "x"
+    0:
+        - y
+    5.0:
+        - x
+    3.14:
+        - q
+    ```
+
+    If "x" is zero, "y" will be postprocessed with 0, "x" with 5.0 and "q" with 3.14.
+    """
+
+    def _get_postprocessor_function(self, method: float, name: str):
+        """For ConditionalZeroPostprocessor, the 'method' is the constant value to fill
+        when the masking variable is zero. This function simply returns the value.
+        """
+        LOGGER.info(
+            f"ConditionalZeroPostprocessor: replacing valus in {name} with value {method} if {self.masking_variable} is zero."
+        )
+        return method
+
+    def get_locations(self, x: torch.Tensor) -> torch.Tensor:
+        """Get zero mask from data"""
+        # The mask is only saved for the last dimension (grid)
+        idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
+        return (x[idx] == 0).squeeze()
+
+
+class ConditionalNaNPostprocessor(ConditionalPostprocessor):
+    """Sets values to NaNs where another variable is NaN.
+
+    Expects the config to have list of variables to postprocess and a variable to use for postprocessing.:
+
+    ```
+    default: "none"
+    remap: "x"
+    nan:
+        - y
+    ```
+
+    If "x" is NaN, "y" will be postprocessed with NaN.
+    """
+
+    def _get_postprocessor_function(self, method: float, name: str):
+        """For ConditionalNaNPostprocessor, the 'method' is a NaN to fill
+        when the masking variable is NaN. This function simply returns a NaN.
+        """
+        LOGGER.info(
+            f"ConditionalNaNPostprocessor: replacing valus in {name} with value NaN if {self.masking_variable} is NaN."
+        )
+        return torch.nan
+
+    def get_locations(self, x: torch.Tensor) -> torch.Tensor:
+        """Get NaN mask from data"""
+        # The mask is only saved for the last dimension (grid)
+        idx = [slice(0, 1)] * (x.ndim - 2) + [slice(None), slice(None)]
+        return (torch.isnan(x[idx])).squeeze()

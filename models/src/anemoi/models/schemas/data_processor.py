@@ -42,8 +42,9 @@ class NormalizerSchema(BaseModel):
 class ImputerSchema(BaseModel):
     default: str = Field(literals=["none", "mean", "stdev"])
     "Imputer default method to apply."
-    maximum: Union[list[str], None]
-    minimum: Union[list[str], None]
+    maximum: Union[list[str], None] = Field(default_factory=list)
+    minimum: Union[list[str], None] = Field(default_factory=list)
+    mean: Union[list[str], None] = Field(default_factory=list)
     none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be imputed."
 
@@ -213,6 +214,17 @@ class ConditionalZeroPostprocessorSchema(RootModel[dict[Any, Any]]):
         return values
 
 
+class ConditionalNaNPostprocessorSchema(BaseModel):
+    default: str = Field(literals=["none", "nan"], default="none")
+    "Postprocessor default method to apply."
+    remap: str
+    "Name of conditional variable."
+    nan: Union[list[str], None] = Field(default_factory=list)
+    "Variables to postprocess with NaNs."
+    none: Union[list[str], None] = Field(default_factory=list)
+    "Variables not to be postprocessed."
+
+
 class RemapperSchema(BaseModel):
     default: str = Field(literals=["none", "log1p", "sqrt", "boxcox"])
     "Remapper default method to apply."
@@ -227,6 +239,7 @@ class PreprocessorTarget(str, Enum):
     remapper = "anemoi.models.preprocessing.remapper.Remapper"
     postprocessor = "anemoi.models.preprocessing.postprocessor.Postprocessor"
     conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
+    conditional_nan_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor"
     normalized_relu_postprocessor = "anemoi.models.preprocessing.postprocessor.NormalizedReluPostprocessor"
 
 
@@ -237,6 +250,7 @@ target_to_schema = {
     PreprocessorTarget.remapper: RemapperSchema,
     PreprocessorTarget.postprocessor: PostprocessorSchema,
     PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
+    PreprocessorTarget.conditional_nan_postprocessor: ConditionalNaNPostprocessorSchema,
     PreprocessorTarget.normalized_relu_postprocessor: NormalizedReluPostprocessorSchema,
 }
 
