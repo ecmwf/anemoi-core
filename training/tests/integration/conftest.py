@@ -58,7 +58,11 @@ def architecture_config(
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = rel_paths[0]
 
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    # Add the imputer here as it's not part of the default config
+    imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
+
+    OmegaConf.set_struct(template.data, False)  # allow adding new keys to the template to add the imputer
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, imputer_modifications)
     OmegaConf.resolve(cfg)
     return cfg, dataset_urls[0]
 
