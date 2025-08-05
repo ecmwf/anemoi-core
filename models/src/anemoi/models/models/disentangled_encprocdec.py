@@ -432,7 +432,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
         curr_latent = self.processor(
             x_accum,
             batch_size=batch_size,
-            shard_shapes=shard_shapes_hiddens[dst_hidden_name],
+            shard_shapes=shard_shapes_hiddens[dst_hidden_name if not self.num_hidden==1 else self._graph_hidden_names[0]],
             model_comm_group=model_comm_group,
         )
 
