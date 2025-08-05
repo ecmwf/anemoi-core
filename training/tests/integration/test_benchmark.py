@@ -58,6 +58,53 @@ class BenchmarkValue():
     def to_csv(self):
         return f"{self.name},{self.unit},{self.date},{self.commit},{self.value}"
 
+
+#This function should be called from inside a git repo
+#It takes a given commit and returns true if it is somewhere in the branches history
+#This function is used when selecting which result to benchmark against, we will take the latest commit which is present in the branch
+# This prevents tests failing because someone pushed a performance improvement and a developer hasnt merged
+
+# example output
+#   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a13")=False
+#   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a18")=True
+# cd ..
+#   Not a git repository.
+#   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a18")=False
+def _isCommitInProject(commit):
+    #import GitPython
+    #TODO add check if branch cant be found (e.g. called outside repo)
+    #branch=$(git symbolic-ref --short HEAD)
+    #isCommitPresent=$(git branch $branch --contains $commit)
+    from git import Repo, InvalidGitRepositoryError, GitCommandError
+
+    #find repo
+    try:
+        repo = Repo('.', search_parent_directories=True)
+    except InvalidGitRepositoryError:
+        LOGGER.debug("Not a git repository.")
+        return False
+
+    #find branch
+    try:
+        current_branch = repo.active_branch.name
+    except TypeError:
+        # Detached HEAD state, no active branch
+        current_branch = None
+
+    try:
+        # Check if the commit is an ancestor of the current branch
+        if current_branch is not None:
+            branch_commit = repo.commit(current_branch)
+        else:
+            # In detached HEAD state, compare with HEAD
+            branch_commit = repo.head.commit
+
+        # Check if the given commit is reachable from the branch
+        repo.git.merge_base('--is-ancestor', commit, branch_commit.hexsha)
+        return True
+    except GitCommandError:
+        return False  # commit is not an ancestor or doesn't exist
+
 class BenchmarkServer():
     def __init__(self, 
             local=True #use a local folder to store data instead of a remote server
@@ -88,8 +135,6 @@ class BenchmarkServer():
 
     #trys to read a metric from 'self.get_url'
     #If the metric exists, update list of benchmark values
-    #assumes file is just a single line with a single value
-    # TODO return none if value cant be found
     def getValue(self, benchmarkName:str, forceGetFromServer:bool = False):
         if not forceGetFromServer and benchmarkName in self.benchmarkValues:
             LOGGER.debug(f"entry for {benchmarkName} found locally, not retrieving from server")
