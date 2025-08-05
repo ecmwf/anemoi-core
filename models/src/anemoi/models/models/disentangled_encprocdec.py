@@ -78,20 +78,21 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         )
 
         model_config = DotDict(model_config)
-        self.use_latent_blending = model_config.model.get("use_latent_blending", False)
 
-        if self.use_latent_blending:
-            # Encoder data -> hidden
-            self.latent_blender = instantiate(
-                model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.num_channels * self.multi_step,
-                in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
-                hidden_dim=self.num_channels,
-                sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            )
+        # Latent Blending
+        self.latent_blender = instantiate(
+            model_config.model.encoder,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            in_channels_src=self.num_channels * self.multi_step,
+            in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
+            hidden_dim=self.num_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+        )
+
+        # Latent rollout
+        self.latent_rollout = model_config.model.get("latent_rollout", False)
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         return super()._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
@@ -114,6 +115,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
     def forward(
         self,
         x: Tensor,
+        rollout_step: Optional[int] = 0,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
@@ -140,78 +142,79 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
-        # Encode each time step separately and then accumulate them
-        x_accum = None
-        for i in range(self.multi_step):
-            x_t = x[:, i : i + 1, ...]  # shape: [B, 1, E, G, D]
+        # Make hidden latent
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
-            x_data_latent, shard_shapes_data = self._assemble_input(
-                x_t, batch_size, grid_shard_shapes, model_comm_group
-            )
+        # If first step of rollout (or no rollout), need to encode all input states
+        if rollout_step == 0:
+            # Encode each time step separately and then accumulate them
+            self.x_accum = None
+            for i in range(self.multi_step):
+                x_t = x[:, i : i + 1, ...]  # shape: [B, 1, E, G, D]
 
-            x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-            shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+                x_data_latent, shard_shapes_data = self._assemble_input(
+                    x_t, batch_size, grid_shard_shapes, model_comm_group
+                )
 
-            # Encode timestep
-            x_data_latent, x_latent = self._run_mapper(
-                self.encoder,
-                (x_data_latent, x_hidden_latent),
-                batch_size=batch_size,
-                shard_shapes=(shard_shapes_data, shard_shapes_hidden),
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                x_dst_is_sharded=False,  # x_latent does not come sharded
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
+                # Encode timestep
+                x_data_latent, x_latent = self._run_mapper(
+                    self.encoder,
+                    (x_data_latent, x_hidden_latent),
+                    batch_size=batch_size,
+                    shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+                    model_comm_group=model_comm_group,
+                    x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+                    x_dst_is_sharded=False,  # x_latent does not come sharded
+                    keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                )
 
-            if x_accum is None:
-                if self.use_latent_blending:
-                    x_accum = [x_latent]
+                if self.x_accum is None:
+                    self.x_accum = [x_latent]
+
                 else:
-                    x_accum = x_latent
-            else:
-                if self.use_latent_blending:
-                    x_accum.append(x_latent)
-                else:
-                    x_accum += x_latent  # accumulates in-place
+                    self.x_accum.append(x_latent)
 
-        # Store the last latent for the residual connection
-        x_skip = x_latent
+            # concatenate latents
+            self.x_accum = torch.cat(self.x_accum, dim=1)
+            # Store the last latent for the residual connection
+            x_skip = x_latent
 
-        if self.use_latent_blending:
-            x_accum = torch.cat(x_accum, dim=1)
+        else:
+            self.x_accum = self.x_accum.roll(-1, dims=1)
+            # Use previous processor output (latent rollout)
+            self.x_accum[:, -1, ...] = self.x_latent_proc[:, 0, ...]
+            # Store the last latent for the residual connection
+            x_skip = self.x_latent_proc
 
-            # Latent blending network
-            _, x_accum = self._run_mapper(
-                self.latent_blender,
-                (x_accum, x_hidden_latent),
-                batch_size=batch_size,
-                shard_shapes=(shard_shapes_hidden, shard_shapes_hidden),
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                x_dst_is_sharded=False,  # x_latent does not come sharded
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
+        # Latent blending network
+        _, blended_x = self._run_mapper(
+            self.latent_blender,
+            (self.x_accum, x_hidden_latent),
+            batch_size=batch_size,
+            shard_shapes=(shard_shapes_hidden, shard_shapes_hidden),
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+            x_dst_is_sharded=False,  # x_latent does not come sharded
+            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+        )
 
         # Processor
         x_latent_proc = self.processor(
-            x_accum,
+            blended_x,
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
             model_comm_group=model_comm_group,
         )
 
         # Residual learning over the latent space
-        x_latent_proc = x_latent_proc + x_skip
+        self.x_latent_proc = x_latent_proc + x_skip
 
         # Only pass data and forcing coordinates to the decoder
         # Autoencoder is trained like this, if model freezing this has to be equal
         x_target_latent, shard_shapes_target = self._assemble_forcings(
             x, batch_size, grid_shard_shapes, model_comm_group
         )
-
-        print(x_latent_proc.shape, x_target_latent.shape)
-        print(shard_shapes_hidden, shard_shapes_target)
 
         # Decoder
         x_out = self._run_mapper(
@@ -282,21 +285,22 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
         )
 
         model_config = DotDict(model_config)
-        self.use_latent_blending = model_config.model.get("use_latent_blending", False)
 
-        if self.use_latent_blending:
-            # Encoder data -> hidden
-            self.latent_blender = instantiate(
-                model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.hidden_dims[self._graph_hidden_names[-1]] * self.multi_step,
-                in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[-1]],
-                hidden_dim=self.hidden_dims[self._graph_hidden_names[-1]],
-                sub_graph=self._graph_data[(self._graph_hidden_names[-1], "to", self._graph_hidden_names[-1])],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
-            )
-        
+        ## Latent Blending
+        self.latent_blender = instantiate(
+            model_config.model.encoder,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            in_channels_src=self.hidden_dims[self._graph_hidden_names[-1]] * self.multi_step,
+            in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[-1]],
+            hidden_dim=self.hidden_dims[self._graph_hidden_names[-1]],
+            sub_graph=self._graph_data[(self._graph_hidden_names[-1], "to", self._graph_hidden_names[-1])],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
+        )
+
+        # Latent rollout
+        self.latent_rollout = model_config.model.get("latent_rollout", False)
+
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         return AnemoiModelHierarchicalAutoEncoder._assemble_input(
             self, x, batch_size, grid_shard_shapes, model_comm_group
@@ -314,6 +318,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
     def forward(
         self,
         x: Tensor,
+        rollout_step: Optional[int] = 0,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
@@ -340,104 +345,114 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
-        # Encode each time step separately and then accumulate them
-        x_accum = None
-        for i in range(self.multi_step):
-            x_t = x[:, i : i + 1, ...]  # shape: [B, 1, E, G, D]
+        # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
+        x_hidden_latents = {}
+        for hidden in self._graph_hidden_names:
+            x_hidden_latents[hidden] = self.node_attributes(hidden, batch_size=batch_size)
 
-            # Prepare input
-            x_data_latent, shard_shapes_data = self._assemble_input(
-                x_t, batch_size, grid_shard_shapes, model_comm_group
-            )
+        # Get data and hidden shapes for sharding
+        shard_shapes_hiddens = {}
+        for hidden, x_latent in x_hidden_latents.items():
+            shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group)
 
-            # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
-            x_hidden_latents = {}
-            for hidden in self._graph_hidden_names:
-                x_hidden_latents[hidden] = self.node_attributes(hidden, batch_size=batch_size)
+        # If first step of rollout (or no rollout), need to encode all input states
+        if rollout_step == 0:
+            # Encode each time step separately and then accumulate them
+            self.x_accum = None
+            for i in range(self.multi_step):
+                x_t = x[:, i : i + 1, ...]  # shape: [B, 1, E, G, D]
 
-            # Get data and hidden shapes for sharding
-            shard_shapes_hiddens = {}
-            for hidden, x_latent in x_hidden_latents.items():
-                shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group)
+                # Prepare input
+                x_data_latent, shard_shapes_data = self._assemble_input(
+                    x_t, batch_size, grid_shard_shapes, model_comm_group
+                )
 
-            # Encode timestep
-            x_data_latent, curr_latent = self._run_mapper(
-                self.encoder,
-                (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
-                batch_size=batch_size,
-                shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]),
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                x_dst_is_sharded=False,  # x_latent does not come sharded
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
-
-            x_encoded_latents = {}
-
-            ## Downscale
-            for i in range(0, self.num_hidden - 1):
-                src_hidden_name = self._graph_hidden_names[i]
-                dst_hidden_name = self._graph_hidden_names[i + 1]
-
-                # Processing at same level
-                if self.level_process:
-                    curr_latent = self.down_level_processor[src_hidden_name](
-                        curr_latent,
-                        batch_size=batch_size,
-                        shard_shapes=shard_shapes_hiddens[src_hidden_name],
-                        model_comm_group=model_comm_group,
-                    )
-
-                # Encode to next hidden level
-                x_encoded_latents[src_hidden_name], curr_latent = self._run_mapper(
-                    self.downscale[src_hidden_name],
-                    (curr_latent, x_hidden_latents[dst_hidden_name]),
+                # Encode timestep
+                x_data_latent, curr_latent = self._run_mapper(
+                    self.encoder,
+                    (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
                     batch_size=batch_size,
-                    shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
+                    shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]),
                     model_comm_group=model_comm_group,
-                    x_src_is_sharded=True,
+                    x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                     x_dst_is_sharded=False,  # x_latent does not come sharded
                     keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 )
-            
-            if x_accum is None:
-                if self.use_latent_blending:
-                    x_accum = [curr_latent]
-                else:
-                    x_accum = curr_latent
-            else:
-                if self.use_latent_blending:
-                    x_accum.append(curr_latent)
-                else:
-                    x_accum += curr_latent  # accumulates in-place
 
-        if self.use_latent_blending:
-            x_accum = torch.cat(x_accum, dim=1)
-            # Latent blending network
-            _, x_accum = self._run_mapper(
-                self.latent_blender,
-                (x_accum, x_hidden_latents[self._graph_hidden_names[self.num_hidden-1]]),
-                batch_size=batch_size,
-                shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[self.num_hidden-1]], shard_shapes_hiddens[self._graph_hidden_names[self.num_hidden-1]]),
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                x_dst_is_sharded=False,  # x_latent does not come sharded
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
-        
-        # Store the last latent for the residual connection
-        x_skip = x_accum
+                x_encoded_latents = {}
+
+                ## Downscale
+                for i in range(0, self.num_hidden - 1):
+                    src_hidden_name = self._graph_hidden_names[i]
+                    dst_hidden_name = self._graph_hidden_names[i + 1]
+
+                    # Processing at same level
+                    if self.level_process:
+                        curr_latent = self.down_level_processor[src_hidden_name](
+                            curr_latent,
+                            batch_size=batch_size,
+                            shard_shapes=shard_shapes_hiddens[src_hidden_name],
+                            model_comm_group=model_comm_group,
+                        )
+
+                    # Encode to next hidden level
+                    x_encoded_latents[src_hidden_name], curr_latent = self._run_mapper(
+                        self.downscale[src_hidden_name],
+                        (curr_latent, x_hidden_latents[dst_hidden_name]),
+                        batch_size=batch_size,
+                        shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
+                        model_comm_group=model_comm_group,
+                        x_src_is_sharded=True,
+                        x_dst_is_sharded=False,  # x_latent does not come sharded
+                        keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                    )
+
+                if self.x_accum is None:
+                    self.x_accum = [curr_latent]
+
+                else:
+                    self.x_accum.append(curr_latent)
+
+            # concatenate latents
+            self.x_accum = torch.cat(self.x_accum, dim=1)
+            # Store the last latent for the residual connection
+            x_skip = curr_latent
+
+        else:
+            self.x_accum = self.x_accum.roll(-1, dims=1)
+            # Use previous processor output (latent rollout)
+            self.x_accum[:, -1, ...] = self.x_latent_proc[:, 0, ...]
+            # Store the last latent for the residual connection
+            x_skip = self.x_latent_proc
+
+        # Latent blending network
+        _, blended_x = self._run_mapper(
+            self.latent_blender,
+            (self.x_accum, x_hidden_latents[self._graph_hidden_names[self.num_hidden - 1]]),
+            batch_size=batch_size,
+            shard_shapes=(
+                shard_shapes_hiddens[self._graph_hidden_names[self.num_hidden - 1]],
+                shard_shapes_hiddens[self._graph_hidden_names[self.num_hidden - 1]],
+            ),
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
+            x_dst_is_sharded=False,  # x_latent does not come sharded
+            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+        )
 
         # Processing hidden-most level
-        curr_latent = self.processor(
-            x_accum,
+        x_latent_proc = self.processor(
+            blended_x,
             batch_size=batch_size,
-            shard_shapes=shard_shapes_hiddens[dst_hidden_name if not self.num_hidden==1 else self._graph_hidden_names[0]],
+            shard_shapes=shard_shapes_hiddens[
+                self._graph_hidden_names[-1] if not self.num_hidden == 1 else self._graph_hidden_names[0]
+            ],
             model_comm_group=model_comm_group,
         )
 
         # Residual learning over the latent space
-        curr_latent = curr_latent + x_skip
+        self.x_latent_proc = x_latent_proc + x_skip
+        curr_latent = self.x_latent_proc
 
         ## Upscale
         for i in range(self.num_hidden - 1, 0, -1):
@@ -479,7 +494,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
             shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_target),
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,
-            x_dst_is_sharded=in_out_sharded,  
+            x_dst_is_sharded=in_out_sharded,
             keep_x_dst_sharded=in_out_sharded,
         )
 

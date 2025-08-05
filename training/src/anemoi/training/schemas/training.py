@@ -18,7 +18,6 @@ from typing import Union
 
 from pydantic import AfterValidator
 from pydantic import Discriminator
-from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -367,6 +366,11 @@ class ForecasterSchema(BaseTrainingSchema):
     "Rollout configuration."
 
 
+class LatentForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.LatentGraphForecaster",] = Field(..., alias="model_task")
+    "Training objective."
+
+
 class ForecasterEnsSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
@@ -393,6 +397,7 @@ class AutoencoderSchema(BaseTrainingSchema):
 TrainingSchema = Annotated[
     Union[
         ForecasterSchema,
+        LatentForecasterSchema,
         ForecasterEnsSchema,
         InterpolationSchema,
         AutoencoderSchema,

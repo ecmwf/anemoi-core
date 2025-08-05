@@ -10,6 +10,7 @@
 from .autoencoder import GraphAutoEncoder
 from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
+from .forecaster import LatentGraphForecaster
 from .interpolator import GraphInterpolator
 
-__all__ = ["GraphAutoEncoder", "GraphEnsForecaster", "GraphForecaster", "GraphInterpolator"]
+__all__ = ["GraphAutoEncoder", "GraphEnsForecaster", "GraphForecaster", "GraphInterpolator", "LatentGraphForecaster"]
