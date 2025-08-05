@@ -168,7 +168,7 @@ class BenchmarkServer:
                 return None
         else:
             url = f"{self.get_url}/{benchmarkName}"
-            print(f"Fetching benchmark data from {url}...")
+            LOGGER.debug(f"Fetching benchmark data from {url}...")
             try:
                 df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
                 # data = urlopen(url)
