@@ -1,0 +1,46 @@
+model:
+  sample:
+    input:
+      era5:
+        timedeltas: ["0h"]
+        variables:
+          - cos_latitude
+          - sin_latitude
+          - cos_longitude
+          - sin_longitude
+          - 10u
+          - 2t
+          - 2d
+          - q_100
+          - q_1000
+      cerra:
+        timedeltas: ["0h"]
+        variables:
+          - cos_latitude
+          - sin_latitude
+          - cos_longitude
+          - sin_longitude
+    target:
+      cerra:
+        timedeltas: ["0h"]
+        variables:
+          - tp
+          - t_100
+
+data:
+  data_handlers:
+    era5:
+      dataset:
+        dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+        set_group: era5
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std:
+              - tp
+    cerra:
+      dataset:
+        dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
+        set_group: cerra

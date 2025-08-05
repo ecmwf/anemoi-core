@@ -1,0 +1,62 @@
+data:
+  era5:
+    dataset:
+      dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+      set_group: era5
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: mean-std
+          std:
+            - tp
+  amsr_h180:
+    dataset:
+      dataset: obs-2018-11
+      select:
+      - amsr_h180.*
+
+sample:
+  dictionary:
+    input:
+      dictionary:
+        era5:
+          tensor:
+            timedeltas: ["0h", "-6h"]
+            variables:
+              - cos_latitude
+              - sin_latitude
+              - 10u
+              - 2t
+              - 2d
+              - q_100
+              - q_1000
+            data: era5
+        amsr_h180:
+          tuple:
+            timedeltas: ["0h"]
+            variables:
+              - rawbt_1
+              - rawbt_2
+              - rawbt_3
+            data: amsr_h180
+    target:
+      dictionary:
+        era5:
+          tuple:
+            timedeltas: ["6h"]
+            variables:
+                - 10u
+                - 2t
+                - 2d
+                - q_100
+                - q_1000
+            data: era5
+        amsr_h180:
+          tuple:
+            timedeltas: ["6h"]
+            variables:
+              - rawbt_1
+              - rawbt_2
+              - rawbt_3
+            data: amsr_h180

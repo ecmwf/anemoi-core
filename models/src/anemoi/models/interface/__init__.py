@@ -19,8 +19,18 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.models.mult_encoder_processor_decoder import AnemoiMultiModel
 from anemoi.models.preprocessing import Processors
 from anemoi.utils.config import DotDict
+
+
+def processor_factory(name_to_index, statistics, processors, **kwargs) -> list[list]:
+    from anemoi.models.preprocessing.normalizer import InputNormalizer
+
+    return [
+        [name, instantiate(cfg, name_to_index=name_to_index["variables"], statistics=statistics["variables"])]
+        for name, cfg in processors.items()
+    ]
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -59,46 +69,39 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DotDict,
+        sample_provider,
         graph_data: HeteroData,
-        statistics: dict,
-        data_indices: dict,
+        # data_indices: dict,
         metadata: dict,
-        supporting_arrays: dict = None,
-        truncation_data: dict,
     ) -> None:
         super().__init__()
         self.config = config
         self.id = str(uuid.uuid4())
-        self.multi_step = self.config.training.multistep_input
+        self.sample_provider = sample_provider
         self.graph_data = graph_data
-        self.statistics = statistics
-        self.truncation_data = truncation_data
         self.metadata = metadata
-        self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
-        self.data_indices = data_indices
+        self.supporting_arrays = {}
         self._build_model()
 
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
         # Instantiate processors
-        processors = [
-            [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
-            for name, processor in self.config.data.processors.items()
-        ]
+        preprocessors = self.sample_provider.apply(processor_factory)
 
         # Assign the processor list pre- and post-processors
-        self.pre_processors = Processors(processors)
-        self.post_processors = Processors(processors, inverse=True)
+        self.input_pre_processors = Processors(preprocessors["input"].processor_factory)
+        self.target_pre_processors = Processors(preprocessors["target"].processor_factory)
+        self.target_post_processors = Processors(preprocessors["target"].processor_factory, inverse=True)
+        # TODO: Implemente structure.processor_factory (not only at LeafStructure)
 
         # Instantiate the model
-        self.model = instantiate(
-            self.config.model.model,
+        self.model = AnemoiMultiModel(
+            # self.config.model.model,
             model_config=self.config,
-            data_indices=self.data_indices,
-            statistics=self.statistics,
+            sample_provider=self.sample_provider,
             graph_data=self.graph_data,
-            truncation_data=self.truncation_data,
-            _recursive_=False,  # Disables recursive instantiation by Hydra
+            # truncation_data=self.truncation_data,
+            # _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
         # Use the forward method of the model directly

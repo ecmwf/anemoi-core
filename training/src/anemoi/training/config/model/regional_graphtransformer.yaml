@@ -1,0 +1,214 @@
+activation: GELU
+num_channels: 1024
+cpu_offload: False
+#output_mask: null # moved this to config.training to have one mask per output
+
+
+sample:
+  input:
+    global:
+      variables:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "lsm"
+      - "z"
+      - "sp"
+      - "msl"
+      - "sdor"
+      - "slor"
+      - "10u"
+      - "10v"
+      - "2t"
+      - "2d"
+      - "q_100"
+      - "q_300"
+      - "q_700"
+      - "q_1000"
+      - "t_100"
+      - "t_300"
+      - "t_700"
+      - "t_1000"
+      - "u_100"
+      - "u_300"
+      - "u_700"
+      - "u_1000"
+      - "v_100"
+      - "v_300"
+      - "v_700"
+      - "v_1000"
+      - "w_100"
+      - "w_300"
+      - "w_700"
+      - "w_1000"
+      - "z_100"
+      - "z_300"
+      - "z_700"
+      - "z_1000"
+      offset: ["-6h", "0h"]
+    regional:
+      variables:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "orog"
+      - "lsm"
+      - "msl_0"
+      - "10si_10"
+      - "10wdir_10"
+      - "2t_2"
+      offset: ["0h"]
+  target:
+    regional:
+      variables:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "orog"
+      - "lsm"
+      - "msl_0"
+      - "10si_10"
+      - "10wdir_10"
+      - "2t_2"
+      - "tp"
+      offset: ["6h"]
+
+model:
+  _target_: anemoi.models.models.mult_encoder_processor_decoder.AnemoiMultiModel
+  encoder_input_names:
+  - global
+  - regional
+  hidden_name: "hidden"
+  decoder_target_names:
+  - regional
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: torch.nn.LayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+
+layer_kernels_processor:
+  LayerNorm:
+    _target_: torch.nn.LayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+emb_data:
+  _target_: anemoi.models.layers.mlp.MLP
+  hidden_dim: 128
+  n_extra_layers: 0
+  final_activation: GELU
+  layer_kernels: ${model.layer_kernels_processor}
+
+processor:
+  _target_: anemoi.models.layers.processor.DynamicGraphTransformerProcessor
+  # activation: ${model.activation}
+  subgraph_edge_attributes: ${model.attributes.edges}
+  num_layers: 16
+  num_chunks: 2
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels_processor}
+
+
+encoder:
+  _target_: anemoi.models.layers.mapper.DynamicGraphTransformerForwardMapper
+  subgraph_edge_attributes: ${model.attributes.edges}
+  # activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
+
+decoder:
+  _target_: anemoi.models.layers.mapper.DynamicGraphTransformerBackwardMapper
+  subgraph_edge_attributes: ${model.attributes.edges}
+  # activation: ${model.activation}
+  num_chunks: 1
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  initialise_data_extractor_zero: False
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
+
+
+trainable_parameters:
+  data: 0
+  hidden: 0
+  data2hidden: 0
+  hidden2data: 0
+  hidden2hidden: 0 # GNN and GraphTransformer Processor only
+
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+# Bounding configuration
+bounding: #These are applied in order
+
+  # Bound tp (total precipitation) with a Relu bounding layer
+  # ensuring a range of [0, infinity) to avoid negative precipitation values.
+  - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+    variables:
+    - tp
+    # - era5.tp # it would be nice to support this
+
+  # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
+  # This guarantees that cp is physically consistent with tp by restricting cp
+  # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
+  # NOTE: If this bounding strategy is used, the normalization of cp must be
+  # changed to "std" normalization, and the "cp" statistics should be remapped
+  # to those of tp to ensure consistency.
+
+  # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+  #   variables:
+  #   - cp
+  #   min_val: 0
+  #   max_val: 1
+  #   total_var: tp
+
+  # [OPTIONAL] NormalizedReluBounding
+  # This is an extension of the Relu bounding in case the thrshold to be used
+  # is not 0. For example, in case of the sea surface temperature we don't use
+  # [0, infinity), buth rather [-2C, infinity). We do not want the water
+  # temperature to be below the freezing temperature.
+
+  # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
+  #   variables: [sst]
+  #   min_val: [-2]
+  #   normalizer: ['mean-std']

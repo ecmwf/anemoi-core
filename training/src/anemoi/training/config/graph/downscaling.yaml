@@ -1,15 +1,19 @@
 ---
 overwrite: True
 
-data: "era5"
+data: "lowres"
 hidden: "hidden"
 
 nodes:
   # Data nodes
-  era5:
+  lowres:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
-      dataset: ${data.data_handlers.era5.dataset}
+      dataset: ${data.data_handlers.lowres.dataset}
+  hires:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
+      dataset: ${data.data_handlers.hires.dataset}
     attributes: ${graph.attributes.nodes}
   # Hidden nodes
   hidden:
@@ -20,7 +24,7 @@ nodes:
 
 edges:
 # Encoder configuration
-- source_name: ${graph.data}
+- source_name: "lowres"
   target_name: ${graph.hidden}
   edge_builders:
   - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
@@ -40,7 +44,7 @@ edges:
   attributes: ${graph.attributes.edges}
   # Decoder configuration
 - source_name: ${graph.hidden}
-  target_name: ${graph.data}
+  target_name: "hires"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
     num_nearest_neighbours: 3 # only for knn method

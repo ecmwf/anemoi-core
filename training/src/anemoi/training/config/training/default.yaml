@@ -44,7 +44,7 @@ optimizer:
     betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+model_task: anemoi.training.train.tasks.GraphForecasterMultiDataset
 
 # select strategy
 strategy:
@@ -60,15 +60,7 @@ strategy:
 loss_gradient_scaling: False
 
 # loss function for the model
-training_loss:
-  # loss class to initialise
-  _target_: anemoi.training.losses.MSELoss
-  # Scalers to include in loss calculation
-  # A selection of available scalers are listed in training/scalers.
-  # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-  # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-  ignore_nans: False
+training_loss: ???
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated

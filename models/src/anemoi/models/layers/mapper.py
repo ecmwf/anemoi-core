@@ -141,13 +141,13 @@ class ForwardMapperPreProcessMixin:
 
 class GraphEdgeMixin:
     def _register_edges(
-        self, sub_graph: HeteroData, edge_attributes: list[str], src_size: int, dst_size: int, trainable_size: int
+        self, subgraph: HeteroData, edge_attributes: list[str], src_size: int, dst_size: int, trainable_size: int
     ) -> None:
         """Register edge dim, attr, index_base, and increment.
 
         Parameters
         ----------
-        sub_graph : HeteroData
+        subgraph : HeteroData
             Sub graph of the full structure
         edge_attributes : list[str]
             Edge attributes to use.
@@ -158,14 +158,14 @@ class GraphEdgeMixin:
         trainable_size : int
             Trainable tensor size
         """
-        assert sub_graph, f"{self.__class__.__name__} needs a valid sub_graph to register edges."
+        assert subgraph, f"{self.__class__.__name__} needs a valid subgraph to register edges."
         assert edge_attributes is not None, "Edge attributes must be provided"
 
-        edge_attr_tensor = torch.cat([sub_graph[attr] for attr in edge_attributes], axis=1)
+        edge_attr_tensor = torch.cat([subgraph[attr] for attr in edge_attributes], axis=1)
 
         self.edge_dim = edge_attr_tensor.shape[1] + trainable_size
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
-        self.register_buffer("edge_index_base", sub_graph.edge_index, persistent=False)
+        self.register_buffer("edge_index_base", subgraph.edge_index, persistent=False)
         self.register_buffer(
             "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=True
         )
@@ -208,8 +208,8 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        subgraph: HeteroData,
+        subgraph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
         qk_norm: bool = False,
@@ -237,9 +237,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             Number of heads in transformer
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension
-        sub_graph : HeteroData
+        subgraph : HeteroData
             Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
+        subgraph_edge_attributes : list[str]
             Edge attributes to use
         src_grid_size : int
             Source grid size
@@ -267,9 +267,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         self.num_chunks = num_chunks
 
-        Linear = self.layer_factory.Linear
-
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self._register_edges(subgraph, subgraph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
 
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
@@ -286,7 +284,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         self.offload_layers(cpu_offload)
 
-        self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
+        self.emb_nodes_dst = self.layer_factory.Linear(self.in_channels_dst, self.hidden_dim)
 
         self.shard_strategy = shard_strategy
 
@@ -506,8 +504,8 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        subgraph: HeteroData,
+        subgraph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
         qk_norm: bool = False,
@@ -533,9 +531,9 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             Number of heads in transformer
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension, default 4
-        sub_graph : HeteroData
+        subgraph : HeteroData
             Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
+        subgraph_edge_attributes : list[str]
             Edge attributes to use
         src_grid_size : int
             Source grid size
@@ -561,8 +559,8 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
             qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            subgraph=subgraph,
+            subgraph_edge_attributes=subgraph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
             layer_kernels=layer_kernels,
@@ -601,8 +599,8 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        subgraph: HeteroData,
+        subgraph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
         qk_norm: bool = False,
@@ -631,9 +629,9 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             Number of heads in transformer
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
-        sub_graph : HeteroData
+        subgraph : HeteroData
             Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
+        subgraph_edge_attributes : list[str]
             Edge attributes to use
         src_grid_size : int
             Source grid size
@@ -662,8 +660,8 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
             qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            subgraph=subgraph,
+            subgraph_edge_attributes=subgraph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
             layer_kernels=layer_kernels,
@@ -705,8 +703,8 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        subgraph: HeteroData,
+        subgraph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
         cpu_offload: bool = False,
@@ -732,9 +730,9 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             Number of heads in transformer
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension
-        sub_graph : HeteroData
+        subgraph : HeteroData
             Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
+        subgraph_edge_attributes : list[str]
             Edge attributes to use
         src_grid_size : int
             Source grid size
@@ -756,7 +754,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
             layer_kernels=layer_kernels,
         )
 
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self._register_edges(subgraph, subgraph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
 
         self.emb_edges = MLP(
             in_features=self.edge_dim,
@@ -831,8 +829,8 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
         trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        subgraph: HeteroData,
+        subgraph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
         cpu_offload: bool = False,
@@ -856,9 +854,9 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             Number of chunks to split into
         mlp_extra_layers : int, optional
             Number of extra layers in MLP, by default 0
-        sub_graph : HeteroData
+        subgraph : HeteroData
             Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
+        subgraph_edge_attributes : list[str]
             Edge attributes to use
         src_grid_size : int
             Source grid size
@@ -879,8 +877,8 @@ class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            subgraph=subgraph,
+            subgraph_edge_attributes=subgraph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
             layer_kernels=layer_kernels,
@@ -927,8 +925,8 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        subgraph: HeteroData,
+        subgraph_edge_attributes: list[str],
         src_grid_size: int,
         dst_grid_size: int,
         cpu_offload: bool = False,
@@ -952,9 +950,9 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             Number of chunks to split into
         mlp_extra_layers : int
             Number of extra layers in MLP
-        sub_graph : HeteroData
+        subgraph : HeteroData
             Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
+        subgraph_edge_attributes : list[str]
             Edge attributes to use
         src_grid_size : int
             Source grid size
@@ -975,8 +973,8 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            subgraph=subgraph,
+            subgraph_edge_attributes=subgraph_edge_attributes,
             src_grid_size=src_grid_size,
             dst_grid_size=dst_grid_size,
             layer_kernels=layer_kernels,
@@ -1320,6 +1318,263 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
         if not x_dst_is_sharded:
             x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
+        x_dst = self.emb_nodes_dst(x_dst)
+        shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+        return x_src, x_dst, shapes_src, shapes_dst
+
+
+class DynamicGraphTransformerBaseMapper(BaseMapper):
+    """Dynamic Graph Transformer Base Mapper from hidden -> data or data -> hidden."""
+
+    def __init__(
+        self,
+        in_channels_src: int = 0,
+        in_channels_dst: int = 0,
+        hidden_dim: int = 128,
+        out_channels_dst: Optional[int] = None,
+        subgraph_edge_attributes: Optional[list] = [],
+        subgraph_edge_index_name: str = "edge_index",
+        layer_kernels: DotDict = None,
+        num_chunks: int = 1,
+        cpu_offload: bool = False,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        edge_dim: int = 0,
+    ) -> None:
+        """Initialize DynamicGraphTransformerBaseMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node
+        hidden_dim : int
+            Hidden dimension
+        num_heads: int
+            Number of heads to use, default 16
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension, default 4
+        subgraph_edge_attributes: list[str]
+            Names of edge attributes to consider
+        subgraph_edge_index_name: str
+            Name of the edge index attribute in the graph. Defaults to "edge_index".
+        cpu_offload : bool, optional
+            Whether to offload processing to CPU, by default False
+        out_channels_dst : Optional[int], optional
+            Output channels of the destination node, by default None
+        edge_dim : int, optional
+            The dimension of the edge attributes
+        """
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+        )
+        self.edge_attribute_names = subgraph_edge_attributes
+        self.edge_index_name = subgraph_edge_index_name
+
+        self.num_chunks = num_chunks
+
+        self.proc = GraphTransformerMapperBlock(
+            in_channels=hidden_dim,
+            hidden_dim=mlp_hidden_ratio * hidden_dim,
+            out_channels=hidden_dim,
+            num_heads=num_heads,
+            edge_dim=edge_dim,
+            layer_kernels=self.layer_factory,
+        )
+
+        self.offload_layers(cpu_offload)
+
+        self.emb_nodes_dst = (
+            nn.Linear(self.in_channels_dst, self.hidden_dim)
+            if self.in_channels_dst != self.hidden_dim
+            else nn.Identity()
+        )
+
+    def forward(
+        self,
+        x: PairTensor,
+        subgraph: HeteroData,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> PairTensor:
+        size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
+        edge_index = subgraph[self.edge_index_name].to(torch.int64)
+        edge_attr = torch.cat([subgraph[attr] for attr in self.edge_attribute_names], axis=1)
+
+        shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
+        edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+
+        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
+
+        (x_src, x_dst), edge_attr = self.proc(
+            (x_src, x_dst),
+            edge_attr,
+            edge_index,
+            (shapes_src, shapes_dst, shapes_edge_attr),
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+            size=size,
+        )
+
+        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group)
+
+        return x_dst
+
+
+class DynamicGraphTransformerForwardMapper(ForwardMapperPreProcessMixin, DynamicGraphTransformerBaseMapper):
+    """Dynamic Graph Transformer Mapper from data -> hidden."""
+
+    def __init__(
+        self,
+        in_channels_src: int = 0,
+        in_channels_dst: int = 0,
+        hidden_dim: int = 128,
+        out_channels_dst: Optional[int] = None,
+        subgraph_edge_attributes: Optional[list] = [],
+        subgraph_edge_index_name: str = "edge_index",
+        layer_kernels: DotDict = None,
+        num_chunks: int = 1,
+        cpu_offload: bool = False,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        edge_dim: int = 0,
+        **kwargs,
+    ) -> None:
+        """Initialize DynamicGraphTransformerForwardMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node
+        hidden_dim : int
+            Hidden dimension
+        num_heads: int
+            Number of heads to use, default 16
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension, default 4
+        subgraph_edge_attributes: list[str]
+            Names of edge attributes to consider
+        subgraph_edge_index_name: str
+            Name of the edge index attribute in the graph. Defaults to "edge_index".
+        cpu_offload : bool, optional
+            Whether to offload processing to CPU, by default False
+        out_channels_dst : Optional[int], optional
+            Output channels of the destination node, by default None
+        edge_dim: int, optional
+            Dimension of the edge attributes
+        """
+        super().__init__(
+            in_channels_src,
+            in_channels_dst,
+            hidden_dim,
+            out_channels_dst=out_channels_dst,
+            subgraph_edge_attributes=subgraph_edge_attributes,
+            subgraph_edge_index_name=subgraph_edge_index_name,
+            layer_kernels=layer_kernels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            edge_dim=edge_dim,
+        )
+
+        self.emb_nodes_src = (
+            nn.Linear(self.in_channels_src, self.hidden_dim)
+            if self.in_channels_src != self.hidden_dim
+            else nn.Identity()
+        )
+
+    def forward(
+        self,
+        x: PairTensor,
+        subgraph: HeteroData,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> PairTensor:
+        x_dst = super().forward(
+            x, subgraph, batch_size=batch_size, shard_shapes=shard_shapes, model_comm_group=model_comm_group
+        )
+        return x[0], x_dst
+
+
+class DynamicGraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, DynamicGraphTransformerBaseMapper):
+    """Dynamic Graph Transformer Mapper from hidden -> data."""
+
+    def __init__(
+        self,
+        in_channels_src: int = 0,
+        in_channels_dst: int = 0,
+        hidden_dim: int = 128,
+        out_channels_dst: Optional[int] = None,
+        subgraph_edge_attributes: Optional[list] = [],
+        subgraph_edge_index_name: str = "edge_index",
+        layer_kernels: DotDict = None,
+        num_chunks: int = 1,
+        cpu_offload: bool = False,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        edge_dim: int = 0,
+        **kwargs,
+    ) -> None:
+        """Initialize DynamicGraphTransformerBackwardMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node
+        hidden_dim : int
+            Hidden dimension
+        num_heads: int
+            Number of heads to use, default 16
+        mlp_hidden_ratio: int
+            ratio of mlp hidden dimension to embedding dimension, default 4
+        subgraph_edge_attributes: list[str]
+            Names of edge attributes to consider
+        subgraph_edge_index_name: str
+            Name of the edge index attribute in the graph. Defaults to "edge_index".
+        cpu_offload : bool, optional
+            Whether to offload processing to CPU, by default False
+        out_channels_dst : Optional[int], optional
+            Output channels of the destination node, by default None
+        edge_dim: int, optional
+            Dimension of the edge attributes
+        """
+        super().__init__(
+            in_channels_src,
+            in_channels_dst,
+            hidden_dim,
+            out_channels_dst=out_channels_dst,
+            subgraph_edge_attributes=subgraph_edge_attributes,
+            subgraph_edge_index_name=subgraph_edge_index_name,
+            layer_kernels=layer_kernels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            edge_dim=edge_dim,
+        )
+
+        self.node_data_extractor = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+        )
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None):
+        x_src, x_dst, shapes_src, shapes_dst = super().pre_process(x, shard_shapes, model_comm_group)
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
         x_dst = self.emb_nodes_dst(x_dst)
         shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
         return x_src, x_dst, shapes_src, shapes_dst

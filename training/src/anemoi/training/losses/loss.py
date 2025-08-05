@@ -19,6 +19,7 @@ from omegaconf import OmegaConf
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.dict import DictLoss
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
@@ -28,6 +29,32 @@ LOGGER = logging.getLogger(__name__)
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
+    scalers: dict[str, tuple[tuple[int] | np.ndarray]] | None = None,
+    data_indices: dict | None = None,
+    **kwargs,
+) -> DictLoss:
+
+    loss_config = OmegaConf.to_container(config, resolve=True)
+    loss_dict = {}
+
+    for key, loss_config_per_output_group in loss_config.items():
+        if isinstance(loss_config_per_output_group, dict):
+            loss_function = _get_loss_function_per_output_group(
+                loss_config_per_output_group,
+                scalers=scalers,
+                data_indices=data_indices,
+                **kwargs,
+            )
+        else:
+            error_msg = f"Loss config for {key} must be a dict, not {type(loss_config_per_output_group)}"
+            raise TypeError(error_msg)
+
+        loss_dict[key] = loss_function
+    return DictLoss(loss_dict)
+
+
+def _get_loss_function_per_output_group(
+    loss_config: DictConfig,
     scalers: dict[str, tuple[tuple[int] | np.ndarray]] | None = None,
     data_indices: dict | None = None,
     **kwargs,
@@ -62,7 +89,7 @@ def get_loss_function(
     ValueError
         If scaler is not found in valid scalers
     """
-    loss_config = OmegaConf.to_container(config, resolve=True)
+    # loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
 
     if "*" in scalers_to_include:
