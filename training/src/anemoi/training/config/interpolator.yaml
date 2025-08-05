@@ -34,11 +34,11 @@ training:
   # ─────────────────────────────────────────────────────────────
   # New section – per-variable accumulation handling
   # ─────────────────────────────────────────────────────────────
-  accumulated_vars:
-    tp:
-      input_accum_period: 6        # hours represented by the input accumulation
-      output_accum_period: 1       # desired (interpolated) period
-      energy_conservation: true    # enforce mass-conserving interpolation
+  accumulated_vars: {}
+    # tp:
+    #   input_accum_period: 6        # hours represented by the input accumulation
+    #   output_accum_period: 1       # desired (interpolated) period
+    #   energy_conservation: true    # enforce mass-conserving interpolation
 
 
   # Instead of inferred using multistep and timeincrement, specify time indices explicitly
