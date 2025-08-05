@@ -27,6 +27,8 @@ from datetime import date
 import operator
 import pandas as pd
 import io 
+from git import Repo, InvalidGitRepositoryError, GitCommandError
+
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -71,12 +73,6 @@ class BenchmarkValue():
 #   Not a git repository.
 #   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a18")=False
 def _isCommitInProject(commit):
-    #import GitPython
-    #TODO add check if branch cant be found (e.g. called outside repo)
-    #branch=$(git symbolic-ref --short HEAD)
-    #isCommitPresent=$(git branch $branch --contains $commit)
-    from git import Repo, InvalidGitRepositoryError, GitCommandError
-
     #find repo
     try:
         repo = Repo('.', search_parent_directories=True)
@@ -104,6 +100,26 @@ def _isCommitInProject(commit):
         return True
     except GitCommandError:
         return False  # commit is not an ancestor or doesn't exist
+
+#this function goes through the csv of past benchmark results and finds 
+# the latest commit which is present in both the csv and the project
+# It must be called from inside a git repo
+def _findLatestSharedCommitRow(df) -> str | None:
+
+    if 'commit' not in df.columns:
+        raise ValueError("CSV must contain a 'commit' column")
+
+    # Iterate from bottom to top
+    for i in reversed(df.index):
+        commit = str(df.at[i, 'commit']).strip()
+        if _isCommitInProject(commit):
+            LOGGER.debug(f"commit '{commit}' is present in both server and project. returning row {i}.")
+            return df.loc[i]
+        else:
+            LOGGER.debug(f"commit '{commit}' is not found in project history.")
+
+    LOGGER.debug(f"No matching commits found between server and project")
+
 
 class BenchmarkServer():
     def __init__(self, 
@@ -133,8 +149,8 @@ class BenchmarkServer():
         string += "-"*20 + "\n"
         return string
 
-    #trys to read a metric from 'self.get_url'
-    #If the metric exists, update list of benchmark values
+    #trys to read a row from a csv stored on a server and create a benchmark value from that
+    #If a benchmark value is found, update list of benchmark values
     def getValue(self, benchmarkName:str, forceGetFromServer:bool = False):
         if not forceGetFromServer and benchmarkName in self.benchmarkValues:
             LOGGER.debug(f"entry for {benchmarkName} found locally, not retrieving from server")
@@ -144,8 +160,6 @@ class BenchmarkServer():
                 local_file = f"./server/{benchmarkName}"
                 try:
                     df = pd.read_csv(local_file)
-                    #with open(local_file, "r") as f:
-                        #data=f.read()
 
                 except FileNotFoundError as e:
                     print(f"Could not open file at {local_file}. Got error {e}")
@@ -154,18 +168,23 @@ class BenchmarkServer():
                 url = f"{self.get_url}/{benchmarkName}"
                 print(f"Fetching benchmark data from {url}...")
                 try:
-                    df = pandas.read_csv(url) #requires pandas 0.19.2, see comments for alternative
+                    df = pd.read_csv(url) #requires pandas 0.19.2, see comments for alternative
                     #data = urlopen(url)  
                     #df=pd.read_csv(io.StringIO(data))
                 except URLError as e: #TODO test this
                     print(f"Could not open file at {url}. Got error {e}")
                     return None
 
-            #header="testName,unit,date,commit,value"
-            assert df["testName"].iloc[-1] == benchmarkName
-            #TODO instead of finding last element, find last element with a commit present in this branch
+            # find last element with a commit present in this branch
             # If no such can be found, error and recomend merging main to get a new enough commit
-            benchmarkValue = BenchmarkValue(name=benchmarkName,value=df["value"].iloc[-1], unit=df["unit"].iloc[-1], date=df["date"].iloc[-1], commit=df["commit"].iloc[-1])
+            maybeRow = _findLatestSharedCommitRow(df)
+            if maybeRow is None:
+                raise RuntimeError("Error. Couldn't find an entry in the server sharing a commit with your branch. Please consider pulling 'main' to enable performance benchmarks")
+            else:
+                row=maybeRow
+
+            assert row["testName"] == benchmarkName #sanity check, should always pass
+            benchmarkValue = BenchmarkValue(name=benchmarkName,value=row["value"], unit=row["unit"], date=row["date"], commit=row["commit"])
             LOGGER.debug( benchmarkValue)
             #update dict of results
             self.benchmarkValues[benchmarkValue.name] = benchmarkValue
@@ -275,7 +294,11 @@ class BenchmarkServer():
         self.benchmarkValues[value.name] = value
 
 def get_git_revision_hash() -> str:
-    return subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    try:
+        repo = Repo('.', search_parent_directories=True)
+        return repo.head.commit.hexsha
+    except InvalidGitRepositoryError:
+        raise RuntimeError("Not a Git repository")
 
 def raise_error(x):
     raise ValueError(x)
@@ -336,7 +359,7 @@ def test_benchmark_training_cycle(
     av_training_batch_time_s = open_log_file("time_profiler.csv")
 
     #create Benchmark value objects
-    commit=get_git_revision_hash() #TODO check what happens if this cant find git hash
+    commit=get_git_revision_hash() 
     yyyy_mm_dd=date.today().strftime('%Y-%m-%d')
     localBenchmarkResults=[]
     localBenchmarkResults.append(BenchmarkValue(name="avThroughputIterPerS", value=av_training_throughput, unit="iter/s", date=yyyy_mm_dd, commit=commit, op=operator.lt, tolerance=5))
