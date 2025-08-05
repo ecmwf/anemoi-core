@@ -21,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 
 class NaNMaskScaler(BaseUpdatingScaler):
 
-    scale_dims: tuple[TensorDim, ...] = (TensorDim.GRID, TensorDim.VARIABLE)
+    scale_dims: tuple[TensorDim] = (TensorDim.BATCH_SIZE, TensorDim.GRID, TensorDim.VARIABLE)
 
     def __init__(self, norm: str | None = None, **kwargs) -> None:
         """Initialise NanMaskScaler.
@@ -34,13 +34,13 @@ class NaNMaskScaler(BaseUpdatingScaler):
         super().__init__(norm=norm)
         del kwargs
 
-    def on_training_start(self, model: AnemoiModelInterface) -> None | torch.Tensor:
-        """Get loss scaling.
+    def on_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:
+        """Update loss scaling.
 
         Get  mask multiplying NaN locations with zero.
         At this stage, returns a loss slicing mask with all values set to 1.
-        When calling the imputer for the first time, the NaN positions are available.
-        Before first application of loss function, the mask is replaced.
+        Always when calling the imputer, the NaN positions are updated.
+        Before every application of training loss function, the mask is replaced.
         """
         loss_weights_mask = None
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
@@ -51,4 +51,5 @@ class NaNMaskScaler(BaseUpdatingScaler):
                 else:
                     # multiply the masks together
                     loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
+
         return loss_weights_mask
