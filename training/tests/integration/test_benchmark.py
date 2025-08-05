@@ -53,7 +53,7 @@ class BenchmarkValue:
         self.tolerance = tolerance
 
     def __str__(self):
-        return f"{self.name}: {self.value:.2f}{self.unit}"
+        return f"{self.name}: {self.value:.2f}{self.unit} (commit: {self.commit[:5]}, date: {self.date})"
 
     # header="testName,unit,date,commit,value"
     def to_csv(self, include_header=False):
@@ -372,7 +372,7 @@ def getLocalBenchmarkResults():
             unit="iter/s",
             date=yyyy_mm_dd,
             commit=commit,
-            op=operator.lt,
+            op=operator.ge,
             tolerance=5,
         ),
     )
@@ -425,9 +425,10 @@ def test_benchmark_training_cycle(
     # print local and reference results
     print(f"Reference benchmark results:\n{benchmarkServer}")
     print("Local benchmark results:")
+    print("-" * 20)
     for benchmarkValue in localBenchmarkResults:
         print(benchmarkValue)
-    print()
+    print("-" * 20 + "\n")
 
     # either update the data on the server, or compare reference results against local results
     if update_data:
