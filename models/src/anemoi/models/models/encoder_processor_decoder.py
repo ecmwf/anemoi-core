@@ -106,7 +106,7 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # Decoder hidden -> data
-        decoded_vars = dict(pl=48, ml=40)
+        decoded_vars = dict(ml=675, pl=88) 
         assert sum(decoded_vars.values()) == self.num_output_channels, f"Set decoded_vars[ml]={self.num_output_channels-decoded_vars['pl']}"
         self.decoders = nn.ModuleDict()
         for key, num_vars in decoded_vars.items():
@@ -396,7 +396,7 @@ class AnemoiModelEncProcDec(nn.Module):
                 keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
             )
         # We want to match: self.data_indices.data.output.full
-        x_out = torch.concat([x_outs["pl"], x_outs["ml"]], axis=1)
+        x_out = torch.concat([x_outs["ml"], x_outs["pl"]], axis=1)
 
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
