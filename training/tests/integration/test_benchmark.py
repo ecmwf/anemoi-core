@@ -53,7 +53,7 @@ class BenchmarkValue:
         self.tolerance = tolerance
 
     def __str__(self):
-        return f"{self.name}: {self.value}{self.unit}"
+        return f"{self.name}: {self.value:.2f}{self.unit}"
 
     # header="testName,unit,date,commit,value"
     def to_csv(self, include_header=False):
@@ -399,7 +399,7 @@ def getLocalBenchmarkResults():
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],
     get_test_archive: callable,
-    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, urls = benchmark_config
