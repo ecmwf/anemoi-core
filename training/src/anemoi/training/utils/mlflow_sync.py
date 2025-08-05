@@ -98,7 +98,7 @@ def _log_tags(client: mlflow.MlflowClient, run_dct: dict, run_id: str, batch_siz
 
 
 def _log_params(client: mlflow.MlflowClient, run_dct: dict[str, Any], run_id: str, batch_size: int) -> None:
-    def get_data(run_dct: dict[str, Any]) -> list[mlflow.entities.Param]:
+    def get_data(run_dct: dict[str, Any], args: Any = None) -> list[mlflow.entities.Param]:  # noqa: ARG001
         cleaned_run_dct = clean_config_params(run_dct["params"])
         LOGGER.info("Logging %s parameters", len(cleaned_run_dct))
         if len(cleaned_run_dct) > MAX_PARAMS_LENGTH:
