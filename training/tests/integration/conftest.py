@@ -18,9 +18,9 @@ from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.migrations import Migrator
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
-from anemoi.models.migrations import Migrator
 
 
 @pytest.fixture(autouse=True)

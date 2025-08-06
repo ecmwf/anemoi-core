@@ -20,9 +20,8 @@ from pytorch_lightning import Callback
 from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
-from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
