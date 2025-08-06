@@ -34,8 +34,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.utils.checkpoint import freeze_submodule_by_name
-from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.train.modify import ModelModifierApplier
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -79,6 +78,7 @@ class AnemoiTrainer:
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
         self.load_weights_only = self.config.training.load_weights_only
+        self.model_modifier = ModelModifierApplier()
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id
@@ -214,29 +214,10 @@ class AnemoiTrainer:
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
-        # Load the model weights
-        if self.load_weights_only:
-            # Sanify the checkpoint for transfer learning
-            if self.config.training.transfer_learning:
-                LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
-                model = transfer_learning_loading(model, self.last_checkpoint)
-            else:
-                LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                # pop data_indices so that the data indices on the checkpoint do not get overwritten
-                # by the data indices from the new config
-                kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
-
-            model.data_indices = self.data_indices
-            # check data indices in original checkpoint and current data indices are the same
-            self.data_indices.compare_variables(model._ckpt_model_name_to_index, self.data_indices.name_to_index)
-
-        if hasattr(self.config.training, "submodules_to_freeze"):
-            # Freeze the chosen model weights
-            LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
-            for submodule_name in self.config.training.submodules_to_freeze:
-                freeze_submodule_by_name(model, submodule_name)
-                LOGGER.info("%s frozen successfully.", submodule_name.upper())
+        self.model_modifier.process(
+            model,
+            self.config,
+        )
 
         return model
 

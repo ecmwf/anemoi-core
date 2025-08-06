@@ -1,0 +1,3 @@
+modifiers:
+  - _target_: "anemoi.training.train.modify.TransferLearningModelModifier"
+    checkpoint_path: ...

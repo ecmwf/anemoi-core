@@ -1,12 +1,11 @@
 ---
 defaults:
   - scalers: global
+  - optional model_modifier: null
 
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
-transfer_learning: False # activate to perform transfer learning
-load_weights_only: False # only load model weights, do not restore optimiser states etc.
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -141,5 +140,3 @@ lr:
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
 # in order to keep a constant global_lr
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
-
-submodules_to_freeze: []
