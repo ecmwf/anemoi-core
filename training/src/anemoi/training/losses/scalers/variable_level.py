@@ -7,20 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from typing import TYPE_CHECKING
 
 import numpy as np
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.variable import BaseVariableLossScaler
-
-if TYPE_CHECKING:
-
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
 

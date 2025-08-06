@@ -7,19 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from hydra.utils import instantiate
 
+from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
 from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
-
-if TYPE_CHECKING:
-
-    from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
-    from anemoi.utils.config import DotDict
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 

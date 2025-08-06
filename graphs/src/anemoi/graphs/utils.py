@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 from enum import Enum
 
@@ -43,7 +42,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
     ----------
     coords_rad : torch.Tensor
         corrdinates in radians
-    mask : Optional[torch.Tensor], optional
+    mask : torch.Tensor, optional
         mask to remove nodes, by default None
 
     Returns
@@ -72,7 +71,7 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
     ----------
     coords_rad : torch.Tensor
         corrdinates in radians
-    mask : Optional[torch.Tensor], optional
+    mask : torch.Tensor, optional
         mask to remove nodes, by default None
 
     Returns

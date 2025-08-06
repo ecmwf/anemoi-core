@@ -8,13 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import datetime
 import logging
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
 from typing import Any
 
 import hydra
@@ -28,6 +25,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
+from torch_geometric.data import HeteroData
 
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -41,9 +39,6 @@ from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
-
-if TYPE_CHECKING:
-    from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,7 +71,13 @@ class AnemoiTrainer:
 
             LOGGER.info("Skipping config validation.")
 
-        self.start_from_checkpoint = bool(self.config.training.run_id) or bool(self.config.training.fork_run_id)
+        self.start_from_checkpoint = (
+            bool(self.config.training.run_id)
+            or bool(self.config.training.fork_run_id)
+            or bool(self.config.hardware.files.warm_start)
+        )
+        LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
+
         self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None
 
@@ -285,6 +286,28 @@ class AnemoiTrainer:
         """TensorBoard logger."""
         return get_tensorboard_logger(self.config)
 
+    def _get_warm_start_checkpoint(self) -> Path | None:
+        """Returns the warm start checkpoint path if specified."""
+        warm_start_dir = getattr(self.config.hardware.paths, "warm_start", None)  # avoid breaking change
+        warm_start_file = self.config.hardware.files.warm_start
+        warm_start_path = None
+
+        if warm_start_dir or warm_start_file:
+            assert (
+                warm_start_dir is not None
+            ), f"Please configure config.hardware.paths.warm_start correctly, found: {warm_start_dir}"
+            assert (
+                warm_start_file is not None
+            ), f"Please configure config.hardware.files.warm_start correctly, found: {warm_start_file}"
+            warm_start_path = Path(warm_start_dir) / Path(warm_start_file)
+            msg = "Warm start checkpoint not found: %s", warm_start_path
+            assert Path.is_file(warm_start_path), msg
+        return warm_start_path
+
+    def _get_checkpoint_directory(self, fork_id: str) -> Path:
+        """Returns the directory where checkpoints are stored."""
+        return Path(self.config.hardware.paths.checkpoints.parent, fork_id or self.lineage_run) / "last.ckpt"
+
     @cached_property
     def last_checkpoint(self) -> Path | None:
         """Path to the last checkpoint."""
@@ -292,11 +315,7 @@ class AnemoiTrainer:
             return None
 
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
-        checkpoint = Path(
-            self.config.hardware.paths.checkpoints.parent,
-            fork_id or self.lineage_run,
-            self.config.hardware.files.warm_start or "last.ckpt",
-        )
+        checkpoint = self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
 
         # Check if the last checkpoint exists
         if checkpoint.exists():
