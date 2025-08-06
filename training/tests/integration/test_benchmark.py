@@ -327,7 +327,7 @@ class BenchmarkServer:
     # Optionally (but strongly recomended) the artifacts will be tar-ed by default
     # tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
     def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
-        artifactDir=Path(f"{self.store}/.artifacts/{commit}")
+        artifactDir=Path(f"{self.store}/artifacts/{commit}")
         artifactTar=Path(f"{artifactDir}.tar.gz")
         output = artifactDir
         if tar:
@@ -354,7 +354,7 @@ class BenchmarkServer:
         #cleanup oldest artifact if we are older artifact limit
 
         #os/listdir gets commit name, and the list compression makes it a complete path
-        commits = [ f"{self.store}/.artifacts/{commit}" for commit in os.listdir(f"{self.store}/.artifacts")]
+        commits = [ f"{self.store}/.rtifacts/{commit}" for commit in os.listdir(f"{self.store}/.artifacts")]
         if len(commits) >  self.artifactLimit:
             print(f"{len(commits)} commits stored under ./artifacts, greater then server limit of {self.artifactLimit}")
             commits.sort(key=os.path.getmtime) #sorts the list, oldest first
@@ -493,13 +493,11 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str, str], #cfg, urls, benchmarkTestCase
     get_test_archive: callable,
-    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, urls, testCase = benchmark_config
-    #print(cfg)
-    #for url in urls:
-    #    get_test_archive(url)
+    print(f"Benchmarking the configuration: {testCase}")
 
     # Run model with profiler
     reset_peak_memory_stats()
