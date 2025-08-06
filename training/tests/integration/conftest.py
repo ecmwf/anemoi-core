@@ -204,7 +204,8 @@ def gnn_config(
     params=[ #selects different test cases
         #"graphtransformer_n320_1g",
         #"gnn_n320_1g",
-        "stretched",
+        #"stretched",
+        "lam",
     ],
 )
 def benchmark_config(
@@ -227,6 +228,10 @@ def benchmark_config(
         overrides = []
         top_level_yaml=Path.cwd()/"training/tests/integration/config/test_stretched.yaml"
         config_name="stretched"
+    elif test_case == "lam":
+        overrides = []
+        top_level_yaml=Path.cwd()/"training/tests/integration/config/test_lam.yaml"
+        config_name="lam" #TODO check if i need to set config_name
     else:
         raise ValueError(f"Error. Unknown benchmark configuration: {testCase}")
 
@@ -237,10 +242,11 @@ def benchmark_config(
     
     use_case_modifications = OmegaConf.load(top_level_yaml)
 
-    if test_case == "stretched":
+    if test_case == "stretched" or  test_case == "lam":
         #tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
         #dataset, forcing_dataset = rel_paths
 
+        #just remove the server paths from files
         use_case_modifications.hardware.files.dataset = "cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr"
         use_case_modifications.hardware.files.forcing_dataset = "aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
         use_case_modifications.hardware.paths.data = "/home/mlx/ai-ml/datasets" #TODO move to seperate streched_benchmark.yaml
