@@ -199,10 +199,12 @@ def gnn_config(
 
 #TODO make graphtransformer_1g the default test case, and only run that
 #TODO add small o48 test case which can be run anywhere
+#TODO change it so i can inherit from stretched_config etc. rather then rewriting
 @pytest.fixture(
     params=[ #selects different test cases
-        "graphtransformer_n320_1g",
-        "gnn_n320_1g",
+        #"graphtransformer_n320_1g",
+        #"gnn_n320_1g",
+        "stretched",
     ],
 )
 def benchmark_config(
@@ -216,24 +218,36 @@ def benchmark_config(
     if test_case == "graphtransformer_n320_1g":
         overrides = ["model=graphtransformer", "graph=multi_scale"]
         top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark.yaml"
+        config_name="config"
     elif test_case == "gnn_n320_1g":
         overrides = []
         top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark.yaml"
+        config_name="config"
+    elif test_case == "stretched":
+        overrides = []
+        top_level_yaml=Path.cwd()/"training/tests/integration/config/test_stretched.yaml"
+        config_name="stretched"
     else:
         raise ValueError(f"Error. Unknown benchmark configuration: {testCase}")
 
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
-        template = compose(config_name="config", overrides=overrides)
 
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
+        template = compose(config_name=config_name, overrides=overrides)
+    
     use_case_modifications = OmegaConf.load(top_level_yaml)
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    #use_case_modifications.hardware.paths.data = tmp_dir #dont overwrite path since we are reading existing large n320 datasets 
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    if test_case == "stretched":
+        #tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
+        #dataset, forcing_dataset = rel_paths
+
+        use_case_modifications.hardware.files.dataset = "cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr"
+        use_case_modifications.hardware.files.forcing_dataset = "aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
+        use_case_modifications.hardware.paths.data = "/home/mlx/ai-ml/datasets" #TODO move to seperate streched_benchmark.yaml
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
-    return cfg, dataset_urls, test_case
+    return cfg, test_case
 
 
 @pytest.fixture

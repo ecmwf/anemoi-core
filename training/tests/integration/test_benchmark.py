@@ -327,36 +327,41 @@ class BenchmarkServer:
     # Optionally (but strongly recomended) the artifacts will be tar-ed by default
     # tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
     def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
-        artifactDir=Path(f"{self.store}/artifacts/{commit}")
-        artifactTar=Path(f"{artifactDir}.tar.gz")
-        output = artifactDir
+
+        if not self.local:
+            print("Storing artifacts on a remote server doesnt work yet")
+            return 
+        artifactDir=Path(f"{self.store}/artifacts")
+        commitDir=Path(f"{artifactDir}/{commit}")
+        commitTar=Path(f"{commitDir}.tar.gz")
+        output = commitDir
         if tar:
-            output =  artifactTar
+            output =  commitTar
 
         LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
         if output.exists():
             print(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
             #return
         else:
-            artifactDir.mkdir(parents=True) # might need to make .artifacts too
+            commitDir.mkdir(parents=True) # might need to make .artifacts too
 
             for artifact in artifacts:
-                LOGGER.debug(f"Copying {artifact} to {artifactDir}...")
-                shutil.copy(artifact, artifactDir)
+                LOGGER.debug(f"Copying {artifact} to {commitDir}...")
+                shutil.copy(artifact, commitDir)
 
             if tar:
-                LOGGER.debug("Tar-ing artifacts {artifactDir} to {artifactTar}")
-                _make_tarfile(artifactTar, artifactDir)
+                LOGGER.debug("Tar-ing artifacts {commitDir} to {commitTar}")
+                _make_tarfile(commitTar, commitDir)
                 #cleanup untar-ed file
-                LOGGER.debug("Deleting {artifactDir}")
-                shutil.rmtree(artifactDir)
+                LOGGER.debug("Deleting {commitDir}")
+                shutil.rmtree(commitDir)
 
-        #cleanup oldest artifact if we are older artifact limit
+        #cleanup oldest artifact if we are over artifact limit
 
         #os/listdir gets commit name, and the list compression makes it a complete path
-        commits = [ f"{self.store}/.rtifacts/{commit}" for commit in os.listdir(f"{self.store}/.artifacts")]
+        commits = [ f"{artifactDir}/{commit}" for commit in os.listdir(f"{artifactDir}")]
         if len(commits) >  self.artifactLimit:
-            print(f"{len(commits)} commits stored under ./artifacts, greater then server limit of {self.artifactLimit}")
+            print(f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}")
             commits.sort(key=os.path.getmtime) #sorts the list, oldest first
             commitsToDelete = commits[:len(commits) - self.artifactLimit]
             print(f"Deleting {commitsToDelete}...")
@@ -459,45 +464,42 @@ def getLocalBenchmarkResults(profilerPath:str) -> list[BenchmarkValue]:
 
 # Runs after a benchmark
 # returns a list of files produced by the profiler
+# TODO tidy this function
 def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
     import csv
     import glob
     import os
 
-    #under /{profilerPath} there is a single random alphanumeric dir
-    # this next(iter(glob(...))) gets us through this random dir
-    profilerDir = next( iter(
-            glob.glob(
-                f"{profilerPath}/[a-z0-9]*/",
-            ),
-        ),
-    )
-    # profiler dir contents:
-    #ac6-308.bullx_3729025.None.1742416383234963152.pt.trace.json  model_summary.txt
-    #ac6-308.bullx_3729025.None.1742435256841839056.pt.trace.json  speed_profiler.csv
-    #memory_profiler.csv                                           system_profiler.csv
-    #memory_snapshot.pickle                                        time_profiler.csv
+    profilerDir =glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
     memory_snapshot=Path(f"{profilerDir}/memory_snapshot.pickle")
     if not memory_snapshot.exists():
         raise RuntimeError(f"Memory snapshot not found at: {memory_snapshot}")
 
+    artifacts= [memory_snapshot]
+
     #get trace file
     #there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
     #but luckily if we take the first one thats always training on rank 0.
-    trace_file= Path(next( iter( glob.glob(f"{profilerDir}/*.pt.trace.json"))))
-    if not trace_file.exists():
-        raise RuntimeError(f"trace file not found at: {trace_file}")
-    return [memory_snapshot, trace_file]
+    trace_files=  glob.glob(f"{profilerDir}/*.pt.trace.json")
+    if len(trace_files) == 0:
+        print(f"Can't find a trace file under {profilerDir}")
+    else:
+        trace_file= Path(trace_files[0])
+        if not trace_file.exists():
+            raise RuntimeError(f"trace file not found at: {trace_file}")
+        artifacts.append(trace_file)
+    return artifacts
 
 @pytest.mark.longtests
 def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str, str], #cfg, urls, benchmarkTestCase
+    benchmark_config: tuple[DictConfig, str], #cfg, benchmarkTestCase
     get_test_archive: callable,
     update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
-    cfg, urls, testCase = benchmark_config
+    cfg, testCase = benchmark_config
     print(f"Benchmarking the configuration: {testCase}")
+    #print(cfg)
 
     # Run model with profiler
     reset_peak_memory_stats()
@@ -549,3 +551,4 @@ def test_benchmark_training_cycle(
 
 #TODO increase benchmark size and add multigpu
 #TODO add an option to save artifacts locally when doing a comparison
+#TODO get artifacts working for remote store
