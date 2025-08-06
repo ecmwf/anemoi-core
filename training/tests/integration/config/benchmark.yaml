@@ -1,4 +1,5 @@
 # Modifications for the basic template "config.yaml"
+# TODO currentl have a hidden grid of 5 when runnign GT, change to 6 on n320
 hardware:
   files:
           #dataset:  aifs-ea-an-oper-0001-mars-n320-2020-2020-6h-v6.zarr #q50
@@ -7,13 +8,33 @@ hardware:
     data:  /home/mlx/ai-ml/datasets/
 
 dataloader:
+  num_workers:
+    training: 6
+    validation: 6
   limit_batches:
-    training: 100
+    training: 10
     validation: 1
   training:
     end: 2020-11-30
   validation:
     start: 2020-12-31
+  batch_size:
+    training: 1
+    validation: 1
+
+
+model:
+  encoder:
+    num_chunks: 16
+  decoder:
+    num_chunks: 16
+  processor:
+    num_chunks: 2
+  num_channels: 256 #32-2-32 didnt fit for 1024 1g
+
+training:
+  max_epochs: 1
+  num_sanity_val_steps: 0
 
 diagnostics:
   print_memory_summary: true

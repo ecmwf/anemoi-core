@@ -197,24 +197,43 @@ def gnn_config(
     return cfg
 
 
-@pytest.fixture
+#TODO make graphtransformer_1g the default test case, and only run that
+#TODO add small o48 test case which can be run anywhere
+@pytest.fixture(
+    params=[ #selects different test cases
+        "graphtransformer_n320_1g",
+        "gnn_n320_1g",
+    ],
+)
 def benchmark_config(
+    request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_paths: callable,
 ) -> tuple[OmegaConf, str]:
+    test_case = request.param
+
+    #change configs based on test case
+    if test_case == "graphtransformer_n320_1g":
+        overrides = ["model=graphtransformer", "graph=multi_scale"]
+        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark.yaml"
+    elif test_case == "gnn_n320_1g":
+        overrides = []
+        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark.yaml"
+    else:
+        raise ValueError(f"Error. Unknown benchmark configuration: {testCase}")
+
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
-        # to run with this, you need to remove 'shard_strategy' from the GT config
-        template = compose(config_name="config", overrides=["model=graphtransformer", "graph=multi_scale"])
+        template = compose(config_name="config", overrides=overrides)
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/benchmark.yaml")
+    use_case_modifications = OmegaConf.load(top_level_yaml)
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    #use_case_modifications.hardware.paths.data = tmp_dir
+    #use_case_modifications.hardware.paths.data = tmp_dir #dont overwrite path since we are reading existing large n320 datasets 
     use_case_modifications.hardware.files.dataset = rel_paths[0]
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
-    return cfg, dataset_urls
+    return cfg, dataset_urls, test_case
 
 
 @pytest.fixture

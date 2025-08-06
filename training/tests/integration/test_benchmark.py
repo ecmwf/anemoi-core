@@ -29,6 +29,7 @@ from torch.cuda import reset_peak_memory_stats
 from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" #reduce memory fragmentation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -127,13 +128,12 @@ def _findLatestSharedCommitRow(df) -> str | None:
 
 
 class BenchmarkServer:
-    def __init__(self, local=False):  # use a local folder to store data instead of a remote server
+    def __init__(self, testCase:str="", local=True):  # use a local folder to store data instead of a remote server
         self.benchmarkValues = {}
 
         self.local = local
         if self.local:
-            print("Using a local 'server' under './server'")
-            subprocess.run(["mkdir", "-p", "./server"], check=True)
+            self.store="./server"
         # TODO could unify these by getting via scp
         # for reading the data we read over internet
         # TODO should certainly not hardcode these
@@ -141,6 +141,22 @@ class BenchmarkServer:
         # for setting the data, we scp
         self.set_remote_path = "/home/data/public/anemoi-integration-tests/training/benchmarks"
         self.set_host = "data@anemoi.ecmwf.int"
+
+        # TestCase creates an optional subdir under BenchmarkServer to store the results
+        # So that you can store GNN_n320_1g and graphtransformer_n320_1g results under the same server
+        # If testcase is "" then no subdirs are created
+        #TODO merge store, get_url and set_remote_path into one variable
+        self.testCase = testCase
+        if self.testCase is not "":
+            if self.local:
+                self.store += f"/{self.testCase}"
+            else:
+                self.get_url += f"/{self.testCase}"
+                self.set_remote_path += f"/{self.testCase}"
+        if self.local:
+            print(f"Using a local server under '{self.store}'")
+            subprocess.run(["mkdir", "-p", self.store], check=True)
+
 
     def __str__(self):
         # TODO should do this properly with string builders
@@ -159,7 +175,7 @@ class BenchmarkServer:
             LOGGER.debug(f"entry for {benchmarkName} found locally, not retrieving from server")
             return self.benchmarkValues[benchmarkName]
         if self.local:
-            local_file = f"./server/{benchmarkName}"
+            local_file = f"{self.store}/{benchmarkName}"
             try:
                 df = pd.read_csv(local_file)
 
@@ -252,18 +268,14 @@ class BenchmarkServer:
     #if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
     def setValue(self, value: BenchmarkValue, overwrite=False):
 
-        # update remote server with new value
-        # append to existing file, but never apend header
-        local_file = f"./{value.name}"
-
         # if file doesnt exist, write header
         if self.local:
-            if not os.path.isfile(f"./server/{value.name}") or overwrite:
-                with open(local_file, "w") as f:
+            if not os.path.isfile(f"{self.store}/{value.name}") or overwrite:
+                with open(f"{self.store}/{value.name}", "w") as f:
                     f.write(value.to_csv(include_header=True) + "\n")
             else:
                 LOGGER.debug("existing file found... appending")
-                with open(f"./server/{value.name}", "a") as f:
+                with open(f"{self.store}/{value.name}", "a") as f:
                     f.write(value.to_csv() + "\n")
         else:
             #Get existing csv
@@ -315,7 +327,7 @@ def raise_error(x):
 
 # this functon will find and open the profiler logs from the most recent benchmarking training run
 # return_val = value for speed profiler or 'avg_time' for time_profiler
-def open_log_file(filename):
+def open_log_file(profilerPath: str, filename: str):
     import csv
     import glob
     import os
@@ -330,12 +342,13 @@ def open_log_file(filename):
         row_name = "training_avg_throughput"
     else:
         raise ValueError
-    tmpdir = os.getenv("TMPDIR")
-    user = os.getenv("USER")  # TODO should use a more portable and secure way
-    file_path = next(
-        iter(
+
+   
+    #under /{profilerPath} there is a single random alphanumeric dir
+    # this next(iter(glob(...))) gets us through this random dir
+    file_path = next( iter(
             glob.glob(
-                f"{tmpdir}/pytest-of-{user}/pytest-0/test_benchmark_training_cycle0profiler/[a-z0-9]*/{filename}",
+                f"{profilerPath}/[a-z0-9]*/{filename}",
             ),
         ),
     )
@@ -352,12 +365,12 @@ def open_log_file(filename):
 # It parses the profiler logs and creates BenchmarkValue objects from them
 # Returns [BenchmarkValue]
 # If you want to add more benchmarks add them here
-def getLocalBenchmarkResults():
+def getLocalBenchmarkResults(profilerPath:str):
     # read memory and mlflow stats
     stats = memory_stats(device=0)
     peak_active_mem_mb = stats["active_bytes.all.peak"] / 1024 / 1024
-    av_training_throughput = open_log_file("speed_profiler.csv")
-    av_training_batch_time_s = open_log_file("time_profiler.csv")
+    av_training_throughput = open_log_file(profilerPath, "speed_profiler.csv")
+    av_training_batch_time_s = open_log_file(profilerPath, "time_profiler.csv")
 
     # get metadata
     commit = get_git_revision_hash()
@@ -397,14 +410,13 @@ def getLocalBenchmarkResults():
 
 @pytest.mark.longtests
 def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str],
+    benchmark_config: tuple[DictConfig, str, str], #cfg, urls, benchmarkTestCase
     get_test_archive: callable,
-    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
-    cfg, urls = benchmark_config
+    cfg, urls, testCase = benchmark_config
     #print(cfg)
-    #exit()
     #for url in urls:
     #    get_test_archive(url)
 
@@ -413,16 +425,16 @@ def test_benchmark_training_cycle(
     AnemoiProfiler(cfg).profile()
 
     # Get local benchmark results
-    localBenchmarkResults = getLocalBenchmarkResults()
+    localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
-    benchmarkServer = BenchmarkServer()
+    benchmarkServer = BenchmarkServer(testCase=testCase) 
     benchmarks = [
         "avThroughputIterPerS",
         "avTimePerBatchS",
         "peakMemoryMB",
     ]  # TODO get name keys from localBenchmarkResults instead of hardcoding
-    benchmarkServer.getValues(benchmarks)
+    benchmarkServer.getValues(benchmarks) #TODO do i need to get these if we are updating data
 
     # print local and reference results
     print(f"Reference benchmark results:\n{benchmarkServer}")
@@ -456,3 +468,5 @@ def test_benchmark_training_cycle(
 
 #TODO increase benchmark size and add multigpu
 #TODO add graph function to BenchmarkServer?
+#TODO save config info and requirements.txt under benchmark server?
+#TODO store traces and memory snapshot
