@@ -40,7 +40,7 @@ diagnostics:
   print_memory_summary: true
   benchmark_profiler:
     memory:
-      enabled: false
+      enabled: true
     time:
       verbose: true
     model_summary:
