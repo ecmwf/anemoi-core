@@ -493,7 +493,7 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str, str], #cfg, urls, benchmarkTestCase
     get_test_archive: callable,
-    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, urls, testCase = benchmark_config
@@ -510,11 +510,8 @@ def test_benchmark_training_cycle(
 
     # Get reference benchmark results
     benchmarkServer = BenchmarkServer(testCase=testCase) 
-    benchmarks = [
-        "avThroughputIterPerS",
-        "avTimePerBatchS",
-        "peakMemoryMB",
-    ]  # TODO get name keys from localBenchmarkResults instead of hardcoding
+
+    benchmarks = [benchmarkValue.name for benchmarkValue in  localBenchmarkResults]
     if not update_data:
         benchmarkServer.getValues(benchmarks)
 
