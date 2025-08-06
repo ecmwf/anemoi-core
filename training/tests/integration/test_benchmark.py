@@ -134,10 +134,11 @@ class BenchmarkServer:
         self.local = local
         if self.local:
             self.store="./server"
-        # TODO could unify these by getting via scp
-        # for reading the data we read over internet
-        # TODO should certainly not hardcode these
-        self.get_url = "https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
+        else:
+            # TODO could unify these by getting via scp
+            # for reading the data we read over internet
+            # TODO should certainly not hardcode these
+            self.store = "https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
         # for setting the data, we scp
         self.set_remote_path = "/home/data/public/anemoi-integration-tests/training/benchmarks"
         self.set_host = "data@anemoi.ecmwf.int"
@@ -145,16 +146,13 @@ class BenchmarkServer:
         # TestCase creates an optional subdir under BenchmarkServer to store the results
         # So that you can store GNN_n320_1g and graphtransformer_n320_1g results under the same server
         # If testcase is "" then no subdirs are created
-        #TODO merge store, get_url and set_remote_path into one variable
         self.testCase = testCase
         if self.testCase is not "":
-            if self.local:
-                self.store += f"/{self.testCase}"
-            else:
-                self.get_url += f"/{self.testCase}"
+            self.store += f"/{self.testCase}"
+            if not local:
                 self.set_remote_path += f"/{self.testCase}"
         if self.local:
-            print(f"Using a local server under '{self.store}'")
+            LOGGER.debug(f"Using a local server under '{self.store}'")
             subprocess.run(["mkdir", "-p", self.store], check=True)
 
 
@@ -166,6 +164,7 @@ class BenchmarkServer:
         for benchmark in self.benchmarkValues.values():
             string += str(benchmark) + "\n"
         string += "-" * 20 + "\n"
+        string += f"(Server location: '{self.store}')\n"
         return string
 
     # trys to read a row from a csv stored on a server and create a benchmark value from that
@@ -183,7 +182,7 @@ class BenchmarkServer:
                 print(f"Could not open file at {local_file}. Got error {e}")
                 return None
         else:
-            url = f"{self.get_url}/{benchmarkName}"
+            url = f"{self.store}/{benchmarkName}"
             LOGGER.debug(f"Fetching benchmark data from {url}...")
             try:
                 df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
@@ -279,7 +278,7 @@ class BenchmarkServer:
                     f.write(value.to_csv() + "\n")
         else:
             #Get existing csv
-            url = f"{self.get_url}/{value.name}"
+            url = f"{self.store}/{value.name}"
             print(f"Fetching benchmark data from {url}...")
             try:
                 df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
@@ -352,6 +351,7 @@ def open_log_file(profilerPath: str, filename: str):
             ),
         ),
     )
+    subprocess.run(['du', '-sh', profilerPath], check=True) # check file size ~20MB
     with Path(file_path).open(newline="") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
@@ -434,7 +434,8 @@ def test_benchmark_training_cycle(
         "avTimePerBatchS",
         "peakMemoryMB",
     ]  # TODO get name keys from localBenchmarkResults instead of hardcoding
-    benchmarkServer.getValues(benchmarks) #TODO do i need to get these if we are updating data
+    if not update_data:
+        benchmarkServer.getValues(benchmarks)
 
     # print local and reference results
     print(f"Reference benchmark results:\n{benchmarkServer}")
@@ -467,6 +468,6 @@ def test_benchmark_training_cycle(
             on_test_fail(f"The following tests failed: {failedTests}")
 
 #TODO increase benchmark size and add multigpu
-#TODO add graph function to BenchmarkServer?
 #TODO save config info and requirements.txt under benchmark server?
 #TODO store traces and memory snapshot
+#TODO disable checkpoints
