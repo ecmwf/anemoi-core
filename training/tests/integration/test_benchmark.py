@@ -15,6 +15,7 @@ import io
 import subprocess
 from datetime import date
 from pathlib import Path
+import shutil
 from urllib.error import URLError
 
 import pandas as pd
@@ -65,6 +66,11 @@ class BenchmarkValue:
             result = header + "\n" + result
         return result
 
+def _make_tarfile(output_filename, source_dir):
+    import tarfile
+    import os.path
+    with tarfile.open(output_filename, "w:gz") as tar:
+        tar.add(source_dir, arcname=os.path.basename(source_dir))
 
 # This function should be called from inside a git repo
 # It takes a given commit and returns true if it is somewhere in the branches history
@@ -154,6 +160,11 @@ class BenchmarkServer:
         if self.local:
             LOGGER.debug(f"Using a local server under '{self.store}'")
             subprocess.run(["mkdir", "-p", self.store], check=True)
+
+        self.artifactLimit=10 #How many commits artifacts will be saved at once.
+        #currently the trace file and memory snapshot are saved
+        #When the artifactLimit is hit, the oldest commits artifacts are deleted
+        #Artifacts can be reproduced by reverting to a given commit and running the pytests locally
 
 
     def __str__(self):
@@ -311,6 +322,34 @@ class BenchmarkServer:
         # update dict of results
         self.benchmarkValues[value.name] = value
 
+    # takes a list of files and stores them on the server, under a commit folder
+    # if the files exist already, by default nothing will be stored
+    # Optionally (but strongly recomended) the artifacts will be tar-ed by default
+    # tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
+    def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
+        artifactDir=Path(f"{self.store}/.artifacts/{commit}")
+        artifactTar=Path(f"{artifactDir}.tar.gz")
+        output = artifactDir
+        if tar:
+            output =  artifactTar
+
+        LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
+        if output.exists():
+            print(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
+            return
+        else:
+            artifactDir.mkdir(parents=True) # might need to make .artifacts too
+
+        for artifact in artifacts:
+            LOGGER.debug(f"Copying {artifact} to {artifactDir}...")
+            shutil.copy(artifact, artifactDir)
+
+        if tar:
+            LOGGER.debug("Tar-ing artifacts {artifactDir} to {artifactTar}")
+            _make_tarfile(artifactTar, artifactDir)
+            #cleanup untar-ed file
+            LOGGER.debug("Deleting {artifactDir}")
+            shutil.rmtree(artifactDir)
 
 def get_git_revision_hash() -> str:
     try:
@@ -351,7 +390,6 @@ def open_log_file(profilerPath: str, filename: str):
             ),
         ),
     )
-    subprocess.run(['du', '-sh', profilerPath], check=True) # check file size ~20MB
     with Path(file_path).open(newline="") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
@@ -365,7 +403,7 @@ def open_log_file(profilerPath: str, filename: str):
 # It parses the profiler logs and creates BenchmarkValue objects from them
 # Returns [BenchmarkValue]
 # If you want to add more benchmarks add them here
-def getLocalBenchmarkResults(profilerPath:str):
+def getLocalBenchmarkResults(profilerPath:str) -> list[BenchmarkValue]:
     # read memory and mlflow stats
     stats = memory_stats(device=0)
     peak_active_mem_mb = stats["active_bytes.all.peak"] / 1024 / 1024
@@ -407,6 +445,37 @@ def getLocalBenchmarkResults(profilerPath:str):
 
     return localBenchmarkResults
 
+# Runs after a benchmark
+# returns a list of files produced by the profiler
+def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
+    import csv
+    import glob
+    import os
+
+    #under /{profilerPath} there is a single random alphanumeric dir
+    # this next(iter(glob(...))) gets us through this random dir
+    profilerDir = next( iter(
+            glob.glob(
+                f"{profilerPath}/[a-z0-9]*/",
+            ),
+        ),
+    )
+    # profiler dir contents:
+    #ac6-308.bullx_3729025.None.1742416383234963152.pt.trace.json  model_summary.txt
+    #ac6-308.bullx_3729025.None.1742435256841839056.pt.trace.json  speed_profiler.csv
+    #memory_profiler.csv                                           system_profiler.csv
+    #memory_snapshot.pickle                                        time_profiler.csv
+    memory_snapshot=Path(f"{profilerDir}/memory_snapshot.pickle")
+    if not memory_snapshot.exists():
+        raise RuntimeError(f"Memory snapshot not found at: {memory_snapshot}")
+
+    #get trace file
+    #there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
+    #but luckily if we take the first one thats always training on rank 0.
+    trace_file= Path(next( iter( glob.glob(f"{profilerDir}/*.pt.trace.json"))))
+    if not trace_file.exists():
+        raise RuntimeError(f"trace file not found at: {trace_file}")
+    return [memory_snapshot, trace_file]
 
 @pytest.mark.longtests
 def test_benchmark_training_cycle(
@@ -450,6 +519,10 @@ def test_benchmark_training_cycle(
         print("Updating metrics on server")
         for localBenchmarkValue in localBenchmarkResults:
             benchmarkServer.setValue(localBenchmarkValue)
+        store_artifacts=True
+        if store_artifacts:
+            artifacts= getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
+            benchmarkServer.storeArtifacts(artifacts,  localBenchmarkResults[0].commit)
     else:
         print("Comparing local benchmark results against reference values from the server")
 
@@ -468,6 +541,4 @@ def test_benchmark_training_cycle(
             on_test_fail(f"The following tests failed: {failedTests}")
 
 #TODO increase benchmark size and add multigpu
-#TODO save config info and requirements.txt under benchmark server?
-#TODO store traces and memory snapshot
-#TODO disable checkpoints
+#TODO add an option to save artifacts locally when doing a comparison

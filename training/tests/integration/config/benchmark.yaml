@@ -37,6 +37,7 @@ training:
   num_sanity_val_steps: 0
 
 diagnostics:
+  enable_checkpointing: False
   print_memory_summary: true
   benchmark_profiler:
     memory:
