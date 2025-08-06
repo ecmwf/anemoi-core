@@ -312,7 +312,7 @@ class ConditionalNaNPostprocessor(ConditionalPostprocessor):
         - y
     ```
 
-    If "x" is NaN, "y" will be postprocessed with NaN.
+    The module sets "y" NaN, at NaN locations of "x".
     """
 
     def _get_postprocessor_function(self, method: float, name: str):
