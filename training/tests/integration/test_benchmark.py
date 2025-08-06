@@ -336,20 +336,32 @@ class BenchmarkServer:
         LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
         if output.exists():
             print(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
-            return
+            #return
         else:
             artifactDir.mkdir(parents=True) # might need to make .artifacts too
 
-        for artifact in artifacts:
-            LOGGER.debug(f"Copying {artifact} to {artifactDir}...")
-            shutil.copy(artifact, artifactDir)
+            for artifact in artifacts:
+                LOGGER.debug(f"Copying {artifact} to {artifactDir}...")
+                shutil.copy(artifact, artifactDir)
 
-        if tar:
-            LOGGER.debug("Tar-ing artifacts {artifactDir} to {artifactTar}")
-            _make_tarfile(artifactTar, artifactDir)
-            #cleanup untar-ed file
-            LOGGER.debug("Deleting {artifactDir}")
-            shutil.rmtree(artifactDir)
+            if tar:
+                LOGGER.debug("Tar-ing artifacts {artifactDir} to {artifactTar}")
+                _make_tarfile(artifactTar, artifactDir)
+                #cleanup untar-ed file
+                LOGGER.debug("Deleting {artifactDir}")
+                shutil.rmtree(artifactDir)
+
+        #cleanup oldest artifact if we are older artifact limit
+
+        #os/listdir gets commit name, and the list compression makes it a complete path
+        commits = [ f"{self.store}/.artifacts/{commit}" for commit in os.listdir(f"{self.store}/.artifacts")]
+        if len(commits) >  self.artifactLimit:
+            print(f"{len(commits)} commits stored under ./artifacts, greater then server limit of {self.artifactLimit}")
+            commits.sort(key=os.path.getmtime) #sorts the list, oldest first
+            commitsToDelete = commits[:len(commits) - self.artifactLimit]
+            print(f"Deleting {commitsToDelete}...")
+            for commit in commitsToDelete:
+                os.remove(commit)
 
 def get_git_revision_hash() -> str:
     try:
