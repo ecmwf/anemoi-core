@@ -133,7 +133,6 @@ class GraphInterpolator(BaseGraphModule):
                 y_pred,
                 y,
                 interp_step - 1,
-                training_mode=True,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
