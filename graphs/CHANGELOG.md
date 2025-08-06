@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.2...graphs-0.6.3) (2025-08-01)
+
+
+### Features
+
+* **graphs:** Add lat weighted attribute ([#223](https://github.com/ecmwf/anemoi-core/issues/223)) ([5dd32ca](https://github.com/ecmwf/anemoi-core/commit/5dd32ca1fa5a0447a524e5a3f651f087be171ef4))
+* **graphs:** Support to export edges to npz ([#395](https://github.com/ecmwf/anemoi-core/issues/395)) ([e21738f](https://github.com/ecmwf/anemoi-core/commit/e21738f0029e799bcf1706a9b5844da0765d4484))
+
+
+### Bug Fixes
+
+* Dropping 3.9 ([#436](https://github.com/ecmwf/anemoi-core/issues/436)) ([f6c0214](https://github.com/ecmwf/anemoi-core/commit/f6c0214ad09d217930956b7eddaf0c8b35a32185))
+* **graphs:** Revert PR [#379](https://github.com/ecmwf/anemoi-core/issues/379) ([#409](https://github.com/ecmwf/anemoi-core/issues/409)) ([d51219f](https://github.com/ecmwf/anemoi-core/commit/d51219f0ef598a149dc2c7901b055947785a26b2))
+* **graphs:** Throw error instead of raising warning when graph exists.  ([#379](https://github.com/ecmwf/anemoi-core/issues/379)) ([6ec6c18](https://github.com/ecmwf/anemoi-core/commit/6ec6c18b67e797f1cf2037feabe0462d2058dd25))
+* **graphs:** Undo masking when torch-cluster is installed ([#375](https://github.com/ecmwf/anemoi-core/issues/375)) ([9f75c06](https://github.com/ecmwf/anemoi-core/commit/9f75c06c1ff8a720f05341ad055ff345306df7a6))
+
+
+### Documentation
+
+* **graphs:** Documenting some missing features ([#423](https://github.com/ecmwf/anemoi-core/issues/423)) ([8addbd8](https://github.com/ecmwf/anemoi-core/commit/8addbd8655ffa71df786d196f23c9615cffd7f2e))
+
 ## [0.6.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.1...graphs-0.6.2) (2025-06-17)
 
 
