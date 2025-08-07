@@ -320,7 +320,7 @@ class ConditionalNaNPostprocessor(ConditionalPostprocessor):
         when the masking variable is NaN. This function simply returns a NaN.
         """
         LOGGER.info(
-            f"ConditionalNaNPostprocessor: replacing valus in {name} with value NaN if {self.masking_variable} is NaN."
+            f"ConditionalNaNPostprocessor: replacing values in {name} with value NaN if {self.masking_variable} is NaN."
         )
         return torch.nan
 
