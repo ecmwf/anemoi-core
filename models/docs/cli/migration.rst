@@ -17,6 +17,8 @@ To inspect the registered versions in the checkpoint, run:
 
    anemoi-models migration inspect PATH_TO_CKPT
 
+You can remove colors with the ``--no-color`` argument.
+
 
 ********
  Migrate
@@ -36,6 +38,7 @@ of anemoi-models. If your checkpoint is too old and migrating is not supported, 
 
 Your old checkpoint is still available with the name ``OLD_NAME-v{version}.ckpt``.
 
+You can remove colors with the ``--no-color`` argument.
 
 ********
  Dry-run
@@ -46,6 +49,7 @@ You can check which migration will be executed with a dry-run, without updating 
 .. code:: bash
 
    anemoi-models migration sync --dry-run PATH_TO_CKPT
+
 
 ********************************
  Migrating to a specific version
@@ -70,4 +74,5 @@ You can decide to manually execute a certain number of steps with
 
    anemoi-models migration sync PATH_TO_CKPT --steps STEPS
 
-``STEPS`` must be positive.
+``STEPS`` must be positive and indicates the number of steps in the resolved operation order
+to execute.

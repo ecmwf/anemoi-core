@@ -284,9 +284,9 @@ class Migration(Command):
         migrator = Migrator()
         ckpt_path = Path(args.ckpt)
         try:
-            new_ckpt, done_ops = migrator.sync(ckpt_path, steps=args.steps)
+            old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path, steps=args.steps)
             if len(done_ops) and not args.dry_run:
-                registered_migrations = migrator.registered_migrations(ckpt_path)
+                registered_migrations = migrator.registered_migrations(old_ckpt)
                 version = ""
                 if len(registered_migrations):
                     version = registered_migrations[-1].metadata.versions["anemoi-models"] + "-"
@@ -329,6 +329,8 @@ class Migration(Command):
         console = Console(force_terminal=not args.no_color, highlight=False)
         try:
             executed_migrations, missing_migrations, extra_migrations = migrator.inspect(args.ckpt)
+            if not len(missing_migrations) and not len(extra_migrations):
+                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
             if len(executed_migrations):
                 print(
                     len(executed_migrations),
@@ -368,8 +370,6 @@ class Migration(Command):
             if len(missing_migrations) or len(extra_migrations):
                 console.print("\n[italic]To update your checkpoint, run:[/italic]")
                 console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
-            else:
-                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
         except IncompatibleCheckpointException:
             print("No compatible migration available: the checkpoint is too old.")
 

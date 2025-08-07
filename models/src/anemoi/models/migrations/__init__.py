@@ -10,17 +10,16 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib
 import logging
 import sys
-import types
 from collections.abc import Callable
 from collections.abc import MutableMapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from enum import auto
-from functools import cache
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
@@ -54,16 +53,43 @@ MigrationVersions = TypedDict("MigrationVersions", {"migration": str, "anemoi-mo
 
 
 class MigrationContext:
+    """
+    A context object allowing setup callbacks to access some utilities:
+    * ``context.move_attribute("pkg.start.MyClass", "pkg.end.MyRenamedClass")`` to update paths
+        to attributes
+    * ``context.move_module("pkg.start", "pkg.end")`` to move a full module.
+    """
+
     def __init__(self) -> None:
         self.module_paths: dict[str, str] = {}
         self.attribute_paths: dict[str, str] = {}
 
     def move_attribute(self, path_start: str, path_end: str) -> None:
+        """
+        Move and rename an attribute between modules.
+
+        Parameters
+        ----------
+        path_start : str
+            Starting module path
+        path_end : str
+            End module path
+        """
         if path_start in self.attribute_paths:
             path_start = self.attribute_paths.pop(path_start)
         self.attribute_paths[path_end] = path_start
 
     def move_module(self, path_start: str, path_end: str) -> None:
+        """
+        Move a module.
+
+        Parameters
+        ----------
+        path_start : str
+            Starting module path
+        path_end : str
+            End module path
+        """
         if path_start in self.module_paths:
             path_start = self.module_paths.pop(path_start)
         self.module_paths[path_end] = path_start
@@ -71,15 +97,28 @@ class MigrationContext:
 
 @dataclass
 class MigrationMetadata:
+    """
+    Metadata object of the migration.
+    """
+
     versions: MigrationVersions
+    """ Migration and anemoi-model versions. """
     final: bool = False
+    """ Whether the migration is final."""
 
 
 class SerializedMigration(TypedDict):
+    """
+    The serialized migration stored in the checkpoint
+    """
+
     name: str
+    """ Name of the migration """
     metadata: MigrationMetadata
     rollback: Callable[[CkptType], CkptType] | None
+    """ The rollback function stored as value """
     rollback_setup: Callable[[MigrationContext], None] | None
+    """ The setup callback for the rollback method """
 
 
 class _SerializedRollback:
@@ -140,11 +179,34 @@ class Migration:
 
     @classmethod
     def from_serialized(cls, migration: SerializedMigration) -> Migration:
+        """
+        Alt init to load the migration from the serialized migration dict in the checkpoint
+        This migration does not contain the ``migrate`` or ``migrate_setup`` callbacks as
+        they are not serialized.
+
+        Parameters
+        ----------
+        migration : SerializedMigration
+            The serialized migration dict
+
+        Returns
+        -------
+        Migration
+            The migration.
+        """
         return Migration(
             migration["name"], migration["metadata"], None, None, migration["rollback"], migration["rollback_setup"]
         )
 
     def serialize(self) -> SerializedMigration:
+        """
+        Serialize this migration
+
+        Returns
+        -------
+        SerializedMigration
+            The serialized dict to store in the checkpoint.
+        """
         serialized_rollback: _SerializedRollback | None = None
         serialized_rollback_setup: _SerializedRollbackSetup | None = None
         if self.rollback is not None:
@@ -164,6 +226,10 @@ class Migration:
 
 
 class OpType(Enum):
+    """
+    Operation type enum. migration or rollback.
+    """
+
     migration = auto()
     rollback = auto()
 
@@ -208,10 +274,16 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
     return migrations
 
 
-class MissingAttribute: ...
+class MissingAttribute:
+    """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class"""
 
 
 class LenientUnpickler(Unpickler):
+    """
+    And Unpickler that does not fail when the pickle object has some reference to non-existing attributes.
+    This is useful to load the "migrations" key from the checkpoint regardless of import issues.
+    """
+
     def find_class(self, module_name: str, global_name: str, /) -> Any:
         try:
             return super().find_class(module_name, global_name)
@@ -221,11 +293,30 @@ class LenientUnpickler(Unpickler):
 
 
 class LenientPicklerModule:
+    """
+    For torch.load's pickle_module argument.
+    A "module" with the LenientUnpickler as Unpickler.
+    """
+
     Unpickler = LenientUnpickler
 
 
-@cache
 def _load_ckpt(path: str | PathLike, lenient: bool = True) -> CkptType:
+    """
+    Loads a checkpoint
+
+    Parameters
+    ----------
+    path : str | PathLike
+
+    lenient : bool
+
+
+    Returns
+    -------
+    CkptType
+
+    """
     import torch
 
     pickle_module: Any = None
@@ -318,6 +409,43 @@ class Migrator:
     def _resolve_ops(
         self, ckpt: CkptType, migrations: list[Migration], steps: int | None = None
     ) -> tuple[list[Callable[[MigrationContext], None]], list[tuple[OpType, Migration]]]:
+        """
+        Resolves the list of operations to execute to migrate the checkpoint.
+        If it contains migrations and rollbacks, first rollbacked are applied (starting
+        from the end), then migrations are applied (starting from the beginning).
+
+        The migrations in the checkpoint are compared with the ones in the ``migrations`` argument.
+
+        For example for the migrations...
+        in ``migrations``  | in the checkpoint
+        A                  | A
+        C                  | E (extra)
+        D (extra)          |
+
+        First backward with the checkpoint as reference:
+        * we need to rollback E
+        * A is ok because it's already synchronized
+        Then forward with ``migrations`` as reference:
+        * A is already sync
+        * then apply C and D.
+
+        Parameters
+        ----------
+        ckpt : CkptType
+            The checkpoint
+        migrations : list[Migration]
+            The reference migration list
+        steps : int | None, default None
+            Number of steps to execute. By default, executes everything.
+
+        Returns
+        -------
+        tuple[list[Callable[[MigrationContext], None]], list[tuple[OpType, Migration]]]
+            The resolved operation (in order)
+            * the list of setup callbacks to execute
+            * the list of operations (migrate or rollback) to execute. Each item is a tuple
+                containing a the operation type from the OpType enum, and the migration.
+        """
         ckpt_migrations = self.registered_migrations(ckpt)
         setups: list[Callable[[MigrationContext], None]] = []
         ops: list[tuple[OpType, Migration]] = []
@@ -358,6 +486,19 @@ class Migrator:
         return setups, ops
 
     def _resolve_context(self, context: MigrationContext) -> None:
+        """
+        Resolves the final context object after all setup callbacks have been executed.
+
+        It first tries to move all modules, then moves all attributes.
+
+        Parameters
+        ----------
+        context : MigrationContext
+            The context object
+        """
+        for module_path_end, module_path_start in context.module_paths.items():
+            LOGGER.debug("Move module %s to %s.", module_path_start, module_path_end)
+            sys.modules[module_path_start] = sys.modules[module_path_end]
         for full_attribute_path_end, attribute_path_start in context.attribute_paths.items():
             attribute_path_start, _, mod_name_start = attribute_path_start.rpartition(".")
             attribute_path_end, _, mod_name_end = full_attribute_path_end.rpartition(".")
@@ -368,13 +509,10 @@ class Migrator:
             attr_end = getattr(mod_end, mod_name_end)
             mod_start = sys.modules[attribute_path_start]
             setattr(mod_start, mod_name_start, attr_end)
-        for module_path_end, module_path_start in context.module_paths.items():
-            LOGGER.debug("Move module %s to %s.", module_path_start, module_path_end)
-            sys.modules[module_path_start] = sys.modules[module_path_end]
 
     def sync(
         self, path: str | PathLike | CkptType, steps: int | None = None
-    ) -> tuple[CkptType, list[tuple[OpType, Migration]]]:
+    ) -> tuple[CkptType, CkptType, list[tuple[OpType, Migration]]]:
         """Migrate or rollbacks the checkpoint using provided migrations
 
         Parameters
@@ -387,13 +525,16 @@ class Migrator:
         Returns
         -------
         tuple[CkptType, list[tuple[OpType, Migration]]]
+            * The original checkpoint (might have obfuscated attributes with `MissingAttribute`
+                if it cannot be imported
             * The migrated checkpoint
             * The list of migrations or rollbacks
         """
         if isinstance(path, str | PathLike):
-            ckpt = _load_ckpt(path)
+            old_ckpt = _load_ckpt(path)
         else:
-            ckpt = path
+            old_ckpt = path
+        ckpt = deepcopy(old_ckpt)
 
         if not self.is_compatible_ckpt(ckpt):
             raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
@@ -419,7 +560,7 @@ class Migrator:
                 assert callback.migrate is not None
                 ckpt = callback.migrate(ckpt)
                 ckpt[_ckpt_migration_key].append(callback.serialize())
-        return ckpt, ops
+        return old_ckpt, ckpt, ops
 
     def inspect(self, path: str | PathLike) -> tuple[list[Migration], list[Migration], list[Migration]]:
         """Inspect migration information in checkpoint
@@ -452,12 +593,12 @@ class Migrator:
                 missing_migrations.append(op)
         return registered_migrations, missing_migrations, extra_migrations
 
-    def registered_migrations(self, ckpt: str | PathLike | CkptType) -> list[Migration]:
+    def registered_migrations(self, ckpt: CkptType) -> list[Migration]:
         """Registered migrations in a ckpt
 
         Parameters
         ----------
-        ckpt : str | PathLike | CkptType
+        ckpt : CkptType
             The checkpoint
 
         Returns
@@ -465,8 +606,6 @@ class Migrator:
         list[str]
             The names of registered migrations
         """
-        if isinstance(ckpt, str | PathLike):
-            ckpt = _load_ckpt(ckpt)
         if _ckpt_migration_key not in ckpt:
             return []
         return [Migration.from_serialized(migration) for migration in ckpt[_ckpt_migration_key]]
