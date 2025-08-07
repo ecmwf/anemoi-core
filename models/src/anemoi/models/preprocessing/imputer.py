@@ -14,6 +14,8 @@ from abc import ABC
 from typing import Optional
 
 import torch
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
@@ -285,6 +287,8 @@ class InputImputer(BaseImputer):
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
+        if isinstance(statistics, DictConfig):
+            statistics = OmegaConf.to_container(statistics, resolve=True)
         self._create_imputation_indices(statistics)
 
         self._validate_indices()
