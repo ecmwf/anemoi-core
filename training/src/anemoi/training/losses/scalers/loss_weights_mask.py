@@ -10,18 +10,18 @@
 
 import logging
 
-import numpy as np
+import torch
 
 from anemoi.models.interface import AnemoiModelInterface
-from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
 
-class NaNMaskScaler(BaseDelayedScaler):
+class NaNMaskScaler(BaseUpdatingScaler):
 
-    scale_dims: tuple[TensorDim] = (TensorDim.GRID, TensorDim.VARIABLE)
+    scale_dims: tuple[TensorDim] = (TensorDim.BATCH_SIZE, TensorDim.GRID, TensorDim.VARIABLE)
 
     def __init__(self, norm: str | None = None, **kwargs) -> None:
         """Initialise NanMaskScaler.
@@ -34,21 +34,22 @@ class NaNMaskScaler(BaseDelayedScaler):
         super().__init__(norm=norm)
         del kwargs
 
-    def get_scaling_values(self) -> np.ndarray:
-        return np.ones(tuple([1] * len(self.scale_dims)))
-
-    def get_delayed_scaling_values(self, model: AnemoiModelInterface) -> np.ndarray:
-        """Get loss scaling.
+    def on_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:
+        """Update loss scaling.
 
         Get  mask multiplying NaN locations with zero.
         At this stage, returns a loss slicing mask with all values set to 1.
-        When calling the imputer for the first time, the NaN positions are available.
-        Before first application of loss function, the mask is replaced.
+        Always when calling the imputer, the NaN positions are updated.
+        Before every application of training loss function, the mask is replaced.
         """
-        loss_weights_mask = np.ones((1, 1))
+        loss_weights_mask = None
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processor in model.pre_processors.processors.values():
             if hasattr(pre_processor, "loss_mask_training"):
-                loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training.cpu().numpy()
+                if loss_weights_mask is None:
+                    loss_weights_mask = pre_processor.loss_mask_training
+                else:
+                    # multiply the masks together
+                    loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
 
         return loss_weights_mask
