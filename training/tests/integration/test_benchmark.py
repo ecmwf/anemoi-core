@@ -159,7 +159,7 @@ class BenchmarkServer:
         else: 
             self.fs.mkdir(str(self.store), create_parents=True)
 
-        self.artifactLimit=10 #How many commits artifacts will be saved at once.
+        self.artifactLimit=2 #How many commits artifacts will be saved at once.
         #currently the trace file and memory snapshot are saved
         #When the artifactLimit is hit, the oldest commits artifacts are deleted
         #Artifacts can be reproduced by reverting to a given commit and running the pytests locally
@@ -367,26 +367,31 @@ class BenchmarkServer:
                 shutil.rmtree(commitDir)
 
         if not self.local:
-            LOGGER.debug("Copying tar file from {commitTar} to {artifactDir}")
+            print(f"Copying tar file from {commitTar} to {artifactDir}")
             self.fs.mkdir(str(artifactDir), create_parents=True)
             self.fs.put_file(str(commitTar), str(artifactDir))
             commitTar.unlink() #delete local commit tar
 
         #cleanup oldest artifact if we are over artifact limit
 
-        if not self.local:
-            print("Artifact deletion doesnt work on remote servers yet")
-            #TODO should just be able to replace os with self.fs
-            return
-        #listdir gets commit name, and the list compression makes it a complete path
-        commits = [ f"{artifactDir}/{commit}" for commit in os.listdir(f"{artifactDir}")]
+        if self.local:
+            remove=os.remove
+            #listdir gets commit name, and the list compression makes it a complete path
+            commits = [ f"{artifactDir}/{commit}" for commit in os.listdir(f"{artifactDir}")]
+            commits.sort(key=os.path.getmtime) #sorts the list, oldest first
+        else:
+            remove=self.fs.rm_file
+            commits = self.fs.listdir(f"{artifactDir}") #returns a list of info dicts
+            commits = sorted(commits, key=lambda d: d['mtime'])
+            commits = [commit['name'] for commit in commits] #commit is a dict of info, now that we've sorted drop to just paths
+
         if len(commits) >  self.artifactLimit:
             print(f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}")
-            commits.sort(key=os.path.getmtime) #sorts the list, oldest first
+
             commitsToDelete = commits[:len(commits) - self.artifactLimit]
             print(f"Deleting {commitsToDelete}...")
             for commit in commitsToDelete:
-                os.remove(commit)
+                remove(commit)
 
 def get_git_revision_hash() -> str:
     try:
@@ -514,7 +519,7 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str], #cfg, benchmarkTestCase
     get_test_archive: callable,
-    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, testCase = benchmark_config
