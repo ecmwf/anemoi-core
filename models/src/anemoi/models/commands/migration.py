@@ -13,10 +13,12 @@ from argparse import ArgumentParser
 from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
+from shutil import copy2
 
 from rich.console import Console
 
 from .. import __version__ as version_anemoi_models
+from ..migrations import LOGGER as migrator_logger
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
 from ..migrations import Migrator
@@ -53,12 +55,22 @@ class Migration(Command):
         help_create = "Create a new migration script."
         create_parser = subparsers.add_parser("create", help=help_create, description=help_create)
         create_parser.add_argument("name", help="Name of the migration.")
-        create_parser.add_argument("--path", type=Path, default=MIGRATION_PATH, help="Path to the migration folder.")
+        create_parser.add_argument(
+            "--path", "-p", type=Path, default=MIGRATION_PATH, help="Path to the migration folder."
+        )
         create_parser.add_argument(
             "--final",
+            "-f",
             action="store_true",
             default=False,
             help="Set this as the final migration. Older checkpoints cannot be migrated past this.",
+        )
+        create_parser.add_argument(
+            "--with-setup",
+            "-s",
+            action="store_true",
+            default=False,
+            help="Set this if need the migrate_setup and rollback_setup callback.",
         )
         create_parser.add_argument(
             "--no-rollback",
@@ -83,6 +95,9 @@ class Migration(Command):
             help="Perform a dry-run, without saving the updated checkpoint.",
         )
         sync_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
+        sync_parser.add_argument(
+            "--log-level", default="NOTSET", choices=logging.getLevelNamesMapping(), help="Log level"
+        )
 
         help_inspect = "Inspect migrations in a checkpoint."
         inspect_parser = subparsers.add_parser("inspect", help=help_inspect, description=help_inspect)
@@ -115,11 +130,16 @@ class Migration(Command):
         """
         from textwrap import dedent
 
+        if args.final and args.with_setup:
+            raise ValueError("Final migration cannot have setup callbacks.")
+
         name = _get_migration_name(args.name)
 
         imports_items: list[str] = []
         if not args.final:
             imports_items.append("from anemoi.models.migrations import CkptType")
+        if args.with_setup:
+            imports_items.append("from anemoi.models.migrations import MigrationContext")
         imports_items.append("from anemoi.models.migrations import MigrationMetadata")
         imports = "\n".join(imports_items)
 
@@ -161,15 +181,63 @@ class Migration(Command):
                 )
             )
 
+            if args.with_setup:
+                f.write(
+                    dedent(
+                        """
+
+                        def migrate_setup(context: MigrationContext) -> None:
+                            \"\"\"
+                            Migrate setup callback to be run before loading the checkpoint.
+
+                            Parameters
+                            ----------
+                            context : MigrationContext
+                               A MigrationContext instance
+                            \"\"\"
+                        """
+                    )
+                )
+
             if not args.final:
                 f.write(
                     dedent(
                         """
 
                         def migrate(ckpt: CkptType) -> CkptType:
-                            \"\"\"Migrate the checkpoint.\"\"\"
+                            \"\"\"
+                            Migrate the checkpoint.
+                            
+                            
+                            Parameters
+                            ----------
+                            ckpt : CkptType
+                                The checkpoint dict. 
+                            
+                            Returns
+                            -------
+                            CkptType
+                                The migrated checkpoint dict.
+                            \"\"\"
                             return ckpt
                     """
+                    )
+                )
+            if not args.no_rollback and args.with_setup:
+                f.write(
+                    dedent(
+                        """
+
+                        def rollback_setup(context: MigrationContext) -> None:
+                            \"\"\"
+                            Rollback setup callback to be run before loading the checkpoint.
+
+                            Parameters
+                            ----------
+                            context : MigrationContext
+                               A MigrationContext instance
+                            \"\"\"
+                        """
                     )
                 )
             if not args.no_rollback and not args.final:
@@ -178,7 +246,20 @@ class Migration(Command):
                         """
 
                         def rollback(ckpt: CkptType) -> CkptType:
-                            \"\"\"Rollback the migration.\"\"\"
+                            \"\"\"
+                            Rollback the checkpoint.
+                            
+                            
+                            Parameters
+                            ----------
+                            ckpt : CkptType
+                                The checkpoint dict. 
+                            
+                            Returns
+                            -------
+                            CkptType
+                                The rollbacked checkpoint dict.
+                            \"\"\"
                             return ckpt
                     """
                     )
@@ -196,17 +277,23 @@ class Migration(Command):
         """
         import torch
 
-        ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+        LOGGER.setLevel(args.log_level)
+        migrator_logger.setLevel(args.log_level)
+
         console = Console(force_terminal=not args.no_color, highlight=False)
         migrator = Migrator()
+        ckpt_path = Path(args.ckpt)
         try:
-            new_ckpt, done_ops = migrator.sync(ckpt, steps=args.steps)
+            new_ckpt, done_ops = migrator.sync(ckpt_path, steps=args.steps)
             if len(done_ops) and not args.dry_run:
-                registerd_migrations = migrator.registered_migrations(ckpt)
-                version = registerd_migrations[-1].metadata.versions["anemoi-models"] + f"-{len(registerd_migrations)}"
-                ckpt_path = Path(args.ckpt)
+                registered_migrations = migrator.registered_migrations(ckpt_path)
+                version = ""
+                if len(registered_migrations):
+                    version = registered_migrations[-1].metadata.versions["anemoi-models"] + "-"
+                version += f"{len(registered_migrations)}"
+
                 new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
-                torch.save(ckpt, new_path)
+                copy2(ckpt_path, new_path)
                 print("Saved backed-up checkpoint here:", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
                 print("Executed ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
@@ -238,13 +325,10 @@ class Migration(Command):
         args : Namespace
             The arguments passed to the command.
         """
-        import torch
-
-        ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
         migrator = Migrator()
         console = Console(force_terminal=not args.no_color, highlight=False)
         try:
-            executed_migrations, missing_migrations, extra_migrations = migrator.inspect(ckpt)
+            executed_migrations, missing_migrations, extra_migrations = migrator.inspect(args.ckpt)
             if len(executed_migrations):
                 print(
                     len(executed_migrations),
