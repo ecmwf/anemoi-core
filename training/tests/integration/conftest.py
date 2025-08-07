@@ -202,10 +202,10 @@ def gnn_config(
 #TODO change it so i can inherit from stretched_config etc. rather then rewriting
 @pytest.fixture(
     params=[ #selects different test cases
+        "lam"
         #"graphtransformer_n320_1g",
         #"gnn_n320_1g",
         #"stretched",
-        "lam",
     ],
 )
 def benchmark_config(

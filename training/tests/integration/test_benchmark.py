@@ -134,38 +134,51 @@ def _findLatestSharedCommitRow(df) -> str | None:
 
 
 class BenchmarkServer:
-    def __init__(self, testCase:str="", local=True):  # use a local folder to store data instead of a remote server
+    def __init__(self, testCase:str="", local=False):  # use a local folder to store data instead of a remote server
         self.benchmarkValues = {}
 
         self.local = local
-        if self.local:
-            self.store="./server"
-        else:
-            # TODO could unify these by getting via scp
-            # for reading the data we read over internet
-            # TODO should certainly not hardcode these
-            self.store = "https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks"
-        # for setting the data, we scp
-        self.set_remote_path = "/home/data/public/anemoi-integration-tests/training/benchmarks"
-        self.set_host = "data@anemoi.ecmwf.int"
+        self.store=Path("./server")
+        if not self.local:
+            self.store = "/home/data/public/anemoi-integration-tests/training/benchmarks"
+            self.remote_host = "anemoi.ecmwf.int"
+            self.remote_user = "data"
 
         # TestCase creates an optional subdir under BenchmarkServer to store the results
         # So that you can store GNN_n320_1g and graphtransformer_n320_1g results under the same server
         # If testcase is "" then no subdirs are created
         self.testCase = testCase
         if self.testCase is not "":
-            self.store += f"/{self.testCase}"
-            if not local:
-                self.set_remote_path += f"/{self.testCase}"
+            self.store = Path(f"{self.store}/{self.testCase}")
+
+        if not self.local:
+            self._mount_remote()
+
         if self.local:
-            LOGGER.debug(f"Using a local server under '{self.store}'")
-            subprocess.run(["mkdir", "-p", self.store], check=True)
+            self.store.mkdir(parents=True, exist_ok=True)
+        else: 
+            self.fs.mkdir(str(self.store), create_parents=True)
 
         self.artifactLimit=10 #How many commits artifacts will be saved at once.
         #currently the trace file and memory snapshot are saved
         #When the artifactLimit is hit, the oldest commits artifacts are deleted
         #Artifacts can be reproduced by reverting to a given commit and running the pytests locally
 
+
+    # mounts the remote server over sftp
+    def _mount_remote(self):
+
+        from sshfs import SSHFileSystem
+
+        self.fs = SSHFileSystem(
+            self.remote_host,
+            username=self.remote_user,
+        )
+
+    def __del__(self):
+        
+        if not self.local:
+            self.fs.close()
 
     def __str__(self):
         # TODO should do this properly with string builders
@@ -184,24 +197,23 @@ class BenchmarkServer:
         if not forceGetFromServer and benchmarkName in self.benchmarkValues:
             LOGGER.debug(f"entry for {benchmarkName} found locally, not retrieving from server")
             return self.benchmarkValues[benchmarkName]
-        if self.local:
-            local_file = f"{self.store}/{benchmarkName}"
-            try:
-                df = pd.read_csv(local_file)
 
-            except FileNotFoundError as e:
-                print(f"Could not open file at {local_file}. Got error {e}")
+        bench_file = Path(f"{self.store}/{benchmarkName}")
+        if self.local:
+            if bench_file.exists():
+                df = pd.read_csv(bench_file)
+            else:
+                print(f"Could not find file at {bench_file}.")
                 return None
         else:
-            url = f"{self.store}/{benchmarkName}"
-            LOGGER.debug(f"Fetching benchmark data from {url}...")
+            local_file= Path(f"./{benchmarkName}")
             try:
-                df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
-                # data = urlopen(url)
-                # df=pd.read_csv(io.StringIO(data))
-            except URLError as e:  
-                print(f"Could not open file at {url}. Got error {e}")
+                self.fs.get(str(bench_file), str(local_file))
+                df = pd.read_csv(local_file)
+            except IOError:
+                print(f"Could not find file at {bench_file}.")
                 return None
+
 
         # find last element with a commit present in this branch
         # If no such can be found, error and recomend merging main to get a new enough commit
@@ -278,47 +290,41 @@ class BenchmarkServer:
     #if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
     def setValue(self, value: BenchmarkValue, overwrite=False):
 
-        # if file doesnt exist, write header
+        #Check do we have an existing value
+        output=Path(f"{self.store}/{value.name}")
+        exists=True
+        if overwrite:
+            exists=False
         if self.local:
-            if not os.path.isfile(f"{self.store}/{value.name}") or overwrite:
-                with open(f"{self.store}/{value.name}", "w") as f:
-                    f.write(value.to_csv(include_header=True) + "\n")
-            else:
-                LOGGER.debug("existing file found... appending")
-                with open(f"{self.store}/{value.name}", "a") as f:
-                    f.write(value.to_csv() + "\n")
+            exists = output.exists()
         else:
-            #Get existing csv
-            url = f"{self.store}/{value.name}"
-            print(f"Fetching benchmark data from {url}...")
-            try:
-                df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
-            except URLError as e: 
-                print(f"Could not open file at {url}. Got error {e}")
-                df = None
+            exists = self.fs.exists(str(output))
 
-            if df is None or overwrite:
-                df = pd.read_csv(io.StringIO(value.to_csv(include_header=True))) #, index_col="testName") #index_col to prevent adding a seperate index col
+        #If we have an existing copy, get it into local_file
+        local_file=Path(f"./{value.name}")
+        if exists:
+            if self.local:
+                shutil.copy(output, local_file)
             else:
-                new_row = pd.read_csv(io.StringIO(value.to_csv()), header=None)
-                new_row.columns = df.columns
-                df = pd.concat([df, new_row], ignore_index=True)
-            df.to_csv(local_file, index=False)
+                self.fs.get(str(output), str(local_file))
 
-            cp_cmd = ["scp", local_file, f"{self.set_host}:{self.set_remote_path}/{value.name}"]
-            cleanup_cmd = [
-                "rm",
-                local_file,
-            ]
-            LOGGER.debug(f"cp command: {cp_cmd}")
+        #If the file exists just write value
+        if exists:
+            with open(local_file, "a") as f:
+                f.write(value.to_csv() + "\n")
+        else:
+        # if file doesnt exist, write header
+            with open(local_file, "w") as f:
+                 f.write(value.to_csv(include_header=True) + "\n")     
 
-            try:
-                subprocess.run(cp_cmd, check=True)
-                LOGGER.debug(f"Uploaded {value.name} to {self.set_host}")
-                subprocess.run(cleanup_cmd, check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"cp failed: {e}")
-
+        #Copy  local_file back to server and delete it
+        if self.local:
+            shutil.copy(local_file, output)
+        else:
+            print(f"Copying {local_file} to {self.store}/{value.name}")
+            self.fs.put_file(str(local_file), str(output))
+        local_file.unlink() # delete local file
+            
         # update dict of results
         self.benchmarkValues[value.name] = value
 
@@ -328,11 +334,14 @@ class BenchmarkServer:
     # tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
     def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
 
-        if not self.local:
-            print("Storing artifacts on a remote server doesnt work yet")
-            return 
+        if not self.local and not tar:
+            print("Uploading untarred to server not supported")
+            return
+
         artifactDir=Path(f"{self.store}/artifacts")
         commitDir=Path(f"{artifactDir}/{commit}")
+        if not self.local: #copy locally before tarring and sending to server
+              commitDir=Path(f"./{commit}")
         commitTar=Path(f"{commitDir}.tar.gz")
         output = commitDir
         if tar:
@@ -340,10 +349,11 @@ class BenchmarkServer:
 
         LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
         if output.exists():
+            #TODO this doesnt work remote, but it should just overwrite
             print(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
             #return
         else:
-            commitDir.mkdir(parents=True) # might need to make .artifacts too
+            commitDir.mkdir(parents=True) # might need to make artifacts too
 
             for artifact in artifacts:
                 LOGGER.debug(f"Copying {artifact} to {commitDir}...")
@@ -356,9 +366,19 @@ class BenchmarkServer:
                 LOGGER.debug("Deleting {commitDir}")
                 shutil.rmtree(commitDir)
 
+        if not self.local:
+            LOGGER.debug("Copying tar file from {commitTar} to {artifactDir}")
+            self.fs.mkdir(str(artifactDir), create_parents=True)
+            self.fs.put_file(str(commitTar), str(artifactDir))
+            commitTar.unlink() #delete local commit tar
+
         #cleanup oldest artifact if we are over artifact limit
 
-        #os/listdir gets commit name, and the list compression makes it a complete path
+        if not self.local:
+            print("Artifact deletion doesnt work on remote servers yet")
+            #TODO should just be able to replace os with self.fs
+            return
+        #listdir gets commit name, and the list compression makes it a complete path
         commits = [ f"{artifactDir}/{commit}" for commit in os.listdir(f"{artifactDir}")]
         if len(commits) >  self.artifactLimit:
             print(f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}")
@@ -494,7 +514,7 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str], #cfg, benchmarkTestCase
     get_test_archive: callable,
-    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, testCase = benchmark_config
@@ -550,5 +570,3 @@ def test_benchmark_training_cycle(
             on_test_fail(f"The following tests failed: {failedTests}")
 
 #TODO increase benchmark size and add multigpu
-#TODO add an option to save artifacts locally when doing a comparison
-#TODO get artifacts working for remote store
