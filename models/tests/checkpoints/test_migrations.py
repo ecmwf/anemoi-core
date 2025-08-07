@@ -17,7 +17,7 @@ from anemoi.models.migrations import OpType
 
 
 def test_run_all_migrations(old_migrator: Migrator, old_ckpt: CkptType):
-    migrated_model, done_ops = old_migrator.sync(old_ckpt)
+    _, migrated_model, done_ops = old_migrator.sync(old_ckpt)
 
     assert len(done_ops) == 4
     for op_type, _ in done_ops:
@@ -46,7 +46,7 @@ def test_run_last_migration(old_migrator: Migrator):
         ],
     }
 
-    migrated_model, done_ops = old_migrator.sync(dummy_model)
+    _, migrated_model, done_ops = old_migrator.sync(dummy_model)
 
     assert len(done_ops) == 3
     for op_type, _ in done_ops:
@@ -73,7 +73,7 @@ def test_extra_migration(old_migrator: Migrator):
         ],
     }
 
-    migrated_model, done_ops = old_migrator.sync(dummy_model)
+    _, migrated_model, done_ops = old_migrator.sync(dummy_model)
     assert len(done_ops) == 4
     assert done_ops[0][0] is OpType.rollback
     assert len(migrated_model["migrations"]) == 4
@@ -83,7 +83,7 @@ def test_extra_migration(old_migrator: Migrator):
 
 
 def test_migrate_step(old_migrator: Migrator, old_ckpt: CkptType):
-    migrated_model, done_ops = old_migrator.sync(old_ckpt, steps=1)
+    _, migrated_model, done_ops = old_migrator.sync(old_ckpt, steps=1)
 
     assert len(done_ops) == 1
     assert len(migrated_model["migrations"]) == 1
@@ -95,7 +95,7 @@ def test_migrate_step(old_migrator: Migrator, old_ckpt: CkptType):
 
 
 def test_migrate_no_step(old_migrator: Migrator, old_ckpt: CkptType):
-    migrated_model, done_ops = old_migrator.sync(old_ckpt, steps=0)
+    _, migrated_model, done_ops = old_migrator.sync(old_ckpt, steps=0)
 
     assert len(done_ops) == 0
     assert len(migrated_model["migrations"]) == 0
@@ -114,7 +114,7 @@ def test_run_migration_step(old_migrator: Migrator):
         ],
     }
 
-    migrated_model, done_ops = old_migrator.sync(dummy_model, steps=1)
+    _, migrated_model, done_ops = old_migrator.sync(dummy_model, steps=1)
 
     assert len(done_ops) == 1
     assert len(migrated_model["migrations"]) == 2
@@ -124,12 +124,12 @@ def test_run_migration_step(old_migrator: Migrator):
 
 
 def test_sync_rollback(old_migrator: Migrator, old_ckpt: CkptType):
-    dummy_model, _ = old_migrator.sync(old_ckpt)
+    _, dummy_model, _ = old_migrator.sync(old_ckpt)
     # only keep the first two migrations of the first group
     old_grouped_migrations = old_migrator._grouped_migrations[0][:]
     old_migrator._grouped_migrations[0] = old_migrator._grouped_migrations[0][:2]
 
-    rollbacked_model, done_ops = old_migrator.sync(dummy_model)
+    _, rollbacked_model, done_ops = old_migrator.sync(dummy_model)
 
     assert len(done_ops) == 2
     for op_type, _ in done_ops:
@@ -150,7 +150,7 @@ def test_error_migration_past_final(migrator: Migrator, old_ckpt: CkptType):
 
 
 def test_migrate_recent_model(migrator: Migrator, recent_ckpt: CkptType):
-    migrated_model, done_ops = migrator.sync(recent_ckpt)
+    _, migrated_model, done_ops = migrator.sync(recent_ckpt)
 
     assert len(done_ops) == 1
     assert len(migrated_model["migrations"]) == 2
@@ -158,11 +158,11 @@ def test_migrate_recent_model(migrator: Migrator, recent_ckpt: CkptType):
 
 
 def test_stop_rollback_to_prev_final(migrator: Migrator, recent_ckpt: CkptType):
-    model, _ = migrator.sync(recent_ckpt)
+    _, model, _ = migrator.sync(recent_ckpt)
     # only keep the first "final" migration
     migrator._grouped_migrations[-1] = migrator._grouped_migrations[-1][:1]
     assert model.get("after", None) == "after"
-    rollbacked_model, done_ops = migrator.sync(model)
+    _, rollbacked_model, done_ops = migrator.sync(model)
 
     assert len(done_ops) == 1
     assert len(rollbacked_model["migrations"]) == 1
