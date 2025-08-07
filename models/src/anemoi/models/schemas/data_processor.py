@@ -10,6 +10,7 @@
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any
+from typing import Union
 
 from pydantic import Field
 from pydantic import RootModel
@@ -22,29 +23,29 @@ from anemoi.utils.schemas import BaseModel
 
 
 class NormalizerSchema(BaseModel):
-    default: str | None = Field(literals=["mean-std", "std", "min-max", "max", "none"])
+    default: Union[str, None] = Field(literals=["mean-std", "std", "min-max", "max", "none"])
     """Normalizer default method to apply"""
-    remap: dict[str, str] | None = Field(default_factory=dict)
+    remap: Union[dict[str, str], None] = Field(default_factory=dict)
     """Dictionary for remapping variables"""
-    std: list[str] | None = Field(default_factory=list)
+    std: Union[list[str], None] = Field(default_factory=list)
     """Variables to normalise with std"""
-    mean_std: list[str] | None = Field(default_factory=list, alias="mean-std")
+    mean_std: Union[list[str], None] = Field(default_factory=list, alias="mean-std")
     """Variables to mormalize with mean-std"""
-    min_max: list[str] | None = Field(default_factory=list, alias="min-max")
+    min_max: Union[list[str], None] = Field(default_factory=list, alias="min-max")
     """Variables to normalize with min-max."""
-    max: list[str] | None = Field(default_factory=list)
+    max: Union[list[str], None] = Field(default_factory=list)
     """Variables to normalize with max."""
-    none: list[str] | None = Field(default_factory=list)
+    none: Union[list[str], None] = Field(default_factory=list)
     """Variables not to be normalized."""
 
 
 class ImputerSchema(BaseModel):
     default: str = Field(literals=["none", "mean", "stdev"])
     "Imputer default method to apply."
-    maximum: list[str] | None = Field(default_factory=list)
-    minimum: list[str] | None = Field(default_factory=list)
-    mean: list[str] | None = Field(default_factory=list)
-    none: list[str] | None = Field(default_factory=list)
+    maximum: Union[list[str], None] = Field(default_factory=list)
+    minimum: Union[list[str], None] = Field(default_factory=list)
+    mean: Union[list[str], None] = Field(default_factory=list)
+    none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be imputed."
 
 
@@ -69,7 +70,7 @@ class ConstantImputerSchema(RootModel[dict[Any, Any]]):
 
     @field_validator("root")
     @classmethod
-    def validate_entries(cls, values: dict[int | float | str, str | list[str]]) -> dict[Any, Any]:
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
 
         for k, v in values.items():
             if k == "default":
@@ -103,13 +104,13 @@ class ConstantImputerSchema(RootModel[dict[Any, Any]]):
 class PostprocessorSchema(BaseModel):
     default: str = Field(literals=["none", "relu", "hardtanh", "hardtanh_0_1"])
     "Postprocessor default method to apply."
-    relu: list[str] | None = Field(default_factory=list)
+    relu: Union[list[str], None] = Field(default_factory=list)
     "Variables to postprocess with relu."
-    hardtanh: list[str] | None = Field(default_factory=list)
+    hardtanh: Union[list[str], None] = Field(default_factory=list)
     "Variables to postprocess with hardtanh."
-    hardtanh_0_1: list[str] | None = Field(default_factory=list)
+    hardtanh_0_1: Union[list[str], None] = Field(default_factory=list)
     "Variables to postprocess with hardtanh in range [0, 1]."
-    none: list[str] | None = Field(default_factory=list)
+    none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be postprocessed."
 
 
@@ -131,7 +132,7 @@ class NormalizedReluPostprocessorSchema(RootModel[dict[Any, Any]]):
 
     @field_validator("root")
     @classmethod
-    def validate_entries(cls, values: dict[int | float | str, str | list[str]]) -> dict[Any, Any]:
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
 
         for k, v in values.items():
 
@@ -182,7 +183,7 @@ class ConditionalZeroPostprocessorSchema(RootModel[dict[Any, Any]]):
 
     @field_validator("root")
     @classmethod
-    def validate_entries(cls, values: dict[int | float | str, str | list[str]]) -> dict[Any, Any]:
+    def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
 
         for k, v in values.items():
             if k == "default":
@@ -218,16 +219,16 @@ class ConditionalNaNPostprocessorSchema(BaseModel):
     "Postprocessor default method to apply."
     remap: str
     "Name of conditional variable."
-    nan: list[str] | None = Field(default_factory=list)
+    nan: Union[list[str], None] = Field(default_factory=list)
     "Variables to postprocess with NaNs."
-    none: list[str] | None = Field(default_factory=list)
+    none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be postprocessed."
 
 
 class RemapperSchema(BaseModel):
     default: str = Field(literals=["none", "log1p", "sqrt", "boxcox"])
     "Remapper default method to apply."
-    none: list[str] | None = Field(default_factory=list)
+    none: Union[list[str], None] = Field(default_factory=list)
     "Variables not to be remapped."
 
 
@@ -257,7 +258,7 @@ target_to_schema = {
 class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
-    config: dict | NormalizerSchema | ImputerSchema | PostprocessorSchema | RemapperSchema
+    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema]
     "Target schema containing processor methods."
 
     @model_validator(mode="after")
