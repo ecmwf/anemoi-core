@@ -9,6 +9,7 @@
 
 
 import logging
+from abc import abstractmethod
 from typing import Optional
 
 import torch
@@ -240,6 +241,13 @@ class ConditionalPostprocessor(Postprocessor):
             if idx_dst is not None:
                 x[..., idx_dst][self._expand_subset_mask(x, fill_mask)] = value
         return x
+
+    @abstractmethod
+    def get_locations(self, x: torch.Tensor) -> torch.Tensor:
+        """Get a mask from data for conditional postprocessing.
+        This method must be implemented by subclasses.
+        """
+        pass
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Set values in the output tensor."""
