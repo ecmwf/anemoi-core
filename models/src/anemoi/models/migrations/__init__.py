@@ -18,8 +18,6 @@ from collections.abc import Callable
 from collections.abc import MutableMapping
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum
-from enum import auto
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
@@ -225,13 +223,22 @@ class Migration:
         }
 
 
-class OpType(Enum):
-    """
-    Operation type enum. migration or rollback.
-    """
+@dataclass
+class BaseOp:
+    """Base class for operations."""
 
-    migration = auto()
-    rollback = auto()
+    run: Callable[[CkptType], CkptType]
+    migration: Migration
+
+
+@dataclass
+class MigrationOp(BaseOp):
+    """Migration Operation"""
+
+
+@dataclass
+class RollbackOp(BaseOp):
+    """Rollback Operation"""
 
 
 def _migrations_from_path(location: str | PathLike, package: str) -> list[Migration]:
@@ -406,9 +413,9 @@ class Migrator:
             return True
         return False
 
-    def _resolve_ops(
+    def _resolve_operations(
         self, ckpt: CkptType, migrations: list[Migration], steps: int | None = None
-    ) -> tuple[list[Callable[[MigrationContext], None]], list[tuple[OpType, Migration]]]:
+    ) -> tuple[list[Callable[[MigrationContext], None]], list[BaseOp]]:
         """
         Resolves the list of operations to execute to migrate the checkpoint.
         If it contains migrations and rollbacks, first rollbacked are applied (starting
@@ -440,15 +447,14 @@ class Migrator:
 
         Returns
         -------
-        tuple[list[Callable[[MigrationContext], None]], list[tuple[OpType, Migration]]]
+        tuple[list[Callable[[MigrationContext], None]], list[BaseOp]]
             The resolved operation (in order)
             * the list of setup callbacks to execute
-            * the list of operations (migrate or rollback) to execute. Each item is a tuple
-                containing a the operation type from the OpType enum, and the migration.
+            * the list of operations (migrate or rollback) to execute.
         """
         ckpt_migrations = self.registered_migrations(ckpt)
         setups: list[Callable[[MigrationContext], None]] = []
-        ops: list[tuple[OpType, Migration]] = []
+        ops: list[BaseOp] = []
         n_ckpt_migrations = len(ckpt_migrations)
         for k, ckpt_migration in enumerate(reversed(ckpt_migrations), 1):
             if steps is not None and len(ops) == steps:
@@ -465,7 +471,7 @@ class Migrator:
                 )
             if ckpt_migration.rollback_setup is not None:
                 setups.append(ckpt_migration.rollback_setup)
-            ops.append((OpType.rollback, ckpt_migration))
+            ops.append(RollbackOp(ckpt_migration.rollback, ckpt_migration))
 
         num_rollbacks = len(ops)
         for k, migration in enumerate(migrations):
@@ -482,7 +488,7 @@ class Migrator:
                 )
             if migration.migrate_setup is not None:
                 setups.append(migration.migrate_setup)
-            ops.append((OpType.migration, migration))
+            ops.append(MigrationOp(migration.migrate, migration))
         return setups, ops
 
     def _resolve_context(self, context: MigrationContext) -> None:
@@ -510,30 +516,25 @@ class Migrator:
             mod_start = sys.modules[attribute_path_start]
             setattr(mod_start, mod_name_start, attr_end)
 
-    def sync(
-        self, path: str | PathLike | CkptType, steps: int | None = None
-    ) -> tuple[CkptType, CkptType, list[tuple[OpType, Migration]]]:
+    def sync(self, path: str | PathLike, steps: int | None = None) -> tuple[CkptType, CkptType, list[BaseOp]]:
         """Migrate or rollbacks the checkpoint using provided migrations
 
         Parameters
         ----------
-        path : str | PathLike | CkptType
+        path : str | PathLike
             The checkpoint to migrate.
         steps : int | None, default None
             Number of steps to execute. Cannot be negative.
 
         Returns
         -------
-        tuple[CkptType, list[tuple[OpType, Migration]]]
+        tuple[CkptType, list[BaseOp]]
             * The original checkpoint (might have obfuscated attributes with `MissingAttribute`
                 if it cannot be imported
             * The migrated checkpoint
             * The list of migrations or rollbacks
         """
-        if isinstance(path, str | PathLike):
-            old_ckpt = _load_ckpt(path)
-        else:
-            old_ckpt = path
+        old_ckpt = _load_ckpt(path)
         ckpt = deepcopy(old_ckpt)
 
         if not self.is_compatible_ckpt(ckpt):
@@ -541,25 +542,21 @@ class Migrator:
         compatible_migrations = self._grouped_migrations[-1]
         if steps is not None and steps < 0:
             raise ValueError("steps should be positive.")
-        setups, ops = self._resolve_ops(ckpt, compatible_migrations, steps)
-        # Setups are useful only of we load the checkpoint from path
-        # Otherwise, this means that the checkpoint could already be loaded.
-        if isinstance(path, str | PathLike) and len(setups):
+        setups, ops = self._resolve_operations(ckpt, compatible_migrations, steps)
+        if len(setups):
             context = MigrationContext()
             for setup in setups:
                 setup(context)
             self._resolve_context(context)
             # Force reloading checkpoint without obfuscating import issues.
             ckpt = _load_ckpt(path, lenient=False)
-        for op_type, callback in ops:
-            if op_type is OpType.rollback:
-                assert callback.rollback is not None
-                ckpt = callback.rollback(ckpt)
+        for op in ops:
+            if isinstance(op, RollbackOp):
+                ckpt = op.run(ckpt)
                 ckpt[_ckpt_migration_key].pop()
             else:
-                assert callback.migrate is not None
-                ckpt = callback.migrate(ckpt)
-                ckpt[_ckpt_migration_key].append(callback.serialize())
+                ckpt = op.run(ckpt)
+                ckpt[_ckpt_migration_key].append(op.migration.serialize())
         return old_ckpt, ckpt, ops
 
     def inspect(self, path: str | PathLike) -> tuple[list[Migration], list[Migration], list[Migration]]:
@@ -582,15 +579,15 @@ class Migrator:
             raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
         compatible_migrations = self._grouped_migrations[-1]
         registered_migrations = self.registered_migrations(ckpt)
-        _, ops = self._resolve_ops(ckpt, compatible_migrations)
+        _, ops = self._resolve_operations(ckpt, compatible_migrations)
         missing_migrations: list[Migration] = []
         extra_migrations: list[Migration] = []
-        for op_type, op in ops:
-            if op_type is OpType.rollback:
-                extra_migrations.append(op)
+        for op in ops:
+            if isinstance(op, RollbackOp):
+                extra_migrations.append(op.migration)
                 registered_migrations.pop()
-            else:
-                missing_migrations.append(op)
+            elif isinstance(op, MigrationOp):
+                missing_migrations.append(op.migration)
         return registered_migrations, missing_migrations, extra_migrations
 
     def registered_migrations(self, ckpt: CkptType) -> list[Migration]:
@@ -632,6 +629,35 @@ class Migrator:
         return ckpt
 
 
+class SaveCkpt:
+    """
+    Useful for testing. Used in the save_ckpt fixture.
+    """
+
+    def __init__(self, ckpt_dir: Path):
+        self.ckpt_dir = ckpt_dir
+
+    def __call__(self, ckpt: CkptType, migrations: list[dict[str, Any]], name: str = "model.ckpt") -> Path:
+        import torch
+
+        ckpt_migrations: list[SerializedMigration] = []
+        for migration in migrations:
+            ckpt_migrations.append(
+                {
+                    "name": migration.get("name", "dummy_name"),
+                    "rollback": migration.get("rollback", None),
+                    "rollback_setup": migration.get("rollback_setup", None),
+                    "metadata": migration.get(
+                        "metadata", {"versions": {"migration": "1.0.0", "anemoi-models": "x.x.x"}}
+                    ),
+                }
+            )
+        ckpt["migrations"] = ckpt_migrations
+        path = self.ckpt_dir / name
+        torch.save(ckpt, path)
+        return path
+
+
 __all__ = [
     "CkptType",
     "IncompatibleCheckpointException",
@@ -642,6 +668,8 @@ __all__ = [
     "MigrationVersions",
     "MIGRATION_PATH",
     "MissingMigrationException",
-    "OpType",
+    "MigrationOp",
+    "RollbackOp",
+    "SaveCkpt",
     "SerializedMigration",
 ]

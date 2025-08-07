@@ -18,11 +18,11 @@ from shutil import copy2
 from rich.console import Console
 
 from .. import __version__ as version_anemoi_models
-from ..migrations import LOGGER as migrator_logger
+from ..migrations import LOGGER as migrator_logger, MigrationOp, RollbackOp
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
 from ..migrations import Migrator
-from ..migrations import OpType
+from ..migrations import MigrationCallbackType
 from . import Command
 
 LOGGER = logging.getLogger(__name__)
@@ -301,14 +301,14 @@ class Migration(Command):
                 print("Would execute ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
             if not len(done_ops):
                 console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
-            for op_type, migration in done_ops:
-                if op_type is OpType.rollback:
+            for op in done_ops:
+                if isinstance(op, RollbackOp):
                     console.print(
-                        f"  [red]+ ROLLBACK [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/red]"
+                        f"  [red]+ ROLLBACK [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/red]"
                     )
-                else:
+                elif isinstance(op, MigrationOp):
                     console.print(
-                        f"  [green]+ MIGRATE [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
+                        f"  [green]+ MIGRATE [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/green]"
                     )
         except IncompatibleCheckpointException as e:
             LOGGER.error(str(e))

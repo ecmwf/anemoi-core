@@ -8,20 +8,20 @@
 # nor does it submit to any jurisdiction.
 
 
+from pathlib import Path
 import pytest
+import torch
 
-from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import IncompatibleCheckpointException
+from anemoi.models.migrations import CkptType, IncompatibleCheckpointException, MigrationOp, RollbackOp, SaveCkpt
 from anemoi.models.migrations import Migrator
-from anemoi.models.migrations import OpType
 
 
-def test_run_all_migrations(old_migrator: Migrator, old_ckpt: CkptType):
-    _, migrated_model, done_ops = old_migrator.sync(old_ckpt)
+def test_run_all_migrations(old_migrator: Migrator, empty_ckpt: Path):
+    _, migrated_model, done_ops = old_migrator.sync(empty_ckpt)
 
     assert len(done_ops) == 4
-    for op_type, _ in done_ops:
-        assert op_type is OpType.migration
+    for op in done_ops:
+        assert isinstance(op, MigrationOp)
     assert len(migrated_model["migrations"]) == 4
     assert "foo" in migrated_model and migrated_model["foo"] == "foo"
     assert "bar" in migrated_model and migrated_model["bar"] == "bar"
@@ -29,61 +29,48 @@ def test_run_all_migrations(old_migrator: Migrator, old_ckpt: CkptType):
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_break_ckpt_too_old(migrator: Migrator):
+def test_break_ckpt_too_old(migrator: Migrator, tmp_path: Path):
+    path = tmp_path / "model.ckpt"
+    torch.save({}, path)
     with pytest.raises(IncompatibleCheckpointException):
-        migrator.sync({})
+        migrator.sync(path)
 
 
-def test_run_last_migration(old_migrator: Migrator):
-    dummy_model = {
-        "foo": "foo",
-        "migrations": [
-            {
-                "name": "1750840837_add_foo",
-                "rollback": lambda x: x,
-                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.8.0"}},
-            }
-        ],
-    }
+def test_run_last_migration(old_migrator: Migrator, save_ckpt: SaveCkpt):
+    dummy_model = save_ckpt({"foo": "foo"}, migrations=[{"name": "1750840837_add_foo"}])
 
     _, migrated_model, done_ops = old_migrator.sync(dummy_model)
 
     assert len(done_ops) == 3
-    for op_type, _ in done_ops:
-        assert op_type is OpType.migration
+    for op in done_ops:
+        assert isinstance(op, MigrationOp)
     assert len(migrated_model["migrations"]) == 4
     assert "bar" in migrated_model and migrated_model["bar"] == "bar"
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_extra_migration(old_migrator: Migrator):
-    dummy_model = {
-        "foo": "foo",
-        "migrations": [
-            {
-                "name": "1750840837_add_foo",
-                "rollback": lambda x: x,
-                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.8.1"}},
-            },
-            {
-                "name": "dummy",
-                "rollback": lambda x: x,
-                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"}},
-            },
-        ],
-    }
+def rollback_fn_extra_migration(ckpt: CkptType) -> CkptType:
+    """Used in test_extra_migration"""
+    return ckpt
+
+
+def test_extra_migration(old_migrator: Migrator, save_ckpt: SaveCkpt):
+    dummy_model = save_ckpt(
+        {"foo": "foo"},
+        migrations=[{"name": "1750840837_add_foo"}, {"name": "dummy", "rollback": rollback_fn_extra_migration}],
+    )
 
     _, migrated_model, done_ops = old_migrator.sync(dummy_model)
     assert len(done_ops) == 4
-    assert done_ops[0][0] is OpType.rollback
+    assert isinstance(done_ops[0], RollbackOp)
     assert len(migrated_model["migrations"]) == 4
     assert "foo" in migrated_model and migrated_model["foo"] == "foo"
     assert "bar" in migrated_model and migrated_model["bar"] == "bar"
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_migrate_step(old_migrator: Migrator, old_ckpt: CkptType):
-    _, migrated_model, done_ops = old_migrator.sync(old_ckpt, steps=1)
+def test_migrate_step(old_migrator: Migrator, empty_ckpt: Path):
+    _, migrated_model, done_ops = old_migrator.sync(empty_ckpt, steps=1)
 
     assert len(done_ops) == 1
     assert len(migrated_model["migrations"]) == 1
@@ -94,25 +81,16 @@ def test_migrate_step(old_migrator: Migrator, old_ckpt: CkptType):
     assert "test" not in migrated_model
 
 
-def test_migrate_no_step(old_migrator: Migrator, old_ckpt: CkptType):
-    _, migrated_model, done_ops = old_migrator.sync(old_ckpt, steps=0)
+def test_migrate_no_step(old_migrator: Migrator, empty_ckpt: Path):
+    _, migrated_model, done_ops = old_migrator.sync(empty_ckpt, steps=0)
 
     assert len(done_ops) == 0
     assert len(migrated_model["migrations"]) == 0
     assert len(migrated_model) == 1
 
 
-def test_run_migration_step(old_migrator: Migrator):
-    dummy_model = {
-        "foo": "foo",
-        "migrations": [
-            {
-                "name": "1750840837_add_foo",
-                "rollback": lambda x: x,
-                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.8.1"}},
-            }
-        ],
-    }
+def test_run_migration_step(old_migrator: Migrator, save_ckpt: SaveCkpt):
+    dummy_model = save_ckpt({"foo": "foo"}, migrations=[{"name": "1750840837_add_foo"}])
 
     _, migrated_model, done_ops = old_migrator.sync(dummy_model, steps=1)
 
@@ -123,17 +101,17 @@ def test_run_migration_step(old_migrator: Migrator):
     assert "test" not in migrated_model
 
 
-def test_sync_rollback(old_migrator: Migrator, old_ckpt: CkptType):
-    _, dummy_model, _ = old_migrator.sync(old_ckpt)
+def test_sync_rollback(old_migrator: Migrator, empty_ckpt: Path, save_ckpt: SaveCkpt):
+    _, dummy_model, _ = old_migrator.sync(empty_ckpt)
     # only keep the first two migrations of the first group
     old_grouped_migrations = old_migrator._grouped_migrations[0][:]
     old_migrator._grouped_migrations[0] = old_migrator._grouped_migrations[0][:2]
 
-    _, rollbacked_model, done_ops = old_migrator.sync(dummy_model)
+    _, rollbacked_model, done_ops = old_migrator.sync(save_ckpt(dummy_model, migrations=dummy_model["migrations"]))
 
     assert len(done_ops) == 2
-    for op_type, _ in done_ops:
-        assert op_type is OpType.rollback
+    for op in done_ops:
+        assert isinstance(op, RollbackOp)
     assert len(rollbacked_model["migrations"]) == 2
     assert "foo" in rollbacked_model and dummy_model["foo"] == "foo"
     assert "bar" in rollbacked_model
@@ -144,12 +122,12 @@ def test_sync_rollback(old_migrator: Migrator, old_ckpt: CkptType):
     old_migrator._grouped_migrations[0] = old_grouped_migrations
 
 
-def test_error_migration_past_final(migrator: Migrator, old_ckpt: CkptType):
+def test_error_migration_past_final(migrator: Migrator, empty_ckpt: Path):
     with pytest.raises(IncompatibleCheckpointException):
-        migrator.sync(old_ckpt, steps=5)
+        migrator.sync(empty_ckpt, steps=5)
 
 
-def test_migrate_recent_model(migrator: Migrator, recent_ckpt: CkptType):
+def test_migrate_recent_model(migrator: Migrator, recent_ckpt: Path):
     _, migrated_model, done_ops = migrator.sync(recent_ckpt)
 
     assert len(done_ops) == 1
@@ -157,12 +135,12 @@ def test_migrate_recent_model(migrator: Migrator, recent_ckpt: CkptType):
     assert migrated_model.get("after", None) == "after"
 
 
-def test_stop_rollback_to_prev_final(migrator: Migrator, recent_ckpt: CkptType):
+def test_stop_rollback_to_prev_final(migrator: Migrator, recent_ckpt: Path, save_ckpt: SaveCkpt):
     _, model, _ = migrator.sync(recent_ckpt)
     # only keep the first "final" migration
     migrator._grouped_migrations[-1] = migrator._grouped_migrations[-1][:1]
     assert model.get("after", None) == "after"
-    _, rollbacked_model, done_ops = migrator.sync(model)
+    _, rollbacked_model, done_ops = migrator.sync(save_ckpt(model, migrations=model["migrations"]))
 
     assert len(done_ops) == 1
     assert len(rollbacked_model["migrations"]) == 1

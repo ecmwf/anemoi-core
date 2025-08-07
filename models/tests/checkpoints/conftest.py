@@ -12,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import IncompatibleCheckpointException
+from anemoi.models.migrations import SaveCkpt
 from anemoi.models.migrations import Migrator
 
 
@@ -41,26 +40,30 @@ def old_migrator() -> Migrator:
     return migrator
 
 
-def final_rollback(_):
-    raise IncompatibleCheckpointException
+@pytest.fixture(scope="session")
+def ckpt_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("ckpts")
 
 
 @pytest.fixture
-def old_ckpt() -> CkptType:
-    return {"migrations": []}
+def save_ckpt(tmp_path: Path) -> SaveCkpt:
+    return SaveCkpt(tmp_path)
 
 
-@pytest.fixture
-def recent_ckpt() -> CkptType:
-    return {
-        "foo": "foo",
-        "bar": "bar",
-        "test": "baz",
-        "migrations": [
+@pytest.fixture(scope="session")
+def empty_ckpt(ckpt_dir: Path) -> Path:
+    return SaveCkpt(ckpt_dir)({}, migrations=[], name="empty.ckpt")
+
+
+@pytest.fixture(scope="session")
+def recent_ckpt(ckpt_dir: Path) -> Path:
+    return SaveCkpt(ckpt_dir)(
+        {"foo": "foo", "bar": "bar", "test": "baz"},
+        migrations=[
             {
                 "name": "1751895180_final",
-                "rollback": final_rollback,
-                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"}},
+                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"}, "final": True},
             }
         ],
-    }
+        name="recent.ckpt",
+    )

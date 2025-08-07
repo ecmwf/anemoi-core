@@ -7,8 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import IncompatibleCheckpointException
 from anemoi.models.migrations import MigrationMetadata
 
 metadata = MigrationMetadata(
@@ -18,13 +16,3 @@ metadata = MigrationMetadata(
     },
     final=True,
 )
-
-
-def migrate(ckpt: CkptType) -> CkptType:
-    """Migrate the checkpoint."""
-    raise IncompatibleCheckpointException
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    """Rollback the migration."""
-    raise IncompatibleCheckpointException
