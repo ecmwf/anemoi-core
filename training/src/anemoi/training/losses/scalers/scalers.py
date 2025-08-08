@@ -12,21 +12,22 @@ import logging
 
 from hydra.utils import instantiate
 
-from anemoi.training.losses.scalers.base_scaler import SCALER_DTYPE
-from anemoi.training.losses.scalers.base_scaler import BaseDelayedScaler
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-def create_scalers(scalers_config: DotDict, **kwargs) -> tuple[dict[str, SCALER_DTYPE], dict[str, SCALER_DTYPE]]:
-    scalers, delayed_scaler_builders = {}, {}
+def create_scalers(scalers_config: DotDict, **kwargs) -> tuple[dict[str, TENSOR_SPEC], dict[str, BaseUpdatingScaler]]:
+    scalers, updating_scalars = {}, {}
     for name, config in scalers_config.items():
-        scaler_builder = instantiate(config, **kwargs)
+        scaler_builder: BaseScaler = instantiate(config, **kwargs)
 
-        if isinstance(scaler_builder, BaseDelayedScaler):
-            delayed_scaler_builders[name] = scaler_builder
+        if isinstance(scaler_builder, BaseUpdatingScaler):
+            updating_scalars[name] = scaler_builder
 
         scalers[name] = scaler_builder.get_scaling()
 
-    return scalers, delayed_scaler_builders
+    return scalers, updating_scalars

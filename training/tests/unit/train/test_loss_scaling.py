@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Any
+
 import pytest
 import torch
 from _pytest.fixtures import SubRequest
@@ -18,6 +20,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -296,6 +299,49 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     }
 
     assert metric_range == expected_metric_range
+
+
+@pytest.fixture
+def mock_updating_scalar() -> type[BaseUpdatingScaler]:
+    class UpdatingScalar(BaseUpdatingScaler):
+        """Mock updating scalar for testing."""
+
+        scale_dims = (TensorDim.VARIABLE,)
+
+        def get_scaling_values(self) -> torch.Tensor:
+            """Return initial scaling values."""
+            return torch.Tensor([1.0])
+
+        def on_training_start(self, model: Any) -> torch.Tensor:  # noqa: ARG002
+            return torch.Tensor([2.0])
+
+        def on_batch_start(self, model: Any) -> torch.Tensor:  # noqa: ARG002
+            return torch.Tensor([3.0])
+
+    return UpdatingScalar
+
+
+def test_updating_scalars(mock_updating_scalar: type[BaseUpdatingScaler]) -> None:
+    """Test that the updating scalar returns the correct values."""
+    scalar = mock_updating_scalar()
+
+    assert scalar.get_scaling_values() is not None
+    assert isinstance(scalar.get_scaling_values(), torch.Tensor)
+
+    assert scalar.get_scaling() is not None
+    assert scalar.get_scaling()[1] == torch.Tensor([1.0]), "Scalar values should be from the initial scaling values."
+
+    assert scalar.on_training_start(None) == torch.Tensor([2.0])
+    updated_scaling = scalar.update_scaling_values(callback="on_training_start", model=None)
+    assert updated_scaling is not None and updated_scaling[1] == torch.Tensor(
+        [2.0],
+    ), "Scalar values should be updated after on_training_start."
+
+    assert scalar.on_batch_start(None) == torch.Tensor([3.0])
+    updated_scaling = scalar.update_scaling_values(callback="on_batch_start", model=None)
+    assert updated_scaling is not None and updated_scaling[1] == torch.Tensor(
+        [3.0],
+    ), "Scalar values should be updated after on_batch_start."
 
 
 def test_variable_masking(
