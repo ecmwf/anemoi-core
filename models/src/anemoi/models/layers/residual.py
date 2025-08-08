@@ -177,18 +177,6 @@ def precompute_legpoly(
     return legpoly(mmax, lmax, np.cos(t), norm=norm, inverse=inverse, csphase=csphase)
 
 
-class IdentityResidual(Module):
-
-    def __init__(self, internal_input_idx: list[int] = [], **_) -> None:
-
-        super().__init__()
-        self._internal_input_idx = internal_input_idx
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-
-        return x[..., self._internal_input_idx]
-
-
 class InverseRealSHT(Module):
 
     def __init__(self, nlat: int, nlon: int, lmax: int, grid: str) -> None:
@@ -217,8 +205,8 @@ class InverseRealSHT(Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         x = torch.view_as_real(x)
-        x = torch.einsum("...lmr, mlk -> ...kmr", x, self.pct.to(x.dtype)).contiguous()
-        x = torch.view_as_complex(x)
+        x = torch.einsum("...lmr, mlk -> ...kmr", x, self.pct.to(x.dtype)).to(x.dtype)
+        x = torch.view_as_complex(x.contiguous())
 
         x[..., 0].imag = 0.0
         if (self.nlon % 2 == 0) and (self.nlon // 2 < self.mmax):
@@ -229,42 +217,101 @@ class InverseRealSHT(Module):
         return x
 
 
+class IdentityResidual(Module):
+
+    def __init__(self, input_idx: list[int] = [], **_) -> None:
+
+        super().__init__()
+        self._internal_input_idx = input_idx
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        return x[..., self._internal_input_idx]
+
+
+class NoResidual(Module):
+
+    def __init__(self, input_idx: list[int] = [], **_) -> None:
+
+        super().__init__()
+        self._internal_input_idx = input_idx
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        return torch.zeros_like(x[..., self._internal_input_idx])
+
+
 class OrnsteinResidual(Module):
 
     def __init__(
         self,
         nlat: int,
         nlon: int,
-        grid: str,
-        lmax: int,
+        lmax: int = 2,
+        grid: str = "legendre-gauss",
         node_order: str = "lat-lon",
-        internal_input_idx: list[int] = [],
-        forcings_input_idx: dict[str, int] = {},
+        theta_init: float = 0.05,
+        theta_buff: float = 0.00,
+        zmean_term: bool = False,
         regressors: list[str] = [],
+        input_idx: list[int] = [],
+        variables: dict[str, int] = {},
+        statistics: dict[str, np.ndarray] = {},
     ) -> None:
         
         super().__init__()
+
+        theta_init = self.build_first_theta(theta_init, theta_buff, statistics)
+        theta_init = np.sqrt(4 * np.pi) * np.log(theta_init / (1 - theta_init))
+        theta_init = np.array(theta_init)
         
-        weight = torch.zeros(len(regressors) + 2, len(internal_input_idx), lmax, lmax, 2)
-        weight[0, :, 0, 0, 0] = -10
+        weight = torch.zeros(len(regressors) + 2, len(input_idx), lmax, lmax, 2)
+        weight[0, :, 0, 0, 0] = torch.from_numpy(theta_init)
 
         self.weight = Parameter(weight)
         self.isht = InverseRealSHT(nlat, nlon, lmax, grid)
 
         self.node_order = node_order.replace("-", " ")
-        self._forcings_input_idx = [forcings_input_idx[f] for f in regressors]
-        self._internal_input_idx = internal_input_idx
+        self._regressors_input_idx = [variables[f] for f in regressors]
+        self._internal_input_idx = input_idx
+
+        muzero = torch.ones_like(weight)
+        coords = slice(0, 1) if zmean_term else slice(None)
+        muzero[1, :, coords, coords, :] = 0
+
+        self.register_buffer("muzero", muzero)
+        self.theta_buff = theta_buff
+
+    def build_first_theta(
+        self,
+        theta_init: float,
+        theta_buff: float,
+        statistics: dict[str, np.ndarray],
+    ) -> torch.Tensor:
+        
+        theta_init = (
+            theta_init
+            if (theta_init > 0) or any(s not in statistics for s in {"stdev", "stdev_tend"})
+            else 0.5 * (statistics["stdev_tend"] / statistics["stdev"]) ** 2
+        )
+        
+        theta_init = (theta_init - theta_buff) / (1 - theta_buff)
+        theta_init = np.where(theta_init < 1, theta_init, 0.95)
+        theta_init = np.where(theta_init > 0, theta_init, 0.05)
+
+        return theta_init
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
-        weight = self.isht(torch.view_as_complex(self.weight))
-        weight = einops.rearrange(weight, f"param var lat lon -> param ({self.node_order}) var")
+        weight = self.isht(torch.view_as_complex(self.weight * self.muzero))
+        weight = einops.rearrange(weight, f"coef var lat lon -> coef ({self.node_order}) var")
 
         return (
-            + (1 - torch.sigmoid(weight[0, ...])) * x[..., self._internal_input_idx]
+            + (1 - torch.sigmoid(weight[0, ...]) * (1 - self.theta_buff) - self.theta_buff)
+            * x[..., self._internal_input_idx]
             + weight[1, ...]
             + sum(
                 weight[i + 2, ...] * x[..., k].unsqueeze(-1)
-                for i, k in enumerate(self._forcings_input_idx)
+                for i, k in enumerate(self._regressors_input_idx)
             )
         )

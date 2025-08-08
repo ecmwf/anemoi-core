@@ -98,7 +98,13 @@ class NativeGridDataset(IterableDataset):
     @cached_property
     def statistics(self) -> dict:
         """Return dataset statistics."""
-        return self.data.statistics
+        stats = self.data.statistics
+
+        try: tends = self.data.statistics_tendencies()
+        except: tends = {}
+        
+        tends = {k + "_tend": v for k, v in tends.items()}
+        return stats | tends
 
     @cached_property
     def statistics_tendencies(self) -> dict:

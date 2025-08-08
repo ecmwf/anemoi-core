@@ -130,10 +130,11 @@ class AnemoiModelEncProcDec(nn.Module):
         # Residual connection x(t+1) = model(x(t)) + residual(x(t))
         self.residual = instantiate(
             model_config.model.residual,
+            statistics={s: v[data_indices.data.input.prognostic] for s, v in statistics.items()},
             nlat=len(torch.unique(self._graph_data[self._graph_name_data].x[:, 0])),
             nlon=len(torch.unique(self._graph_data[self._graph_name_data].x[:, 1])),
-            internal_input_idx=data_indices.internal_model.input.prognostic,
-            forcings_input_idx=data_indices.model.input.name_to_index,
+            input_idx=data_indices.internal_model.input.prognostic,
+            variables=data_indices.internal_model.input.name_to_index,
         )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
