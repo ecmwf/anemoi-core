@@ -64,15 +64,3 @@ version, as long as your checkpoint is not too old.
 *********
 If you update to an older version, the checkpoint will be rollbacked to be compatible with this
 older version.
-
-*******************
- Manually migrating
-*******************
-You can decide to manually execute a certain number of steps with
-
-.. code:: bash
-
-   anemoi-models migration sync PATH_TO_CKPT --steps STEPS
-
-``STEPS`` must be positive and indicates the number of steps in the resolved operation order
-to execute.

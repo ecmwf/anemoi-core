@@ -84,12 +84,6 @@ class Migration(Command):
         sync_parser = subparsers.add_parser("sync", help=help_sync, description=help_sync)
         sync_parser.add_argument("ckpt", help="Path to the checkpoint to migrate.")
         sync_parser.add_argument(
-            "--steps",
-            default=None,
-            type=int,
-            help="Number of steps to execute. Defaults to execute all migrations. Cannot be negative.",
-        )
-        sync_parser.add_argument(
             "--dry-run",
             default=False,
             action="store_true",
@@ -285,7 +279,7 @@ class Migration(Command):
         migrator = Migrator()
         ckpt_path = Path(args.ckpt)
         try:
-            old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path, steps=args.steps)
+            old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path)
             if len(done_ops) and not args.dry_run:
                 registered_migrations = migrator.registered_migrations(old_ckpt)
                 version = ""

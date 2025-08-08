@@ -440,7 +440,7 @@ class Migrator:
         return False
 
     def _resolve_operations(
-        self, ckpt: CkptType, migrations: list[Migration], steps: int | None = None
+        self, ckpt: CkptType, migrations: list[Migration]
     ) -> tuple[list[Callable[[MigrationContext], None]], list[BaseOp]]:
         """Resolves the list of operations to execute to migrate the checkpoint.
         If it contains migrations and rollbacks, first rollbacked are applied (starting
@@ -467,8 +467,6 @@ class Migrator:
             The checkpoint
         migrations : list[Migration]
             The reference migration list
-        steps : int | None, default None
-            Number of steps to execute. By default, executes everything.
 
         Returns
         -------
@@ -482,8 +480,6 @@ class Migrator:
         ops: list[BaseOp] = []
         n_ckpt_migrations = len(ckpt_migrations)
         for k, ckpt_migration in enumerate(reversed(ckpt_migrations), 1):
-            if steps is not None and len(ops) == steps:
-                break
             if (
                 len(migrations) > n_ckpt_migrations - k
                 and migrations[n_ckpt_migrations - k].name == ckpt_migration.name
@@ -500,8 +496,6 @@ class Migrator:
 
         num_rollbacks = len(ops)
         for k, migration in enumerate(migrations):
-            if steps is not None and len(ops) == steps:
-                break
             if (
                 len(ckpt_migrations[: len(ckpt_migrations) - num_rollbacks]) > k
                 and migration.name == ckpt_migrations[k].name
@@ -540,15 +534,13 @@ class Migrator:
             mod_start = sys.modules[attribute_path_start]
             setattr(mod_start, mod_name_start, attr_end)
 
-    def sync(self, path: str | PathLike, steps: int | None = None) -> tuple[CkptType, CkptType, list[BaseOp]]:
+    def sync(self, path: str | PathLike) -> tuple[CkptType, CkptType, list[BaseOp]]:
         """Migrate or rollbacks the checkpoint using provided migrations
 
         Parameters
         ----------
         path : str | PathLike
             The checkpoint to migrate.
-        steps : int | None, default None
-            Number of steps to execute. Cannot be negative.
 
         Returns
         -------
@@ -566,9 +558,7 @@ class Migrator:
         if not self.is_compatible_ckpt(ckpt):
             raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
         compatible_migrations = self._grouped_migrations[-1]
-        if steps is not None and steps < 0:
-            raise ValueError("steps should be positive.")
-        setups, ops = self._resolve_operations(ckpt, compatible_migrations, steps)
+        setups, ops = self._resolve_operations(ckpt, compatible_migrations)
         replace_attrs: list[str] = []
         if len(setups):
             context = MigrationContext()

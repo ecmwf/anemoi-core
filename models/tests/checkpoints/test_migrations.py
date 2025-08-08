@@ -9,11 +9,16 @@
 
 
 from pathlib import Path
+
 import pytest
 import torch
 
-from anemoi.models.migrations import CkptType, IncompatibleCheckpointException, MigrationOp, RollbackOp, SaveCkpt
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import IncompatibleCheckpointException
+from anemoi.models.migrations import MigrationOp
 from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import RollbackOp
+from anemoi.models.migrations import SaveCkpt
 
 
 def test_run_all_migrations(old_migrator: Migrator, empty_ckpt: Path):
@@ -69,38 +74,6 @@ def test_extra_migration(old_migrator: Migrator, save_ckpt: SaveCkpt):
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_migrate_step(old_migrator: Migrator, empty_ckpt: Path):
-    _, migrated_model, done_ops = old_migrator.sync(empty_ckpt, steps=1)
-
-    assert len(done_ops) == 1
-    assert len(migrated_model["migrations"]) == 1
-    assert migrated_model["migrations"][0]["name"] == "1750840837_add_foo"
-    assert "foo" in migrated_model and migrated_model["foo"] == "foo"
-    assert "bar" not in migrated_model
-    assert "baz" not in migrated_model
-    assert "test" not in migrated_model
-
-
-def test_migrate_no_step(old_migrator: Migrator, empty_ckpt: Path):
-    _, migrated_model, done_ops = old_migrator.sync(empty_ckpt, steps=0)
-
-    assert len(done_ops) == 0
-    assert len(migrated_model["migrations"]) == 0
-    assert len(migrated_model) == 1
-
-
-def test_run_migration_step(old_migrator: Migrator, save_ckpt: SaveCkpt):
-    dummy_model = save_ckpt({"foo": "foo"}, migrations=[{"name": "1750840837_add_foo"}])
-
-    _, migrated_model, done_ops = old_migrator.sync(dummy_model, steps=1)
-
-    assert len(done_ops) == 1
-    assert len(migrated_model["migrations"]) == 2
-    assert "bar" in migrated_model and migrated_model["bar"] == "bar"
-    assert "baz" not in migrated_model
-    assert "test" not in migrated_model
-
-
 def test_sync_rollback(old_migrator: Migrator, empty_ckpt: Path, save_ckpt: SaveCkpt):
     _, dummy_model, _ = old_migrator.sync(empty_ckpt)
     # only keep the first two migrations of the first group
@@ -120,11 +93,6 @@ def test_sync_rollback(old_migrator: Migrator, empty_ckpt: Path, save_ckpt: Save
 
     # cleanup to not break future tests
     old_migrator._grouped_migrations[0] = old_grouped_migrations
-
-
-def test_error_migration_past_final(migrator: Migrator, empty_ckpt: Path):
-    with pytest.raises(IncompatibleCheckpointException):
-        migrator.sync(empty_ckpt, steps=5)
 
 
 def test_migrate_recent_model(migrator: Migrator, recent_ckpt: Path):
