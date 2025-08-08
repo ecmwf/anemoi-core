@@ -57,10 +57,11 @@ your change.
    particular, you should follow the recommandations described `here
    <https://github.com/cloudpipe/cloudpickle/tree/master?tab=readme-ov-file#overriding-pickles-serialization-mechanism-for-importable-constructs>`_.
 
-Rollback are not strictly required for the migration script to function.
-Note however that if the migration script does not have a rollback,
-checkpoints will not be able to be rollbacked before your migration
-script.
+.. note::
+
+   Rollback functions are not strictly required. However checkpoints
+   will not be able to be rollbacked before your migration script if it
+   does not have a rollback.
 
 To generate a migration script without a rollback use the
 ``--no-rollback`` parameter:
@@ -104,18 +105,16 @@ migration:
  Setup callbacks
 *****************
 
-Python objects are store by reference in a pickle object. This means
-that if your changes moves to another module an object stored in
-checkpoints, it will break the checkpoint to the point that it cannot be
-loaded.
+Python objects are stored by reference in a pickle object. This means
+that if you move (or remove) a class, old checkpoints cannot be loaded.
 
 .. note::
 
    Migration scripts use a special Unpickler that obfuscate these import
-   errors to access the store migration information.
+   errors to access the migration information in the checkpoint.
 
-The setup callbacks is are functions in your migration script that are
-run before loading the checkpoint to fix import errors:
+The setup callbacks are functions that fix import errors. They are run
+before loading the checkpoint:
 
 .. code:: python
 
@@ -148,20 +147,19 @@ To generate your script with the setup callbacks, use the
 
    anemoi-models migration create migration-name --with-setup
 
-The context object provides two functions that can be used to simplify
-fixing attributes that are moved:
+The context object provides three methods to fix import errors:
 
 -  ``context.move_attribute(start_path, end_path)`` to indicate that an
    attribute was moved from ``start_path`` to ``end_path``.
 
--  ``context.move_module(start_path, end_path)`` to indicate that this
-   script moved a module from ``start_path`` to ``end_path``.
+-  ``context.move_module(start_path, end_path)`` to indicate that a
+   module was moved from ``start_path`` to ``end_path``.
 
 -  ``context.delete_attribute(path)`` to indicate that an attribute was
    removed. You can use the wildcard "*" to delete any attribute in the
    module.
 
-For example, if you rename the module
+For example, if you renamed the module
 ``anemoi.models.schemas.data_processor`` to
 ``anemoi.models.schemas.data``, your migration might look like:
 
@@ -237,9 +235,9 @@ like:
  Final migrations
 ******************
 
-If the modifications are too complex, and we decide that we don't
-support migrating old checkpoints past this change, you can create a
-"final" migration with:
+If the modifications are too complex, and it is decided that migrating
+old checkpoint should not be supported, you can create a "final"
+migration with:
 
 .. code:: bash
 
@@ -249,8 +247,8 @@ support migrating old checkpoints past this change, you can create a
  Full example
 **************
 
-Here is a full example of what a migration could have looked like for
-`PR 433 <https://github.com/ecmwf/anemoi-core/pull/433>`_
+Here is a full example of a migration to fix `PR 433
+<https://github.com/ecmwf/anemoi-core/pull/433>`_
 
 .. code:: python
 
