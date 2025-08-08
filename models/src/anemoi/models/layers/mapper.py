@@ -33,6 +33,7 @@ from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvMapperBlock
+from anemoi.models.layers.block import GraphInterpolationMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
@@ -1312,6 +1313,249 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
+            x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
+        )
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        if not x_dst_is_sharded:
+            x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
+        x_dst = self.emb_nodes_dst(x_dst)
+        shapes_dst = change_channels_in_shape(shapes_dst, self.hidden_dim)
+        return x_src, x_dst, shapes_src, shapes_dst
+
+
+class GraphInterpolationBaseMapper(GraphEdgeMixin, BaseMapper):
+    """Non-learnable interpolation Base Mapper from hidden -> data or data -> hidden."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        hidden_dim: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
+        out_channels_dst: Optional[int] = None,
+        weight_attribute_name: Optional[str] = None,
+        apply_gaussian_distance: bool = True,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+    ) -> None:
+        """Initialize GraphInterpolationBaseMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        hidden_dim : int
+            Hidden dimension
+        out_channels_dst : int, optional
+            Output channels of the destination node, by default None
+        sub_graph : HeteroData
+            Sub graph of the full structure
+        sub_graph_edge_attributes : list[str]
+            Edge attributes to use
+        src_grid_size : int
+            Source grid size
+        dst_grid_size : int
+            Destination grid size
+        weight_attribute_name : str, optional
+            Name of the edge attribute to use as weight, by default None
+        apply_gaussian_distance : bool, optional
+            Whether to apply Gaussian distance weighting, by default True
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        """
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=0,
+            hidden_dim=hidden_dim,
+            out_channels_dst=out_channels_dst,
+            layer_kernels=layer_kernels,
+            cpu_offload=cpu_offload,
+        )
+
+        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, 0)
+
+        self.trainable = TrainableTensor(trainable_size=0, tensor_size=self.edge_attr.shape[0])
+
+        weights = self._get_weight_attribute(sub_graph, weight_attribute_name)
+        if apply_gaussian_distance:
+            weights = self._gaussian_distance_weighting(weights)
+        A = self._get_sparse_matrix(sub_graph.edge_index, weights, src_grid_size, dst_grid_size)
+        self.proc = GraphInterpolationMapperBlock(sparse_matrix=A)
+
+        self.offload_layers(cpu_offload)
+
+        self.emb_nodes_dst = nn.Identity()
+
+    def _get_weight_attribute(self, sub_graph: HeteroData, weight_attribute: Optional[str] = None) -> torch.Tensor:
+        """Get the weight attribute from the subgraph."""
+        if weight_attribute is not None:
+            if weight_attribute not in sub_graph.edge_types:
+                raise ValueError(f"Weight attribute '{weight_attribute}' not found in subgraph edge types.")
+            return sub_graph[weight_attribute]
+
+        return torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+
+    def _gaussian_distance_weighting(self, weights: torch.Tensor, sigma: float = 1.0) -> torch.Tensor:
+        """Apply Gaussian distance weighting to the weights."""
+        return torch.exp(-0.5 * (weights / sigma) ** 2)
+
+    def _get_sparse_matrix(
+        self,
+        edge_index: torch.Tensor,
+        weights: torch.Tensor,
+        src_grid_size: int,
+        dst_grid_size: int,
+    ):
+        """Create a sparse matrix from edge_index and weights."""
+        total = torch.zeros(dst_grid_size, device=weights.device)
+        norm = total.scatter_add_(0, edge_index[1], weights)
+        norm = norm[edge_index[1]]
+        A = torch.sparse_coo_tensor(
+            edge_index,
+            weights / (norm + 1e-8),
+            (src_grid_size, dst_grid_size),
+            device=edge_index.device,
+        )
+        return A.coalesce().T
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[tuple[int]], tuple[tuple[int]]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+    ) -> PairTensor:
+        if model_comm_group:
+            assert (
+                model_comm_group.size() == 1
+            ), f"Model sharding across GPUs is not supported for {self.__class__.__name__}"
+
+        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+
+        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
+            x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded
+        )
+
+        (x_src, x_dst), _ = self.proc(
+            x=(x_src, x_dst),
+            edge_attr=None,
+            edge_index=edge_index,
+            shapes=(shapes_src, shapes_dst, None),
+            model_comm_group=model_comm_group,
+        )
+
+        x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded)
+
+        return x_dst
+
+
+class GraphInterpolationForwardMapper(ForwardMapperPreProcessMixin, GraphInterpolationBaseMapper):
+    """Non-learnable Interpolation forward mapper from data -> hidden."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
+        out_channels_dst: Optional[int] = None,
+        weight_attribute_name: Optional[str] = None,
+        apply_gaussian_distance: bool = True,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+    ) -> None:
+        super().__init__(
+            in_channels_src=in_channels_src,
+            sub_graph=sub_graph,
+            hidden_dim=out_channels_dst,
+            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            src_grid_size=src_grid_size,
+            dst_grid_size=dst_grid_size,
+            out_channels_dst=out_channels_dst,
+            weight_attribute_name=weight_attribute_name,
+            apply_gaussian_distance=apply_gaussian_distance,
+            layer_kernels=layer_kernels,
+            cpu_offload=cpu_offload,
+        )
+        if self.in_channels_src == self.hidden_dim:
+            self.emb_nodes_src = nn.Identity()
+        else:
+            self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = True,
+    ) -> PairTensor:
+        x_dst = super().forward(
+            x, batch_size, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded, keep_x_dst_sharded
+        )
+        return x[0], x_dst
+
+
+class GraphInterpolationBackwardMapper(BackwardMapperPostProcessMixin, GraphInterpolationBaseMapper):
+    """Non-learnable Interpolation backward mapper from hidden -> data."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        sub_graph: HeteroData,
+        sub_graph_edge_attributes: list[str],
+        src_grid_size: int,
+        dst_grid_size: int,
+        out_channels_dst: Optional[int] = None,
+        weight_attribute_name: Optional[str] = None,
+        apply_gaussian_distance: bool = True,
+        initialise_data_extractor_zero: bool = False,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+    ) -> None:
+        super().__init__(
+            in_channels_src=in_channels_src,
+            hidden_dim=in_channels_src,
+            sub_graph=sub_graph,
+            sub_graph_edge_attributes=sub_graph_edge_attributes,
+            src_grid_size=src_grid_size,
+            dst_grid_size=dst_grid_size,
+            out_channels_dst=out_channels_dst,
+            weight_attribute_name=weight_attribute_name,
+            apply_gaussian_distance=apply_gaussian_distance,
+            layer_kernels=layer_kernels,
+            cpu_offload=cpu_offload,
+        )
+        if self.hidden_dim == self.out_channels_dst:
+            self.node_data_extractor = nn.Identity()
+        else:
+            self.node_data_extractor = nn.Sequential(
+                self.layer_factory.LayerNorm(self.hidden_dim),
+                self.layer_factory.Linear(self.hidden_dim, self.out_channels_dst),
+            )
+        if initialise_data_extractor_zero:
+            for module in self.node_data_extractor.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.constant_(module.weight, 0.0)
+                    if module.bias is not None:
+                        nn.init.constant_(module.bias, 0.0)
 
     def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
