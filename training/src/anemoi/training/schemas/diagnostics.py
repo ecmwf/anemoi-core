@@ -283,6 +283,12 @@ class MlflowSchema(BaseModel):
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
     max_params_length: int = MAX_PARAMS_LENGTH
     "Maximum number of hpParams to be logged with mlflow"
+    use_azure: bool = False
+    "If true, log to azure ml workspace server"
+    aml_resource_group: str | None = None
+    "If using AML to log with mlflow, name of the resource group"
+    aml_workspace_name: str | None = None
+    "If using AML to log with mlflow, name of the workspace"
 
     @root_validator(pre=True)
     def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
