@@ -16,7 +16,7 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.mapper import BaseMapper
+from anemoi.models.layers.mapper.base import BaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
