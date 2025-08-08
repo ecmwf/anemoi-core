@@ -177,6 +177,53 @@ def precompute_legpoly(
     return legpoly(mmax, lmax, np.cos(t), norm=norm, inverse=inverse, csphase=csphase)
 
 
+class RealSHT(Module):
+
+    def __init__(self, nlat: int, nlon: int, grid: str) -> None:
+
+        super().__init__()
+
+        self.nlat = nlat
+        self.nlon = nlon
+
+        self.lmax = self.nlat
+        self.mmax = min(self.lmax, self.nlon // 2 + 1)
+
+        if grid == "legendre-gauss":
+            cost, w = legendre_gauss_weights(nlat, -1, 1)
+        elif grid == "equiangular":
+            cost, w = clenshaw_curtiss_weights(nlat, -1, 1)
+        else:
+            raise NotImplementedError(f"Unknown grid {grid}.")
+
+        tq = np.flip(np.arccos(cost))
+
+        pct = precompute_legpoly(self.mmax, self.lmax, tq)
+        pct = torch.from_numpy(pct)
+
+        weights = torch.from_numpy(w)
+        weights = torch.einsum('mlk, k -> mlk', pct, weights)
+
+        self.register_buffer('weights', weights, persistent=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
+
+        x = torch.view_as_real(x)
+
+        out_shape = list(x.size())
+        out_shape[-3] = self.lmax
+        out_shape[-2] = self.mmax
+        xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
+
+        xout[..., 0] = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 0], self.weights.to(x.dtype))
+        xout[..., 1] = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 1], self.weights.to(x.dtype))
+        x = torch.view_as_complex(xout)
+
+        return x
+
+
 class InverseRealSHT(Module):
 
     def __init__(self, nlat: int, nlon: int, lmax: int, grid: str) -> None:
@@ -315,3 +362,123 @@ class OrnsteinResidual(Module):
                 for i, k in enumerate(self._regressors_input_idx)
             )
         )
+
+
+class SpectralOrnsteinResidual(OrnsteinResidual):
+
+    def __init__(
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int = 2,
+        grid: str = "legendre-gauss",
+        node_order: str = "lat-lon",
+        theta_init: float = 0.05,
+        theta_buff: float = 0.00,
+        zmean_term: bool = False,
+        regressors: list[str] = [],
+        anti_aliasing: bool = True,
+        skip_blur: list[str] = [],
+        input_idx: list[int] = [],
+        variables: dict[str, int] = {},
+        statistics: dict[str, np.ndarray] = {},
+    ) -> None:
+        
+        super().__init__(
+            nlat=nlat,
+            nlon=nlon,
+            grid=grid,
+            lmax=lmax,
+            node_order=node_order,
+            theta_init=theta_init,
+            theta_buff=theta_buff,
+            zmean_term=zmean_term,
+            regressors=regressors,
+            input_idx=input_idx,
+            variables=variables,
+            statistics=statistics,
+        )
+
+        self.x_fsht = RealSHT(nlat, nlon, grid)
+        self.x_isht = InverseRealSHT(nlat, nlon, self.x_fsht.lmax, grid)
+
+        self._blurring_input_idx = [
+            int(idx)
+            for idx in input_idx
+            if idx not in [variables.get(v) for v in skip_blur]
+        ]
+
+        filter = torch.ones(len(self._blurring_input_idx), self.x_fsht.lmax)
+        filter = filter * 2 * theta_init / (1 - 2 * theta_init)
+        filter = torch.sqrt(filter / self.x_fsht.lmax)
+
+        walias = torch.zeros(len(self._blurring_input_idx), lmax, lmax, 2)
+
+        self.filter = Parameter(filter)
+        self.walias = Parameter(walias)
+
+        self.lpass_filter = (
+            self.blur_with_anti_aliasing
+            if anti_aliasing
+            else self.blur_without_anti_aliasing
+        )
+
+    def x_filter(self) -> torch.Tensor:
+
+        filter = torch.square(self.filter)
+        filter = torch.cumsum(filter, -1)
+        filter = filter / (1 + filter)
+
+        return filter
+
+    def w_filter(self) -> torch.Tensor:
+
+        walias = self.isht(torch.view_as_complex(self.walias))
+
+        return torch.sigmoid(walias)
+
+    def blur_without_anti_aliasing(self, x_blur: torch.Tensor) -> torch.Tensor:
+
+        x_blur = self.x_fsht(x_blur)
+        filter = self.x_filter()
+
+        x_blur = x_blur * (1 - filter.unsqueeze(-1))
+
+        return self.x_isht(x_blur)
+
+    def blur_with_anti_aliasing(self, x_blur: torch.Tensor) -> torch.Tensor:
+        
+        x_skip = self.x_fsht(x_blur)
+        filter = self.x_filter()
+        walias = self.w_filter()
+
+        x_skip = x_skip * (1 - filter.unsqueeze(-1))
+
+        return (
+            + walias * x_blur
+            + (1 - walias) * self.x_isht(x_skip)
+        )
+
+    def blurring(self, x: torch.Tensor) -> torch.Tensor:
+
+        x = einops.rearrange(
+            tensor=x,
+            pattern=f"... ({self.node_order}) var -> ... var lat lon",
+            lat=self.x_fsht.nlat,
+            lon=self.x_fsht.nlon,
+        )
+
+        x[..., self._blurring_input_idx, :, :] = self.lpass_filter(
+            x[..., self._blurring_input_idx, :, :]
+        )
+
+        x = einops.rearrange(
+            tensor=x,
+            pattern=f"... var lat lon -> ... ({self.node_order}) var",
+        )
+
+        return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        return super().forward(self.blurring(x))
