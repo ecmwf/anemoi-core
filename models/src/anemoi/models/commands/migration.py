@@ -18,11 +18,12 @@ from shutil import copy2
 from rich.console import Console
 
 from .. import __version__ as version_anemoi_models
-from ..migrations import LOGGER as migrator_logger, MigrationOp, RollbackOp
+from ..migrations import LOGGER as migrator_logger
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
+from ..migrations import MigrationOp
 from ..migrations import Migrator
-from ..migrations import MigrationCallbackType
+from ..migrations import RollbackOp
 from . import Command
 
 LOGGER = logging.getLogger(__name__)
@@ -207,13 +208,13 @@ class Migration(Command):
                         def migrate(ckpt: CkptType) -> CkptType:
                             \"\"\"
                             Migrate the checkpoint.
-                            
-                            
+
+
                             Parameters
                             ----------
                             ckpt : CkptType
-                                The checkpoint dict. 
-                            
+                                The checkpoint dict.
+
                             Returns
                             -------
                             CkptType
@@ -248,13 +249,13 @@ class Migration(Command):
                         def rollback(ckpt: CkptType) -> CkptType:
                             \"\"\"
                             Rollback the checkpoint.
-                            
-                            
+
+
                             Parameters
                             ----------
                             ckpt : CkptType
-                                The checkpoint dict. 
-                            
+                                The checkpoint dict.
+
                             Returns
                             -------
                             CkptType

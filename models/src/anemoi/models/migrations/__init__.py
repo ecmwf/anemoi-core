@@ -10,13 +10,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import importlib
 import logging
 import sys
 from collections.abc import Callable
 from collections.abc import MutableMapping
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import cached_property
 from os import PathLike
@@ -51,20 +51,33 @@ MigrationVersions = TypedDict("MigrationVersions", {"migration": str, "anemoi-mo
 
 
 class MigrationContext:
-    """
-    A context object allowing setup callbacks to access some utilities:
+    """A context object allowing setup callbacks to access some utilities:
     * ``context.move_attribute("pkg.start.MyClass", "pkg.end.MyRenamedClass")`` to update paths
-        to attributes
+        to attributes.
     * ``context.move_module("pkg.start", "pkg.end")`` to move a full module.
+    * ``context.delete_attribute("pkg.mod.MyClass")`` to remove a class you can use "*" as
+        a wildcard for the attribute name: ``context.delete_attribute("pkg.mod.*")`` will remove
+        all attribute from the module.
     """
 
     def __init__(self) -> None:
-        self.module_paths: dict[str, str] = {}
         self.attribute_paths: dict[str, str] = {}
+        self.module_paths: dict[str, str] = {}
+        self.deleted_attributes: list[str] = []
+
+    def delete_attribute(self, path: str) -> None:
+        """Indicate that an attribute has been deleted. Any class referencing this module will
+        be replace by a ``MissingAttribute`` object.
+
+        Parameters
+        ----------
+        path : str
+            Path to the attribute. For example ``pkg.mod.MyClass``.
+        """
+        self.deleted_attributes.append(path)
 
     def move_attribute(self, path_start: str, path_end: str) -> None:
-        """
-        Move and rename an attribute between modules.
+        """Move and rename an attribute between modules.
 
         Parameters
         ----------
@@ -78,8 +91,7 @@ class MigrationContext:
         self.attribute_paths[path_end] = path_start
 
     def move_module(self, path_start: str, path_end: str) -> None:
-        """
-        Move a module.
+        """Move a module.
 
         Parameters
         ----------
@@ -95,9 +107,7 @@ class MigrationContext:
 
 @dataclass
 class MigrationMetadata:
-    """
-    Metadata object of the migration.
-    """
+    """Metadata object of the migration."""
 
     versions: MigrationVersions
     """ Migration and anemoi-model versions. """
@@ -106,9 +116,7 @@ class MigrationMetadata:
 
 
 class SerializedMigration(TypedDict):
-    """
-    The serialized migration stored in the checkpoint
-    """
+    """The serialized migration stored in the checkpoint"""
 
     name: str
     """ Name of the migration """
@@ -177,8 +185,7 @@ class Migration:
 
     @classmethod
     def from_serialized(cls, migration: SerializedMigration) -> Migration:
-        """
-        Alt init to load the migration from the serialized migration dict in the checkpoint
+        """Alt init to load the migration from the serialized migration dict in the checkpoint
         This migration does not contain the ``migrate`` or ``migrate_setup`` callbacks as
         they are not serialized.
 
@@ -197,8 +204,7 @@ class Migration:
         )
 
     def serialize(self) -> SerializedMigration:
-        """
-        Serialize this migration
+        """Serialize this migration
 
         Returns
         -------
@@ -285,39 +291,61 @@ class MissingAttribute:
     """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class"""
 
 
-class LenientUnpickler(Unpickler):
-    """
-    And Unpickler that does not fail when the pickle object has some reference to non-existing attributes.
-    This is useful to load the "migrations" key from the checkpoint regardless of import issues.
-    """
+def get_unpickler(replace_attrs: list[str] | bool = False):
+    """Get the Unpickler
 
-    def find_class(self, module_name: str, global_name: str, /) -> Any:
-        try:
-            return super().find_class(module_name, global_name)
-        except (ImportError, AttributeError):
-            LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
-            return MissingAttribute
+    Parameters
+    ----------
+    replace_attrs : list[str] | bool, default False
+        Replace the provided attrs by a ``MissingAttribute`` object. If False, Fill not
+        try to replace attributes. If True, will replace every missing attribute. You can use
+        * as a wildcard to be replaced by any attribute in a module.
 
-
-class LenientPicklerModule:
-    """
-    For torch.load's pickle_module argument.
-    A "module" with the LenientUnpickler as Unpickler.
+    Returns
+    -------
+    Any
+        An Unpickler wrapper for torch.load.
     """
 
-    Unpickler = LenientUnpickler
+    class _Unpickler(Unpickler):
+        """And Unpickler that does not fail when the pickle object has some reference to non-existing attributes.
+        This is useful to load the "migrations" key from the checkpoint regardless of import issues.
+        """
+
+        def find_class(self, module_name: str, global_name: str, /) -> Any:
+            try:
+                return super().find_class(module_name, global_name)
+            except (ImportError, AttributeError) as e:
+                attr_name = f"{module_name}.{global_name}"
+                wild_name = f"{module_name}.*"
+                if replace_attrs is False:
+                    raise e
+                if replace_attrs is True or attr_name in replace_attrs or wild_name in replace_attrs:
+                    LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
+                    return MissingAttribute
+                raise e
+
+    class UnpicklerWrapper:
+        """For torch.load's pickle_module argument.
+        A "module" with the LenientUnpickler as Unpickler.
+        """
+
+        Unpickler = _Unpickler
+
+    return UnpicklerWrapper
 
 
-def _load_ckpt(path: str | PathLike, lenient: bool = True) -> CkptType:
-    """
-    Loads a checkpoint
+def _load_ckpt(path: str | PathLike, replace_attrs: list[str] | bool = False) -> CkptType:
+    """Loads a checkpoint
 
     Parameters
     ----------
     path : str | PathLike
-
-    lenient : bool
-
+        Checkpoint path
+    replace_attrs : list[str] | bool, default False
+        Replace the provided attrs by a ``MissingAttribute`` object. If False, Fill not
+        try to replace attributes. If True, will replace every missing attribute. You can use
+        * as a wildcard to be replaced by any attribute in a module.
 
     Returns
     -------
@@ -326,9 +354,7 @@ def _load_ckpt(path: str | PathLike, lenient: bool = True) -> CkptType:
     """
     import torch
 
-    pickle_module: Any = None
-    if lenient:
-        pickle_module = LenientPicklerModule
+    pickle_module = get_unpickler(replace_attrs)
     ckpt = torch.load(path, map_location="cpu", pickle_module=pickle_module, weights_only=False)
     # TODO: remove this. Only for testing
     if _ckpt_migration_key not in ckpt:
@@ -416,8 +442,7 @@ class Migrator:
     def _resolve_operations(
         self, ckpt: CkptType, migrations: list[Migration], steps: int | None = None
     ) -> tuple[list[Callable[[MigrationContext], None]], list[BaseOp]]:
-        """
-        Resolves the list of operations to execute to migrate the checkpoint.
+        """Resolves the list of operations to execute to migrate the checkpoint.
         If it contains migrations and rollbacks, first rollbacked are applied (starting
         from the end), then migrations are applied (starting from the beginning).
 
@@ -492,8 +517,7 @@ class Migrator:
         return setups, ops
 
     def _resolve_context(self, context: MigrationContext) -> None:
-        """
-        Resolves the final context object after all setup callbacks have been executed.
+        """Resolves the final context object after all setup callbacks have been executed.
 
         It first tries to move all modules, then moves all attributes.
 
@@ -534,7 +558,9 @@ class Migrator:
             * The migrated checkpoint
             * The list of migrations or rollbacks
         """
-        old_ckpt = _load_ckpt(path)
+        # First load the checkpoint and obfuscate any import issue, just to get the
+        # migrations from the checkpoint. The real checkpoint is reloaded afterwards.
+        old_ckpt = _load_ckpt(path, replace_attrs=True)
         ckpt = deepcopy(old_ckpt)
 
         if not self.is_compatible_ckpt(ckpt):
@@ -543,13 +569,15 @@ class Migrator:
         if steps is not None and steps < 0:
             raise ValueError("steps should be positive.")
         setups, ops = self._resolve_operations(ckpt, compatible_migrations, steps)
+        replace_attrs: list[str] = []
         if len(setups):
             context = MigrationContext()
             for setup in setups:
                 setup(context)
             self._resolve_context(context)
-            # Force reloading checkpoint without obfuscating import issues.
-            ckpt = _load_ckpt(path, lenient=False)
+            replace_attrs = context.deleted_attributes
+        # Force reloading checkpoint without obfuscating import issues.
+        ckpt = _load_ckpt(path, replace_attrs)
         for op in ops:
             if isinstance(op, RollbackOp):
                 ckpt = op.run(ckpt)
@@ -630,9 +658,7 @@ class Migrator:
 
 
 class SaveCkpt:
-    """
-    Useful for testing. Used in the save_ckpt fixture.
-    """
+    """Useful for testing. Used in the save_ckpt fixture."""
 
     def __init__(self, ckpt_dir: Path):
         self.ckpt_dir = ckpt_dir
