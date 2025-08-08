@@ -244,12 +244,7 @@ def gnn_config_with_checkpoint(
         "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-07-31.ckpt",
     )
 
-    # Execute migrations
-    ckpt = torch.load(existing_ckpt, map_location="cpu", weights_only=False)
-    # TODO(benjamin): remove this line when we have a checkpoint that supports migrations
-    # in get_test_data
-    ckpt["migrations"] = []
-    new_ckpt, _ = migrator.sync(ckpt)
+    _, new_ckpt, _ = migrator.sync(existing_ckpt)
 
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
