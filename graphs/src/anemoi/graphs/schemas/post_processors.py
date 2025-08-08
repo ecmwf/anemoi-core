@@ -45,7 +45,6 @@ class RestrictEdgeLengthSchema(BaseModel):
     "Boolean mask attribute on target nodes. Only edges whose target is True under this mask will be post-processed"
 
 
-
 class SortEdgeIndexSchema(BaseModel):
     target_: Literal[
         "anemoi.graphs.processors.SortEdgeIndexBySourceNodes",
