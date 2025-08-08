@@ -99,6 +99,18 @@ attributes:
   - edge_dirs
   nodes: []
 
+# Torch compile configuration
+# A list of modules present in the model, which will be compiled
+# You can optionally pass options to torch.compile with the 'options' key
+compile:
+  - module: anemoi.models.layers.conv.GraphTransformerConv
+    options:
+      dynamic: false
+      #mode: max-autotune # an example of setting the compilation mode
+  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+    options:
+      dynamic: false
+
 # Bounding configuration
 bounding: #These are applied in order
 

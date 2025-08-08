@@ -183,6 +183,48 @@ class AnemoiTrainer:
 
         return truncation_data
 
+    def set_compile_flags(self, compile_config):
+        # I guess min triton version is enforced by torch 2.6
+        # TODO allow setting different requirements for each class
+        import torch_geometric
+
+        req = torch.__version__ >= "2.6" and torch_geometric.__version__ >= "2.6"
+        if not req:
+            LOGGER.info("Minimum library requirements not met to compile, not compiling...")
+            return
+
+        # Convert class paths to actual classes
+        compile_classes = [get_class(entry.module) for entry in compile_config]
+        LOGGER.info(f"The following modules will be compiled: {compile_config}")
+        default_compile_options = {}
+
+        # Loop through all modules
+        for name, module in self.model.named_modules():
+            # If it is listed in the compile config
+            if type(module) in compile_classes:
+                # retrieve its entry
+                entry = next((entry for entry in compile_config if get_class(entry["module"]) == type(module)), None)
+                if entry is None:
+                    # Somehow we dont have a match
+                    # Shouldn't be possible since we had to match on modules to get here
+                    continue
+                options = entry.get("options", default_compile_options)
+
+                LOGGER.debug(f"{module} will be compiled with the following options: {options}")
+                compiled_module = torch.compile(module, **options)
+
+                # Update the model with the new compiled module
+                if name == "":
+                    self.model = compiled_module
+                else:
+                    # Walk the model to the parent of the module and set it
+                    parent = self.model
+                    parts = name.split(".")
+                    for part in parts[:-1]:
+                        parent = getattr(parent, part)
+                    LOGGER.debug(f"Replacing {parts[-1]} in parent with a compiled version")
+                    setattr(parent, parts[-1], compiled_module)
+
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
@@ -521,6 +563,10 @@ class AnemoiTrainer:
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
         )
 
+        # cant have this inside model() or we get an infinite loop
+        if hasattr(self.config.model, "compile"):
+            self.set_compile_flags(self.config.model.compile)
+
         LOGGER.debug("Starting training..")
 
         trainer.fit(
@@ -529,8 +575,8 @@ class AnemoiTrainer:
             ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
         )
 
-        if self.config.diagnostics.print_memory_summary:
-            LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
+        if self.config.diagnostics.print_memory_summary and rank_zero_only.rank == 0:
+            LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
 
         LOGGER.debug("---- DONE. ----")
 
