@@ -7,15 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
 import logging
 import operator
 import os
 import os.path
-import io
+import shutil
 import subprocess
 from datetime import date
 from pathlib import Path
-import shutil
 from urllib.error import URLError
 
 import pandas as pd
@@ -30,7 +30,7 @@ from torch.cuda import reset_peak_memory_stats
 from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" #reduce memory fragmentation
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,11 +66,14 @@ class BenchmarkValue:
             result = header + "\n" + result
         return result
 
+
 def _make_tarfile(output_filename, source_dir):
-    import tarfile
     import os.path
+    import tarfile
+
     with tarfile.open(output_filename, "w:gz") as tar:
         tar.add(source_dir, arcname=os.path.basename(source_dir))
+
 
 # This function should be called from inside a git repo
 # It takes a given commit and returns true if it is somewhere in the branches history
@@ -134,12 +137,12 @@ def _findLatestSharedCommitRow(df) -> str | None:
 
 
 class BenchmarkServer:
-    def __init__(self, testCase:str="", local=True):  # use a local folder to store data instead of a remote server
+    def __init__(self, testCase: str = "", local=True):  # use a local folder to store data instead of a remote server
         self.benchmarkValues = {}
 
         self.local = local
         if self.local:
-            self.store="./server"
+            self.store = "./server"
         else:
             # TODO could unify these by getting via scp
             # for reading the data we read over internet
@@ -153,7 +156,7 @@ class BenchmarkServer:
         # So that you can store GNN_n320_1g and graphtransformer_n320_1g results under the same server
         # If testcase is "" then no subdirs are created
         self.testCase = testCase
-        if self.testCase is not "":
+        if self.testCase != "":
             self.store += f"/{self.testCase}"
             if not local:
                 self.set_remote_path += f"/{self.testCase}"
@@ -161,11 +164,10 @@ class BenchmarkServer:
             LOGGER.debug(f"Using a local server under '{self.store}'")
             subprocess.run(["mkdir", "-p", self.store], check=True)
 
-        self.artifactLimit=10 #How many commits artifacts will be saved at once.
-        #currently the trace file and memory snapshot are saved
-        #When the artifactLimit is hit, the oldest commits artifacts are deleted
-        #Artifacts can be reproduced by reverting to a given commit and running the pytests locally
-
+        self.artifactLimit = 10  # How many commits artifacts will be saved at once.
+        # currently the trace file and memory snapshot are saved
+        # When the artifactLimit is hit, the oldest commits artifacts are deleted
+        # Artifacts can be reproduced by reverting to a given commit and running the pytests locally
 
     def __str__(self):
         # TODO should do this properly with string builders
@@ -199,7 +201,7 @@ class BenchmarkServer:
                 df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
                 # data = urlopen(url)
                 # df=pd.read_csv(io.StringIO(data))
-            except URLError as e:  
+            except URLError as e:
                 print(f"Could not open file at {url}. Got error {e}")
                 return None
 
@@ -214,7 +216,11 @@ class BenchmarkServer:
 
         assert row["testName"] == benchmarkName  # sanity check, should always pass
         benchmarkValue = BenchmarkValue(
-            name=benchmarkName, value=row["value"], unit=row["unit"], date=row["date"], commit=row["commit"],
+            name=benchmarkName,
+            value=row["value"],
+            unit=row["unit"],
+            date=row["date"],
+            commit=row["commit"],
         )
         LOGGER.debug(benchmarkValue)
         # update dict of results
@@ -261,11 +267,11 @@ class BenchmarkServer:
         result_str = ""
         if passed:
             if passedWithinTolerance:
-                result_str += f"PASS. Local value for {localValue.name} is within {tolerance}% tolerance of the reference value "
-            else:
                 result_str += (
-                    f"PASS. Local value for {localValue.name} has improved compared to the reference value "
+                    f"PASS. Local value for {localValue.name} is within {tolerance}% tolerance of the reference value "
                 )
+            else:
+                result_str += f"PASS. Local value for {localValue.name} has improved compared to the reference value "
 
         else:
             result_str += f"FAIL. Local value for {localValue.name} has degraded compared to the reference value "
@@ -275,7 +281,7 @@ class BenchmarkServer:
         return passed
 
     # trys to update a metric on a remote server, with a given benchmarkValue
-    #if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
+    # if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
     def setValue(self, value: BenchmarkValue, overwrite=False):
 
         # if file doesnt exist, write header
@@ -288,17 +294,19 @@ class BenchmarkServer:
                 with open(f"{self.store}/{value.name}", "a") as f:
                     f.write(value.to_csv() + "\n")
         else:
-            #Get existing csv
+            # Get existing csv
             url = f"{self.store}/{value.name}"
             print(f"Fetching benchmark data from {url}...")
             try:
                 df = pd.read_csv(url)  # requires pandas 0.19.2, see comments for alternative
-            except URLError as e: 
+            except URLError as e:
                 print(f"Could not open file at {url}. Got error {e}")
                 df = None
 
             if df is None or overwrite:
-                df = pd.read_csv(io.StringIO(value.to_csv(include_header=True))) #, index_col="testName") #index_col to prevent adding a seperate index col
+                df = pd.read_csv(
+                    io.StringIO(value.to_csv(include_header=True)),
+                )  # , index_col="testName") #index_col to prevent adding a seperate index col
             else:
                 new_row = pd.read_csv(io.StringIO(value.to_csv()), header=None)
                 new_row.columns = df.columns
@@ -330,20 +338,20 @@ class BenchmarkServer:
 
         if not self.local:
             print("Storing artifacts on a remote server doesnt work yet")
-            return 
-        artifactDir=Path(f"{self.store}/artifacts")
-        commitDir=Path(f"{artifactDir}/{commit}")
-        commitTar=Path(f"{commitDir}.tar.gz")
+            return
+        artifactDir = Path(f"{self.store}/artifacts")
+        commitDir = Path(f"{artifactDir}/{commit}")
+        commitTar = Path(f"{commitDir}.tar.gz")
         output = commitDir
         if tar:
-            output =  commitTar
+            output = commitTar
 
         LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
         if output.exists():
             print(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
-            #return
+            # return
         else:
-            commitDir.mkdir(parents=True) # might need to make .artifacts too
+            commitDir.mkdir(parents=True)  # might need to make .artifacts too
 
             for artifact in artifacts:
                 LOGGER.debug(f"Copying {artifact} to {commitDir}...")
@@ -352,21 +360,24 @@ class BenchmarkServer:
             if tar:
                 LOGGER.debug("Tar-ing artifacts {commitDir} to {commitTar}")
                 _make_tarfile(commitTar, commitDir)
-                #cleanup untar-ed file
+                # cleanup untar-ed file
                 LOGGER.debug("Deleting {commitDir}")
                 shutil.rmtree(commitDir)
 
-        #cleanup oldest artifact if we are over artifact limit
+        # cleanup oldest artifact if we are over artifact limit
 
-        #os/listdir gets commit name, and the list compression makes it a complete path
-        commits = [ f"{artifactDir}/{commit}" for commit in os.listdir(f"{artifactDir}")]
-        if len(commits) >  self.artifactLimit:
-            print(f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}")
-            commits.sort(key=os.path.getmtime) #sorts the list, oldest first
-            commitsToDelete = commits[:len(commits) - self.artifactLimit]
+        # os/listdir gets commit name, and the list compression makes it a complete path
+        commits = [f"{artifactDir}/{commit}" for commit in os.listdir(f"{artifactDir}")]
+        if len(commits) > self.artifactLimit:
+            print(
+                f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}",
+            )
+            commits.sort(key=os.path.getmtime)  # sorts the list, oldest first
+            commitsToDelete = commits[: len(commits) - self.artifactLimit]
             print(f"Deleting {commitsToDelete}...")
             for commit in commitsToDelete:
                 os.remove(commit)
+
 
 def get_git_revision_hash() -> str:
     try:
@@ -385,7 +396,6 @@ def raise_error(x):
 def open_log_file(profilerPath: str, filename: str):
     import csv
     import glob
-    import os
 
     if filename == "time_profiler.csv":
         return_val = "avg_time"
@@ -398,10 +408,10 @@ def open_log_file(profilerPath: str, filename: str):
     else:
         raise ValueError
 
-   
-    #under /{profilerPath} there is a single random alphanumeric dir
+    # under /{profilerPath} there is a single random alphanumeric dir
     # this next(iter(glob(...))) gets us through this random dir
-    file_path = next( iter(
+    file_path = next(
+        iter(
             glob.glob(
                 f"{profilerPath}/[a-z0-9]*/{filename}",
             ),
@@ -420,7 +430,7 @@ def open_log_file(profilerPath: str, filename: str):
 # It parses the profiler logs and creates BenchmarkValue objects from them
 # Returns [BenchmarkValue]
 # If you want to add more benchmarks add them here
-def getLocalBenchmarkResults(profilerPath:str) -> list[BenchmarkValue]:
+def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
     # read memory and mlflow stats
     stats = memory_stats(device=0)
     peak_active_mem_mb = stats["active_bytes.all.peak"] / 1024 / 1024
@@ -456,50 +466,56 @@ def getLocalBenchmarkResults(profilerPath:str) -> list[BenchmarkValue]:
     )
     localBenchmarkResults.append(
         BenchmarkValue(
-            name="peakMemoryMB", value=peak_active_mem_mb, unit="MB", date=yyyy_mm_dd, commit=commit, tolerance=1,
+            name="peakMemoryMB",
+            value=peak_active_mem_mb,
+            unit="MB",
+            date=yyyy_mm_dd,
+            commit=commit,
+            tolerance=1,
         ),
     )  # added 1% tolerance here so it doesnt fail over a few stray kilobytes
 
     return localBenchmarkResults
 
+
 # Runs after a benchmark
 # returns a list of files produced by the profiler
 # TODO tidy this function
-def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
-    import csv
+def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
     import glob
-    import os
 
-    profilerDir =glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
-    memory_snapshot=Path(f"{profilerDir}/memory_snapshot.pickle")
+    profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
+    memory_snapshot = Path(f"{profilerDir}/memory_snapshot.pickle")
     if not memory_snapshot.exists():
         raise RuntimeError(f"Memory snapshot not found at: {memory_snapshot}")
 
-    artifacts= [memory_snapshot]
+    artifacts = [memory_snapshot]
 
-    #get trace file
-    #there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
-    #but luckily if we take the first one thats always training on rank 0.
-    trace_files=  glob.glob(f"{profilerDir}/*.pt.trace.json")
+    # get trace file
+    # there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
+    # but luckily if we take the first one thats always training on rank 0.
+    trace_files = glob.glob(f"{profilerDir}/*.pt.trace.json")
     if len(trace_files) == 0:
         print(f"Can't find a trace file under {profilerDir}")
     else:
-        trace_file= Path(trace_files[0])
+        trace_file = Path(trace_files[0])
         if not trace_file.exists():
             raise RuntimeError(f"trace file not found at: {trace_file}")
         artifacts.append(trace_file)
     return artifacts
 
-@pytest.mark.longtests
+
+@pytest.mark.multigpu
+@pytest.mark.slow
 def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str], #cfg, benchmarkTestCase
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
     get_test_archive: callable,
     update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, testCase = benchmark_config
     print(f"Benchmarking the configuration: {testCase}")
-    #print(cfg)
+    # print(cfg)
 
     # Run model with profiler
     reset_peak_memory_stats()
@@ -509,9 +525,9 @@ def test_benchmark_training_cycle(
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
-    benchmarkServer = BenchmarkServer(testCase=testCase) 
+    benchmarkServer = BenchmarkServer(testCase=testCase)
 
-    benchmarks = [benchmarkValue.name for benchmarkValue in  localBenchmarkResults]
+    benchmarks = [benchmarkValue.name for benchmarkValue in localBenchmarkResults]
     if not update_data:
         benchmarkServer.getValues(benchmarks)
 
@@ -528,10 +544,10 @@ def test_benchmark_training_cycle(
         print("Updating metrics on server")
         for localBenchmarkValue in localBenchmarkResults:
             benchmarkServer.setValue(localBenchmarkValue)
-        store_artifacts=True
+        store_artifacts = True
         if store_artifacts:
-            artifacts= getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
-            benchmarkServer.storeArtifacts(artifacts,  localBenchmarkResults[0].commit)
+            artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
+            benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
     else:
         print("Comparing local benchmark results against reference values from the server")
 
@@ -549,6 +565,7 @@ def test_benchmark_training_cycle(
         if len(failedTests) > 0:
             on_test_fail(f"The following tests failed: {failedTests}")
 
-#TODO increase benchmark size and add multigpu
-#TODO add an option to save artifacts locally when doing a comparison
-#TODO get artifacts working for remote store
+
+# TODO increase benchmark size and add multigpu
+# TODO add an option to save artifacts locally when doing a comparison
+# TODO get artifacts working for remote store
