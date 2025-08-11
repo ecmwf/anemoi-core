@@ -490,7 +490,8 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
         artifacts.append(trace_file)
     return artifacts
 
-@pytest.mark.longtests
+@pytest.mark.multigpu
+@pytest.mark.slow
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str], #cfg, benchmarkTestCase
     get_test_archive: callable,
