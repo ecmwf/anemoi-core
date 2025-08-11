@@ -197,14 +197,14 @@ def gnn_config(
     return cfg
 
 
-#TODO make graphtransformer_1g the default test case, and only run that
-#TODO add small o48 test case which can be run anywhere
-#TODO change it so i can inherit from stretched_config etc. rather then rewriting
+# TODO make graphtransformer_1g the default test case, and only run that
+# TODO add small o48 test case which can be run anywhere
+# TODO change it so i can inherit from stretched_config etc. rather then rewriting
 @pytest.fixture(
-    params=[ #selects different test cases
-        #"graphtransformer_n320_1g",
-        #"gnn_n320_1g",
-        #"stretched",
+    params=[  # selects different test cases
+        # "graphtransformer_n320_1g",
+        # "gnn_n320_1g",
+        # "stretched",
         "lam",
     ],
 )
@@ -215,41 +215,43 @@ def benchmark_config(
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
 
-    #change configs based on test case
+    # change configs based on test case
     if test_case == "graphtransformer_n320_1g":
         overrides = ["model=graphtransformer", "graph=multi_scale"]
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark.yaml"
-        config_name="config"
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark.yaml"
+        config_name = "config"
     elif test_case == "gnn_n320_1g":
         overrides = []
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark.yaml"
-        config_name="config"
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark.yaml"
+        config_name = "config"
     elif test_case == "stretched":
         overrides = []
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/test_stretched.yaml"
-        config_name="stretched"
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/test_stretched.yaml"
+        config_name = "stretched"
     elif test_case == "lam":
         overrides = []
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/test_lam.yaml"
-        config_name="lam" #TODO check if i need to set config_name
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/test_lam.yaml"
+        config_name = "lam"  # TODO check if i need to set config_name
     else:
         raise ValueError(f"Error. Unknown benchmark configuration: {testCase}")
 
-
-
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
         template = compose(config_name=config_name, overrides=overrides)
-    
+
     use_case_modifications = OmegaConf.load(top_level_yaml)
 
-    if test_case == "stretched" or  test_case == "lam":
-        #tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
-        #dataset, forcing_dataset = rel_paths
+    if test_case == "stretched" or test_case == "lam":
+        # tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
+        # dataset, forcing_dataset = rel_paths
 
-        #just remove the server paths from files
+        # just remove the server paths from files
         use_case_modifications.hardware.files.dataset = "cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr"
-        use_case_modifications.hardware.files.forcing_dataset = "aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
-        use_case_modifications.hardware.paths.data = "/home/mlx/ai-ml/datasets" #TODO move to seperate streched_benchmark.yaml
+        use_case_modifications.hardware.files.forcing_dataset = (
+            "aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr"
+        )
+        use_case_modifications.hardware.paths.data = (
+            "/home/mlx/ai-ml/datasets"  # TODO move to seperate streched_benchmark.yaml
+        )
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
