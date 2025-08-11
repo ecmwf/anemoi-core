@@ -7,15 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
 import logging
 import operator
 import os
 import os.path
-import io
+import shutil
 import subprocess
 from datetime import date
 from pathlib import Path
-import shutil
 from urllib.error import URLError
 
 import pandas as pd
@@ -30,7 +30,7 @@ from torch.cuda import reset_peak_memory_stats
 from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True" #reduce memory fragmentation
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,11 +66,14 @@ class BenchmarkValue:
             result = header + "\n" + result
         return result
 
+
 def _make_tarfile(output_filename, source_dir):
-    import tarfile
     import os.path
+    import tarfile
+
     with tarfile.open(output_filename, "w:gz") as tar:
         tar.add(source_dir, arcname=os.path.basename(source_dir))
+
 
 # This function should be called from inside a git repo
 # It takes a given commit and returns true if it is somewhere in the branches history
@@ -159,11 +162,10 @@ class BenchmarkServer:
         else: 
             self.fs.mkdir(str(self.store), create_parents=True)
 
-        self.artifactLimit=2 #How many commits artifacts will be saved at once.
+        self.artifactLimit=10 #How many commits artifacts will be saved at once.
         #currently the trace file and memory snapshot are saved
         #When the artifactLimit is hit, the oldest commits artifacts are deleted
         #Artifacts can be reproduced by reverting to a given commit and running the pytests locally
-
 
     # mounts the remote server over sftp
     def _mount_remote(self):
@@ -229,7 +231,11 @@ class BenchmarkServer:
 
         assert row["testName"] == benchmarkName  # sanity check, should always pass
         benchmarkValue = BenchmarkValue(
-            name=benchmarkName, value=row["value"], unit=row["unit"], date=row["date"], commit=row["commit"],
+            name=benchmarkName,
+            value=row["value"],
+            unit=row["unit"],
+            date=row["date"],
+            commit=row["commit"],
         )
         LOGGER.debug(benchmarkValue)
         # update dict of results
@@ -276,11 +282,11 @@ class BenchmarkServer:
         result_str = ""
         if passed:
             if passedWithinTolerance:
-                result_str += f"PASS. Local value for {localValue.name} is within {tolerance}% tolerance of the reference value "
-            else:
                 result_str += (
-                    f"PASS. Local value for {localValue.name} has improved compared to the reference value "
+                    f"PASS. Local value for {localValue.name} is within {tolerance}% tolerance of the reference value "
                 )
+            else:
+                result_str += f"PASS. Local value for {localValue.name} has improved compared to the reference value "
 
         else:
             result_str += f"FAIL. Local value for {localValue.name} has degraded compared to the reference value "
@@ -290,7 +296,7 @@ class BenchmarkServer:
         return passed
 
     # trys to update a metric on a remote server, with a given benchmarkValue
-    #if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
+    # if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
     def setValue(self, value: BenchmarkValue, overwrite=False):
 
         #Check do we have an existing value
@@ -348,13 +354,13 @@ class BenchmarkServer:
         commitTar=Path(f"{commitDir}.tar.gz")
         output = commitDir
         if tar:
-            output =  commitTar
+            output = commitTar
 
         LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
         if output.exists():
             #TODO this doesnt work remote, but it should just overwrite
             print(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
-            #return
+            # return
         else:
             commitDir.mkdir(parents=True) # might need to make artifacts too
 
@@ -365,7 +371,7 @@ class BenchmarkServer:
             if tar:
                 LOGGER.debug("Tar-ing artifacts {commitDir} to {commitTar}")
                 _make_tarfile(commitTar, commitDir)
-                #cleanup untar-ed file
+                # cleanup untar-ed file
                 LOGGER.debug("Deleting {commitDir}")
                 shutil.rmtree(commitDir)
 
@@ -396,6 +402,7 @@ class BenchmarkServer:
             for commit in commitsToDelete:
                 remove(commit)
 
+
 def get_git_revision_hash() -> str:
     try:
         repo = Repo(".", search_parent_directories=True)
@@ -413,7 +420,6 @@ def raise_error(x):
 def open_log_file(profilerPath: str, filename: str):
     import csv
     import glob
-    import os
 
     if filename == "time_profiler.csv":
         return_val = "avg_time"
@@ -426,10 +432,10 @@ def open_log_file(profilerPath: str, filename: str):
     else:
         raise ValueError
 
-   
-    #under /{profilerPath} there is a single random alphanumeric dir
+    # under /{profilerPath} there is a single random alphanumeric dir
     # this next(iter(glob(...))) gets us through this random dir
-    file_path = next( iter(
+    file_path = next(
+        iter(
             glob.glob(
                 f"{profilerPath}/[a-z0-9]*/{filename}",
             ),
@@ -448,7 +454,7 @@ def open_log_file(profilerPath: str, filename: str):
 # It parses the profiler logs and creates BenchmarkValue objects from them
 # Returns [BenchmarkValue]
 # If you want to add more benchmarks add them here
-def getLocalBenchmarkResults(profilerPath:str) -> list[BenchmarkValue]:
+def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
     # read memory and mlflow stats
     stats = memory_stats(device=0)
     peak_active_mem_mb = stats["active_bytes.all.peak"] / 1024 / 1024
@@ -484,49 +490,55 @@ def getLocalBenchmarkResults(profilerPath:str) -> list[BenchmarkValue]:
     )
     localBenchmarkResults.append(
         BenchmarkValue(
-            name="peakMemoryMB", value=peak_active_mem_mb, unit="MB", date=yyyy_mm_dd, commit=commit, tolerance=1,
+            name="peakMemoryMB",
+            value=peak_active_mem_mb,
+            unit="MB",
+            date=yyyy_mm_dd,
+            commit=commit,
+            tolerance=1,
         ),
     )  # added 1% tolerance here so it doesnt fail over a few stray kilobytes
 
     return localBenchmarkResults
 
+
 # Runs after a benchmark
 # returns a list of files produced by the profiler
 def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
-    import csv
     import glob
-    import os
 
-    profilerDir =glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
-    memory_snapshot=Path(f"{profilerDir}/memory_snapshot.pickle")
+    profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
+    memory_snapshot = Path(f"{profilerDir}/memory_snapshot.pickle")
     if not memory_snapshot.exists():
         raise RuntimeError(f"Memory snapshot not found at: {memory_snapshot}")
 
-    artifacts= [memory_snapshot]
+    artifacts = [memory_snapshot]
 
-    #get trace file
-    #there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
-    #but luckily if we take the first one thats always training on rank 0.
-    trace_files=  glob.glob(f"{profilerDir}/*.pt.trace.json")
+    # get trace file
+    # there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
+    # but luckily if we take the first one thats always training on rank 0.
+    trace_files = glob.glob(f"{profilerDir}/*.pt.trace.json")
     if len(trace_files) == 0:
         print(f"Can't find a trace file under {profilerDir}")
     else:
-        trace_file= Path(trace_files[0])
+        trace_file = Path(trace_files[0])
         if not trace_file.exists():
             raise RuntimeError(f"trace file not found at: {trace_file}")
         artifacts.append(trace_file)
     return artifacts
 
-@pytest.mark.longtests
+
+@pytest.mark.multigpu
+@pytest.mark.slow
 def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str], #cfg, benchmarkTestCase
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
     get_test_archive: callable,
     update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, testCase = benchmark_config
     print(f"Benchmarking the configuration: {testCase}")
-    #print(cfg)
+    # print(cfg)
 
     # Run model with profiler
     reset_peak_memory_stats()
@@ -536,9 +548,9 @@ def test_benchmark_training_cycle(
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
-    benchmarkServer = BenchmarkServer(testCase=testCase) 
+    benchmarkServer = BenchmarkServer(testCase=testCase)
 
-    benchmarks = [benchmarkValue.name for benchmarkValue in  localBenchmarkResults]
+    benchmarks = [benchmarkValue.name for benchmarkValue in localBenchmarkResults]
     if not update_data:
         benchmarkServer.getValues(benchmarks)
 
@@ -555,10 +567,10 @@ def test_benchmark_training_cycle(
         print("Updating metrics on server")
         for localBenchmarkValue in localBenchmarkResults:
             benchmarkServer.setValue(localBenchmarkValue)
-        store_artifacts=True
+        store_artifacts = True
         if store_artifacts:
-            artifacts= getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
-            benchmarkServer.storeArtifacts(artifacts,  localBenchmarkResults[0].commit)
+            artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
+            benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
     else:
         print("Comparing local benchmark results against reference values from the server")
 

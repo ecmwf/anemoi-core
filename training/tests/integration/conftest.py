@@ -197,9 +197,9 @@ def gnn_config(
     return cfg
 
 
-#TODO make graphtransformer_1g the default test case, and only run that
-#TODO add small o48 test case which can be run anywhere
-#TODO change it so i can inherit from stretched_config etc. rather then rewriting
+# TODO make graphtransformer_1g the default test case, and only run that
+# TODO add small o48 test case which can be run anywhere
+# TODO change it so i can inherit from stretched_config etc. rather then rewriting
 @pytest.fixture(
     params=[ #selects different test cases
         "graphtransformer_n320_1g",
@@ -215,7 +215,7 @@ def benchmark_config(
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
 
-    #change configs based on test case
+    # change configs based on test case
     if test_case == "graphtransformer_n320_1g":
         overrides = ["model=graphtransformer", "graph=multi_scale"]
         top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark/graphtransformer.yaml"
