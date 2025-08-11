@@ -1,0 +1,63 @@
+# Modifications for the basic template "config.yaml"
+# TODO currentl have a hidden grid of 5 when runnign GT, change to 6 on n320
+hardware:
+  files:
+          #dataset:  aifs-ea-an-oper-0001-mars-n320-2020-2020-6h-v6.zarr #q50
+    dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr #q50
+  paths:
+    data:  /home/mlx/ai-ml/datasets/
+
+dataloader:
+  num_workers:
+    training: 6
+    validation: 6
+  limit_batches:
+    training: 10
+    validation: 1
+  training:
+    end: 2020-11-30
+  validation:
+    start: 2020-12-31
+  batch_size:
+    training: 1
+    validation: 1
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        resolution: 6
+
+model:
+  encoder:
+    num_chunks: 16
+  decoder:
+    num_chunks: 16
+  processor:
+    num_chunks: 2
+  num_channels: 256
+
+training:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+
+diagnostics:
+  enable_checkpointing: False
+  print_memory_summary: true
+  benchmark_profiler:
+    memory:
+      enabled: true
+    time:
+      verbose: true
+    model_summary:
+      enabled: false
+    snapshot:
+      enabled: true
+    system:
+      enabled: false #some error about metric key in extract_gpu_metrics being invalid
+  log:
+    mlflow:
+      enabled: true
+      offline: True
+      tracking_uri: ""
+    interval: 1

@@ -22,15 +22,20 @@ dataloader:
     training: 1
     validation: 1
 
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        resolution: 6
 
 model:
   encoder:
     num_chunks: 16
   decoder:
-    num_chunks: 16
+    num_chunks: 32
   processor:
     num_chunks: 2
-  num_channels: 256 #32-2-32 didnt fit for 1024 1g
+  num_channels: 512 #32-2-32 didnt fit for 1024 1g
 
 training:
   max_epochs: 1
