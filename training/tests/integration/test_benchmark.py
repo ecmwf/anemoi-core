@@ -188,7 +188,10 @@ class BenchmarkServer:
         for benchmark in self.benchmarkValues.values():
             string += str(benchmark) + "\n"
         string += "-" * 20 + "\n"
-        string += f"(Server location: '{self.store}')\n"
+        if self.local:
+            string += f"(Server location: '{self.store}')\n"
+        else:
+            string += f"(Server location: '{self.remote_host}:{self.store}')\n"
         return string
 
     # trys to read a row from a csv stored on a server and create a benchmark value from that
@@ -489,7 +492,6 @@ def getLocalBenchmarkResults(profilerPath:str) -> list[BenchmarkValue]:
 
 # Runs after a benchmark
 # returns a list of files produced by the profiler
-# TODO tidy this function
 def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
     import csv
     import glob
@@ -575,3 +577,4 @@ def test_benchmark_training_cycle(
             on_test_fail(f"The following tests failed: {failedTests}")
 
 #TODO increase benchmark size and add multigpu
+#TODO change hidden res for GT
