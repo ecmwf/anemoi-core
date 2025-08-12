@@ -192,6 +192,7 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     # Parent UUID callback
     # Check variable order callback
+    # Register Migrations callback
     trainer_callbacks.extend(
         (
             ParentUUIDCallback(config),
