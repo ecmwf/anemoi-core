@@ -58,6 +58,16 @@ You can check which migration will be executed with a dry-run, without updating 
 
    anemoi-models migration sync --dry-run PATH_TO_CKPT
 
+***********************************
+ Migrating the inference checkpoint
+***********************************
+
+You cannot migrate the inference checkpoint directly for now. You must first migrate the training
+checkpoint, then re-generate the inference checkpoint with:
+
+.. code:: bash
+
+   anemoi-training checkpoint inference -i migrated-last.ckpt -o migrated-inference-last.ckpt
 
 ********************************
  Migrating to a specific version

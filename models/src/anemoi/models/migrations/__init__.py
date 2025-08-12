@@ -356,6 +356,11 @@ def _load_ckpt(path: str | PathLike, replace_attrs: list[str] | bool = False) ->
 
     pickle_module = get_unpickler(replace_attrs)
     ckpt = torch.load(path, map_location="cpu", pickle_module=pickle_module, weights_only=False)
+    if "pytorch-lightning_version" not in ckpt:
+        raise ValueError(
+            "You can only migrate training checkpoint. If you need a migrated inference checkpoint, fisrt "
+            "migrate the training checkpoint, then regenerate the inference one with `anemoi-training checkpoint inference`."
+        )
     # TODO: remove this. Only for testing
     if _ckpt_migration_key not in ckpt:
         ckpt[_ckpt_migration_key] = []

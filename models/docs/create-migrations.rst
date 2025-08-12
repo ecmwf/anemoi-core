@@ -51,6 +51,23 @@ must return a checkpoint compatible with your changes.
    is to allow future changes in the API but still support older
    migration scripts.
 
+Migrations are only done for training checkpoints. Users are expected to
+re-generate the inference checkpoint once the training checkpoint is
+migrated.
+
+If you migration is only related to a specific architecture, you should
+add a guard in the migration script. For example, related to a specific
+processor class:
+
+.. code:: python
+
+   def migrate(ckpt: CkptType) -> CkptType:
+      """Migrate the checkpoint"""
+      if ckpt["hyper_parameters"]["config"].model.processor._target_ == "anemoi.models.layers.processor.TransformerProcessor":
+          # Do stuff
+          ...
+      return ckpt
+
 **********
  Rollback
 **********
