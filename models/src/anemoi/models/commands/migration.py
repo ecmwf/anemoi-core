@@ -15,10 +15,12 @@ from datetime import datetime
 from pathlib import Path
 from shutil import copy2
 
+from jinja2 import Environment
 from rich.console import Console
 
 from .. import __version__ as version_anemoi_models
 from ..migrations import LOGGER as migrator_logger
+from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
 from ..migrations import MigrationOp
 from ..migrations import Migrator
@@ -38,6 +40,98 @@ def maybe_plural(count: int, text: str) -> str:
     if count >= 2:
         return text + "s"
     return text
+
+
+migration_template_str = """\
+# (C) Copyright 2025 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+{% for import in imports %}
+{{import}}
+{% endfor %}
+
+metadata = MigrationMetadata(
+    versions={
+        "migration": "{{migration_version}}",
+        "anemoi-models": "{{anemoi_models_version}}",
+    },
+    {% if final %}
+    final=True,
+    {% endif %}
+)
+{% if not final %}
+
+
+{% if with_setup %}
+def migrate_setup(context: MigrationContext) -> None:
+    \"""
+    Migrate setup callback to be run before loading the checkpoint.
+
+    Parameters
+    ----------
+    context : MigrationContext
+       A MigrationContext instance
+    \"""
+
+
+{% endif %}
+def migrate(ckpt: CkptType) -> CkptType:
+    \"""
+    Migrate the checkpoint.
+
+
+    Parameters
+    ----------
+    ckpt : CkptType
+        The checkpoint dict.
+
+    Returns
+    -------
+    CkptType
+        The migrated checkpoint dict.
+    \"""
+    return ckpt
+{% if not no_rollback %}
+
+
+{% if with_setup %}
+def rollback_setup(context: MigrationContext) -> None:
+    \"""
+    Rollback setup callback to be run before loading the checkpoint.
+
+    Parameters
+    ----------
+    context : MigrationContext
+       A MigrationContext instance
+    \"""
+
+
+{% endif %}
+def rollback(ckpt: CkptType) -> CkptType:
+    \"""
+    Rollback the checkpoint.
+
+
+    Parameters
+    ----------
+    ckpt : CkptType
+        The checkpoint dict.
+
+    Returns
+    -------
+    CkptType
+        The rollbacked checkpoint dict.
+    \"""
+    return ckpt
+{% endif %}
+{% endif %}
+"""
 
 
 class Migration(Command):
@@ -119,144 +213,35 @@ class Migration(Command):
         args : Namespace
             The arguments passed to the command.
         """
-        from textwrap import dedent
 
         if args.final and args.with_setup:
             raise ValueError("Final migration cannot have setup callbacks.")
 
         name = _get_migration_name(args.name)
 
-        imports_items: list[str] = []
+        imports: list[str] = []
         if not args.final:
-            imports_items.append("from anemoi.models.migrations import CkptType")
+            imports.append("from anemoi.models.migrations import CkptType")
         if args.with_setup:
-            imports_items.append("from anemoi.models.migrations import MigrationContext")
-        imports_items.append("from anemoi.models.migrations import MigrationMetadata")
-        imports = "\n".join(imports_items)
+            imports.append("from anemoi.models.migrations import MigrationContext")
+        imports.append("from anemoi.models.migrations import MigrationMetadata")
+        template = Environment(trim_blocks=True, lstrip_blocks=True).from_string(migration_template_str)
 
-        with open(args.path / name, "w") as f:
+        with open(MIGRATION_PATH / name, "w") as f:
             f.write(
-                dedent(
-                    """\
-                    # (C) Copyright 2025 Anemoi contributors.
-                    #
-                    # This software is licensed under the terms of the Apache Licence Version 2.0
-                    # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-                    #
-                    # In applying this licence, ECMWF does not waive the privileges and immunities
-                    # granted to it by virtue of its status as an intergovernmental organisation
-                    # nor does it submit to any jurisdiction.\n
-                    """
-                )
-            )
-            f.write(imports)
-
-            f.write(
-                dedent(
-                    f"""
-
-                    metadata = MigrationMetadata(
-                        versions={{
-                            "migration": "1.0.0",
-                            "anemoi-models": "{version_anemoi_models}",
-                        }}"""
-                )
-            )
-            if args.final:
-                f.write(f",\n    final={args.final},")
-            f.write(
-                dedent(
-                    """
-                    )
-                """
+                template.render(
+                    {
+                        "migration_version": "1.0.0",
+                        "anemoi_models_version": version_anemoi_models,
+                        "imports": imports,
+                        "final": args.final,
+                        "no_rollback": args.no_rollback,
+                        "with_setup": args.with_setup,
+                    }
                 )
             )
 
-            if args.with_setup:
-                f.write(
-                    dedent(
-                        """
-
-                        def migrate_setup(context: MigrationContext) -> None:
-                            \"\"\"
-                            Migrate setup callback to be run before loading the checkpoint.
-
-                            Parameters
-                            ----------
-                            context : MigrationContext
-                               A MigrationContext instance
-                            \"\"\"
-                        """
-                    )
-                )
-
-            if not args.final:
-                f.write(
-                    dedent(
-                        """
-
-                        def migrate(ckpt: CkptType) -> CkptType:
-                            \"\"\"
-                            Migrate the checkpoint.
-
-
-                            Parameters
-                            ----------
-                            ckpt : CkptType
-                                The checkpoint dict.
-
-                            Returns
-                            -------
-                            CkptType
-                                The migrated checkpoint dict.
-                            \"\"\"
-                            return ckpt
-                    """
-                    )
-                )
-            if not args.no_rollback and args.with_setup:
-                f.write(
-                    dedent(
-                        """
-
-                        def rollback_setup(context: MigrationContext) -> None:
-                            \"\"\"
-                            Rollback setup callback to be run before loading the checkpoint.
-
-                            Parameters
-                            ----------
-                            context : MigrationContext
-                               A MigrationContext instance
-                            \"\"\"
-                        """
-                    )
-                )
-            if not args.no_rollback and not args.final:
-                f.write(
-                    dedent(
-                        """
-
-                        def rollback(ckpt: CkptType) -> CkptType:
-                            \"\"\"
-                            Rollback the checkpoint.
-
-
-                            Parameters
-                            ----------
-                            ckpt : CkptType
-                                The checkpoint dict.
-
-                            Returns
-                            -------
-                            CkptType
-                                The rollbacked checkpoint dict.
-                            \"\"\"
-                            return ckpt
-                    """
-                    )
-                )
-
-        print(f"Created migration {args.path}/{name}")
+        print(f"Created migration {MIGRATION_PATH}/{name}")
 
     def run_sync(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
