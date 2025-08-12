@@ -15,6 +15,7 @@ from typing import Union
 
 import einops
 import torch
+from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -23,7 +24,6 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.diffusion import SinusoidalEmbeddings
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -48,11 +48,13 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         model_config_local = DotDict(model_config) if isinstance(model_config, dict) else model_config
 
         diffusion_config = model_config_local.model.model.diffusion
-        self.noise_channels = diffusion_config.noise.noise_channels
-        self.noise_cond_dim = diffusion_config.noise.noise_cond_dim
-        self.sigma_max = diffusion_config.noise.sigma_max
-        self.sigma_min = diffusion_config.noise.sigma_min
-        self.sigma_data = diffusion_config.noise.sigma_data
+        self.noise_channels = diffusion_config.noise_channels
+        self.noise_cond_dim = diffusion_config.noise_cond_dim
+        self.sigma_data = diffusion_config.sigma_data
+        self.sigma_max = diffusion_config.noise_scheduler.sigma_max
+        self.sigma_min = diffusion_config.noise_scheduler.sigma_min
+        self.noise_scheduler = diffusion_config.noise_scheduler
+        self.inference_defaults = diffusion_config.inference_defaults
 
         super().__init__(
             model_config=model_config,
@@ -62,18 +64,19 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             truncation_data=truncation_data,
         )
 
-        self.get_noise_schedule = diffusion_samplers.get_noise_schedule
-
-        self.noise_embedder = SinusoidalEmbeddings(num_channels=self.noise_channels, max_period=1000)
-
-        self.noise_cond_mlp = nn.Sequential()
-        self.noise_cond_mlp.add_module("linear1_no_gradscaling", nn.Linear(self.noise_channels, self.noise_channels))
-        self.noise_cond_mlp.add_module("activation", nn.SiLU())
-        self.noise_cond_mlp.add_module("linear2_no_gradscaling", nn.Linear(self.noise_channels, self.noise_cond_dim))
+        self.noise_embedder = instantiate(diffusion_config.noise_embedder)
+        self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
     def _calculate_input_dim(self, model_config):
         base_input_dim = super()._calculate_input_dim(model_config)
         return base_input_dim + self.num_output_channels  # input + noised targets
+
+    def _create_noise_conditioning_mlp(self) -> nn.Sequential:
+        mlp = nn.Sequential()
+        mlp.add_module("linear1_no_gradscaling", nn.Linear(self.noise_channels, self.noise_channels))
+        mlp.add_module("activation", nn.SiLU())
+        mlp.add_module("linear2_no_gradscaling", nn.Linear(self.noise_channels, self.noise_cond_dim))
+        return mlp
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
@@ -453,16 +456,16 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         x: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
-        sampler: str = "heun",
-        num_steps: int = 50,
-        schedule_type: str = "karras",
-        rho: float = 7.0,
+        sampler: str = None,
+        num_steps: int = None,
+        schedule_type: str = None,
+        rho: float = None,
         sigma_max: float = None,
         sigma_min: float = None,
-        S_churn: float = 0.0,
-        S_min: float = 0.0,
-        S_max: float = float("inf"),
-        S_noise: float = 1.0,
+        S_churn: float = None,
+        S_min: float = None,
+        S_max: float = None,
+        S_noise: float = None,
         **kwargs,
     ) -> torch.Tensor:
         """Sample from the diffusion model.
@@ -494,48 +497,70 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Sampled output with shape (batch, ensemble, grid, vars)
         """
 
-        # Generate noise schedule
-        assert sigma_max is not None and sigma_min is not None, "sigma_max and sigma_min are required."
-        sigmas = self.get_noise_schedule(
-            num_steps=num_steps,
-            sigma_max=sigma_max,
-            sigma_min=sigma_min,
-            schedule_type=schedule_type,
-            rho=rho,
-            device=x.device,
-            dtype_compute=torch.float64,
-        )
+        # Get num_steps from inference defaults if not provided
+        if num_steps is None:
+            num_steps = self.inference_defaults.num_steps
+
+        # Build noise scheduler config dict from all inference defaults
+        noise_scheduler_config = dict(vars(self.inference_defaults.noise_scheduler))
+
+        # Remove schedule_type (used for class selection, not constructor)
+        actual_schedule_type = noise_scheduler_config.pop("schedule_type")
+        if schedule_type is not None:
+            actual_schedule_type = schedule_type
+
+        # Override config with provided parameters
+        if sigma_max is not None:
+            noise_scheduler_config["sigma_max"] = sigma_max
+        if sigma_min is not None:
+            noise_scheduler_config["sigma_min"] = sigma_min
+        if rho is not None:
+            noise_scheduler_config["rho"] = rho
+
+        if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
+            raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
+
+        scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
+        scheduler = scheduler_cls(**noise_scheduler_config)
+        sigmas = scheduler.get_schedule(num_steps, x.device, torch.float64)
 
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
         shape = (batch_size, ensemble_size, grid_size, self.num_output_channels)
         y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
 
-        if sampler == "heun":
-            return diffusion_samplers.edm_heun_sampler(
-                x,
-                y_init,
-                sigmas,
-                self.fwd_with_preconditioning,
-                model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
-                S_churn=S_churn,
-                S_min=S_min,
-                S_max=S_max,
-                S_noise=S_noise,
-                dtype=sigmas.dtype,
-            )
-        elif sampler == "dpmpp_2m":
-            return diffusion_samplers.dpmpp_2m_sampler(
-                x,
-                y_init.to(x.dtype),
-                sigmas.to(x.dtype),
-                self.fwd_with_preconditioning,
-                model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
-            )
-        else:
-            raise ValueError(f"Unknown sampler: {sampler}")
+        # Build diffusion sampler config dict from all inference defaults
+        diffusion_sampler_config = dict(vars(self.inference_defaults.diffusion_sampler))
+
+        # Remove sampler name (used for class selection, not constructor)
+        actual_sampler = diffusion_sampler_config.pop("sampler")
+        if sampler is not None:
+            actual_sampler = sampler
+
+        # Override config with provided parameters
+        if S_churn is not None:
+            diffusion_sampler_config["S_churn"] = S_churn
+        if S_min is not None:
+            diffusion_sampler_config["S_min"] = S_min
+        if S_max is not None:
+            diffusion_sampler_config["S_max"] = S_max
+        if S_noise is not None:
+            diffusion_sampler_config["S_noise"] = S_noise
+
+        if actual_sampler not in diffusion_samplers.DIFFUSION_SAMPLERS:
+            raise ValueError(f"Unknown sampler: {actual_sampler}")
+
+        sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
+        sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
+
+        return sampler_instance.sample(
+            x,
+            y_init,
+            sigmas,
+            self.fwd_with_preconditioning,
+            model_comm_group,
+            grid_shard_shapes=grid_shard_shapes,
+        )
 
 
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
@@ -708,7 +733,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def _before_sampling(
         self,
         batch: torch.Tensor,
-        pre_processors: nn.Module,
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
@@ -757,7 +781,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         gather_out: bool = True,
-        pre_processors_tendencies: Optional[nn.Module] = None,
         post_processors_tendencies: Optional[nn.Module] = None,
         **kwargs,
     ) -> torch.Tensor:

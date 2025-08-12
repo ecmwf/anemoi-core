@@ -56,7 +56,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             supporting_arrays=supporting_arrays,
         )
 
-        self.rho = config.model.model.diffusion.noise.rho
+        self.rho = config.model.model.diffusion.noise_scheduler.rho
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         return self.model.model.fwd_with_preconditioning(

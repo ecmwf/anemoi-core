@@ -13,8 +13,8 @@ import pytest
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.samplers.diffusion_samplers import dpmpp_2m_sampler
-from anemoi.models.samplers.diffusion_samplers import edm_heun_sampler
+from anemoi.models.samplers.diffusion_samplers import DPMpp2MSampler
+from anemoi.models.samplers.diffusion_samplers import EDMHeunSampler
 
 
 class MockDenoisingFunction:
@@ -87,7 +87,8 @@ class TestEDMHeunSampler:
         """Test basic functionality of EDM Heun sampler."""
         x, y, sigmas = sample_data
 
-        result = edm_heun_sampler(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
+        sampler = EDMHeunSampler()
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
         # Check output shape
         assert result.shape == y.shape
@@ -114,7 +115,8 @@ class TestEDMHeunSampler:
 
             mock_denoising_fn.call_count = 0  # Reset counter
 
-            result = edm_heun_sampler(x, y, sigmas, mock_denoising_fn)
+            sampler = EDMHeunSampler()
+            result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
             assert result.shape == y.shape
             assert torch.isfinite(result).all()
@@ -128,7 +130,8 @@ class TestEDMHeunSampler:
 
         mock_denoising_fn.call_count = 0
 
-        result = edm_heun_sampler(x, y, sigmas, mock_denoising_fn)
+        sampler = EDMHeunSampler()
+        result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
         assert result.shape == y.shape
         # For Heun method, we expect roughly 2 calls per step (first order + correction)
@@ -143,7 +146,8 @@ class TestEDMHeunSampler:
         x, y, sigmas = sample_data
         mock_denoising_fn = MockDenoisingFunction(deterministic=True)
 
-        result = edm_heun_sampler(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn, S_churn=S_churn)
+        sampler = EDMHeunSampler(S_churn=S_churn)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
         assert result.shape == y.shape
         assert torch.isfinite(result).all()
@@ -154,9 +158,8 @@ class TestEDMHeunSampler:
         x, y, sigmas = sample_data
         mock_denoising_fn = MockDenoisingFunction(deterministic=True)
 
-        result = edm_heun_sampler(
-            x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn, S_churn=0.2, S_min=S_min, S_max=S_max
-        )
+        sampler = EDMHeunSampler(S_churn=0.2, S_min=S_min, S_max=S_max)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
         assert result.shape == y.shape
         assert torch.isfinite(result).all()
@@ -167,7 +170,8 @@ class TestEDMHeunSampler:
         x, y, sigmas = sample_data
         mock_denoising_fn = MockDenoisingFunction(deterministic=True)
 
-        result = edm_heun_sampler(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn, S_noise=S_noise)
+        sampler = EDMHeunSampler(S_noise=S_noise)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
         assert result.shape == y.shape
         assert torch.isfinite(result).all()
@@ -178,7 +182,8 @@ class TestEDMHeunSampler:
         x, y, sigmas = sample_data
         mock_denoising_fn = MockDenoisingFunction(deterministic=True)
 
-        result = edm_heun_sampler(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn, dtype=dtype)
+        sampler = EDMHeunSampler(dtype=dtype)
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
         assert result.shape == y.shape
         assert torch.isfinite(result).all()
@@ -190,11 +195,13 @@ class TestEDMHeunSampler:
         # Run twice with same seed
         torch.manual_seed(42)
         mock_fn1 = MockDenoisingFunction(deterministic=True)
-        result1 = edm_heun_sampler(x, y.clone(), sigmas, mock_fn1, S_churn=0.0)
+        sampler1 = EDMHeunSampler(S_churn=0.0)
+        result1 = sampler1.sample(x, y.clone(), sigmas, mock_fn1)
 
         torch.manual_seed(42)
         mock_fn2 = MockDenoisingFunction(deterministic=True)
-        result2 = edm_heun_sampler(x, y.clone(), sigmas, mock_fn2, S_churn=0.0)
+        sampler2 = EDMHeunSampler(S_churn=0.0)
+        result2 = sampler2.sample(x, y.clone(), sigmas, mock_fn2)
 
         assert torch.allclose(result1, result2, atol=1e-6)
 
@@ -206,7 +213,8 @@ class TestEDMHeunSampler:
         # Store initial noise level
         initial_norm = torch.norm(y)
 
-        result = edm_heun_sampler(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
+        sampler = EDMHeunSampler()
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
         final_norm = torch.norm(result)
 
@@ -245,7 +253,8 @@ class TestDPMPP2MSampler:
         """Test basic functionality of DPM++ 2M sampler."""
         x, y, sigmas = sample_data
 
-        result = dpmpp_2m_sampler(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
+        sampler = DPMpp2MSampler()
+        result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=mock_denoising_fn)
 
         # Check output shape
         assert result.shape == y.shape
@@ -272,7 +281,8 @@ class TestDPMPP2MSampler:
 
             mock_denoising_fn.call_count = 0  # Reset counter
 
-            result = dpmpp_2m_sampler(x, y, sigmas, mock_denoising_fn)
+            sampler = DPMpp2MSampler()
+            result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
             assert result.shape == y.shape
             assert torch.isfinite(result).all()
@@ -286,7 +296,8 @@ class TestDPMPP2MSampler:
 
         mock_denoising_fn.call_count = 0
 
-        result = dpmpp_2m_sampler(x, y, sigmas, mock_denoising_fn)
+        sampler = DPMpp2MSampler()
+        result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
         assert result.shape == y.shape
         # DPM++ 2M should call denoising function once per step
@@ -298,10 +309,12 @@ class TestDPMPP2MSampler:
 
         # Run twice with same inputs
         mock_fn1 = MockDenoisingFunction(deterministic=True)
-        result1 = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn1)
+        sampler1 = DPMpp2MSampler()
+        result1 = sampler1.sample(x, y.clone(), sigmas, mock_fn1)
 
         mock_fn2 = MockDenoisingFunction(deterministic=True)
-        result2 = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn2)
+        sampler2 = DPMpp2MSampler()
+        result2 = sampler2.sample(x, y.clone(), sigmas, mock_fn2)
 
         assert torch.allclose(result1, result2, atol=1e-6)
 
@@ -312,7 +325,8 @@ class TestDPMPP2MSampler:
         # Ensure final sigma is exactly zero
         sigmas[-1] = 0.0
 
-        result = dpmpp_2m_sampler(x, y, sigmas, mock_denoising_fn)
+        sampler = DPMpp2MSampler()
+        result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
         assert result.shape == y.shape
         assert torch.isfinite(result).all()
@@ -325,7 +339,8 @@ class TestDPMPP2MSampler:
         # Create schedule with very small sigmas
         sigmas = torch.tensor([1e-3, 1e-4, 1e-5, 0.0])
 
-        result = dpmpp_2m_sampler(x, y, sigmas, mock_denoising_fn)
+        sampler = DPMpp2MSampler()
+        result = sampler.sample(x, y, sigmas, mock_denoising_fn)
 
         assert result.shape == y.shape
         assert torch.isfinite(result).all()
@@ -357,9 +372,11 @@ class TestSamplerComparison:
         mock_fn1 = MockDenoisingFunction(deterministic=True, noise_reduction_factor=0.8)
         mock_fn2 = MockDenoisingFunction(deterministic=True, noise_reduction_factor=0.8)
 
-        result_heun = edm_heun_sampler(x, y.clone(), sigmas, mock_fn1, S_churn=0.0)
+        sampler_heun = EDMHeunSampler(S_churn=0.0)
+        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
 
-        result_dpmpp = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn2)
+        sampler_dpmpp = DPMpp2MSampler()
+        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
 
         # Convert to same dtype for comparison
         result_heun = result_heun.to(result_dpmpp.dtype)
@@ -374,8 +391,10 @@ class TestSamplerComparison:
         mock_fn1 = MockDenoisingFunction(deterministic=True)
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
-        result_heun = edm_heun_sampler(x, y.clone(), sigmas, mock_fn1)
-        result_dpmpp = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn2)
+        sampler_heun = EDMHeunSampler()
+        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        sampler_dpmpp = DPMpp2MSampler()
+        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
 
         assert result_heun.shape == result_dpmpp.shape == y.shape
 
@@ -399,8 +418,10 @@ class TestSamplerComparison:
         mock_fn1 = DeviceMockDenoisingFunction(deterministic=True)
         mock_fn2 = DeviceMockDenoisingFunction(deterministic=True)
 
-        result_heun = edm_heun_sampler(x, y.clone(), sigmas, mock_fn1)
-        result_dpmpp = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn2)
+        sampler_heun = EDMHeunSampler()
+        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        sampler_dpmpp = DPMpp2MSampler()
+        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
 
         assert result_heun.device.type == device
         assert result_dpmpp.device.type == device
@@ -420,8 +441,10 @@ class TestSamplerEdgeCases:
         mock_fn1 = MockDenoisingFunction(deterministic=True)
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
-        result_heun = edm_heun_sampler(x, y.clone(), sigmas, mock_fn1)
-        result_dpmpp = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn2)
+        sampler_heun = EDMHeunSampler()
+        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        sampler_dpmpp = DPMpp2MSampler()
+        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
 
         assert result_heun.shape == y.shape
         assert result_dpmpp.shape == y.shape
@@ -438,8 +461,10 @@ class TestSamplerEdgeCases:
         mock_fn1 = MockDenoisingFunction(deterministic=True)
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
-        result_heun = edm_heun_sampler(x, y.clone(), sigmas, mock_fn1)
-        result_dpmpp = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn2)
+        sampler_heun = EDMHeunSampler()
+        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        sampler_dpmpp = DPMpp2MSampler()
+        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
 
         assert result_heun.shape == y.shape
         assert result_dpmpp.shape == y.shape
@@ -456,8 +481,10 @@ class TestSamplerEdgeCases:
         mock_fn1 = MockDenoisingFunction(deterministic=True)
         mock_fn2 = MockDenoisingFunction(deterministic=True)
 
-        result_heun = edm_heun_sampler(x, y.clone(), sigmas, mock_fn1)
-        result_dpmpp = dpmpp_2m_sampler(x, y.clone(), sigmas, mock_fn2)
+        sampler_heun = EDMHeunSampler()
+        result_heun = sampler_heun.sample(x, y.clone(), sigmas, mock_fn1)
+        sampler_dpmpp = DPMpp2MSampler()
+        result_dpmpp = sampler_dpmpp.sample(x, y.clone(), sigmas, mock_fn2)
 
         assert result_heun.shape == y.shape
         assert result_dpmpp.shape == y.shape
