@@ -46,8 +46,8 @@ class NaNMaskScaler(BaseUpdatingScaler):
         loss_weights_mask = None
 
         processors = [model.pre_processors]
-        if self.use_processors_tendencies and hasattr(self.model, "pre_processors_tendencies"):
-            processors.extend(self.model.pre_processors_tendencies)
+        if self.use_processors_tendencies and hasattr(model, "pre_processors_tendencies"):
+            processors.extend(model.pre_processors_tendencies)
 
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processors in processors:

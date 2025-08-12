@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
+
 from .forecaster import GraphForecaster
 
 if TYPE_CHECKING:
@@ -138,8 +140,10 @@ class GraphDiffusionForecaster(GraphForecaster):
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
-            self.define_delayed_scalers()
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
+
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         # start rollout of preprocessed batch
         x = batch[
@@ -348,8 +352,10 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
-            self.define_delayed_scalers()
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
+
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         msg = (
             "Batch length not sufficient for requested multi_step length!"
