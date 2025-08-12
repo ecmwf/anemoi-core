@@ -19,7 +19,6 @@ from rich.console import Console
 
 from .. import __version__ as version_anemoi_models
 from ..migrations import LOGGER as migrator_logger
-from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
 from ..migrations import MigrationOp
 from ..migrations import Migrator
@@ -56,9 +55,6 @@ class Migration(Command):
         help_create = "Create a new migration script."
         create_parser = subparsers.add_parser("create", help=help_create, description=help_create)
         create_parser.add_argument("name", help="Name of the migration.")
-        create_parser.add_argument(
-            "--path", "-p", type=Path, default=MIGRATION_PATH, help="Path to the migration folder."
-        )
         create_parser.add_argument(
             "--final",
             "-f",
