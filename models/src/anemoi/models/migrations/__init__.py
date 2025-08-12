@@ -386,6 +386,7 @@ class Migrator:
         self._grouped_migrations: list[list[Migration]] = []
         current_group: list[Migration] = []
         for migration in migrations:
+            LOGGER.info("Loading migration %s", migration.name)
             if migration.metadata.final:
                 self._grouped_migrations.append(current_group)
                 current_group = []
