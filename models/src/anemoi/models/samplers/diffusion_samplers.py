@@ -224,9 +224,6 @@ class EDMHeunSampler(DiffusionSampler):
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
 
-        # Heun sampler keeps original dtypes (no conversion needed)
-        # y and sigmas are already in the right dtype
-
         batch_size, ensemble_size = x.shape[0], x.shape[2]
         num_steps = len(sigmas) - 1
 
