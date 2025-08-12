@@ -17,7 +17,11 @@ To inspect the registered versions in the checkpoint, run:
 
    anemoi-models migration inspect PATH_TO_CKPT
 
-You can remove colors with the ``--no-color`` argument.
+You can remove colors with the ``--no-color`` argument:
+
+.. code:: bash
+
+   anemoi-models migration inspect PATH_TO_CKPT --no-color
 
 
 ********
@@ -38,7 +42,11 @@ of anemoi-models. If your checkpoint is too old and migrating is not supported, 
 
 Your old checkpoint is still available with the name ``OLD_NAME-v{version}.ckpt``.
 
-You can remove colors with the ``--no-color`` argument.
+You can remove colors with the ``--no-color`` argument:
+
+.. code:: bash
+
+   anemoi-models migration sync PATH_TO_CKPT --no-color
 
 ********
  Dry-run

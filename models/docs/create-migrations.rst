@@ -42,6 +42,15 @@ looks like:
 ``migrate`` receives an old checkpoint (made before your changes), and
 must return a checkpoint compatible with your changes.
 
+.. note::
+
+   The metadata object is automatically generated. You should not change
+   this part of the script.
+
+   In particular, it contains the version of the migration system. This
+   is to allow future changes in the API but still support older
+   migration scripts.
+
 **********
  Rollback
 **********
@@ -120,6 +129,7 @@ before loading the checkpoint:
 
    from anemoi.models.migrations import MigrationContext
 
+
    def migrate_setup(context: MigrationContext) -> None:
        """
        Migrate setup callback to be run before loading the checkpoint.
@@ -129,6 +139,7 @@ before loading the checkpoint:
        context : MigrationContext
           A MigrationContext instance
        """
+
 
    def migrate_rollback(context: MigrationContext) -> None:
        """
@@ -188,9 +199,12 @@ For example, if you renamed the module
        """
        context.move_module("anemoi.models.schemas.data_processor", "anemoi.models.schemas.data")
 
+
    def migrate(ckpt: CkptType) -> CkptType:
        """Migrate the checkpoint"""
+       # This is also executed. You can update the checkpoint if you need to.
        return ckpt
+
 
    def migrate_rollback(context: MigrationContext) -> None:
        """
@@ -202,6 +216,7 @@ For example, if you renamed the module
           A MigrationContext instance
        """
        context.move_module("anemoi.models.schemas.data", "anemoi.models.schemas.data_processor")
+
 
    def rollback(ckpt: CkptType) -> CkptType:
        """Rollbacks the migration"""
@@ -274,9 +289,8 @@ Here is a full example of a migration to fix `PR 433
        context : MigrationContext
           A context object with some utilities
        """
-       context.move_attribute("anemoi.models.schemas.data_processor.DataSchema", "anemoi.training.schemas.data.DataSchema")
        context.move_attribute(
-           "anemoi.training.schemas.data.NormalizerSchema", "anemoi.models.schemas.data_processor.DataSchema"
+           "anemoi.training.schemas.data.NormalizerSchema", "anemoi.models.schemas.data_processor.NormalizerSchema"
        )
 
 
@@ -308,9 +322,8 @@ Here is a full example of a migration to fix `PR 433
        context : MigrationContext
           A context object with some utilities
        """
-       context.move_attribute("anemoi.training.schemas.data.DataSchema", "anemoi.models.schemas.data_processor.DataSchema")
        context.move_attribute(
-           "anemoi.models.schemas.data_processor.DataSchema", "anemoi.training.schemas.data.NormalizerSchema"
+           "anemoi.models.schemas.data_processor.NormalizerSchema", "anemoi.training.schemas.data.NormalizerSchema"
        )
 
 
