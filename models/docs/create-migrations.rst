@@ -31,12 +31,39 @@ looks like:
 
 
    def migrate(ckpt: CkptType) -> CkptType:
-       """Migrate the checkpoint"""
+       """
+       Migrate the checkpoint.
+
+
+       Parameters
+       ----------
+       ckpt : CkptType
+           The checkpoint dict.
+
+       Returns
+       -------
+       CkptType
+           The migrated checkpoint dict.
+       """
        return ckpt
 
 
    def rollback(ckpt: CkptType) -> CkptType:
-       """Rollbacks the migration"""
+       """
+       Rollback the checkpoint.
+
+
+       Parameters
+       ----------
+       ckpt : CkptType
+           The checkpoint dict.
+
+       Returns
+       -------
+       CkptType
+           The rollbacked checkpoint dict.
+       """
+
        return ckpt
 
 ``migrate`` receives an old checkpoint (made before your changes), and
@@ -62,7 +89,6 @@ processor class:
 .. code:: python
 
    def migrate(ckpt: CkptType) -> CkptType:
-      """Migrate the checkpoint"""
       if ckpt["hyper_parameters"]["config"].model.processor._target_ == "anemoi.models.layers.processor.TransformerProcessor":
           # Do stuff
           ...
@@ -117,13 +143,39 @@ migration:
 
 
    def migrate(ckpt: CkptType) -> CkptType:
-       """Migrate the checkpoint"""
+       """
+       Migrate the checkpoint.
+
+
+       Parameters
+       ----------
+       ckpt : CkptType
+           The checkpoint dict.
+
+       Returns
+       -------
+       CkptType
+           The migrated checkpoint dict.
+       """
        ckpt["state_dict"]["y"] = ckpt["state_dict"].pop("x")
        return ckpt
 
 
    def rollback(ckpt: CkptType) -> CkptType:
-       """Rollbacks the migration"""
+       """
+       Rollback the checkpoint.
+
+
+       Parameters
+       ----------
+       ckpt : CkptType
+           The checkpoint dict.
+
+       Returns
+       -------
+       CkptType
+           The rollbacked checkpoint dict.
+       """
        ckpt["state_dict"]["x"] = ckpt["state_dict"].pop("y")
        return ckpt
 
@@ -158,9 +210,9 @@ before loading the checkpoint:
        """
 
 
-   def migrate_rollback(context: MigrationContext) -> None:
+   def rollback_setup(context: MigrationContext) -> None:
        """
-       Migrate setup callback to be run before loading the checkpoint.
+       Rollback setup callback to be run before loading the checkpoint.
 
        Parameters
        ----------
@@ -218,14 +270,27 @@ For example, if you renamed the module
 
 
    def migrate(ckpt: CkptType) -> CkptType:
-       """Migrate the checkpoint"""
+       """
+       Migrate the checkpoint.
+
+
+       Parameters
+       ----------
+       ckpt : CkptType
+           The checkpoint dict.
+
+       Returns
+       -------
+       CkptType
+           The migrated checkpoint dict.
+       """
        # This is also executed. You can update the checkpoint if you need to.
        return ckpt
 
 
-   def migrate_rollback(context: MigrationContext) -> None:
+   def rollback_setup(context: MigrationContext) -> None:
        """
-       Migrate setup callback to be run before loading the checkpoint.
+       Rollback setup callback to be run before loading the checkpoint.
 
        Parameters
        ----------
@@ -236,7 +301,20 @@ For example, if you renamed the module
 
 
    def rollback(ckpt: CkptType) -> CkptType:
-       """Rollbacks the migration"""
+       """
+       Rollback the checkpoint.
+
+
+       Parameters
+       ----------
+       ckpt : CkptType
+           The checkpoint dict.
+
+       Returns
+       -------
+       CkptType
+           The rollbacked checkpoint dict.
+       """
        return ckpt
 
 Similarly, if you moved the class ``NormalizerSchema`` from
@@ -256,7 +334,7 @@ like:
           A MigrationContext instance
        """
        context.move_attribute(
-           "anemoi.training.schemas.data.NormalizerSchema", "anemoi.models.schemas.data_processor.DataSchema"
+           "anemoi.training.schemas.data.NormalizerSchema", "anemoi.models.schemas.data_processor.NormalizerSchema"
        )
 
 .. note::
@@ -298,13 +376,12 @@ Here is a full example of a migration to fix `PR 433
 
    def migrate_setup(context: MigrationContext) -> None:
        """
-       Setup function ran before loading the checkpoint. This can be used to move objects
-       around.
+       Migrate setup callback to be run before loading the checkpoint.
 
        Parameters
        ----------
        context : MigrationContext
-          A context object with some utilities
+          A MigrationContext instance
        """
        context.move_attribute(
            "anemoi.training.schemas.data.NormalizerSchema", "anemoi.models.schemas.data_processor.NormalizerSchema"
@@ -313,31 +390,30 @@ Here is a full example of a migration to fix `PR 433
 
    def migrate(ckpt: CkptType) -> CkptType:
        """
+       Migrate the checkpoint.
 
 
        Parameters
        ----------
        ckpt : CkptType
-
+           The checkpoint dict.
 
        Returns
        -------
        CkptType
-
+           The migrated checkpoint dict.
        """
-       """Migrate the checkpoint"""
        return ckpt
 
 
    def rollback_setup(context: MigrationContext) -> None:
        """
-       Setup function ran before loading the checkpoint. This can be used to move objects
-       around.
+       Rollback setup callback to be run before loading the checkpoint.
 
        Parameters
        ----------
        context : MigrationContext
-          A context object with some utilities
+          A MigrationContext instance
        """
        context.move_attribute(
            "anemoi.models.schemas.data_processor.NormalizerSchema", "anemoi.training.schemas.data.NormalizerSchema"
@@ -345,5 +421,18 @@ Here is a full example of a migration to fix `PR 433
 
 
    def rollback(ckpt: CkptType) -> CkptType:
-       """Rollbacks the migration"""
+       """
+       Rollback the checkpoint.
+
+
+       Parameters
+       ----------
+       ckpt : CkptType
+           The checkpoint dict.
+
+       Returns
+       -------
+       CkptType
+           The rollbacked checkpoint dict.
+       """
        return ckpt
