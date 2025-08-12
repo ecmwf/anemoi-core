@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from anemoi.models.migrations import SaveCkpt
 from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import SaveCkpt
 
 
 @pytest.fixture(scope="module")
