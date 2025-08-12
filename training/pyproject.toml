@@ -43,7 +43,7 @@ dependencies = [
   "anemoi-graphs>=0.5.2",
   "anemoi-models>=0.8",
   "anemoi-transform>=0.1.11",
-  "anemoi-utils[provenance,mlflow]>=0.4.28",
+  "anemoi-utils[provenance,mlflow]>=0.4.32",
   "datashader>=0.16.3,<0.17; python_version<'3.10'",
   "datashader>=0.17; python_version>='3.10'",
   "einops>=0.6.1",
@@ -86,7 +86,7 @@ optional-dependencies.profile = [
   "rich>=13.6",
   "tabulate>=0.9",
 ]
-optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
+optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3", "pytest-skip-slow>=0.0.5" ]
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"

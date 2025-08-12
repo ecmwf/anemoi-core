@@ -580,7 +580,7 @@ def plot_flat_sample(
         norms[1] = norm
         norms[2] = norm
 
-    if sum(input_) != 0:
+    if np.nansum(input_) != 0:
         # prognostic fields: plot input and increment as well
         data[0] = input_
         data[4] = pred - input_
