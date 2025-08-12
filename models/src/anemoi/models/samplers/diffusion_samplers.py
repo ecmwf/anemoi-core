@@ -24,14 +24,14 @@ DenoisingFunction = Callable[
 class NoiseScheduler(ABC):
     """Base class for noise schedulers."""
 
-    def __init__(self, sigma_max: float, sigma_min: float):
+    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int):
         self.sigma_max = sigma_max
         self.sigma_min = sigma_min
+        self.num_steps = num_steps
 
     @abstractmethod
     def get_schedule(
         self,
-        num_steps: int,
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
@@ -40,8 +40,6 @@ class NoiseScheduler(ABC):
 
         Parameters
         ----------
-        num_steps : int
-            Number of sampling steps
         device : torch.device
             Device to create tensors on
         dtype_compute : torch.dtype
@@ -60,22 +58,21 @@ class NoiseScheduler(ABC):
 class KarrasScheduler(NoiseScheduler):
     """Karras et al. EDM schedule."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, rho: float = 7.0, **kwargs):
-        super().__init__(sigma_max, sigma_min)
+    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, rho: float = 7.0, **kwargs):
+        super().__init__(sigma_max, sigma_min, num_steps)
         self.rho = rho
 
     def get_schedule(
         self,
-        num_steps: int,
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
     ) -> torch.Tensor:
-        step_indices = torch.arange(num_steps, device=device, dtype=dtype_compute)
+        step_indices = torch.arange(self.num_steps, device=device, dtype=dtype_compute)
         sigmas = (
             self.sigma_max ** (1.0 / self.rho)
             + step_indices
-            / (num_steps - 1.0)
+            / (self.num_steps - 1.0)
             * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
         ) ** self.rho
         # Append 0 for the final step
@@ -86,17 +83,16 @@ class KarrasScheduler(NoiseScheduler):
 class LinearScheduler(NoiseScheduler):
     """Linear schedule in sigma space."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, **kwargs):
-        super().__init__(sigma_max, sigma_min)
+    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, **kwargs):
+        super().__init__(sigma_max, sigma_min, num_steps)
 
     def get_schedule(
         self,
-        num_steps: int,
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
     ) -> torch.Tensor:
-        sigmas = torch.linspace(self.sigma_max, self.sigma_min, num_steps, device=device, dtype=dtype_compute)
+        sigmas = torch.linspace(self.sigma_max, self.sigma_min, self.num_steps, device=device, dtype=dtype_compute)
         # Append 0 for the final step
         sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])
         return sigmas
@@ -105,18 +101,17 @@ class LinearScheduler(NoiseScheduler):
 class CosineScheduler(NoiseScheduler):
     """Cosine schedule."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, s: float = 0.008, **kwargs):
-        super().__init__(sigma_max, sigma_min)
+    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, s: float = 0.008, **kwargs):
+        super().__init__(sigma_max, sigma_min, num_steps)
         self.s = s  # small offset to prevent singularity
 
     def get_schedule(
         self,
-        num_steps: int,
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
     ) -> torch.Tensor:
-        t = torch.linspace(0, 1, num_steps, device=device, dtype=dtype_compute)
+        t = torch.linspace(0, 1, self.num_steps, device=device, dtype=dtype_compute)
         alpha_bar = torch.cos((t + self.s) / (1 + self.s) * torch.pi / 2) ** 2
         sigmas = torch.sqrt((1 - alpha_bar) / alpha_bar) * self.sigma_max
         sigmas = torch.clamp(sigmas, min=self.sigma_min, max=self.sigma_max)
@@ -128,12 +123,11 @@ class CosineScheduler(NoiseScheduler):
 class ExponentialScheduler(NoiseScheduler):
     """Exponential schedule (linear in log space)."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, **kwargs):
-        super().__init__(sigma_max, sigma_min)
+    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, **kwargs):
+        super().__init__(sigma_max, sigma_min, num_steps)
 
     def get_schedule(
         self,
-        num_steps: int,
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
@@ -141,7 +135,7 @@ class ExponentialScheduler(NoiseScheduler):
         log_sigmas = torch.linspace(
             torch.log(torch.tensor(self.sigma_max, dtype=dtype_compute)),
             torch.log(torch.tensor(self.sigma_min, dtype=dtype_compute)),
-            num_steps,
+            self.num_steps,
             device=device,
             dtype=dtype_compute,
         )

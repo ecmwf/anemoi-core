@@ -180,8 +180,12 @@ class DiffusionSchema(BaseModel):
     "Number of channels for noise embedding"
     noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Dimension of noise conditioning"
-    noise_scheduler: dict = Field(default_factory=dict)
-    "Noise scheduler configuration with _target_ for Hydra instantiation"
+    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
+    "Maximum noise level for training"
+    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
+    "Minimum noise level for training"
+    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
+    "Karras schedule parameter for training noise distribution"
     noise_embedder: dict = Field(default_factory=dict)
     "Noise embedder configuration with _target_ for Hydra instantiation"
     inference_defaults: dict = Field(default_factory=dict)

@@ -51,9 +51,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_channels = diffusion_config.noise_channels
         self.noise_cond_dim = diffusion_config.noise_cond_dim
         self.sigma_data = diffusion_config.sigma_data
-        self.sigma_max = diffusion_config.noise_scheduler.sigma_max
-        self.sigma_min = diffusion_config.noise_scheduler.sigma_min
-        self.noise_scheduler = diffusion_config.noise_scheduler
+        self.sigma_max = diffusion_config.sigma_max
+        self.sigma_min = diffusion_config.sigma_min
         self.inference_defaults = diffusion_config.inference_defaults
 
         super().__init__(
@@ -333,16 +332,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
-        sigma_max: Optional[float] = None,
-        sigma_min: Optional[float] = None,
-        rho: float = 7.0,
-        num_steps: int = 20,
-        sampler: str = "heun",
-        schedule_type: str = "karras",
-        S_churn: float = 0.0,
-        S_min: float = 0.0,
-        S_max: float = float("inf"),
-        S_noise: float = 1.0,
+        noise_scheduler_params: Optional[dict] = None,
+        sampler_params: Optional[dict] = None,
         pre_processors_tendencies: Optional[nn.Module] = None,
         post_processors_tendencies: Optional[nn.Module] = None,
         **kwargs,
@@ -363,26 +354,12 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Process group for distributed training
         gather_out : bool
             Whether to gather output tensors across distributed processes
-        sigma_max : Optional[float]
-            Maximum noise level for sampling. If None, uses self.sigma_max
-        sigma_min : Optional[float]
-            Minimum noise level for sampling. If None, uses self.sigma_min
-        rho : float
-            Time discretization parameter, default 7.0
-        num_steps : int
-            Number of sampling steps, default 20
-        sampler : str
-            Sampling method: "heun" or "dpmpp_2m", default "heun"
-        schedule_type : str
-            Type of noise schedule, default "karras"
-        S_churn : float
-            Stochasticity parameter for Heun sampler, default 0.0
-        S_min : float
-            Minimum noise level for stochasticity, default 0.0
-        S_max : float
-            Maximum noise level for stochasticity, default inf
-        S_noise : float
-            Noise multiplier for stochasticity, default 1.0
+        noise_scheduler_params : Optional[dict]
+            Dictionary of noise scheduler parameters (schedule_type, sigma_max, sigma_min, rho, num_steps, etc.)
+            These will override the default values from inference_defaults
+        sampler_params : Optional[dict]
+            Dictionary of sampler parameters (sampler, S_churn, S_min, S_max, S_noise, etc.)
+            These will override the default values from inference_defaults
         pre_processors_tendencies : Optional[nn.Module]
             Pre-processing module for tendencies (used by subclasses)
         post_processors_tendencies : Optional[nn.Module]
@@ -414,25 +391,12 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
             x = before_sampling_data[0]
 
-            if sigma_max is None:
-                sigma_max = self.sigma_max
-            if sigma_min is None:
-                sigma_min = self.sigma_min
-
             out = self.sample(
                 x,
                 model_comm_group,
                 grid_shard_shapes=grid_shard_shapes,
-                sigma_max=sigma_max,
-                sigma_min=sigma_min,
-                rho=rho,
-                num_steps=num_steps,
-                schedule_type=schedule_type,
-                sampler=sampler,
-                S_churn=S_churn,
-                S_min=S_min,
-                S_max=S_max,
-                S_noise=S_noise,
+                noise_scheduler_params=noise_scheduler_params,
+                sampler_params=sampler_params,
                 **kwargs,
             ).to(x.dtype)
 
@@ -456,16 +420,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         x: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
-        sampler: str = None,
-        num_steps: int = None,
-        schedule_type: str = None,
-        rho: float = None,
-        sigma_max: float = None,
-        sigma_min: float = None,
-        S_churn: float = None,
-        S_min: float = None,
-        S_max: float = None,
-        S_noise: float = None,
+        noise_scheduler_params: Optional[dict] = None,
+        sampler_params: Optional[dict] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Sample from the diffusion model.
@@ -476,18 +432,12 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Input conditioning data with shape (batch, time, ensemble, grid, vars)
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
-        sampler : str
-            Sampling method: "heun" or "dpmpp_2m"
-        num_steps : int
-            Number of sampling steps
-        schedule_type : str
-            Type of noise schedule
-        rho : float
-            Time discretization parameter
-        sigma_max : float
-            Maximum noise level
-        sigma_min : float
-            Minimum noise level
+        grid_shard_shapes : Optional[list]
+            Grid shard shapes for distributed processing
+        noise_scheduler_params : Optional[dict]
+            Dictionary of noise scheduler parameters (schedule_type, num_steps, sigma_max, etc.) to override defaults
+        sampler_params : Optional[dict]
+            Dictionary of sampler parameters (sampler, S_churn, S_min, etc.) to override defaults
         **kwargs
             Additional sampler-specific arguments
 
@@ -497,32 +447,22 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Sampled output with shape (batch, ensemble, grid, vars)
         """
 
-        # Get num_steps from inference defaults if not provided
-        if num_steps is None:
-            num_steps = self.inference_defaults.num_steps
-
-        # Build noise scheduler config dict from all inference defaults
+        # Start with inference defaults
         noise_scheduler_config = dict(vars(self.inference_defaults.noise_scheduler))
+
+        # Override config with provided noise scheduler parameters
+        if noise_scheduler_params is not None:
+            noise_scheduler_config.update(noise_scheduler_params)
 
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
-        if schedule_type is not None:
-            actual_schedule_type = schedule_type
-
-        # Override config with provided parameters
-        if sigma_max is not None:
-            noise_scheduler_config["sigma_max"] = sigma_max
-        if sigma_min is not None:
-            noise_scheduler_config["sigma_min"] = sigma_min
-        if rho is not None:
-            noise_scheduler_config["rho"] = rho
 
         if actual_schedule_type not in diffusion_samplers.NOISE_SCHEDULERS:
             raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
 
         scheduler_cls = diffusion_samplers.NOISE_SCHEDULERS[actual_schedule_type]
         scheduler = scheduler_cls(**noise_scheduler_config)
-        sigmas = scheduler.get_schedule(num_steps, x.device, torch.float64)
+        sigmas = scheduler.get_schedule(x.device, torch.float64)
 
         # Initialize output with noise
         batch_size, ensemble_size, grid_size = x.shape[0], x.shape[2], x.shape[-2]
@@ -532,20 +472,12 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(vars(self.inference_defaults.diffusion_sampler))
 
+        # Override config with provided sampler parameters
+        if sampler_params is not None:
+            diffusion_sampler_config.update(sampler_params)
+
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
-        if sampler is not None:
-            actual_sampler = sampler
-
-        # Override config with provided parameters
-        if S_churn is not None:
-            diffusion_sampler_config["S_churn"] = S_churn
-        if S_min is not None:
-            diffusion_sampler_config["S_min"] = S_min
-        if S_max is not None:
-            diffusion_sampler_config["S_max"] = S_max
-        if S_noise is not None:
-            diffusion_sampler_config["S_noise"] = S_noise
 
         if actual_sampler not in diffusion_samplers.DIFFUSION_SAMPLERS:
             raise ValueError(f"Unknown sampler: {actual_sampler}")

@@ -56,7 +56,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             supporting_arrays=supporting_arrays,
         )
 
-        self.rho = config.model.model.diffusion.noise_scheduler.rho
+        self.rho = config.model.model.diffusion.rho
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         return self.model.model.fwd_with_preconditioning(
@@ -162,6 +162,7 @@ class GraphDiffusionForecaster(GraphForecaster):
                 sigma_max=self.model.model.sigma_max,
                 sigma_min=self.model.model.sigma_min,
                 sigma_data=self.model.model.sigma_data,
+                rho=self.rho,
                 device=x.device,
             )
 
@@ -202,13 +203,11 @@ class GraphDiffusionForecaster(GraphForecaster):
         sigma_max: float,
         sigma_min: float,
         sigma_data: float,
+        rho: float,
         device: torch.device,
     ) -> tuple[torch.Tensor]:
         rnd_uniform = torch.rand(shape, device=device)
-        sigma = (
-            sigma_max ** (1.0 / self.rho)
-            + rnd_uniform * (sigma_min ** (1.0 / self.rho) - sigma_max ** (1.0 / self.rho))
-        ) ** self.rho
+        sigma = (sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))) ** rho
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
         return sigma, weight
 
@@ -399,6 +398,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 sigma_max=self.model.model.sigma_max,
                 sigma_min=self.model.model.sigma_min,
                 sigma_data=self.model.model.sigma_data,
+                rho=self.rho,
                 device=x.device,
             )
 

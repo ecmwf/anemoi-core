@@ -10,22 +10,20 @@ model:
     sigma_data: 1.0
     noise_channels: 32
     noise_cond_dim: 16
-    noise_scheduler:
-      _target_: anemoi.models.samplers.diffusion_samplers.KarrasScheduler
-      sigma_max: 100.0
-      sigma_min: 0.02
-      rho: 7.0
+    sigma_max: 100.0
+    sigma_min: 0.02
+    rho: 7.0
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.diffusion.noise_channels}
       max_period: 1000
     inference_defaults:
-      num_steps: 50
       noise_scheduler:
         schedule_type: "karras"
         sigma_max: 100.0
         sigma_min: 0.02
         rho: 7.0
+        num_steps: 50
       diffusion_sampler:
         sampler: "heun"
         S_churn: 0.0
