@@ -365,8 +365,8 @@ class Migration(Command):
             if len(missing_migrations) or len(extra_migrations):
                 console.print("\n[italic]To update your checkpoint, run:[/italic]")
                 console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
-        except IncompatibleCheckpointException:
-            print("No compatible migration available: the checkpoint is too old.")
+        except IncompatibleCheckpointException as e:
+            print(str(e))
 
 
 command = Migration

@@ -439,6 +439,50 @@ class Migrator:
             return True
         return False
 
+    def _get_group(self, ckpt: CkptType) -> int:
+        """Get the compatibility group of the checkpoint. Note that if the compatibility
+        group is not the latest group, then the checkpoint cannot be migrated.
+
+        Parameters
+        ----------
+        ckpt : CkptType
+            The checkpoint to get the group
+
+        Returns
+        -------
+        int
+            Index of the compatibility group
+        """
+        if _ckpt_migration_key not in ckpt:
+            raise ValueError("Checkpoint is not compatible")
+
+        if not len(ckpt[_ckpt_migration_key]):
+            return 0
+        first_migration = ckpt[_ckpt_migration_key][0]["name"]
+        for k, group in enumerate(self._grouped_migrations[1:], 1):
+            if group[0].name == first_migration:
+                return k
+        raise ValueError("Checkpoint is not compatible")
+
+    def get_first_incompatible_version(self, ckpt: CkptType) -> str | None:
+        """Get the first version where you cannot update the checkpoint
+
+        Parameters
+        ----------
+        ckpt : CkptType
+            the checkpoint to check
+
+        Returns
+        -------
+        str | None
+            If None, no incompatibility (you can update to any version). Otherwise,
+            the first anemoi-models version where your checkpoint would not be compatible.
+        """
+        group = self._get_group(ckpt)
+        if group == len(self._grouped_migrations) - 1:
+            return None
+        return self._grouped_migrations[group + 1][0].metadata.versions["anemoi-models"]
+
     def _resolve_operations(
         self, ckpt: CkptType, migrations: list[Migration]
     ) -> tuple[list[Callable[[MigrationContext], None]], list[BaseOp]]:
@@ -556,7 +600,11 @@ class Migrator:
         ckpt = deepcopy(old_ckpt)
 
         if not self.is_compatible_ckpt(ckpt):
-            raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
+            first_incompatible_version = self.get_first_incompatible_version(ckpt)
+            raise IncompatibleCheckpointException(
+                "No compatible migration available: the checkpoint is too old. "
+                f"Use a version of anemoi-models < {first_incompatible_version}."
+            )
         compatible_migrations = self._grouped_migrations[-1]
         setups, ops = self._resolve_operations(ckpt, compatible_migrations)
         replace_attrs: list[str] = []
@@ -592,9 +640,13 @@ class Migrator:
             * The list of missing migrations
             * The list of extra migrations in the checkpoint (to rollback)
         """
-        ckpt = _load_ckpt(path)
+        ckpt = _load_ckpt(path, replace_attrs=True)
         if not self.is_compatible_ckpt(ckpt):
-            raise IncompatibleCheckpointException("This checkpoint is too old and cannot be migrated.")
+            first_incompatible_version = self.get_first_incompatible_version(ckpt)
+            raise IncompatibleCheckpointException(
+                "No compatible migration available: the checkpoint is too old. "
+                f"Use a version of anemoi-models < {first_incompatible_version}."
+            )
         compatible_migrations = self._grouped_migrations[-1]
         registered_migrations = self.registered_migrations(ckpt)
         _, ops = self._resolve_operations(ckpt, compatible_migrations)
