@@ -363,30 +363,24 @@ class ForecasterSchema(BaseTrainingSchema):
     "Rollout configuration."
 
 
-class ForecasterEnsSchema(BaseTrainingSchema):
+class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
     ensemble_size_per_device: PositiveInt = Field(example=1)
     "Number of ensemble member per device"
 
 
-class DiffusionForecasterSchema(BaseTrainingSchema):
+class DiffusionForecasterSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
     "Training objective."
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
 
 
-class DiffusionTendForecasterSchema(BaseTrainingSchema):
+class DiffusionTendForecasterSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
         ...,
         alias="model_task",
     )
     "Training objective."
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
 
 
 class InterpolationSchema(BaseTrainingSchema):

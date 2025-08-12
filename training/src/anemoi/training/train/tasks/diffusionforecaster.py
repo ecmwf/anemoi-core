@@ -425,16 +425,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 # metrics calculation and plotting expects normalised states
                 y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
 
-                # re-construct target state with noised tendency
-                # ruff: noqa: ERA001
-                # y_noised = self.model.model.add_tendency_to_state(
-                #     x_ref[..., self.data_indices.data.input.full],
-                #     tendency_target_noised,
-                #     self.model.post_processors,
-                #     self.model.post_processors_tendencies,
-                #     output_pre_processor=self.model.pre_processors,
-                # )
-
             # compute_loss_metrics
             loss, metrics_next = checkpoint(
                 self.compute_loss_metrics,

@@ -62,7 +62,10 @@ class Model(BaseModel):
     "Model object defined in anemoi.models.model."
     convert_: str = Field("all", alias="_convert_")
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
-    diffusion: Optional[DiffusionSchema] = Field(default=None)
+
+
+class DiffusionModel(Model):
+    diffusion: DiffusionSchema = Field(default=None)
     "Diffusion configuration for diffusion models"
 
 
@@ -170,24 +173,19 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
-class DiffusionNoiseSchema(PydanticBaseModel):
-    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
-    "Time discretization parameter for Karras schedule"
-    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
-    "Maximum noise level"
-    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
-    "Minimum noise level"
+class DiffusionSchema(BaseModel):
     sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Data scaling parameter"
     noise_channels: PositiveInt = Field(default=32, examples=[32])
     "Number of channels for noise embedding"
     noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Dimension of noise conditioning"
-
-
-class DiffusionSchema(PydanticBaseModel):
-    noise: DiffusionNoiseSchema = Field(default_factory=DiffusionNoiseSchema)
-    "Noise configuration for diffusion models"
+    noise_scheduler: dict = Field(default_factory=dict)
+    "Noise scheduler configuration with _target_ for Hydra instantiation"
+    noise_embedder: dict = Field(default_factory=dict)
+    "Noise embedder configuration with _target_ for Hydra instantiation"
+    inference_defaults: dict = Field(default_factory=dict)
+    "Default parameters for inference sampling"
 
 
 class BaseModelSchema(PydanticBaseModel):
@@ -247,17 +245,18 @@ class EnsModelSchema(BaseModelSchema):
 
 
 class DiffusionModelSchema(BaseModelSchema):
-    diffusion: DiffusionSchema = Field(default_factory=DiffusionSchema)
-    "Diffusion configuration for diffusion models"
+    model: DiffusionModel = Field(default_factory=DiffusionModel)
+    "Diffusion Model schema"
 
     @model_validator(mode="after")
     def validate_no_bounding_for_diffusion(self) -> "DiffusionModelSchema":
         if self.bounding:
-            raise ValueError(
+            msg = (
                 "Diffusion models do not support bounding layers. "
                 f"Found {len(self.bounding)} bounding configuration(s). "
                 "Please remove all bounding configurations for diffusion models."
             )
+            raise ValueError(msg)
         return self
 
 
