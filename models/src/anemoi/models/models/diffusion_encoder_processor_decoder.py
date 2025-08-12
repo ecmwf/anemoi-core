@@ -32,7 +32,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
-    """Message passing graph neural network."""
+    """Diffusion Model."""
 
     def __init__(
         self,
@@ -496,7 +496,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
 
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
-    """Message passing graph neural network."""
+    """Diffusion model for tendency prediction."""
 
     def __init__(
         self,
