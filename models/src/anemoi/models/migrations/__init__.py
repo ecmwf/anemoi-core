@@ -368,15 +368,13 @@ def _load_ckpt(path: str | PathLike, replace_attrs: list[str] | bool = False) ->
 
 
 class Migrator:
-    def __init__(self, migrations: Sequence[Migration] | None = None, raise_missing_migrations: bool = True) -> None:
+    def __init__(self, migrations: Sequence[Migration] | None = None) -> None:
         """Create the migrator object
 
         Parameters
         ----------
         migrations : Sequence[Migration] | None, default None
             List of migration to execute. If None, get migrations from the current folder.
-        raise_missing_migrations : bool
-            Whether to check if there are out of order migrations missing from the checkpoint
         """
 
         if migrations is None:
@@ -393,8 +391,6 @@ class Migrator:
                 current_group = []
             current_group.append(migration)
         self._grouped_migrations.append(current_group)
-
-        self._raise_missing_migrations = raise_missing_migrations
 
     @classmethod
     def from_path(cls, location: str | PathLike, package: str) -> Migrator:
