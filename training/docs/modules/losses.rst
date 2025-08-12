@@ -203,6 +203,49 @@ If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
 
+Custom Scalars
+==============
+
+To create a custom scalar, subclass the ``BaseScaler`` and implement the
+``get_scaling_values`` method. This method should return an array of the
+scaling values. Set ``scale_dims`` to the dimensions that the scaling
+values should be applied to.
+
+.. code:: python
+
+   from anemoi.training.losses.scalers import BaseScaler
+   from anemoi.training.utils.enums import TensorDim
+
+   class CustomScaler(BaseScaler):
+      scale_dims = [TensorDim.GRID]
+      def get_scaling_values(self):
+         # Custom scaling logic here
+         return scaling_values
+
+This scalar will only be instantiated once at the start of training, and
+thus cannot adapt throughout batches and epochs.
+
+Custom Updating Scalars
+-----------------------
+
+If you want a scalar that adapts throughout the training process, you
+can subclass the ``BaseUpdatingScaler``.
+
+As with the ``BaseScaler``, set the initial scalar values at the start
+of training by implementing the ``get_scaling_values`` method.
+Currently, two callbacks to update at are available, at the start of
+training, and at the start of every batch.
+
+Implementing any of these updating methods will allow for the scaler
+values to be changed at the specified point. If ``None`` is returned by
+these methods, it indicates that the scaler values should not be updated
+at that time.
+
+An example of this updating scaler is the
+``anemoi.training.losses.scalers.loss_weights_mask.NaNMaskScaler``,
+which updates the loss weights based on the presence of NaN values in
+the input.
+
 ********************
  Validation Metrics
 ********************
