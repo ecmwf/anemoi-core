@@ -280,6 +280,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             shard_shapes = get_shard_shapes(x, -2, model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+            x = pre_processors(x, in_place=False)
 
         return (x,), grid_shard_shapes
 
@@ -373,7 +374,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             Sampled output (after post-processing)
         """
         with torch.no_grad():
-            batch = pre_processors(batch, in_place=False)
+
             assert (
                 len(batch.shape) == 4
             ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
@@ -665,6 +666,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def _before_sampling(
         self,
         batch: torch.Tensor,
+        pre_processors: nn.Module,
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
@@ -699,9 +701,11 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             shard_shapes = get_shard_shapes(x, -2, model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+            x = pre_processors(x, in_place=False)
 
             shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group)
             x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
+            x_t0 = pre_processors(x_t0, in_place=False)
 
         return (x, x_t0), grid_shard_shapes
 

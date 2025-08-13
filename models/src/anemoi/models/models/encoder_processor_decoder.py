@@ -439,7 +439,7 @@ class AnemoiModelEncProcDec(nn.Module):
             Model output (after post-processing)
         """
         with torch.no_grad():
-            batch = pre_processors(batch, in_place=False)
+
             assert (
                 len(batch.shape) == 4
             ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
@@ -453,6 +453,8 @@ class AnemoiModelEncProcDec(nn.Module):
                 shard_shapes = get_shard_shapes(x, -2, model_comm_group)
                 grid_shard_shapes = [shape[-2] for shape in shard_shapes]
                 x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+
+            x = self.pre_processors(x, in_place=False)
 
             # Perform forward pass
             y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
