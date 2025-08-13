@@ -339,7 +339,6 @@ class FlashAttentionV3Wrapper(nn.Module):
             import flash_attn_interface
         except ImportError as e:
             raise ImportError(f"Error importing flash-attn v3\n{e}")
-        # TODO test this
         if version.parse(flash_attn_interface.__version__) < version.parse("3.0.0"):
             raise RuntimeError("Error: Flash-attn version is too low. Update to 3.0.0 or higher to use flash-attn v3.")
 
