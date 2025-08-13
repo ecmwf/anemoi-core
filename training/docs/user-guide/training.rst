@@ -384,6 +384,23 @@ level has a weighting less than 0.2), defined in class
       y_intercept: 0.2
       slope: 0.001
 
+.. note::
+
+   Note that by default, there is no pressure level scaling, because
+   there is no default variable grouping. In order to apply the pressure
+   level scaling, the ``pressure_level`` code block above needs to be
+   added to the ``training.scalers`` section of the configuration.
+   Additionally, ``variable_groups`` need to be defined that group all
+   pressure level variables together. For example by defining the
+   following in the training section of the config
+
+   .. code:: yaml
+
+      variable_groups:
+        default: sfc
+        pl:
+          is_pressure_level: True
+
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. The configuration option

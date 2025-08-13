@@ -20,11 +20,13 @@ general_variable:
     tp: 0.025
     cp: 0.0025
 
-pressure_level:
-  _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-  group: pl
-  y_intercept: 0.2
-  slope: 0.001
+# By default, no pressure level scaling
+# uncomment and/or modify below to incoporate the scaling
+#pressure_level:
+#  _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+#  group: pl
+#  y_intercept: 0.2
+#  slope: 0.001
 
 # mask NaNs with zeros in the loss function
 nan_mask_weights:
