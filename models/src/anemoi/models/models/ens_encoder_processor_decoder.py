@@ -45,17 +45,19 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             graph_data=graph_data,
             truncation_data=truncation_data,
         )
-        model_config = DotDict(model_config)
-        self.noise_injector = instantiate(
-            model_config.model.noise_injector,
-            _recursive_=False,
-            num_channels=self.num_channels,
-        )
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         super()._calculate_shapes_and_indices(data_indices)
         self.input_dim += self.num_input_channels_prognostic
         self.input_dim += 1
+
+    def _build_networks(self, model_config):
+        super()._build_networks(model_config)
+        self.noise_injector = instantiate(
+            model_config.model.noise_injector,
+            _recursive_=False,
+            num_channels=self.num_channels,
+        )
 
     def _assemble_input(self, x, fcstep, bse, grid_shard_shapes=None, model_comm_group=None):
         x_skip = x[:, -1, :, :, self._internal_input_idx]
