@@ -27,7 +27,7 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> Non
     data_indices : IndexCollection
         Index collection to get the variable names from.
     """
-    variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).squeeze()
+    variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).reshape(-1)
     log_text = "Final Variable Scaling: "
     for idx, name in enumerate(data_indices.model.output.name_to_index.keys()):
         log_text += f"{name}: {variable_scaling[idx]:.4g}, "
