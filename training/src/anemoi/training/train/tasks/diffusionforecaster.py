@@ -97,10 +97,10 @@ class GraphDiffusionForecaster(GraphForecaster):
         torch.Tensor
             Computed loss with noise weighting applied
         """
-        fact = weights**0.5  # factor for mse loss
         return self.loss(
-            y_pred * fact,
-            y * fact,
+            y_pred,
+            y,
+            weights=weights,
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )

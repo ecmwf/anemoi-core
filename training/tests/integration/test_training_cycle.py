@@ -185,7 +185,7 @@ def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, s
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
     cfg, url = diffusion_config
     get_test_archive(url)

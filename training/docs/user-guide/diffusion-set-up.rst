@@ -24,11 +24,9 @@ deterministic training:
    :class:`AnemoiDiffusionTendModelEncProcDec`) instead of
    :class:`AnemoiModelEncProcDec`
 
--  **Loss computation**: Standard MSE loss is recommended as it is the
-   most appropriate for diffusion training (noise-based weighting
-   applied automatically during training before loss computation). While
-   other losses could be used, they may not make sense in the diffusion
-   context
+-  **Loss computation**: WeightedMSELoss is recommended for diffusion
+   training as it properly handles weighting according to the noise
+   level.
 
 *************************
  Changes in model config
@@ -106,17 +104,17 @@ noise injection.
  Changes in loss computation
 *****************************
 
-The diffusion training uses the same MSE loss class but requires noise
-weights during computation:
+The diffusion training uses WeightedMSELoss which handles noise weights
+properly:
 
 .. code:: yaml
 
    training_loss:
-     _target_: anemoi.training.losses.MSELoss
+     _target_: anemoi.training.losses.WeightedMSELoss
 
 During training, the :class:`GraphDiffusionForecaster` automatically
-applies the required `weights` based on the noise level before the loss
-computation.
+passes the required `weights` based on the noise level to the loss
+function.
 
 **************************
  Diffusion model variants

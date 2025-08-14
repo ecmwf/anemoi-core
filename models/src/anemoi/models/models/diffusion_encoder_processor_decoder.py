@@ -99,7 +99,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         x_out = einops.rearrange(
             x_out,
-            "(batch ensemble grid) (time vars) -> batch ensemble grid vars",
+            "(batch ensemble grid) vars -> batch ensemble grid vars",
             batch=batch_size,
             ensemble=ensemble_size,
         ).to(dtype=dtype)

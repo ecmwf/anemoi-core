@@ -64,7 +64,7 @@ loss_gradient_scaling: False
 # loss function for the model
 training_loss:
   # loss class to initialise
-  _target_: anemoi.training.losses.MSELoss
+  _target_: anemoi.training.losses.WeightedMSELoss
   # Scalers to include in loss calculation
   # A selection of available scalers are listed in training/scalers.
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
