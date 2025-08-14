@@ -17,6 +17,7 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import GraphInterpolationModelComponent
 from .common_components import TransformerModelComponent
 
 
@@ -68,3 +69,8 @@ class TransformerDecoderSchema(TransformerModelComponent):
     "Use alibi slopes for attention implementation. Default to False."
     use_rotary_embeddings: bool = Field(example=False)
     "Use rotary embeddings for attention implementation. Default to False."
+
+
+class GraphInterpolationDecoderSchema(GraphInterpolationModelComponent):
+    target_: Literal["anemoi.models.layers.mapper.GraphInterpolationBackwardMapper"] = Field(..., alias="_target_")
+    "Graph interpolation Decoder object from anemoi.models.layers.mapper."

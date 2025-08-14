@@ -63,6 +63,35 @@ class BaseBlock(nn.Module, ABC):
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
 
+class PointWiseMLPProcessorBlock(BaseBlock):
+    """Point-wise MLP block with MultiHeadSelfAttention and MLPs."""
+
+    def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
+        super().__init__()
+        layers = [
+            layer_kernels.Linear(num_channels, hidden_dim),
+            layer_kernels.LayerNorm(hidden_dim),
+            layer_kernels.Activation(),
+        ]
+        if num_channels != hidden_dim:
+            layers.append(layer_kernels.Linear(hidden_dim, num_channels))
+
+        if dropout_p is not None and dropout_p > 0:
+            layers.append(nn.Dropout(p=dropout_p))
+
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
+    ) -> Tensor:
+        return self.mlp(x)
+
+
 class TransformerProcessorBlock(BaseBlock):
     """Transformer block with MultiHeadSelfAttention and MLPs."""
 
@@ -820,3 +849,33 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         nodes_new = self.run_node_dst_mlp(out, **layer_kwargs) + out
 
         return nodes_new, edge_attr
+
+
+class GraphInterpolationMapperBlock(BaseBlock):
+    """Graph interpolation block."""
+
+    def __init__(self, sparse_matrix, **kwargs):
+        """Initialize GraphTransformerBlock.
+
+        Parameters
+        ----------
+        sparse_matrix : torch.sparse.FloatTensor
+            Sparse matrix representing the interpolation.
+        kwargs : dict
+            Additional arguments for the base class.
+        """
+        super().__init__(**kwargs)
+        self.A = sparse_matrix
+
+    def forward(
+        self,
+        x: OptPairTensor,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        shapes: tuple,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
+    ):
+        x_src, _ = x
+        x_dst = torch.sparse.mm(self.A, x_src)
+        return (x_src, x_dst), edge_attr
