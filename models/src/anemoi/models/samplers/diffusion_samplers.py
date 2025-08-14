@@ -75,8 +75,7 @@ class KarrasScheduler(NoiseScheduler):
             / (self.num_steps - 1.0)
             * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
         ) ** self.rho
-        # Append 0 for the final step
-        sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])
+
         return sigmas
 
 
@@ -93,8 +92,7 @@ class LinearScheduler(NoiseScheduler):
         **kwargs,
     ) -> torch.Tensor:
         sigmas = torch.linspace(self.sigma_max, self.sigma_min, self.num_steps, device=device, dtype=dtype_compute)
-        # Append 0 for the final step
-        sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])
+
         return sigmas
 
 
@@ -115,8 +113,7 @@ class CosineScheduler(NoiseScheduler):
         alpha_bar = torch.cos((t + self.s) / (1 + self.s) * torch.pi / 2) ** 2
         sigmas = torch.sqrt((1 - alpha_bar) / alpha_bar) * self.sigma_max
         sigmas = torch.clamp(sigmas, min=self.sigma_min, max=self.sigma_max)
-        # Append 0 for the final step
-        sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])
+
         return sigmas
 
 
@@ -140,8 +137,7 @@ class ExponentialScheduler(NoiseScheduler):
             dtype=dtype_compute,
         )
         sigmas = torch.exp(log_sigmas)
-        # Append 0 for the final step
-        sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])
+
         return sigmas
 
 
