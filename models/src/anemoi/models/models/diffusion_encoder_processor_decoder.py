@@ -281,7 +281,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             shard_shapes = get_shard_shapes(x, -2, model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-            x = pre_processors(x, in_place=False)
+        x = pre_processors(x, in_place=False)
 
         return (x,), grid_shard_shapes
 
@@ -702,11 +702,11 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             shard_shapes = get_shard_shapes(x, -2, model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-            x = pre_processors(x, in_place=False)
-
             shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group)
             x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
-            x_t0 = pre_processors(x_t0, in_place=False)
+
+        x = pre_processors(x, in_place=False)
+        x_t0 = pre_processors(x_t0, in_place=False)
 
         return (x, x_t0), grid_shard_shapes
 
