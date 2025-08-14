@@ -21,8 +21,7 @@ LOGGER = logging.getLogger(__name__)
 class WeightedMSELoss(MSELoss):
     """Weighted MSE loss for use with diffusion models.
 
-    This loss applies weights directly to the MSE difference rather than scaling
-    the inputs. Designed specifically for use with diffusion forecasting models.
+    This loss applies weights to the MSE difference
     """
 
     name: str = "weighted_mse"
