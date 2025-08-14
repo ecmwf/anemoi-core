@@ -13,7 +13,7 @@ from dataclasses import field
 
 import pytest
 
-from anemoi.models.layers.processor import BaseProcessor
+from anemoi.models.layers.processor.base import BaseProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 

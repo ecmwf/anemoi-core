@@ -14,7 +14,7 @@ from dataclasses import field
 import pytest
 import torch
 
-from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.layers.processor.static import TransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
