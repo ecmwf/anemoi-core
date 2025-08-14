@@ -34,10 +34,6 @@ _ckpt_migration_key = "migrations"
 LOGGER = logging.getLogger(__name__)
 
 
-class MissingMigrationException(BaseException):
-    """The checkpoint is missing a migration that cannot be added (wrong order)."""
-
-
 class IncompatibleCheckpointException(BaseException):
     """The provided checkpoitn cannot be migrated because it is to old/recent."""
 
@@ -737,7 +733,6 @@ __all__ = [
     "MigrationMetadata",
     "MigrationVersions",
     "MIGRATION_PATH",
-    "MissingMigrationException",
     "MigrationOp",
     "RollbackOp",
     "SaveCkpt",
