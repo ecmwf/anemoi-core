@@ -13,7 +13,6 @@ import logging
 from enum import Enum
 from typing import Annotated
 from typing import Literal
-from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -244,8 +243,6 @@ class NoiseInjectorSchema(BaseModel):
 class EnsModelSchema(BaseModelSchema):
     noise_injector: NoiseInjectorSchema = Field(default_factory=list)
     "Settings related to custom kernels for encoder processor and decoder blocks"
-    diffusion: Optional[DiffusionSchema] = None
-    "Diffusion configuration for diffusion models"
 
 
 class DiffusionModelSchema(BaseModelSchema):

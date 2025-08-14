@@ -97,13 +97,13 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         return x_data_latent, None, shard_shapes_data
 
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
-        bse = batch_size * ensemble_size
-        x_out = einops.rearrange(x_out, "(bse n) f -> bse n f", bse=bse)
-        x_out = einops.rearrange(x_out, "(bs e) n f -> bs e n f", bs=batch_size).to(dtype=dtype)
+        x_out = einops.rearrange(
+            x_out,
+            "(batch ensemble grid) (time vars) -> batch ensemble grid vars",
+            batch=batch_size,
+            ensemble=ensemble_size,
+        ).to(dtype=dtype)
 
-        for bounding in self.boundings:
-            # bounding performed in the order specified in the config file
-            x_out = bounding(x_out)
         return x_out
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
@@ -123,7 +123,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         )
         c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
 
-        if edge_conditioning:
+        if edge_conditioning:  # this is currently not used but could be useful for edge conditioning of GNN
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
                 repeat=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)]["edge_length"].shape[0],
@@ -224,6 +224,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
     ) -> torch.Tensor:
+        """Forward pass with pre-conditioning of EDM diffusion model."""
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
             x, (c_in * y_noised), c_noise, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes

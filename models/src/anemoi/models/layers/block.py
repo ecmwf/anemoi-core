@@ -641,7 +641,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         LayerNorm = layer_kernels.LayerNorm
 
         self.layer_norm_attention_src = LayerNorm(normalized_shape=in_channels)
-        self.layer_norm_attention_dst = self.layer_norm_attention
+        self.layer_norm_attention_dest = self.layer_norm_attention
 
         if self.update_src_nodes:
             self.layer_norm_mlp_src = LayerNorm(normalized_shape=out_channels)
@@ -696,7 +696,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         x = (
             self.layer_norm_attention_src(x[0], **cond_src_kwargs),
-            self.layer_norm_attention_dst(x[1], **cond_dst_kwargs),
+            self.layer_norm_attention_dest(x[1], **cond_dst_kwargs),
         )
 
         x_r = self.lin_self(x[1])
