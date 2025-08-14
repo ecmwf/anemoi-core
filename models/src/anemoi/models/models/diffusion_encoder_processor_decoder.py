@@ -450,7 +450,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         """
 
         # Start with inference defaults
-        noise_scheduler_config = dict(vars(self.inference_defaults.noise_scheduler))
+        noise_scheduler_config = dict(self.inference_defaults.noise_scheduler)
 
         # Override config with provided noise scheduler parameters
         if noise_scheduler_params is not None:
@@ -472,7 +472,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         y_init = torch.randn(shape, device=x.device, dtype=sigmas.dtype) * sigmas[0]
 
         # Build diffusion sampler config dict from all inference defaults
-        diffusion_sampler_config = dict(vars(self.inference_defaults.diffusion_sampler))
+        diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
 
         # Override config with provided sampler parameters
         if sampler_params is not None:
