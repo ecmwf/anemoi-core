@@ -34,3 +34,13 @@ training, so providing a valid migration will fix the CI pipeline.
 
 See :ref:`create checkpoint migrations <create-migrations>` for
 information.
+
+Migration names have a timestamp at the start to specify their order of
+execution. The timestamp is decided when creating the migration script.
+However, it may happen that a new commit in main contains a migration
+script with a later timestamp than one or several of your migration
+scripts, which would the correct order.
+
+The unit test ``test_migration_order`` will check whether the correct
+order is preserved. If you get an error, you can run ``anemoi-models
+migration fix-order`` to update the timestamps of your scripts.

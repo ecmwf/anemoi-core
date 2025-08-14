@@ -9,6 +9,7 @@
 
 
 import logging
+import subprocess
 from argparse import ArgumentParser
 from argparse import Namespace
 from datetime import datetime
@@ -29,6 +30,9 @@ from . import Command
 
 LOGGER = logging.getLogger(__name__)
 
+here = Path(__file__).parent
+root_folder = here.parent.parent.parent.parent.parent
+
 
 def _get_migration_name(name: str) -> str:
     name = name.lower().replace("-", "_").replace(" ", "_")
@@ -40,6 +44,52 @@ def maybe_plural(count: int, text: str) -> str:
     if count >= 2:
         return text + "s"
     return text
+
+
+def new_migrations_from_main_branch():
+    """Finds the all now migration scripts that were added compared to origin/main"""
+    run_new_migrations = subprocess.run(
+        [
+            "git diff --name-only --diff-filter=A "
+            '$(git log -n 1 origin/main --pretty=format:"%H") '
+            f"HEAD {MIGRATION_PATH.resolve()}"
+        ],
+        capture_output=True,
+        shell=True,
+    )
+    new_migrations = [root_folder / file for file in run_new_migrations.stdout.decode("utf-8").split("\n")]
+    new_migrations = [file.name for file in new_migrations if file.is_file() and file.name != "__init__.py"]
+    return sorted(new_migrations)
+
+
+def in_incorrect_order(all_migrations: list[str], new_migrations: list[str]) -> tuple[list[str], str | None]:
+    """Tests whether the order of the new migrations is correct.
+    All new migrations should be at the end of all_migrations.
+
+    Parameters
+    ----------
+    all_migrations : list[str]
+        All migrations currently in anemoi-models
+    new_migrations : list[str]
+        New migrations from this PR.
+
+    Returns
+    -------
+    tuple[list[str], str | None]
+        * the list of name in incorrect order
+        * the name of the last migration in main
+    """
+    stop_new = False
+    incorrect_order: list[str] = []
+    last_name: str | None = None
+
+    for name in reversed(all_migrations):
+        if name not in new_migrations and not stop_new:
+            stop_new = True
+            last_name = name
+        elif stop_new and name in new_migrations:
+            incorrect_order.append(name)
+    return list(reversed(incorrect_order)), last_name
 
 
 migration_template_str = """\
@@ -189,6 +239,9 @@ class Migration(Command):
         inspect_parser.add_argument("ckpt", help="Path to the checkpoint to inspect.")
         inspect_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
+        help_fix_order = "Fix the order of migrations after a git merge."
+        subparsers.add_parser("fix-order", help=help_fix_order, description=help_fix_order)
+
     def run(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
 
@@ -203,6 +256,8 @@ class Migration(Command):
             return self.run_sync(args)
         elif args.subcommand == "inspect":
             return self.run_inspect(args)
+        elif args.subcommand == "fix-order":
+            return self.run_fix_order()
         raise ValueError(f"{args.subcommand} does not exist.")
 
     def run_create(self, args: Namespace) -> None:
@@ -348,6 +403,29 @@ class Migration(Command):
                 console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
         except IncompatibleCheckpointException as e:
             print(str(e))
+
+    def run_fix_order(self) -> None:
+        """Fixes the order of the new migration scripts.
+        It uses the earliest possible time with the last migration name in origin/main.
+        """
+        new_migrations = new_migrations_from_main_branch()
+        all_migrations = sorted(
+            [file.name for file in MIGRATION_PATH.iterdir() if file.is_file() and file.name != "__init__.py"]
+        )
+        incorrect_order, last_upstream_name = in_incorrect_order(all_migrations, new_migrations)
+
+        if last_upstream_name is None or not len(incorrect_order):
+            print("No migration to rename.")
+            return
+
+        new_timestamp = int(last_upstream_name.partition("_")[0]) + 1
+        for k, name in enumerate(new_migrations):
+            path = MIGRATION_PATH / name
+            _, _, new_name = name.partition("_")
+            new_name = f"{new_timestamp + k}_{new_name}"
+            print(f"Renaming {name} to {new_name}.")
+            print(path, path.with_name(new_name))
+            # path.rename(path.with_name(new_name))
 
 
 command = Migration
