@@ -44,8 +44,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         truncation_data: dict,
     ) -> None:
 
-        # model_config can be either a dict (when instantiated directly, tests?) or DotDict (from Hydra instantiation)
-        model_config_local = DotDict(model_config) if isinstance(model_config, dict) else model_config
+        model_config_local = DotDict(model_config)
 
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
