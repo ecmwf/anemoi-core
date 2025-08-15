@@ -372,6 +372,8 @@ class FlashAttentionV3Wrapper(nn.Module):
         softcap: Optional[float] = None,
         alibi_slopes: torch.Tensor = None,
     ):
+        if alibi_slopes is not None:
+            raise RuntimeError("Alibi slopes not supported for flash attention v3")
         query, key, value = (
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
@@ -379,7 +381,7 @@ class FlashAttentionV3Wrapper(nn.Module):
             query,
             key,
             value,
-            causal=False,
+            causal=causal,
             window_size=(window_size, window_size),
         )[0]
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
