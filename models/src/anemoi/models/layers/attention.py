@@ -35,6 +35,24 @@ class MultiHeadSelfAttention(nn.Module):
     allows for three different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
+    - flash attention v3, see https://github.com/Dao-AILab/flash-attention#flashattention-3-beta-release
+
+    scaled dot product attention is a pytorch function, so it is easiest to use but the least performant.
+        It runs on CPUs and GPUs.
+
+    flash attention is optimised for efficient usage of the GPUs memory hierarchy. It loads smaller chunks
+        into fast local memory, and fuses attention into a single kernel to reduce the passes through memory.
+        It runs on Nvidia Ampere (e.g. A100) GPUs or newer and AMD MI200 GPUs or newer. Check the GitHub for
+        the full requirements.
+        You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
+        wheels available on the GitHub. On an aarch64 system, you have to build flash attention from source.
+
+    flash attention v3 uses new GPU features to achieve an up to 2x speedup compared to flash attention v2.
+        The new features include more efficient tensor core usage via the WGMMA instruction and hardware
+        accelerated memory accesses via the Tensor Memory Accelerator.
+        It requires Nvidia Hopper (e.g. H100) or newer GPUs. Check the Github for the full requirements.
+        You have to install flash attention v3 yourself. There are currently no pre-built wheels, so it must
+        be built from source.
     """
 
     def __init__(
@@ -126,6 +144,7 @@ class MultiHeadSelfAttention(nn.Module):
     def set_attention_function(self):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
+            "flash_attention_v3": FlashAttentionV3Wrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
         assert (
@@ -272,8 +291,8 @@ class FlashAttentionWrapper(nn.Module):
         super().__init__()
         try:
             import flash_attn
-        except ImportError:
-            raise ImportError("Error: Flash-attn not installed. Please install flash-attn to use Flash Attention")
+        except ImportError as e:
+            raise ImportError(f"Error importing flash-attn: {e}")
 
         if version.parse(flash_attn.__version__) < version.parse("2.6.0"):
             raise RuntimeError("Error: Flash-attn version is too low. Update to 2.6.0 or higher.")
@@ -325,6 +344,46 @@ class FlashAttentionWrapper(nn.Module):
             softcap=softcap,
             alibi_slopes=alibi_slopes,
         )
+        out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
+        return out
+
+
+class FlashAttentionV3Wrapper(nn.Module):
+    """Wrapper for Flash attention."""
+
+    def __init__(self):
+        super().__init__()
+        try:
+            import flash_attn_interface
+        except ImportError as e:
+            raise ImportError(f"Error importing flash-attn v3\n{e}")
+
+        self.attention = flash_attn_interface.flash_attn_func
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap: Optional[float] = None,
+        alibi_slopes: torch.Tensor = None,
+    ):
+        if alibi_slopes is not None:
+            raise RuntimeError("Alibi slopes not supported for flash attention v3")
+        query, key, value = (
+            einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
+        )
+        out = self.attention(
+            query,
+            key,
+            value,
+            causal=causal,
+            window_size=(window_size, window_size),
+        )[0]
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
 
