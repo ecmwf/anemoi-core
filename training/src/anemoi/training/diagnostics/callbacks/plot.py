@@ -261,7 +261,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for post_processor in self.post_processors.processors.values():
+            for post_processor in self.post_processors.processors:
                 if hasattr(post_processor, "nan_locations"):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
@@ -635,7 +635,7 @@ class LongRolloutPlots(BasePlotCallback):
             output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
 
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for post_processor in self.post_processors.processors.values():
+            for post_processor in self.post_processors.processors:
                 if hasattr(post_processor, "nan_locations"):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
