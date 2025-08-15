@@ -9,6 +9,7 @@
 
 
 import logging
+import warnings
 from typing import Callable
 from typing import Optional
 from typing import Union
@@ -455,6 +456,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         if noise_scheduler_params is not None:
             noise_scheduler_config.update(noise_scheduler_params)
 
+        warnings.warn(f"noise_scheduler_config: {noise_scheduler_config}")
+
         # Remove schedule_type (used for class selection, not constructor)
         actual_schedule_type = noise_scheduler_config.pop("schedule_type")
 
@@ -476,6 +479,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         # Override config with provided sampler parameters
         if sampler_params is not None:
             diffusion_sampler_config.update(sampler_params)
+
+        warnings.warn(f"diffusion_sampler_config: {diffusion_sampler_config}")
 
         # Remove sampler name (used for class selection, not constructor)
         actual_sampler = diffusion_sampler_config.pop("sampler")
