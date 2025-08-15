@@ -16,48 +16,64 @@ from warnings import warn
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.schemas.base_graph import BaseGraphSchema
+from anemoi.graphs.schemas.base_graph import UnvalidatedGraphSchema
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
+# Support previous version. This will be deprecated in a future release
+def map_edge_builder_to_new_schema(config: DictConfig) -> DictConfig:
+    edges = []
+    for edges_cfg in config.get("edges", []):
+        if "edge_builder" in edges_cfg:
+            warn(
+                "This format will be deprecated. The key 'edge_builder' is renamed to 'edge_builders' and takes a list of edge builders. In addition, the source_mask_attr_name & target_mask_attr_name fields are moved under the each edge builder.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+            edge_builder_cfg = edges_cfg.get("edge_builder")
+            if edge_builder_cfg is not None:
+                edge_builder_cfg = DotDict(edge_builder_cfg)
+                edge_builder_cfg.source_mask_attr_name = edges_cfg.get("source_mask_attr_name", None)
+                edge_builder_cfg.target_mask_attr_name = edges_cfg.get("target_mask_attr_name", None)
+                edges_cfg["edge_builders"] = [edge_builder_cfg]
+
+        edges.append(edges_cfg)
+    config.edges = edges
+    return config
+
+
 class GraphCreator:
     """Graph creator."""
 
-    config: DotDict
+    config: DictConfig
 
     def __init__(
         self,
-        config: str | Path | DotDict | DictConfig,
+        config: str | Path | DictConfig,
+        config_validation: bool = True,
     ):
+        """Initialize the GraphCreator."""
+        # Load and resolve the configuration
         if isinstance(config, Path) or isinstance(config, str):
-            self.config = DotDict.from_file(config)
-        elif isinstance(config, DictConfig):
-            self.config = DotDict(config)
+            config = OmegaConf.load(config)
+
+        OmegaConf.resolve(config)
+        config = DotDict(config)
+        config = map_edge_builder_to_new_schema(config)
+
+        if config_validation:
+            self.config = BaseGraphSchema(**config).model_dump(by_alias=True)
+            LOGGER.info("Config validated.")
         else:
-            self.config = config
-
-        # Support previous version. This will be deprecated in a future release
-        edges = []
-        for edges_cfg in self.config.get("edges", []):
-            if "edge_builder" in edges_cfg:
-                warn(
-                    "This format will be deprecated. The key 'edge_builder' is renamed to 'edge_builders' and takes a list of edge builders. In addition, the source_mask_attr_name & target_mask_attr_name fields are moved under the each edge builder.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
-                edge_builder_cfg = edges_cfg.get("edge_builder")
-                if edge_builder_cfg is not None:
-                    edge_builder_cfg = DotDict(edge_builder_cfg)
-                    edge_builder_cfg.source_mask_attr_name = edges_cfg.get("source_mask_attr_name", None)
-                    edge_builder_cfg.target_mask_attr_name = edges_cfg.get("target_mask_attr_name", None)
-                    edges_cfg["edge_builders"] = [edge_builder_cfg]
-
-            edges.append(edges_cfg)
-        self.config.edges = edges
+            self.config = UnvalidatedGraphSchema(**config).model_dump(by_alias=True)
+            LOGGER.info("Skipping config validation.")
 
     def update_graph(self, graph: HeteroData) -> HeteroData:
         """Update the graph.

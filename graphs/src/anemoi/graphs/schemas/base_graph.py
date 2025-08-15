@@ -9,13 +9,17 @@
 
 
 import logging
+import sys
+from typing import Any
 
+from omegaconf import DictConfig
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
-from pydantic import model_validator
-from typing_extensions import Self
+from pydantic_core import ValidationError
 
 from anemoi.utils.schemas import BaseModel
+from anemoi.utils.schemas.errors import CUSTOM_MESSAGES
+from anemoi.utils.schemas.errors import convert_errors
 
 from .edge_attributes_schemas import EdgeAttributeSchema  # noqa: TC001
 from .edge_schemas import EdgeBuilderSchemas  # noqa: TC001
@@ -29,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 class NodeSchema(BaseModel):
     node_builder: NodeBuilderSchemas
     "Node builder schema."
-    attributes: dict[str, NodeAttributeSchemas] | None = None
+    attributes: dict[str, NodeAttributeSchemas] = Field(default_factory=dict)
     "Dictionary of attributes with names as keys and anemoi.graphs.nodes.attributes objects as values."
 
 
@@ -40,27 +44,41 @@ class EdgeSchema(BaseModel):
     "Target of the edges."
     edge_builders: list[EdgeBuilderSchemas]
     "Edge builder schema."
-    attributes: dict[str, EdgeAttributeSchema]
+    attributes: dict[str, EdgeAttributeSchema] = Field(default_factory=dict)
     "Dictionary of attributes with names as keys and anemoi.graphs.edges.attributes objects as values."
 
 
 class BaseGraphSchema(PydanticBaseModel):
-    nodes: dict[str, NodeSchema] | None = Field(default=None)
+    nodes: dict[str, NodeSchema] = Field(default_factory=dict)
     "Nodes schema for all types of nodes (ex. data, hidden)."
-    edges: list[EdgeSchema] | None = Field(default=None)
+    edges: list[EdgeSchema] = Field(default_factory=list)
     "List of edges schema."
-    overwrite: bool = Field(example=True)
-    "whether to overwrite existing graph file. Default to True."
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)
-    data: str = Field(example="data")
-    "Key name for the data nodes. Default to 'data'."
-    hidden: str | list[str] = Field(example="hidden")
-    "Key name for the hidden nodes. Default to 'hidden'."
-    # TODO(Helen): Needs to be adjusted for more complex graph setups
 
-    @model_validator(mode="after")
-    def check_if_nodes_edges_present_if_overwrite(self) -> Self:
-        if self.overwrite and ("nodes" not in self.model_fields_set or "edges" not in self.model_fields_set):
-            msg = "If overwrite is True, nodes and edges must be provided."
-            raise ValueError(msg)
-        return self
+    def model_dump(self, by_alias: bool = False) -> DictConfig:
+        dumped_model = super().model_dump(by_alias=by_alias)
+        return DictConfig(dumped_model)
+
+
+class UnvalidatedGraphSchema(PydanticBaseModel):
+    """Unvalidated graph schema for the training configuration."""
+
+    nodes: Any
+    "Nodes schema for all types of nodes (ex. data, hidden)."
+    edges: Any
+    "List of edges schema."
+
+    def model_dump(self, by_alias: bool = False) -> DictConfig:
+        dumped_model = super().model_dump(by_alias=by_alias)
+        return DictConfig(dumped_model)
+
+
+def validate_graph_schema(config: DictConfig) -> BaseGraphSchema:
+    try:
+        config = BaseGraphSchema(**config)
+    except ValidationError as e:
+        errors = convert_errors(e, CUSTOM_MESSAGES)
+        LOGGER.error(errors)  # noqa: TRY400
+        sys.exit(0)
+    else:
+        return config
