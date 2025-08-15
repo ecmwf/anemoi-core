@@ -516,7 +516,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         if self.keep_batch_sharded and self.model_comm_group_size > 1:
             self.grid_shard_shapes = self.grid_indices.shard_shapes
-            self.grid_shard_slice = self.grid_indices.get_shard_indices(self.reader_group_rank)
+            self.grid_shard_slice = self.grid_indices.get_shard_slice(self.reader_group_rank)
         else:
             batch = self.allgather_batch(batch)
             self.grid_shard_shapes, self.grid_shard_slice = None, None

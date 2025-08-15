@@ -32,7 +32,7 @@ class BaseGridIndices(ABC):
     def setup(self, graph: HeteroData) -> None:
         self.grid_size = self.compute_grid_size(graph)
 
-    def split_seq_in_shards(self, reader_group_rank: int) -> slice:
+    def get_shard_slice(self, reader_group_rank: int) -> slice:
         """Get the grid shard slice according to the reader rank."""
         assert (
             0 <= reader_group_rank < self.reader_group_size
@@ -68,7 +68,7 @@ class FullGrid(BaseGridIndices):
         return graph[self.nodes_name].num_nodes
 
     def get_shard_indices(self, reader_group_rank: int) -> slice:
-        return self.split_seq_in_shards(reader_group_rank)
+        return self.get_shard_slice(reader_group_rank)
 
 
 class MaskedGrid(BaseGridIndices):
@@ -95,5 +95,5 @@ class MaskedGrid(BaseGridIndices):
         return len(self.grid_indices)
 
     def get_shard_indices(self, reader_group_rank: int) -> ArrayIndex:
-        sequence_indices = self.split_seq_in_shards(reader_group_rank)
+        sequence_indices = self.get_shard_slice(reader_group_rank)
         return self.grid_indices[sequence_indices]
