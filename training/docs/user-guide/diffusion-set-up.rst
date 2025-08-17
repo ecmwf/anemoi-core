@@ -43,23 +43,42 @@ Changes in the diffusion model configs:
 
    model:
      _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
-     # Diffusion noise parameters
+     # Diffusion parameters
      diffusion:
-       noise:
-         rho: 7
-         sigma_max: 100.0
-         sigma_min: 0.02
-         sigma_data: 1.0
-         noise_channels: 32
-         noise_cond_dim: 16
+       sigma_data: 1.0
+       noise_channels: 32
+       noise_cond_dim: 16
+       sigma_max: 100.0
+       sigma_min: 0.02
+       rho: 7.0
+       noise_embedder:
+         _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
+         num_channels: ${model.model.diffusion.noise_channels}
+         max_period: 1000
+       inference_defaults:
+         noise_scheduler:
+           schedule_type: "karras"
+           sigma_max: 100.0
+           sigma_min: 0.02
+           rho: 7.0
+           num_steps: 50
+         diffusion_sampler:
+           sampler: "heun"
+           S_churn: 0.0
+           S_min: 0.0
+           S_max: .inf
+           S_noise: 1.0
 
-The diffusion configuration includes noise scheduling parameters:
+The diffusion configuration includes:
 
--  `rho`: Controls the noise schedule distribution
--  `sigma_max` / `sigma_min`: Maximum and minimum noise levels
 -  `sigma_data`: Data standard deviation for preconditioning
 -  `noise_channels`: Number of noise channels to inject
 -  `noise_cond_dim`: Dimension of noise conditioning
+-  `sigma_max` / `sigma_min`: Maximum and minimum noise levels
+-  `rho`: Controls the noise schedule distribution
+-  `noise_embedder`: Sinusoidal embeddings for noise conditioning
+-  `inference_defaults`: Default parameters for noise scheduler and
+   sampler
 
 .. code:: yaml
 
@@ -74,6 +93,33 @@ The diffusion configuration includes noise scheduling parameters:
 The diffusion model uses conditional layer normalization to condition
 the latent space on the noise level, enabling the model to denoise
 appropriately at different noise scales.
+
+*************************
+ Inference configuration
+*************************
+
+The `inference_defaults` block specifies default parameters for
+sampling:
+
+.. code:: yaml
+
+   inference_defaults:
+     noise_scheduler:
+       schedule_type: "karras"  # Noise schedule type
+       num_steps: 50           # Number of sampling steps
+       sigma_max: 100.0        # Maximum noise level
+       sigma_min: 0.02         # Minimum noise level
+       rho: 7.0               # Schedule distribution parameter
+     diffusion_sampler:
+       sampler: "heun"         # Sampling algorithm
+       S_churn: 0.0           # Stochasticity parameters
+       S_min: 0.0
+       S_max: .inf
+       S_noise: 1.0
+
+These defaults can be overridden at inference time by passing
+`noise_scheduler_params` and `sampler_params` to the `predict_step`
+method.
 
 ****************************
  Changes in training config
