@@ -231,8 +231,8 @@ class MultiHeadSelfAttention(nn.Module):
 
 class SDPAAttentionWrapper(nn.Module):
     """Wrapper for Pytorch scaled dot product attention
-	To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
-	"""
+    To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
+    """
 
     def __init__(self):
         super().__init__()
@@ -293,8 +293,8 @@ class SDPAAttentionWrapper(nn.Module):
 
 class FlashAttentionWrapper(nn.Module):
     """Wrapper for Flash attention.
-	To use this attention implementation: model.processor.attention_implementation='flash_attention'
-	"""
+    To use this attention implementation: model.processor.attention_implementation='flash_attention'
+    """
 
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
@@ -359,8 +359,8 @@ class FlashAttentionWrapper(nn.Module):
 
 class FlashAttentionV3Wrapper(nn.Module):
     """Wrapper for Flash attention v3.
-	To use this attention implementation: model.processor.attention_implementation='flash_attention_v3'
-	"""
+    To use this attention implementation: model.processor.attention_implementation='flash_attention_v3'
+    """
 
     def __init__(self):
         super().__init__()
