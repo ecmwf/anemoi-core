@@ -78,7 +78,7 @@ The diffusion configuration includes:
 -  `rho`: Controls the noise schedule distribution
 -  `noise_embedder`: Sinusoidal embeddings for noise conditioning
 -  `inference_defaults`: Default parameters for noise scheduler and
-   sampler
+   sampler, these are not used during training.
 
 .. code:: yaml
 
