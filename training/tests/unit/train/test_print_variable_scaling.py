@@ -23,6 +23,7 @@ LOGGER = logging.getLogger(print_variable_scaling.__module__)
 
 # -------------------------- Minimal fakes -----------------------------------
 
+
 class _FakeScalerSubset:
     def __init__(self, arr: np.ndarray) -> None:
         self._arr = np.asarray(arr)
@@ -55,6 +56,7 @@ def _fake_indices(names: list[str]) -> SimpleNamespace:  # <-- annotated
 
 class _ListHandler(logging.Handler):
     """Capture log records as plain strings."""
+
     def __init__(self) -> None:
         super().__init__(level=logging.DEBUG)
         self.messages: list[str] = []
@@ -66,13 +68,14 @@ class _ListHandler(logging.Handler):
 def _count_logged_pairs(message: str) -> int:
     """Count 'name: value' pairs in the function's log line."""
     prefix = "Final Variable Scaling: "
-    payload = message[len(prefix):] if message.startswith(prefix) else message
+    payload = message.removeprefix(prefix)
     # The function ends with a trailing ", " — filter empty tail
     parts = [p for p in payload.split(", ") if p]
     return len(parts)
 
 
 # ------------------------------ Tests ---------------------------------------
+
 
 def test_print_variable_scaling_single_var_flattens_but_not_scalar() -> None:
     """For a single variable, various shapes should flatten to a length-1 vector (never 0-D scalar)."""
