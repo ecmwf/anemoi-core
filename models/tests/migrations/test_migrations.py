@@ -36,7 +36,7 @@ def test_run_all_migrations(old_migrator: Migrator, empty_ckpt: Path):
 
 def test_break_ckpt_too_old(migrator: Migrator, tmp_path: Path):
     path = tmp_path / "model.ckpt"
-    torch.save({"pytorch-lightning_version": ""}, path)
+    torch.save({"pytorch-lightning_version": "", "migrations": []}, path)
     with pytest.raises(IncompatibleCheckpointException):
         migrator.sync(path)
 

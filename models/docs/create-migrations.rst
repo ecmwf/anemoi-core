@@ -189,9 +189,9 @@ migration:
        ckpt["state_dict"]["x"] = ckpt["state_dict"].pop("y")
        return ckpt
 
-*****************
- Setup callbacks
-*****************
+****************
+ Setup callback
+****************
 
 Python objects are stored by reference in a pickle object. This means
 that if you move (or remove) a class, old checkpoints cannot be loaded.
@@ -202,7 +202,8 @@ that if you move (or remove) a class, old checkpoints cannot be loaded.
    errors to access the migration information in the checkpoint.
 
 The setup callbacks are functions that fix import errors. They are run
-before loading the checkpoint:
+before loading the checkpoint. To add a setup callback to your script,
+define the ``migrate_setup`` callback:
 
 .. code:: python
 
@@ -219,16 +220,10 @@ before loading the checkpoint:
           A MigrationContext instance
        """
 
+.. note::
 
-   def rollback_setup(context: MigrationContext) -> None:
-       """
-       Rollback setup callback to be run before loading the checkpoint.
-
-       Parameters
-       ----------
-       context : MigrationContext
-          A MigrationContext instance
-       """
+   The setup is only defined for migrate. The setup required for the
+   rollback pass is automatically inferred.
 
 To generate your script with the setup callbacks, use the
 ``--with-setup`` argument:
@@ -296,18 +291,6 @@ For example, if you renamed the module
        """
        # This is also executed. You can update the checkpoint if you need to.
        return ckpt
-
-
-   def rollback_setup(context: MigrationContext) -> None:
-       """
-       Rollback setup callback to be run before loading the checkpoint.
-
-       Parameters
-       ----------
-       context : MigrationContext
-          A MigrationContext instance
-       """
-       context.move_module("anemoi.models.schemas.data", "anemoi.models.schemas.data_processor")
 
 
    def rollback(ckpt: CkptType) -> CkptType:

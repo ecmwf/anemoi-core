@@ -104,6 +104,52 @@ class MigrationContext:
         self.module_paths[path_end] = path_start
 
 
+class _SerializedMigrationContext(TypedDict):
+    attribute_paths: dict[str, str]
+    module_paths: dict[str, str]
+    deleted_attributes: list[str]
+
+
+def _serialize_setup_callback(setup: Callable[[MigrationContext], None]) -> _SerializedMigrationContext:
+    ctx = MigrationContext()
+    setup(ctx)
+    return {
+        "attribute_paths": ctx.attribute_paths,
+        "module_paths": ctx.module_paths,
+        "deleted_attributes": ctx.deleted_attributes,
+    }
+
+
+class _DeserializeMigrationContext:
+    def __init__(self, ctx: _SerializedMigrationContext) -> None:
+        self._ctx = ctx
+
+    def __call__(self, context: MigrationContext) -> None:
+        for deleted_attribute in self._ctx["deleted_attributes"]:
+            context.delete_attribute(deleted_attribute)
+        for path_end, path_start in self._ctx["attribute_paths"].items():
+            context.move_attribute(path_start, path_end)
+        for path_end, path_start in self._ctx["module_paths"].items():
+            context.move_module(path_start, path_end)
+
+
+class _ReversedSetupCallback:
+    def __init__(self, callback: Callable[[MigrationContext], None]) -> None:
+        self._callback = callback
+
+    def __call__(self, context: MigrationContext) -> None:
+        new_ctx = MigrationContext()
+        # apply the callback on a dummy context
+        self._callback(new_ctx)
+        # then reverse everything that was registered
+        # Note context.delete_attribute is not present because items are
+        # not deleted when going back
+        for path_end, path_start in new_ctx.attribute_paths.items():
+            context.move_attribute(path_end, path_start)
+        for path_end, path_start in new_ctx.module_paths.items():
+            context.move_module(path_end, path_start)
+
+
 @dataclass
 class MigrationMetadata:
     """Metadata object of the migration."""
@@ -124,7 +170,7 @@ class SerializedMigration(TypedDict):
     """ The signature of the script. Can be used to detect if a script changed. """
     rollback: Callable[[CkptType], CkptType] | None
     """ The rollback function stored as value """
-    rollback_setup: Callable[[MigrationContext], None] | None
+    setup_context: _SerializedMigrationContext | None
     """ The setup callback for the rollback method """
 
 
@@ -148,23 +194,6 @@ class _SerializedRollback:
         return self.__class__, (self._rollback_bytes,)
 
 
-class _SerializedRollbackSetup:
-    """Use cloudpickle to serialize the rollback_setup function by value and not reference."""
-
-    def __init__(self, rollback_setup_bytes: bytes):
-        self._rollback_setup_bytes = rollback_setup_bytes
-
-    @cached_property
-    def rollback_setup(self) -> Callable[[MigrationContext], None]:
-        return cloudpickle.loads(self._rollback_setup_bytes)
-
-    def __call__(self, context: MigrationContext) -> None:
-        return self.rollback_setup(context)
-
-    def __reduce__(self) -> tuple[Callable[[bytes], _SerializedRollbackSetup], tuple[bytes]]:
-        return self.__class__, (self._rollback_setup_bytes,)
-
-
 @dataclass
 class Migration:
     """Represents a migration"""
@@ -182,9 +211,6 @@ class Migration:
     mock missing modules or Attributes."""
     rollback: Callable[[CkptType], CkptType] | None = None
     """Callback to execute a migration rollback"""
-    rollback_setup: Callable[[MigrationContext], None] | None = None
-    """Setup function to execute before loading the checkpoint for rollback. This can be used to
-    mock missing modules or Attributes."""
 
     @classmethod
     def from_serialized(cls, migration: SerializedMigration) -> Migration:
@@ -202,14 +228,16 @@ class Migration:
         Migration
             The migration.
         """
+        migration_setup = None
+        if migration["setup_context"] is not None:
+            migration_setup = _DeserializeMigrationContext(migration["setup_context"])
         return Migration(
             migration["name"],
             migration["metadata"],
             migration["signature"],
             None,
-            None,
+            migration_setup,
             migration["rollback"],
-            migration["rollback_setup"],
         )
 
     def serialize(self) -> SerializedMigration:
@@ -221,21 +249,19 @@ class Migration:
             The serialized dict to store in the checkpoint.
         """
         serialized_rollback: _SerializedRollback | None = None
-        serialized_rollback_setup: _SerializedRollbackSetup | None = None
         if self.rollback is not None:
             cloudpickle.register_pickle_by_value(sys.modules[self.rollback.__module__])
             rollback_bytes = cloudpickle.dumps(self.rollback)
             serialized_rollback = _SerializedRollback(rollback_bytes)
-        if self.rollback_setup is not None:
-            cloudpickle.register_pickle_by_value(sys.modules[self.rollback_setup.__module__])
-            rollback_setup_bytes = cloudpickle.dumps(self.rollback_setup)
-            serialized_rollback_setup = _SerializedRollbackSetup(rollback_setup_bytes)
+        serialized_rollback_setup: _SerializedMigrationContext | None = None
+        if self.migrate_setup is not None:
+            serialized_rollback_setup = _serialize_setup_callback(self.migrate_setup)
         return {
             "name": self.name,
             "metadata": self.metadata,
             "signature": self.signature,
             "rollback": serialized_rollback,
-            "rollback_setup": serialized_rollback_setup,
+            "setup_context": serialized_rollback_setup,
         }
 
 
@@ -484,7 +510,7 @@ class Migrator:
             Index of the compatibility group
         """
         if _ckpt_migration_key not in ckpt:
-            raise ValueError("Checkpoint is not compatible")
+            raise IncompatibleCheckpointException("Checkpoint is not compatible")
 
         if not len(ckpt[_ckpt_migration_key]):
             return 0
@@ -492,7 +518,7 @@ class Migrator:
         for k, group in enumerate(self._grouped_migrations[1:], 1):
             if group[0].name == first_migration:
                 return k
-        raise ValueError("Checkpoint is not compatible")
+        raise IncompatibleCheckpointException("Checkpoint is not compatible")
 
     def get_first_incompatible_version(self, ckpt: CkptType) -> str | None:
         """Get the first version where you cannot update the checkpoint
@@ -569,8 +595,8 @@ class Migrator:
                 raise IncompatibleCheckpointException(
                     f"{ckpt_migration.name} cannot bo rollbacked. Missing rollback function."
                 )
-            if ckpt_migration.rollback_setup is not None:
-                setups.append(ckpt_migration.rollback_setup)
+            if ckpt_migration.migrate_setup is not None:
+                setups.append(_ReversedSetupCallback(ckpt_migration.migrate_setup))
             ops.append(RollbackOp(ckpt_migration.rollback, ckpt_migration))
 
         num_rollbacks = len(ops)
@@ -765,11 +791,12 @@ class SaveCkpt:
                     ),
                     "signature": migration.get("signature", migration.get("name", "")),
                     "rollback": migration.get("rollback", None),
-                    "rollback_setup": migration.get("rollback_setup", None),
+                    "setup_context": migration.get("setup_context", None),
                 }
             )
         ckpt["migrations"] = ckpt_migrations
         ckpt["pytorch-lightning_version"] = ""
+        ckpt.setdefault("hyper_parameters", {}).setdefault("metadata", {})
         path = self.ckpt_dir / name
         torch.save(ckpt, path)
         return path

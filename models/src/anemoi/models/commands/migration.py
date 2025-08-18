@@ -148,19 +148,6 @@ def migrate(ckpt: CkptType) -> CkptType:
 {% if not no_rollback %}
 
 
-{% if with_setup %}
-def rollback_setup(context: MigrationContext) -> None:
-    \"""
-    Rollback setup callback to be run before loading the checkpoint.
-
-    Parameters
-    ----------
-    context : MigrationContext
-       A MigrationContext instance
-    \"""
-
-
-{% endif %}
 def rollback(ckpt: CkptType) -> CkptType:
     \"""
     Rollback the checkpoint.
