@@ -49,7 +49,7 @@ class MultiHeadSelfAttention(nn.Module):
         You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
         wheels available on the GitHub. On an aarch64 system, you have to build flash attention from source.
 
-    flash attention v3 (FAv3)
+    flash attention v3
         Flash-Attn v3  uses new GPU features to achieve an up to 2x speedup compared to flash attention v2.
         The new features include more efficient tensor core usage via the WGMMA instruction and hardware
         accelerated memory accesses via the Tensor Memory Accelerator.
