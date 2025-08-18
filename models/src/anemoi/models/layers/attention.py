@@ -35,7 +35,9 @@ class MultiHeadSelfAttention(nn.Module):
     allows for three different attention implementations:
         - scaled dot product attention (see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
         - flash attention (see https://github.com/Dao-AILab/flash-attention)
-        - flash attention v3 (see https://github.com/Dao-AILab/flash-attention#flashattention-3-beta-release_
+        - flash attention v3 (see https://github.com/Dao-AILab/flash-attention#flashattention-3-beta-release)
+
+    The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
 
     scaled dot product attention (SDPA)
         SDPA is a pytorch function, so it is easiest to use but the least performant.
@@ -228,7 +230,9 @@ class MultiHeadSelfAttention(nn.Module):
 
 
 class SDPAAttentionWrapper(nn.Module):
-    """Wrapper for Pytorch scaled dot product attention"""
+    """Wrapper for Pytorch scaled dot product attention
+	To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
+	"""
 
     def __init__(self):
         super().__init__()
@@ -288,7 +292,9 @@ class SDPAAttentionWrapper(nn.Module):
 
 
 class FlashAttentionWrapper(nn.Module):
-    """Wrapper for Flash attention."""
+    """Wrapper for Flash attention.
+	To use this attention implementation: model.processor.attention_implementation='flash_attention'
+	"""
 
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
@@ -352,7 +358,9 @@ class FlashAttentionWrapper(nn.Module):
 
 
 class FlashAttentionV3Wrapper(nn.Module):
-    """Wrapper for Flash attention."""
+    """Wrapper for Flash attention v3.
+	To use this attention implementation: model.processor.attention_implementation='flash_attention_v3'
+	"""
 
     def __init__(self):
         super().__init__()
