@@ -323,7 +323,6 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
             continue
         LOGGER.debug("Loading migration .%s from %s", file.stem, package)
         try:
-            print(f".{file.stem}", package)
             migration = importlib.import_module(f".{file.stem}", package)
         except ImportError as e:
             LOGGER.warning("Error loading %s: %s", file.name, str(e))
