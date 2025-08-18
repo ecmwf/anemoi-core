@@ -720,6 +720,7 @@ class SaveCkpt:
                 }
             )
         ckpt["migrations"] = ckpt_migrations
+        ckpt["pytorch-lightning_version"] = ""
         path = self.ckpt_dir / name
         torch.save(ckpt, path)
         return path
