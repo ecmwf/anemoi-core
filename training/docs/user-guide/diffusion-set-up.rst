@@ -121,6 +121,26 @@ These defaults can be overridden at inference time by passing
 `noise_scheduler_params` and `sampler_params` to the `predict_step`
 method.
 
+Here is an example of how to modify inference settings for a diffusion
+model in your configuration:
+
+.. code:: yaml
+
+   checkpoint: /path/to/your/checkpoint
+   date: 20250101T00:00:00
+   predict_kwargs:
+     noise_scheduler_params:
+       num_steps: 20
+       sigma_max: 90.0
+       sigma_min: 0.03
+       rho: 7.0
+     sampler_params:
+       sampler: "heun"
+       S_churn: 2.5
+       S_min: 0.75
+       S_max: 90
+       S_noise: 1.05
+
 ****************************
  Changes in training config
 ****************************
