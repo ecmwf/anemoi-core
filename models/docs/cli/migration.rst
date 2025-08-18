@@ -21,7 +21,12 @@ To inspect the registered versions in the checkpoint, run:
 
 .. code:: bash
 
-   anemoi-models migration inspect PATH_TO_CKPT
+   $ anemoi-models migration inspect PATH_TO_CKPT
+   1 missing migration:
+     + 1750845283_rename_thing [v0.10.1]
+
+   To update your checkpoint, run:
+     anemoi-models migration sync path/to/last.ckpt
 
 You can remove colors with the ``--no-color`` argument:
 

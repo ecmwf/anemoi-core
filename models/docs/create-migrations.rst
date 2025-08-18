@@ -446,3 +446,12 @@ Here is a full example of a migration to fix `PR 433
            The rollbacked checkpoint dict.
        """
        return ckpt
+
+***************
+ Best practice
+***************
+
+Here are best practices that will help you create good migration
+scripts.
+
+-  Use a `if` guard to only apply scripts to specific architecture
