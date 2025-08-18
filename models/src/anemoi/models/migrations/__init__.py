@@ -659,13 +659,20 @@ class Migrator:
             replace_attrs = context.deleted_attributes
         # Force reloading checkpoint without obfuscating import issues.
         ckpt = _load_ckpt(path, replace_attrs)
+        ckpt["hyper_paramaters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
         for op in ops:
             if isinstance(op, RollbackOp):
                 ckpt = op.run(ckpt)
                 ckpt[_ckpt_migration_key].pop()
+                ckpt["hyper_parameters"]["metadata"]["migrations"]["history"].append(
+                    {"type": "rollback", "name": op.migration.name}
+                )
             else:
                 ckpt = op.run(ckpt)
                 ckpt[_ckpt_migration_key].append(op.migration.serialize())
+                ckpt["hyper_parameters"]["metadata"]["migrations"]["history"].append(
+                    {"type": "migrate", "name": op.migration.name}
+                )
         return old_ckpt, ckpt, ops
 
     def inspect(self, path: str | PathLike) -> tuple[list[Migration], list[Migration], list[Migration]]:
