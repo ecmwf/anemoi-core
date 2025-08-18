@@ -28,8 +28,6 @@ from ..migrations import Migrator
 from ..migrations import RollbackOp
 from . import Command
 
-LOGGER = logging.getLogger(__name__)
-
 here = Path(__file__).parent
 root_folder = here.parent.parent.parent.parent.parent
 
@@ -308,7 +306,6 @@ class Migration(Command):
         """
         import torch
 
-        LOGGER.setLevel(args.log_level)
         migrator_logger.setLevel(args.log_level)
 
         console = Console(force_terminal=not args.no_color, highlight=False)
@@ -342,7 +339,7 @@ class Migration(Command):
                         f"  [green]+ MIGRATE [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/green]"
                     )
         except IncompatibleCheckpointException as e:
-            LOGGER.error(str(e))
+            print(str(e))
 
     def run_inspect(self, args: Namespace) -> None:
         """Inspects the checkpoint.
