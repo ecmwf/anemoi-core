@@ -13,11 +13,12 @@
 
 import logging
 from types import SimpleNamespace
-from typing import Any 
+from typing import Any
+
 import numpy as np
 
-
 from anemoi.training.losses.utils import print_variable_scaling
+
 LOGGER = logging.getLogger(print_variable_scaling.__module__)
 
 
