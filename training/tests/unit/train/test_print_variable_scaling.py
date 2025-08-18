@@ -8,14 +8,16 @@
 # nor does it submit to any jurisdiction.
 
 
+# (C) Copyright 2024 Anemoi contributors.
+# Apache 2.0 license…
+
 import logging
 from types import SimpleNamespace
+from typing import Any 
 import numpy as np
 
-# The function lives in utils.py (a module file, not a package directory)
-from anemoi.training.losses.utils import print_variable_scaling
 
-# Use the logger from that module (LOGGER = logging.getLogger(__name__) there)
+from anemoi.training.losses.utils import print_variable_scaling
 LOGGER = logging.getLogger(print_variable_scaling.__module__)
 
 
@@ -25,7 +27,7 @@ class _FakeScalerSubset:
     def __init__(self, arr: np.ndarray) -> None:
         self._arr = np.asarray(arr)
 
-    def get_scaler(self, *_args, **_kwargs) -> np.ndarray:
+    def get_scaler(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
         # Return exactly what we seeded (shape preserved); the function will reshape(-1)
         return self._arr.copy()
 
@@ -34,7 +36,7 @@ class _FakeScaler:
     def __init__(self, arr: np.ndarray) -> None:
         self._arr = np.asarray(arr)
 
-    def subset_by_dim(self, _dim) -> "_FakeScalerSubset":
+    def subset_by_dim(self, _dim: Any) -> "_FakeScalerSubset":  # <-- annotated
         # dim is ignored in this fake; real code uses TensorDim.VARIABLE.value
         return _FakeScalerSubset(self._arr)
 
@@ -44,7 +46,7 @@ class _FakeLoss:
         self.scaler = _FakeScaler(arr)
 
 
-def _fake_indices(names: list[str]):
+def _fake_indices(names: list[str]) -> SimpleNamespace:  # <-- annotated
     # Must provide data_indices.model.output.name_to_index (ordered)
     name_to_index = {name: i for i, name in enumerate(names)}
     model = SimpleNamespace(output=SimpleNamespace(name_to_index=name_to_index))
