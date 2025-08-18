@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import importlib
 import logging
 import sys
@@ -19,6 +21,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import cached_property
+from inspect import getsource
 from os import PathLike
 from pathlib import Path
 from pickle import Unpickler
@@ -117,6 +120,8 @@ class SerializedMigration(TypedDict):
     name: str
     """ Name of the migration """
     metadata: MigrationMetadata
+    signature: str
+    """ The signature of the script. Can be used to detect if a script changed. """
     rollback: Callable[[CkptType], CkptType] | None
     """ The rollback function stored as value """
     rollback_setup: Callable[[MigrationContext], None] | None
@@ -168,6 +173,8 @@ class Migration:
     """Name of the migration"""
     metadata: MigrationMetadata
     """Tracked metadata"""
+    signature: str
+    """Signature of the migration. Can be used to detect if the script changed"""
     migrate: Callable[[CkptType], CkptType] | None = None
     """Callback to execute the migration"""
     migrate_setup: Callable[[MigrationContext], None] | None = None
@@ -196,7 +203,13 @@ class Migration:
             The migration.
         """
         return Migration(
-            migration["name"], migration["metadata"], None, None, migration["rollback"], migration["rollback_setup"]
+            migration["name"],
+            migration["metadata"],
+            migration["signature"],
+            None,
+            None,
+            migration["rollback"],
+            migration["rollback_setup"],
         )
 
     def serialize(self) -> SerializedMigration:
@@ -220,6 +233,7 @@ class Migration:
         return {
             "name": self.name,
             "metadata": self.metadata,
+            "signature": self.signature,
             "rollback": serialized_rollback,
             "rollback_setup": serialized_rollback_setup,
         }
@@ -241,6 +255,24 @@ class MigrationOp(BaseOp):
 @dataclass
 class RollbackOp(BaseOp):
     """Rollback Operation"""
+
+
+def _get_code_digest(content: str) -> str:
+    """Get a digest for some python code. This does not take indentations, comments
+    (except docstrings) and is based on the code's ast.
+
+    Parameters
+    ----------
+    content : str
+        Some valid python code
+
+    Returns
+    -------
+    str
+        The digest of the code
+    """
+    code = ast.dump(ast.parse(content), include_attributes=False)
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
 def _migrations_from_path(location: str | PathLike, package: str) -> list[Migration]:
@@ -271,7 +303,9 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
             LOGGER.warning("Error loading %s: %s", file.name, str(e))
             continue
 
-        args: dict[str, Any] = dict(name=file.stem, metadata=migration.metadata)
+        args: dict[str, Any] = dict(
+            name=file.stem, metadata=migration.metadata, signature=_get_code_digest(getsource(migration))
+        )
         if hasattr(migration, "migrate"):
             args["migrate"] = migration.migrate
         if hasattr(migration, "migrate_setup"):
@@ -527,7 +561,12 @@ class Migrator:
                 len(migrations) > n_ckpt_migrations - k
                 and migrations[n_ckpt_migrations - k].name == ckpt_migration.name
             ):
-                break
+                if migrations[n_ckpt_migrations - k].signature != ckpt_migration.signature:
+                    LOGGER.warning(
+                        "The script for %s has changed. Re-run the migrations if possible to use the new script.",
+                        ckpt_migration.name,
+                    )
+                continue
 
             if ckpt_migration.rollback is None:
                 raise IncompatibleCheckpointException(
@@ -543,6 +582,11 @@ class Migrator:
                 len(ckpt_migrations[: len(ckpt_migrations) - num_rollbacks]) > k
                 and migration.name == ckpt_migrations[k].name
             ):
+                if migration.signature != ckpt_migrations[k].signature:
+                    LOGGER.warning(
+                        "The script for %s has changed. Re-run the migrations if possible to use the new script.",
+                        migration.name,
+                    )
                 continue
             if migration.migrate is None:
                 raise IncompatibleCheckpointException(
@@ -712,11 +756,12 @@ class SaveCkpt:
             ckpt_migrations.append(
                 {
                     "name": migration.get("name", "dummy_name"),
-                    "rollback": migration.get("rollback", None),
-                    "rollback_setup": migration.get("rollback_setup", None),
                     "metadata": migration.get(
                         "metadata", {"versions": {"migration": "1.0.0", "anemoi-models": "x.x.x"}}
                     ),
+                    "signature": migration.get("signature", migration.get("name", "")),
+                    "rollback": migration.get("rollback", None),
+                    "rollback_setup": migration.get("rollback_setup", None),
                 }
             )
         ckpt["migrations"] = ckpt_migrations
