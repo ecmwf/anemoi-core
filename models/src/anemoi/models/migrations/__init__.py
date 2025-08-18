@@ -27,7 +27,7 @@ from typing import TypedDict
 
 import cloudpickle
 
-MIGRATION_PATH = Path(__file__).parent
+MIGRATION_PATH = Path(__file__).parent / "scripts"
 
 _ckpt_migration_key = "migrations"
 
@@ -265,6 +265,7 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
             continue
         LOGGER.debug("Loading migration .%s from %s", file.stem, package)
         try:
+            print(f".{file.stem}", package)
             migration = importlib.import_module(f".{file.stem}", package)
         except ImportError as e:
             LOGGER.warning("Error loading %s: %s", file.name, str(e))
@@ -374,7 +375,7 @@ class Migrator:
         """
 
         if migrations is None:
-            migrations = _migrations_from_path(MIGRATION_PATH, __name__)
+            migrations = _migrations_from_path(MIGRATION_PATH, f"{__name__}.scripts")
 
         # Compatibility groups. Checkpoints cannot be migrated past their
         # own group. This is useful to indicate when migrating checkpoints is no longer
