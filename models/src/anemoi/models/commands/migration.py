@@ -424,8 +424,7 @@ class Migration(Command):
             _, _, new_name = name.partition("_")
             new_name = f"{new_timestamp + k}_{new_name}"
             print(f"Renaming {name} to {new_name}.")
-            print(path, path.with_name(new_name))
-            # path.rename(path.with_name(new_name))
+            path.rename(path.with_name(new_name))
 
 
 command = Migration
