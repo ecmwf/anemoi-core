@@ -656,7 +656,7 @@ class Migrator:
             replace_attrs = context.deleted_attributes
         # Force reloading checkpoint without obfuscating import issues.
         ckpt = _load_ckpt(path, replace_attrs)
-        ckpt["hyper_paramaters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
+        ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
         for op in ops:
             if isinstance(op, RollbackOp):
                 ckpt = op.run(ckpt)
