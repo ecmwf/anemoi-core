@@ -1,6 +1,6 @@
 ---
 defaults:
-  - scalers: lam
+  - scalers: global
 
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
@@ -12,7 +12,7 @@ load_weights_only: False # only load model weights, do not restore optimiser sta
 deterministic: False
 
 # miscellaneous
-precision: 16-mixed
+precision: bf16-mixed
 
 # multistep input
 # 1 = single step scheme, X(t-1) used to predict X(t)
@@ -28,8 +28,8 @@ num_sanity_val_steps: 6
 
 # clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
 gradient_clip:
-  val: 32.
-  algorithm: value
+  val: 1.
+  algorithm: norm
 
 # stochastic weight averaging
 # https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
@@ -39,12 +39,14 @@ swa:
 
 # Optimizer settings
 optimizer:
-  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
+  zero: False
   kwargs:
+    weight_decay: 0.1
     betas: [0.9, 0.95]
+    eps: 1e-7
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
 
 # select strategy
 strategy:
@@ -62,9 +64,9 @@ loss_gradient_scaling: False
 # loss function for the model
 training_loss:
   # loss class to initialise
-  _target_: anemoi.training.losses.MSELoss
+  _target_: anemoi.training.losses.WeightedMSELoss
   # Scalers to include in loss calculation
-  # A selection of available scalers are listed in training/scalers/scalers.yaml
+  # A selection of available scalers are listed in training/scalers.
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
   scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
@@ -77,14 +79,14 @@ training_loss:
 # have undergone postprocessing.
 validation_metrics:
   # loss class to initialise
-  mse_inside_lam:
+  mse:
     _target_: anemoi.training.losses.MSELoss
     # Scalers to include in loss calculation
     # Cannot scale over the variable dimension due to possible remappings.
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: ["node_weights"]
+    scalers: ['node_weights']
     # other kwargs
     ignore_nans: True
 
@@ -95,8 +97,7 @@ validation_metrics:
 
 # If more complex grouping is required, groups can be defined as a dictionary, such that all
 # keys must be evaluate to True.
-# .e.g. to set the variable group based on if the metadata specifies the variable is a pressure level
-# you can write the following:
+# .e.g.:
 #   variable_groups:
 #     default: sfc
 #     pl:
@@ -131,7 +132,7 @@ rollout:
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
-max_steps: 150000
+max_steps: 1000000
 
 lr:
   warmup: 1000 # number of warmup iterations
