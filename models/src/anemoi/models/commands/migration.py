@@ -104,6 +104,7 @@ migration_template_str = """\
 {{import}}
 {% endfor %}
 
+# DO NOT CHANGE -->
 metadata = MigrationMetadata(
     versions={
         "migration": "{{migration_version}}",
@@ -113,13 +114,13 @@ metadata = MigrationMetadata(
     final=True,
     {% endif %}
 )
+# <-- END DO NOT CHANGE
 {% if not final %}
 
 
 {% if with_setup %}
 def migrate_setup(context: MigrationContext) -> None:
-    \"""
-    Migrate setup callback to be run before loading the checkpoint.
+    \"""Migrate setup callback to be run before loading the checkpoint.
 
     Parameters
     ----------
@@ -130,8 +131,7 @@ def migrate_setup(context: MigrationContext) -> None:
 
 {% endif %}
 def migrate(ckpt: CkptType) -> CkptType:
-    \"""
-    Migrate the checkpoint.
+    \"""Migrate the checkpoint.
 
 
     Parameters
@@ -149,8 +149,7 @@ def migrate(ckpt: CkptType) -> CkptType:
 
 
 def rollback(ckpt: CkptType) -> CkptType:
-    \"""
-    Rollback the checkpoint.
+    \"""Rollback the checkpoint.
 
 
     Parameters

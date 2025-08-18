@@ -7,23 +7,46 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 from anemoi.models.migrations import CkptType
 from anemoi.models.migrations import MigrationMetadata
 
+# DO NOT CHANGE -->
 metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
-        "anemoi-models": "0.8.1.post1",
-    }
+        "anemoi-models": "0.8.1.post84",
+    },
 )
+# <-- END DO NOT CHANGE
 
 
 def migrate(ckpt: CkptType) -> CkptType:
-    """Migrate the checkpoint"""
+    """Migrate the checkpoint.
+
+    Parameters
+    ----------
+    ckpt : CkptType
+        The checkpoint dict.
+
+    Returns
+    -------
+    CkptType
+        The migrated checkpoint dict.
+    """
     return ckpt
 
 
 def rollback(ckpt: CkptType) -> CkptType:
-    """Rollbacks the migration"""
+    """Rollback the checkpoint.
+
+    Parameters
+    ----------
+    ckpt : CkptType
+        The checkpoint dict.
+
+    Returns
+    -------
+    CkptType
+        The rollbacked checkpoint dict.
+    """
     return ckpt

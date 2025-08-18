@@ -514,7 +514,7 @@ class Migrator:
         if not len(ckpt[_ckpt_migration_key]):
             return 0
         first_migration = ckpt[_ckpt_migration_key][0]["name"]
-        for k, group in enumerate(self._grouped_migrations[1:], 1):
+        for k, group in enumerate(self._grouped_migrations):
             if group[0].name == first_migration:
                 return k
         raise IncompatibleCheckpointException("Checkpoint is not compatible")
