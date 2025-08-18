@@ -29,7 +29,7 @@ weather forecasting.
 
    introduction/overview
    introduction/installing
-   introduction/migrations
+   migrations
 
 .. toctree::
    :maxdepth: 1
