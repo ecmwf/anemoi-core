@@ -7,16 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import torch
+from omegaconf import DictConfig
 from torch import nn
-
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
 
 LOGGER = logging.getLogger(__name__)
 

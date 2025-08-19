@@ -6,9 +6,13 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
+
 from __future__ import annotations
 
 import logging
+from abc import ABC
+from abc import abstractmethod
 from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
@@ -16,7 +20,6 @@ import torch
 from hydra.utils import instantiate
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
@@ -34,20 +37,97 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from collections.abc import Mapping
 
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphForecaster(pl.LightningModule):
-    """Graph neural network forecaster for PyTorch Lightning."""
+class BaseGraphModule(pl.LightningModule, ABC):
+    """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
+
+    This class encapsulates the shared functionality for distributed training,
+    scaling, and evaluation of graph-based neural network models across multiple GPUs and nodes.
+    It provides hooks for defining losses, metrics, optimizers, and distributed sharding strategies.
+
+    Key Features
+    ------------
+    - Supports model and data parallelism through model and reader process groups.
+    - Handles graph data via `torch_geometric.data.HeteroData` format.
+    - Supports sharded input batches and reconstruction via `allgather`.
+    - Integrates modular loss and metric functions with support for variable scaling.
+    - Enables deferred creation of variable scalers post-model instantiation.
+    - Fully compatible with PyTorch Lightning training and validation loops.
+
+    Subclass Responsibilities
+    -------------------------
+    Child classes must implement the `_step` method, which defines the forward and loss computation
+    for training and validation steps.
+
+    Parameters
+    ----------
+    config : BaseSchema
+        Configuration object defining all parameters.
+    graph_data : HeteroData
+        Graph-structured input data containing node and edge features.
+    truncation_data : dict
+        Information for input/output truncation masks.
+    statistics : dict
+        Dictionary of training statistics (mean, std, etc.) used for normalization.
+    statistics_tendencies : dict
+        Statistics related to tendencies (if used).
+    data_indices : IndexCollection
+        Maps feature names to index ranges used for training and loss functions.
+    metadata : dict
+        Dictionary with metadata such as dataset provenance and variable descriptions.
+    supporting_arrays : dict
+        Numpy arrays (e.g., topography, masks) needed during inference and stored in checkpoints.
+
+    Attributes
+    ----------
+    model : AnemoiModelInterface
+        Wrapper for the underlying GNN model and its pre/post-processing logic.
+    loss : BaseLoss
+        Training loss function, optionally supporting variable scaling and sharding.
+    metrics : dict[str, BaseLoss | Callable]
+        Dictionary of validation metrics (often loss-style) computed during evaluation.
+    scalers : dict
+        Variable-wise scaling functions (e.g., standardization).
+    val_metric_ranges : dict
+        Mapping of variable groups for which to calculate validation metrics.
+    output_mask : nn.Module
+        Masking module that filters outputs during inference.
+    multi_step : bool
+        Flag to enable autoregressive rollouts (used in multi-step forecasting).
+    keep_batch_sharded : bool
+        Whether to keep input batches split across GPUs instead of gathering them.
+
+    Distributed Training
+    --------------------
+    The module can be configured to work in multi-node, multi-GPU environments with support for:
+    - Custom communication groups for model and reader parallelism
+    - Sharded input and output tensors
+    - Support for `ZeroRedundancyOptimizer` and learning rate warmup
+
+    Notes
+    -----
+    - This class should not be used directly. Subclass it and override `_step`.
+
+    See Also
+    --------
+    - `AnemoiModelInterface`
+    - `BaseLoss`
+    - `IndexCollection`
+    - `CosineLRScheduler`
+    - `create_scalers`, `grad_scaler`
+
+    """
 
     def __init__(
         self,
@@ -87,6 +167,7 @@ class GraphForecaster(pl.LightningModule):
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
@@ -110,7 +191,7 @@ class GraphForecaster(pl.LightningModule):
         )
 
         # Instantiate all scalers with the training configuration
-        self.scalers, self.delayed_scaler_builders = create_scalers(
+        self.scalers, self.updating_scalars = create_scalers(
             config.model_dump(by_alias=True).training.scalers,
             data_indices=data_indices,
             graph_data=graph_data,
@@ -156,10 +237,6 @@ class GraphForecaster(pl.LightningModule):
         self.lr_iterations = config.training.lr.iterations
         self.lr_warmup = config.training.lr.warmup
         self.lr_min = config.training.lr.min
-        self.rollout = config.training.rollout.start
-        self.rollout_epoch_increment = config.training.rollout.epoch_increment
-        self.rollout_max = config.training.rollout.max
-
         self.optimizer_settings = config.training.optimizer
 
         self.model_comm_group = None
@@ -202,9 +279,6 @@ class GraphForecaster(pl.LightningModule):
                 ", ".join(self.metrics.keys()),
             )
 
-        LOGGER.debug("Rollout window length: %d", self.rollout)
-        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
-        LOGGER.debug("Rollout max : %d", self.rollout_max)
         LOGGER.debug("Multistep: %d", self.multi_step)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
@@ -227,14 +301,22 @@ class GraphForecaster(pl.LightningModule):
             grid_shard_shapes=self.grid_shard_shapes,
         )
 
-    def on_load_checkpoint(self, checkpoint: torch.nn.module) -> None:
+    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
-    def define_delayed_scalers(self) -> None:
-        """Update delayed scalers such as the loss weights mask for imputed variables."""
-        for name, scaler_builder in self.delayed_scaler_builders.items():
-            self.scalers[name] = scaler_builder.get_delayed_scaling(model=self.model)
-            self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
+    def update_scalers(self, callback: AvailableCallbacks) -> None:
+        """Update scalers, calling the defined function on them, updating if not None."""
+        for name, scaler_builder in self.updating_scalars.items():
+            scaler = scaler_builder.update_scaling_values(callback, model=self.model)
+            if scaler is None:  # If scalar is None, no update to be applied
+                continue
+
+            if name in self.loss.scaler:  # If scalar in loss, update it
+                self.loss.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+
+            for metric in self.metrics.values():  # If scalar in metrics, update it
+                if name in metric.scaler:
+                    metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
     def set_model_comm_group(
         self,
@@ -262,50 +344,37 @@ class GraphForecaster(pl.LightningModule):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
-    def advance_input(
-        self,
-        x: torch.Tensor,
-        y_pred: torch.Tensor,
-        batch: torch.Tensor,
-        rollout_step: int,
-    ) -> torch.Tensor:
-        x = x.roll(-1, dims=1)
-
-        # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
-            ...,
-            self.data_indices.model.output.prognostic,
-        ]
-
-        x[:, -1] = self.output_mask.rollout_boundary(
-            x[:, -1],
-            batch[:, self.multi_step + rollout_step],
-            self.data_indices,
-        )
-
-        # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
-            :,
-            self.multi_step + rollout_step,
-            :,
-            :,
-            self.data_indices.data.input.forcing,
-        ]
-        return x
-
-    def compute_loss_metrics(
+    def _prepare_tensors_for_loss(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
         training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
+        """Prepare tensors for loss computation, handling sharding if necessary.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        training_mode : bool
+            Whether in training mode
+        validation_mode : bool
+            Whether in validation mode
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, slice | None]
+            Prepared y_pred, y, and grid_shard_slice
+        """
         is_sharded = self.grid_shard_slice is not None
 
         sharding_supported = (self.loss_supports_sharding or not training_mode) and (
             self.metrics_support_sharding or not validation_mode
         )
+
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
             shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, self.grid_shard_shapes)
             y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
@@ -315,98 +384,122 @@ class GraphForecaster(pl.LightningModule):
             y_pred_full, y_full = y_pred, y
             grid_shard_slice = self.grid_shard_slice
 
-        loss = (
-            self.loss(
-                y_pred_full,
-                y_full,
-                grid_shard_slice=grid_shard_slice,
-                group=self.model_comm_group,
-            )
-            if training_mode
-            else None
-        )
+        return y_pred_full, y_full, grid_shard_slice
 
-        metrics_next = {}
-        if validation_mode:
-            metrics_next = self.calculate_val_metrics(
-                y_pred_full,
-                y_full,
-                rollout_step,
-                grid_shard_slice=grid_shard_slice,
-            )
-
-        return loss, metrics_next
-
-    def rollout_step(
+    def _compute_loss(
         self,
-        batch: torch.Tensor,
-        rollout: int | None = None,
-        training_mode: bool = True,
-        validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
-        """Rollout step for the forecaster.
-
-        Will run pre_processors on batch, but not post_processors on predictions.
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Compute the loss function.
 
         Parameters
         ----------
-        batch : torch.Tensor
-            Batch to use for rollout
-        rollout : Optional[int], optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
-        validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+        **_kwargs
+            Additional arguments
 
-        Yields
-        ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
-            Loss value, metrics, and predictions (per step)
-
+        Returns
+        -------
+        torch.Tensor
+            Computed loss
         """
-        batch = self.model.pre_processors(batch)  # normalized in-place
-
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.define_delayed_scalers()
-            self.is_first_step = False
-
-        # start rollout of preprocessed batch
-        x = batch[
-            :,
-            0 : self.multi_step,
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, multi_step, latlon, nvar)
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+        return self.loss(
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
         )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
 
-        for rollout_step in range(rollout or self.rollout):
-            # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-            y_pred = self(x)
+    def _compute_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int = 0,
+        grid_shard_slice: slice | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Compute validation metrics.
 
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
-            # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, metrics_next = checkpoint(
-                self.compute_loss_metrics,
-                y_pred,
-                y,
-                rollout_step,
-                training_mode,
-                validation_mode,
-                use_reentrant=False,
-            )
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        rollout_step : int
+            Current rollout step
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Computed metrics
+        """
+        return self.calculate_val_metrics(
+            y_pred,
+            y,
+            rollout_step,
+            grid_shard_slice=grid_shard_slice,
+        )
 
-            yield loss, metrics_next, y_pred
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int,
+        training_mode: bool = True,
+        validation_mode: bool = False,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        """Compute loss and metrics for the given predictions and targets.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        rollout_step : int
+            Current rollout step
+        training_mode : bool
+            Whether to compute training loss
+        validation_mode : bool
+            Whether to compute validation metrics
+        **kwargs
+            Additional arguments to pass to loss computation
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
+            Loss (if training_mode) and metrics dictionary (if validation_mode)
+        """
+        # Prepare tensors for loss/metrics computation
+        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            training_mode,
+            validation_mode,
+        )
+
+        # Compute loss if in training mode
+        loss = None
+        if training_mode:
+            loss = self._compute_loss(y_pred=y_pred_full, y=y_full, grid_shard_slice=grid_shard_slice, **kwargs)
+
+        # Compute metrics if in validation mode
+        metrics_next = {}
+        if validation_mode:
+            metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice)
+
+        return loss, metrics_next
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -415,8 +508,6 @@ class GraphForecaster(pl.LightningModule):
         ----------
         batch : torch.Tensor
             Batch to transfer
-        dataloader_idx : int
-            Dataloader index
 
         Returns
         -------
@@ -432,30 +523,14 @@ class GraphForecaster(pl.LightningModule):
 
         return batch
 
+    @abstractmethod
     def _step(
         self,
         batch: torch.Tensor,
         batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        del batch_idx
-
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
-        for loss_next, metrics_next, y_preds_next in self.rollout_step(
-            batch,
-            rollout=self.rollout,
-            training_mode=True,
-            validation_mode=validation_mode,
-        ):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
-
-        loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds
+        pass
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
@@ -491,7 +566,7 @@ class GraphForecaster(pl.LightningModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
+        rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -551,14 +626,7 @@ class GraphForecaster(pl.LightningModule):
             batch_size=batch.shape[0],
             sync_dist=True,
         )
-        self.log(
-            "rollout",
-            float(self.rollout),
-            on_step=True,
-            logger=self.logger_enabled,
-            rank_zero_only=True,
-            sync_dist=False,
-        )
+
         return train_loss
 
     def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
@@ -568,7 +636,7 @@ class GraphForecaster(pl.LightningModule):
         ----------
         scheduler : CosineLRScheduler
             Learning rate scheduler object.
-        metric : Optional[Any]
+        metric : Any
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """
@@ -576,10 +644,7 @@ class GraphForecaster(pl.LightningModule):
         scheduler.step(epoch=self.trainer.global_step)
 
     def on_train_epoch_end(self) -> None:
-        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
-            self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
-        self.rollout = min(self.rollout, self.rollout_max)
+        pass
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
         """Calculate the loss over a validation batch using the training loss function.

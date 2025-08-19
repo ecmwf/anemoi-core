@@ -18,12 +18,13 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.train.forecaster import GraphForecaster
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
+from anemoi.training.train.tasks.base import BaseGraphModule
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphInterpolator(GraphForecaster):
+class GraphInterpolator(BaseGraphModule):
     """Graph neural network interpolator for PyTorch Lightning."""
 
     def __init__(
@@ -99,8 +100,9 @@ class GraphInterpolator(GraphForecaster):
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
-            self.define_delayed_scalers()
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
             ...,

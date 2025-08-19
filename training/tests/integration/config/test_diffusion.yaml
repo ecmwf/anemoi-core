@@ -1,0 +1,16 @@
+# Modifications for the diffusion template "diffusion.yaml"
+hardware:
+  paths:
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
+    truncation: null
+  files:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    truncation: null
+    truncation_inv: null
+    graph: null
+
+dataloader:
+  training:
+    end: 2017-01-08 12:00:00
+  validation:
+    start: 2017-01-08 18:00:00

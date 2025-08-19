@@ -7,26 +7,21 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 import numpy as np
 import torch
 from einops import rearrange
 
+from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
 
 from .singledataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from anemoi.training.data.grid_indices import BaseGridIndices
 
 
 class EnsNativeGridDataset(NativeGridDataset):

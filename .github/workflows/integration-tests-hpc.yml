@@ -40,8 +40,8 @@ jobs:
             python3 -m venv .venv
             source .venv/bin/activate
             pip install --upgrade pip
-            pip install -e ./training[all,tests,profiler] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --longtests
+            pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
+            python3 -m pytest -v training/tests/integration --slow
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
@@ -82,7 +82,6 @@ jobs:
             #SBATCH --gres=gpu:2
             #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
-
 
   notify-team:
     needs: integration-tests

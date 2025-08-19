@@ -9,20 +9,16 @@
 
 # ruff: noqa: ANN001
 
-from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 from typing import Any
 
+import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
-
-if TYPE_CHECKING:
-    import pytorch_lightning as pl
-    from pytorch_lightning.utilities.types import STEP_OUTPUT
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 LOGGER = logging.getLogger(__name__)
 

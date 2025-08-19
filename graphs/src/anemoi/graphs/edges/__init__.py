@@ -8,16 +8,20 @@
 # nor does it submit to any jurisdiction.
 
 from .builders.cutoff import CutOffEdges
+from .builders.cutoff import ReversedCutOffEdges
 from .builders.icon import ICONTopologicalDecoderEdges
 from .builders.icon import ICONTopologicalEncoderEdges
 from .builders.icon import ICONTopologicalProcessorEdges
 from .builders.knn import KNNEdges
+from .builders.knn import ReversedKNNEdges
 from .builders.multi_scale import MultiScaleEdges
 
 __all__ = [
     "KNNEdges",
     "CutOffEdges",
     "MultiScaleEdges",
+    "ReversedCutOffEdges",
+    "ReversedKNNEdges",
     "ICONTopologicalProcessorEdges",
     "ICONTopologicalEncoderEdges",
     "ICONTopologicalDecoderEdges",
