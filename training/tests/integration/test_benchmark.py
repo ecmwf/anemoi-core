@@ -25,7 +25,6 @@ from git import GitCommandError
 from git import InvalidGitRepositoryError
 from git import Repo
 from omegaconf import DictConfig
-from sshfs import SSHFileSystem
 from torch.cuda import memory_stats
 from torch.cuda import reset_peak_memory_stats
 
@@ -74,6 +73,26 @@ def _make_tarfile(output_filename, source_dir):
     with tarfile.open(output_filename, "w:gz") as tar:
         tar.add(source_dir, arcname=os.path.basename(source_dir))
 
+
+def _is_repo_on_branch(branch):
+    """
+    checks if a repo is on a given branch
+    """
+    # find repo
+    try:
+        repo = Repo(".", search_parent_directories=True)
+    except InvalidGitRepositoryError:
+        LOGGER.debug("Not a git repository.")
+        return False
+
+    # find branch
+    try:
+        current_branch = repo.active_branch.name
+    except TypeError:
+        # Detached HEAD state, no active branch
+        return False
+
+    return branch == current_branch
 
 # This function should be called from inside a git repo
 # It takes a given commit and returns true if it is somewhere in the branches history
@@ -140,7 +159,8 @@ class BenchmarkServer:
     # def __init__(self, store:str="./local", testCase:str=""):  # use a local folder to store data instead of a remote server
     def __init__(
         self,
-        store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks",
+        #store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks",
+        store:str="./local",
         testCase: str = "",
     ):  # use a local folder to store data instead of a remote server
         self.benchmarkValues = {}
@@ -195,6 +215,7 @@ class BenchmarkServer:
 
     # mounts the remote server over sftp
     def _mount_remote(self):
+        from sshfs import SSHFileSystem
         self.fs = SSHFileSystem(self.remote_host, username=self.remote_user)
 
     def __str__(self):
@@ -541,15 +562,14 @@ def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
     return artifacts
 
 
-def benchmark(cfg, testCase: str, update_data: bool, store_artifacts: bool = True, throw_error: bool = True) -> None:
+def benchmark(cfg, testCase: str, store_artifacts: bool = True, throw_error: bool = True) -> None:
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
     benchmarkServer = BenchmarkServer(testCase=testCase)
 
     benchmarks = [benchmarkValue.name for benchmarkValue in localBenchmarkResults]
-    if not update_data:
-        benchmarkServer.getValues(benchmarks)
+    benchmarkServer.getValues(benchmarks)
 
     # print local and reference results
     LOGGER.info(f"Reference benchmark results:\n{benchmarkServer}")
@@ -572,11 +592,12 @@ def benchmark(cfg, testCase: str, update_data: bool, store_artifacts: bool = Tru
         passed = benchmarkServer.compare(localBenchmarkValue)
         if not passed:
             failedTests.append(localBenchmarkValue.name)
-
+   
     if len(failedTests) > 0:
         on_test_fail(f"The following tests failed: {failedTests}")
     else:
         # the tests have passed, possibly update the data on the server
+        update_data= _is_repo_on_branch("main") #update if our branch is main
         if update_data:
             LOGGER.info("Updating metrics on server")
             for localBenchmarkValue in localBenchmarkResults:
@@ -585,14 +606,11 @@ def benchmark(cfg, testCase: str, update_data: bool, store_artifacts: bool = Tru
                 artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
                 benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
 
-
 @pytest.mark.multigpu
 @pytest.mark.slow
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
     get_test_archive: callable,
-    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
-    throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     """Runs a benchmark and then compares them against the values stored on a server.
     This test should run on unmerged PRs
@@ -604,23 +622,10 @@ def test_benchmark_training_cycle(
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
-    benchmark(cfg, testCase, update_data, throw_error=throw_error)
+    throw_error=True  # if true, an error will be thrown when a benchmark test is failed
+    benchmark(cfg, testCase, throw_error=throw_error)
 
-
-@pytest.mark.multigpu
-@pytest.mark.slow
-def test_benchmark_training_cycle_update_server(
-    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
-    get_test_archive: callable,
-) -> None:
-    """Runs a benchmark and then updates the benchmark server with those values.
-    This test should run during mains nightly integration tests
-    """
-    update_data = True
-    throw_error = True
-    test_benchmark_training_cycle(benchmark_config, get_test_archive, update_data=update_data, throw_error=throw_error)
-
-
+# TODO add benchmark flag to pytest
 # TODO refactor benchmark server into seperate file
 # TODO update docs showing how to run
 # TODO throw error when update_server fails
