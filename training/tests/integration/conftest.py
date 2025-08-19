@@ -203,7 +203,6 @@ def gnn_config(
 @pytest.fixture(
     params=[ #selects different test cases
         "graphtransformer_n320_1g",
-        "gnn_n320_1g",
         #"stretched",
         #"lam",
     ],

@@ -1,6 +1,9 @@
-# Modifications for the basic template "config.yaml"
-# TODO currentl have a hidden grid of 5 when runnign GT, change to 6 on n320
+# configuration for the "graphtransformed_2g_n320" benchmark
 hardware:
+  accelerator: cuda
+  num_gpus_per_node: 2
+  num_nodes: 1
+  num_gpus_per_model: 2
   files:
           #dataset:  aifs-ea-an-oper-0001-mars-n320-2020-2020-6h-v6.zarr #q50
     dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr #q50
@@ -30,12 +33,12 @@ graph:
 
 model:
   encoder:
-    num_chunks: 16
+    num_chunks: 4
   decoder:
-    num_chunks: 32
+    num_chunks: 4
   processor:
     num_chunks: 2
-  num_channels: 512 #32-2-32 didnt fit for 1024 1g
+  num_channels: 1024 #32-2-32 didnt fit for 1024 1g
 
 training:
   max_epochs: 1

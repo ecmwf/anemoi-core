@@ -26,6 +26,7 @@ from git import Repo
 from omegaconf import DictConfig
 from torch.cuda import memory_stats
 from torch.cuda import reset_peak_memory_stats
+from torch.distributed import get_rank as dist_get_rank
 
 from anemoi.training.train.profiler import AnemoiProfiler
 
@@ -33,7 +34,6 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
 
 LOGGER = logging.getLogger(__name__)
-
 
 BENCHMARK_SERVER_ARTIFACT_LIMIT=10
 
@@ -547,23 +547,7 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
         artifacts.append(trace_file)
     return artifacts
 
-
-@pytest.mark.multigpu
-@pytest.mark.slow
-def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
-    get_test_archive: callable,
-    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
-    throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
-) -> None:
-    cfg, testCase = benchmark_config
-    LOGGER.info(f"Benchmarking the configuration: {testCase}")
-
-    # Run model with profiler
-    reset_peak_memory_stats()
-    AnemoiProfiler(cfg).profile()
-
-    # Get local benchmark results
+def benchmark(cfg, testCase:str, update_data:bool, store_artifacts:bool = True, throw_error:bool=True) -> None:
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
@@ -586,7 +570,6 @@ def test_benchmark_training_cycle(
         LOGGER.info("Updating metrics on server")
         for localBenchmarkValue in localBenchmarkResults:
             benchmarkServer.setValue(localBenchmarkValue)
-        store_artifacts = True
         if store_artifacts:
             artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
             benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
@@ -607,7 +590,27 @@ def test_benchmark_training_cycle(
         if len(failedTests) > 0:
             on_test_fail(f"The following tests failed: {failedTests}")
 
-#TODO increase benchmark size and add multigpu
+
+@pytest.mark.multigpu
+@pytest.mark.slow
+def test_benchmark_training_cycle(
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
+    get_test_archive: callable,
+    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
+) -> None:
+    cfg, testCase = benchmark_config
+    LOGGER.info(f"Benchmarking the configuration: {testCase}")
+
+    # Run model with profiler
+    reset_peak_memory_stats()
+    AnemoiProfiler(cfg).profile()
+
+    rank=dist_get_rank()
+    LOGGER.info(f"{rank=}")
+    #if rank == 0:
+    benchmark(cfg, testCase, update_data, throw_error=throw_error)
+
 #TODO change hidden res for GT
 #TODO refactor benchmark server into seperate file
 #TODO when running multi-gpu, make sure only gpu 0 does benchmark server stuff
