@@ -105,12 +105,27 @@ class MigrationContext:
 
 
 class _SerializedMigrationContext(TypedDict):
+    """Serialized migration context"""
+
     attribute_paths: dict[str, str]
     module_paths: dict[str, str]
     deleted_attributes: list[str]
 
 
 def _serialize_setup_callback(setup: Callable[[MigrationContext], None]) -> _SerializedMigrationContext:
+    """Serialize a setup callback. It runs the callback with a dummy context and
+    returns the serialized context.
+
+    Parameters
+    ----------
+    setup : Callable[[MigrationContext], None]
+        The setup callback.
+
+    Returns
+    -------
+    _SerializedMigrationContext
+        The serialized migration context.
+    """
     ctx = MigrationContext()
     setup(ctx)
     return {
@@ -121,6 +136,8 @@ def _serialize_setup_callback(setup: Callable[[MigrationContext], None]) -> _Ser
 
 
 class _DeserializeMigrationContext:
+    """Deserializes the serialized migratoin context into a setup callback"""
+
     def __init__(self, ctx: _SerializedMigrationContext) -> None:
         self._ctx = ctx
 
@@ -134,6 +151,11 @@ class _DeserializeMigrationContext:
 
 
 class _ReversedSetupCallback:
+    """Reverses a setup callback.
+    When called with __call__, it creates a dummy context, runs the callback, then reverse the output of the
+    context into the provided context.
+    """
+
     def __init__(self, callback: Callable[[MigrationContext], None]) -> None:
         self._callback = callback
 
