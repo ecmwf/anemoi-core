@@ -562,30 +562,32 @@ def benchmark(cfg, testCase:str, update_data:bool, store_artifacts:bool = True, 
         LOGGER.info(benchmarkValue)
     LOGGER.info("-" * 20 + "\n")
 
-    # either update the data on the server, or compare reference results against local results
-    if update_data:
-        LOGGER.info("Updating metrics on server")
-        for localBenchmarkValue in localBenchmarkResults:
-            benchmarkServer.setValue(localBenchmarkValue)
-        if store_artifacts:
-            artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
-            benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
+    #compare reference results against local results
+    LOGGER.info("Comparing local benchmark results against reference values from the server")
+
+    # Controls if error or not if a test fails
+    on_test_fail = LOGGER.info
+    if throw_error:
+        on_test_fail = raise_error
+
+    failedTests = []
+    for localBenchmarkValue in localBenchmarkResults:
+        passed = benchmarkServer.compare(localBenchmarkValue)
+        if not passed:
+            failedTests.append(localBenchmarkValue.name)
+
+    if len(failedTests) > 0:
+        on_test_fail(f"The following tests failed: {failedTests}")
     else:
-        LOGGER.info("Comparing local benchmark results against reference values from the server")
+        # the tests have passed, possibly update the data on the server
+        if update_data:
+            LOGGER.info("Updating metrics on server")
+            for localBenchmarkValue in localBenchmarkResults:
+                benchmarkServer.setValue(localBenchmarkValue)
+            if store_artifacts:
+                artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
+                benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
 
-        # Controls if error or not if a test fails
-        on_test_fail = LOGGER.info
-        if throw_error:
-            on_test_fail = raise_error
-
-        failedTests = []
-        for localBenchmarkValue in localBenchmarkResults:
-            passed = benchmarkServer.compare(localBenchmarkValue)
-            if not passed:
-                failedTests.append(localBenchmarkValue.name)
-
-        if len(failedTests) > 0:
-            on_test_fail(f"The following tests failed: {failedTests}")
 
 @pytest.mark.multigpu
 @pytest.mark.slow
