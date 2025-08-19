@@ -29,6 +29,14 @@ from torch.cuda import reset_peak_memory_stats
 from torch.distributed import get_rank as dist_get_rank
 
 from anemoi.training.train.profiler import AnemoiProfiler
+from sshfs import SSHFileSystem
+import os.path
+import tarfile
+import re
+import csv
+import glob
+
+
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
@@ -70,9 +78,6 @@ class BenchmarkValue:
 
 
 def _make_tarfile(output_filename, source_dir):
-    import os.path
-    import tarfile
-
     with tarfile.open(output_filename, "w:gz") as tar:
         tar.add(source_dir, arcname=os.path.basename(source_dir))
 
@@ -174,8 +179,6 @@ class BenchmarkServer:
         retuns: None, but sets self.store and self.remote_user,self.remote_host if remote
         """
 
-        import re
-
         #a string which starts with ".ssh" and has a "@" and ":" in the middle
         remote_pattern=r'^ssh://.*@.*:.*$'  
         if re.match(remote_pattern, store): 
@@ -196,7 +199,6 @@ class BenchmarkServer:
 
     # mounts the remote server over sftp
     def _mount_remote(self):
-        from sshfs import SSHFileSystem
         self.fs = SSHFileSystem(
             self.remote_host,
             username=self.remote_user
@@ -438,9 +440,6 @@ def raise_error(x):
 # this functon will find and open the profiler logs from the most recent benchmarking training run
 # return_val = value for speed profiler or 'avg_time' for time_profiler
 def open_log_file(profilerPath: str, filename: str):
-    import csv
-    import glob
-
     if filename == "time_profiler.csv":
         return_val = "avg_time"
         row_selector = "name"
@@ -525,8 +524,6 @@ def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
 # Runs after a benchmark
 # returns a list of files produced by the profiler
 def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
-    import glob
-
     profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
     memory_snapshot = Path(f"{profilerDir}/memory_snapshot.pickle")
     if not memory_snapshot.exists():
@@ -614,3 +611,4 @@ def test_benchmark_training_cycle(
 #TODO change hidden res for GT
 #TODO refactor benchmark server into seperate file
 #TODO when running multi-gpu, make sure only gpu 0 does benchmark server stuff
+#TODO update docs showing how to run
