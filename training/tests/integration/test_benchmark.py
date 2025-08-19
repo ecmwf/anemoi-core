@@ -75,9 +75,7 @@ def _make_tarfile(output_filename, source_dir):
 
 
 def _is_repo_on_branch(branch):
-    """
-    checks if a repo is on a given branch
-    """
+    """Checks if a repo is on a given branch"""
     # find repo
     try:
         repo = Repo(".", search_parent_directories=True)
@@ -93,6 +91,7 @@ def _is_repo_on_branch(branch):
         return False
 
     return branch == current_branch
+
 
 # This function should be called from inside a git repo
 # It takes a given commit and returns true if it is somewhere in the branches history
@@ -159,8 +158,8 @@ class BenchmarkServer:
     # def __init__(self, store:str="./local", testCase:str=""):  # use a local folder to store data instead of a remote server
     def __init__(
         self,
-        #store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks",
-        store:str="./local",
+        # store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks",
+        store: str = "./local",
         testCase: str = "",
     ):  # use a local folder to store data instead of a remote server
         self.benchmarkValues = {}
@@ -216,6 +215,7 @@ class BenchmarkServer:
     # mounts the remote server over sftp
     def _mount_remote(self):
         from sshfs import SSHFileSystem
+
         self.fs = SSHFileSystem(self.remote_host, username=self.remote_user)
 
     def __str__(self):
@@ -592,12 +592,12 @@ def benchmark(cfg, testCase: str, store_artifacts: bool = True, throw_error: boo
         passed = benchmarkServer.compare(localBenchmarkValue)
         if not passed:
             failedTests.append(localBenchmarkValue.name)
-   
+
     if len(failedTests) > 0:
         on_test_fail(f"The following tests failed: {failedTests}")
     else:
         # the tests have passed, possibly update the data on the server
-        update_data= _is_repo_on_branch("main") #update if our branch is main
+        update_data = _is_repo_on_branch("main")  # update if our branch is main
         if update_data:
             LOGGER.info("Updating metrics on server")
             for localBenchmarkValue in localBenchmarkResults:
@@ -605,6 +605,7 @@ def benchmark(cfg, testCase: str, store_artifacts: bool = True, throw_error: boo
             if store_artifacts:
                 artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
                 benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
+
 
 @pytest.mark.multigpu
 @pytest.mark.slow
@@ -622,8 +623,9 @@ def test_benchmark_training_cycle(
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
-    throw_error=True  # if true, an error will be thrown when a benchmark test is failed
+    throw_error = True  # if true, an error will be thrown when a benchmark test is failed
     benchmark(cfg, testCase, throw_error=throw_error)
+
 
 # TODO add benchmark flag to pytest
 # TODO refactor benchmark server into seperate file
