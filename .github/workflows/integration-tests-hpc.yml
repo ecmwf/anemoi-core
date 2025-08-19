@@ -69,7 +69,6 @@ jobs:
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
-            tail -n +1 ~/.ssh/*.pub
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
             python3 -m pytest -v training/tests/integration --multigpu -k "test_benchmark_training_cycle"
