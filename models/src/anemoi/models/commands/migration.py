@@ -19,7 +19,6 @@ from shutil import copy2
 from jinja2 import Environment
 from rich.console import Console
 
-from .. import __version__ as version_anemoi_models
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
 from ..migrations import MigrationOp
@@ -108,7 +107,7 @@ migration_template_str = """\
 metadata = MigrationMetadata(
     versions={
         "migration": "{{migration_version}}",
-        "anemoi-models": "{{anemoi_models_version}}",
+        "anemoi-models": "%NEXT_ANEMOI_MODELS_VERSION%",
     },
     {% if final %}
     final=True,
@@ -271,7 +270,6 @@ class Migration(Command):
                 template.render(
                     {
                         "migration_version": "1.0.0",
-                        "anemoi_models_version": version_anemoi_models,
                         "imports": imports,
                         "final": args.final,
                         "no_rollback": args.no_rollback,
