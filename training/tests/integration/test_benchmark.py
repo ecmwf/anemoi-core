@@ -27,6 +27,7 @@ from git import Repo
 from omegaconf import DictConfig
 from torch.cuda import memory_stats
 from torch.cuda import reset_peak_memory_stats
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.train.profiler import AnemoiProfiler
 
@@ -37,6 +38,15 @@ LOGGER = logging.getLogger(__name__)
 
 BENCHMARK_SERVER_ARTIFACT_LIMIT = 10
 
+
+def _get_rank():
+    """
+        Gets process rank
+        normally the benchmark tests will be run via slurm.
+        If not, this function can be extended
+    """
+    if os.getenv("SLURM_PROCID", "-1") is not "-1":
+        return int(os.getenv("SLURM_PROCID"))
 
 class BenchmarkValue:
     def __init__(
@@ -469,14 +479,11 @@ def open_log_file(profilerPath: str, filename: str):
         raise ValueError
 
     # under /{profilerPath} there is a single random alphanumeric dir
-    # this next(iter(glob(...))) gets us through this random dir
-    file_path = next(
-        iter(
-            glob.glob(
-                f"{profilerPath}/[a-z0-9]*/{filename}",
-            ),
-        ),
-    )
+    try:
+        profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
+    except IndexError as e:
+        raise IndexError(f"Could not find a profiler dir under {profilerPath}. Full error message: {e}")
+    file_path=f"{profilerDir}/{filename}"
     with Path(file_path).open(newline="") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
@@ -561,7 +568,7 @@ def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
         artifacts.append(trace_file)
     return artifacts
 
-
+@rank_zero_only
 def benchmark(cfg, testCase: str, store_artifacts: bool = True, throw_error: bool = True) -> None:
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
