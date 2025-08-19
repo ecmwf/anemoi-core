@@ -35,6 +35,9 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce mem
 LOGGER = logging.getLogger(__name__)
 
 
+BENCHMARK_SERVER_ARTIFACT_LIMIT=10
+
+
 class BenchmarkValue:
     def __init__(
         self,
@@ -57,7 +60,6 @@ class BenchmarkValue:
     def __str__(self):
         return f"{self.name}: {self.value:.2f}{self.unit} (commit: {self.commit[:5]}, date: {self.date})"
 
-    # header="testName,unit,date,commit,value"
     def to_csv(self, include_header=False):
         header = "testName,unit,date,commit,value"
 
@@ -137,15 +139,11 @@ def _findLatestSharedCommitRow(df) -> str | None:
 
 
 class BenchmarkServer:
-    def __init__(self, testCase:str="", local=False):  # use a local folder to store data instead of a remote server
+    #def __init__(self, store:str="./local", testCase:str=""):  # use a local folder to store data instead of a remote server
+    def __init__(self, store:str="ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks", testCase:str=""):  # use a local folder to store data instead of a remote server
         self.benchmarkValues = {}
-
-        self.local = local
-        self.store=Path("./server")
-        if not self.local:
-            self.store = "/home/data/public/anemoi-integration-tests/training/benchmarks"
-            self.remote_host = "anemoi.ecmwf.int"
-            self.remote_user = "data"
+    
+        self._parse_store_location(store)
 
         # TestCase creates an optional subdir under BenchmarkServer to store the results
         # So that you can store GNN_n320_1g and graphtransformer_n320_1g results under the same server
@@ -162,25 +160,47 @@ class BenchmarkServer:
         else: 
             self.fs.mkdir(str(self.store), create_parents=True)
 
-        self.artifactLimit=10 #How many commits artifacts will be saved at once.
+        self.artifactLimit=BENCHMARK_SERVER_ARTIFACT_LIMIT #How many commits artifacts will be saved at once.
         #currently the trace file and memory snapshot are saved
         #When the artifactLimit is hit, the oldest commits artifacts are deleted
         #Artifacts can be reproduced by reverting to a given commit and running the pytests locally
 
+    def _parse_store_location(self, store:str) -> None:
+        """Parses an input string to determine where to store the benchmark servers files
+
+        store: str -> either a local path or a remote path. Remote paths should be in the form
+                    "ssh://<user>@<dest>:<remote_path>"
+
+        retuns: None, but sets self.store and self.remote_user,self.remote_host if remote
+        """
+
+        import re
+
+        #a string which starts with ".ssh" and has a "@" and ":" in the middle
+        remote_pattern=r'^ssh://.*@.*:.*$'  
+        if re.match(remote_pattern, store): 
+            #looks like a remote string
+            parts=store.strip("ssh://").split(":")
+            remote=parts[0].split("@")
+            self.remote_user=str(remote[0])
+            self.remote_host=str(remote[1])
+            self.store=Path(parts[1])
+            #'%s' looks like a remote store pointing to %s on %s ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks /home/data/public/anemoi-integration-tests/training/benchmark data@anemoi.ecmwf.int
+            LOGGER.debug("'%s' looks like a remote store pointing to %s on %s", store, self.store, remote)
+            self.local=False
+        else:
+            #TODO could write a regex to check if its a valid path
+            self.local=True
+            self.store=Path(store)
+            LOGGER.info("'%s' is a local store pointing to %s", store, str(self.store))
+
     # mounts the remote server over sftp
     def _mount_remote(self):
-
         from sshfs import SSHFileSystem
-
         self.fs = SSHFileSystem(
             self.remote_host,
-            username=self.remote_user,
+            username=self.remote_user
         )
-
-    def __del__(self):
-        
-        if not self.local:
-            self.fs.close()
 
     def __str__(self):
         # TODO should do this properly with string builders
@@ -208,7 +228,7 @@ class BenchmarkServer:
             if bench_file.exists():
                 df = pd.read_csv(bench_file)
             else:
-                print(f"Could not find file at {bench_file}.")
+                LOGGER.info(f"Could not find file at {bench_file}.")
                 return None
         else:
             local_file= Path(f"./{benchmarkName}")
@@ -216,7 +236,7 @@ class BenchmarkServer:
                 self.fs.get(str(bench_file), str(local_file))
                 df = pd.read_csv(local_file)
             except IOError:
-                print(f"Could not find file at {bench_file}.")
+                LOGGER.info(f"Could not find file at {bench_file}.")
                 return None
 
 
@@ -252,9 +272,9 @@ class BenchmarkServer:
 
         if referenceValue is None:
             if failOnMiss:
-                print(f"Benchmark server does not contain a measurement for {localValue.name}")
+                LOGGER.info(f"Benchmark server does not contain a measurement for {localValue.name}")
                 return False
-            print(f"{localValue.name} not found on server. Passing anyway because 'failOnMiss=False'")
+            LOGGER.info(f"{localValue.name} not found on server. Passing anyway because 'failOnMiss=False'")
             return True
         LOGGER.debug("didnt pass")
         passed = False
@@ -291,7 +311,7 @@ class BenchmarkServer:
         else:
             result_str += f"FAIL. Local value for {localValue.name} has degraded compared to the reference value "
         result_str += f"({localVal:.2f}{localValue.unit} local vs {refVal:.2f}{referenceValue.unit} reference)"
-        print(result_str)
+        LOGGER.info(result_str)
 
         return passed
 
@@ -330,7 +350,7 @@ class BenchmarkServer:
         if self.local:
             shutil.copy(local_file, output)
         else:
-            print(f"Copying {local_file} to {self.store}/{value.name}")
+            LOGGER.info(f"Copying {local_file} to {self.store}/{value.name}")
             self.fs.put_file(str(local_file), str(output))
         local_file.unlink() # delete local file
             
@@ -344,7 +364,7 @@ class BenchmarkServer:
     def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
 
         if not self.local and not tar:
-            print("Uploading untarred to server not supported")
+            LOGGER.info("Uploading untarred to server not supported")
             return
 
         artifactDir=Path(f"{self.store}/artifacts")
@@ -359,7 +379,7 @@ class BenchmarkServer:
         LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
         if output.exists():
             #TODO this doesnt work remote, but it should just overwrite
-            print(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
+            LOGGER.info(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
             # return
         else:
             commitDir.mkdir(parents=True) # might need to make artifacts too
@@ -376,7 +396,7 @@ class BenchmarkServer:
                 shutil.rmtree(commitDir)
 
         if not self.local:
-            print(f"Copying tar file from {commitTar} to {artifactDir}")
+            LOGGER.info(f"Copying tar file from {commitTar} to {artifactDir}")
             self.fs.mkdir(str(artifactDir), create_parents=True)
             self.fs.put_file(str(commitTar), str(artifactDir))
             commitTar.unlink() #delete local commit tar
@@ -395,10 +415,10 @@ class BenchmarkServer:
             commits = [commit['name'] for commit in commits] #commit is a dict of info, now that we've sorted drop to just paths
 
         if len(commits) >  self.artifactLimit:
-            print(f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}")
+            LOGGER.info(f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}")
 
             commitsToDelete = commits[:len(commits) - self.artifactLimit]
-            print(f"Deleting {commitsToDelete}...")
+            LOGGER.info(f"Deleting {commitsToDelete}...")
             for commit in commitsToDelete:
                 remove(commit)
 
@@ -519,7 +539,7 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
     # but luckily if we take the first one thats always training on rank 0.
     trace_files = glob.glob(f"{profilerDir}/*.pt.trace.json")
     if len(trace_files) == 0:
-        print(f"Can't find a trace file under {profilerDir}")
+        LOGGER.info(f"Can't find a trace file under {profilerDir}")
     else:
         trace_file = Path(trace_files[0])
         if not trace_file.exists():
@@ -533,12 +553,11 @@ def getLocalBenchmarkArtifacts(profilerPath:str) -> list[Path]:
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
     get_test_archive: callable,
-    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
     cfg, testCase = benchmark_config
-    print(f"Benchmarking the configuration: {testCase}")
-    # print(cfg)
+    LOGGER.info(f"Benchmarking the configuration: {testCase}")
 
     # Run model with profiler
     reset_peak_memory_stats()
@@ -555,16 +574,16 @@ def test_benchmark_training_cycle(
         benchmarkServer.getValues(benchmarks)
 
     # print local and reference results
-    print(f"Reference benchmark results:\n{benchmarkServer}")
-    print("Local benchmark results:")
-    print("-" * 20)
+    LOGGER.info(f"Reference benchmark results:\n{benchmarkServer}")
+    LOGGER.info("Local benchmark results:")
+    LOGGER.info("-" * 20)
     for benchmarkValue in localBenchmarkResults:
-        print(benchmarkValue)
-    print("-" * 20 + "\n")
+        LOGGER.info(benchmarkValue)
+    LOGGER.info("-" * 20 + "\n")
 
     # either update the data on the server, or compare reference results against local results
     if update_data:
-        print("Updating metrics on server")
+        LOGGER.info("Updating metrics on server")
         for localBenchmarkValue in localBenchmarkResults:
             benchmarkServer.setValue(localBenchmarkValue)
         store_artifacts = True
@@ -572,10 +591,10 @@ def test_benchmark_training_cycle(
             artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
             benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
     else:
-        print("Comparing local benchmark results against reference values from the server")
+        LOGGER.info("Comparing local benchmark results against reference values from the server")
 
         # Controls if error or not if a test fails
-        on_test_fail = print
+        on_test_fail = LOGGER.info
         if throw_error:
             on_test_fail = raise_error
 
@@ -590,3 +609,5 @@ def test_benchmark_training_cycle(
 
 #TODO increase benchmark size and add multigpu
 #TODO change hidden res for GT
+#TODO refactor benchmark server into seperate file
+#TODO when running multi-gpu, make sure only gpu 0 does benchmark server stuff
