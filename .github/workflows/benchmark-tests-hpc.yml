@@ -1,11 +1,10 @@
-name: nightly-integration-tests-hpc-gpu
+name: nightly-benchmark-tests-hpc-gpu
 
  # Controls when the workflow will run
 on:
   schedule:
     - cron: "0 22 * * *"  # every day at 22pm on default(main) branch
   workflow_dispatch:
-
 
 jobs:
   check_date:
@@ -22,7 +21,7 @@ jobs:
         name: check latest commit is less than a day
         if: ${{ github.event_name == 'schedule' }}
         run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
-  integration-tests:
+  benchmark-tests:
     runs-on: hpc
     needs: check_date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
@@ -40,21 +39,21 @@ jobs:
             python3 -m venv .venv
             source .venv/bin/activate
             pip install --upgrade pip
-            pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --slow
+            pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            python3 -m pytest -v training/tests/integration --slow --multigpu -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
-            #SBATCH --job-name=anemoi_core_pytest
-            #SBATCH --time=01:00:00
-            #SBATCH --qos=ng
-            #SBATCH --gpus=1
-            #SBATCH --gres=gpu:1
-            #SBATCH --mem=16G
+            #SBATCH --job-name=anemoi_core_benchmark_pytest
+            #SBATCH --time=00:30:00
+            #SBATCH --qos=dg
+            #SBATCH --gpus=2
+            #SBATCH --gres=gpu:2
+            #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
   notify-team:
-    needs: integration-tests
+    needs: benchmark-tests
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -63,7 +62,7 @@ jobs:
         with:
           issue-number: 294
           body: |
-            ## 🚨 Nightly Job Failed
+            ## 🚨 Nightly Benchmark Job Failed
 
             **Repository:** ${{ github.repository }}
             **Workflow:** ${{ github.workflow }}
