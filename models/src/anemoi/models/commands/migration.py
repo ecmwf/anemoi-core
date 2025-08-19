@@ -20,12 +20,12 @@ from jinja2 import Environment
 from rich.console import Console
 
 from .. import __version__ as version_anemoi_models
-from ..migrations import LOGGER as migrator_logger
 from ..migrations import MIGRATION_PATH
 from ..migrations import IncompatibleCheckpointException
 from ..migrations import MigrationOp
 from ..migrations import Migrator
 from ..migrations import RollbackOp
+from ..migrations.migrator import LOGGER as migrator_logger
 from . import Command
 
 here = Path(__file__).parent

@@ -125,7 +125,20 @@ In the example, it will produce:
 -  MIGRATE migration 6
 -  MIGRATE migration 7
 
-.. automodule:: anemoi.models.migrations
+**********
+ Migrator
+**********
+
+.. automodule:: anemoi.models.migrations.migrator
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+***************
+ Setup Context
+***************
+
+.. automodule:: anemoi.models.migrations.setup_context
    :members:
    :no-undoc-members:
    :show-inheritance:
