@@ -587,15 +587,19 @@ def benchmark(cfg, testCase:str, update_data:bool, store_artifacts:bool = True, 
         if len(failedTests) > 0:
             on_test_fail(f"The following tests failed: {failedTests}")
 
-
 @pytest.mark.multigpu
 @pytest.mark.slow
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
     get_test_archive: callable,
-    update_data=True,  # if true, the server will be updated with local values. if false the server values will be compared to local values
+    update_data=False,  # if true, the server will be updated with local values. if false the server values will be compared to local values
     throw_error=True,  # if true, an error will be thrown when a benchmark test is failed
 ) -> None:
+    """
+    Runs a benchmark and then compares them against the values stored on a server.
+    This test should run on unmerged PRs
+    """
+
     cfg, testCase = benchmark_config
     LOGGER.info(f"Benchmarking the configuration: {testCase}")
 
@@ -603,12 +607,24 @@ def test_benchmark_training_cycle(
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
-    rank=dist_get_rank()
-    LOGGER.info(f"{rank=}")
-    #if rank == 0:
     benchmark(cfg, testCase, update_data, throw_error=throw_error)
 
-#TODO change hidden res for GT
+
+@pytest.mark.multigpu
+@pytest.mark.slow
+def test_benchmark_training_cycle_update_server(
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
+    get_test_archive: callable,
+) -> None:
+    """
+    Runs a benchmark and then updates the benchmark server with those values.
+    This test should run during mains nightly integration tests
+    """
+    update_data=True
+    throw_error=True 
+    test_benchmark_training_cycle(benchmark_config, get_test_archive, update_data=update_data, throw_error=throw_error)
+
+
 #TODO refactor benchmark server into seperate file
-#TODO when running multi-gpu, make sure only gpu 0 does benchmark server stuff
 #TODO update docs showing how to run
+#TODO throw error when update_server fails
