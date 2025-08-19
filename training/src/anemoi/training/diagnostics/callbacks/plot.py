@@ -914,7 +914,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch_idx: int,
     ) -> None:
 
-
         if batch_idx % self.every_n_batches == 0:
 
             self.loss = copy.deepcopy(pl_module.loss)
