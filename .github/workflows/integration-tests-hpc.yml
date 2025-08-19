@@ -81,7 +81,7 @@ jobs:
             #SBATCH --gpus=2
             #SBATCH --gres=gpu:2
             #SBATCH --mem=64G
-          troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }
+          troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
 
   notify-team:
