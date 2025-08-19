@@ -155,15 +155,15 @@ def sort_edges_1hop_chunks(
     return edge_attr_list, edge_index_list
 
 
-def drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, num_nodes: tuple[int, int]) -> tuple[Tensor, Adj]:
+def drop_unconnected_src_nodes(
+    x_src: Tensor, edge_index: Adj, num_nodes: tuple[int, int]
+) -> tuple[Tensor, Adj, Tensor]:
     """Drop unconnected nodes from x_src and relabel edges.
 
     Parameters
     ----------
     x_src : Tensor
         source node features
-    edge_attr : Tensor
-        edge attributes
     edge_index : Adj
         edge index
     num_nodes : tuple[int, int]
@@ -171,8 +171,9 @@ def drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, num_nodes: tuple[
 
     Returns
     -------
-    tuple[Tensor, Adj]
-        reduced node features, relabeled edge index (contiguous, starting from 0)
+    tuple[Tensor, Adj, Tensor]
+        reduced node features, relabeled edge index (contiguous, starting from 0),
+        indices of connected source nodes
     """
     connected_src_nodes = torch.unique(edge_index[0])
     dst_nodes = torch.arange(num_nodes[1], device=x_src.device)
@@ -184,4 +185,4 @@ def drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, num_nodes: tuple[
         relabel_nodes=True,
     )
 
-    return x_src[connected_src_nodes], edge_index_new
+    return x_src[connected_src_nodes], edge_index_new, connected_src_nodes
