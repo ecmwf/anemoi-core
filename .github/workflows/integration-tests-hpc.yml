@@ -71,7 +71,7 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profiler] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --multi-gpu -k "test_benchmark_training-cycle"
+            python3 -m pytest -v training/tests/integration --multigpu -k "test_benchmark_training-cycle"
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
