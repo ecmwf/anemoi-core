@@ -234,10 +234,10 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 # TODO add small o48 test case which can be run anywhere
 # TODO change it so i can inherit from stretched_config etc. rather then rewriting
 @pytest.fixture(
-    params=[ #selects different test cases
+    params=[  # selects different test cases
         "graphtransformer_n320_1g",
-        #"stretched",
-        #"lam",
+        # "stretched",
+        # "lam",
     ],
 )
 def benchmark_config(
@@ -250,22 +250,22 @@ def benchmark_config(
     # change configs based on test case
     if test_case == "graphtransformer_n320_1g":
         overrides = ["model=graphtransformer", "graph=multi_scale"]
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark/graphtransformer.yaml"
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark/graphtransformer.yaml"
     elif test_case == "gnn_n320_1g":
         overrides = []
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark/gnn.yaml"
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark/gnn.yaml"
     elif test_case == "stretched":
         overrides = []
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmakr/stretched.yaml"
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmakr/stretched.yaml"
     elif test_case == "lam":
         overrides = []
-        top_level_yaml=Path.cwd()/"training/tests/integration/config/benchmark/lam.yaml"
+        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark/lam.yaml"
     else:
         raise ValueError(f"Error. Unknown benchmark configuration: {testCase}")
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
         template = compose(config_name="config", overrides=overrides)
-    
+
     use_case_modifications = OmegaConf.load(top_level_yaml)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)

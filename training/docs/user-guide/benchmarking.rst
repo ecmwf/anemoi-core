@@ -754,7 +754,7 @@ the following components are benchmarked: 'throughput, time per batch and total 
 Each time a commit is merged into Anemoi, these benchmark tests are run. The score is then logged, alongside the date and commit, on a database.
 In this way we can track the performance of anemoi over time and ensure that no pull requests unintentionally reduce performance.
 
-A suite of different anemoi configurations are tested. The current list of configurations is 
+A suite of different anemoi configurations are tested. The current list of configurations is
   - global GraphTransformer model, n320 source resolution, 1 GPU
   - global GNN model, n320 source resolution, 1 GPU
   - LAM model
