@@ -35,7 +35,6 @@ class MultiHeadSelfAttention(nn.Module):
     allows for three different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
-    - flash attention v3, see https://github.com/Dao-AILab/flash-attention#flashattention-3-beta-release
 
     scaled dot product attention is a pytorch function, so it is easiest to use but the least performant.
         It runs on CPUs and GPUs.
@@ -144,7 +143,6 @@ class MultiHeadSelfAttention(nn.Module):
     def set_attention_function(self):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
-            "flash_attention_v3": FlashAttentionV3Wrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
         assert (
@@ -271,7 +269,10 @@ class SDPAAttentionWrapper(nn.Module):
         if window_size is not None and (self.mask is None or tuple(self.mask.shape) != (sequence_len, sequence_len)):
             self.update_mask(sequence_len, window_size=window_size, device=query.device)
 
-        with torch.nn.attention.sdpa_kernel(backends=[torch.nn.attention.SDPBackend.MATH]):
+        from torch.nn.attention import SDPBackend
+        from torch.nn.attention import sdpa_kernel
+
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
             out = self.attention(
                 query,
                 key,
@@ -285,23 +286,53 @@ class SDPAAttentionWrapper(nn.Module):
 
 
 class FlashAttentionWrapper(nn.Module):
-    """Wrapper for Flash attention."""
+    """Wrapper for Flash attention.
+    Will use either flash attn v2 or flash attn v3 (optimised for hoppers and newer), based on
+    what is installed
+    """
 
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
+
+        self.use_flash_attn_v3 = False
+
+        # to detect which flash-attn interface we're using we try import them
+        # Since each import is semantically different we use this to
+        # distringuish flash attention versions
         try:
+            # first try import flash attn v2
             import flash_attn
-        except ImportError as e:
-            raise ImportError(f"Error importing flash-attn: {e}")
 
-        if version.parse(flash_attn.__version__) < version.parse("2.6.0"):
-            raise RuntimeError("Error: Flash-attn version is too low. Update to 2.6.0 or higher.")
+            flash_attn_func = flash_attn.flash_attn_func
+        except ImportError as e_v2:
+
+            # failed importing flash attn v2,
+            # try import flash attn v3
+            try:
+                import flash_attn_interface
+
+                flash_attn_func = flash_attn_interface.flash_attn_func
+            except ImportError as e_v3:
+                # print both errors if both fail
+                raise ImportError(f"Error importing flash-attn v2: {e_v2}\nError importing flash-attn v2: {e_v3}")
+            else:
+                LOGGER.info("Using flash-attn v3")
+                self.use_flash_attn_v3 = True
+                if use_rotary_embeddings:
+                    raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
+
         else:
-            from flash_attn.layers.rotary import RotaryEmbedding
+            LOGGER.info("Using flash-attn v2")
+            if version.parse(flash_attn.__version__):
+                raise RuntimeError("Error: Flash-attn version is too low. Update to 2.6.0 or higher.")
+            else:
+                from flash_attn.layers.rotary import RotaryEmbedding
 
-            self.attention = flash_attn.flash_attn_func
+        self.attention = flash_attn_func
 
-        self.use_rotary_embeddings = use_rotary_embeddings
+        self.use_rotary_embeddings = (
+            use_rotary_embeddings and not self.use_flash_attn_v3
+        )  # disable rotary embeddings with fav3 for now
 
         if self.use_rotary_embeddings:  # find alternative implementation
             self.rotary_emb = RotaryEmbedding(dim=head_dim)
@@ -334,54 +365,28 @@ class FlashAttentionWrapper(nn.Module):
             key = keyvalue[:, :, 0, ...]
             value = keyvalue[:, :, 1, ...]
 
-        out = self.attention(
-            query,
-            key,
-            value,
-            causal=False,
-            window_size=(window_size, window_size) if window_size is not None else (-1, -1),
-            dropout_p=dropout_p,
-            softcap=softcap,
-            alibi_slopes=alibi_slopes,
-        )
-        out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
-        return out
-
-
-class FlashAttentionV3Wrapper(nn.Module):
-    """Wrapper for Flash attention."""
-
-    def __init__(self):
-        super().__init__()
-        try:
-            import flash_attn_interface
-        except ImportError as e:
-            raise ImportError(f"Error importing flash-attn v3\n{e}")
-
-        self.attention = flash_attn_interface.flash_attn_func
-
-    def forward(
-        self,
-        query,
-        key,
-        value,
-        batch_size: int,
-        causal: bool = False,
-        window_size: int = None,
-        dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
-        alibi_slopes: torch.Tensor = None,
-    ):
-        query, key, value = (
-            einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
-        )
-        out = self.attention(
-            query,
-            key,
-            value,
-            causal=False,
-            window_size=(window_size, window_size),
-        )[0]
+        if self.use_flash_attn_v3:
+            out = self.attention(
+                query,
+                key,
+                value,
+                causal=False,
+                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+                softcap=softcap,
+            )[
+                0
+            ]  # migth not need [0] in newer versions of fav3, seem to have made returning the tuple optional
+        else:
+            out = self.attention(
+                query,
+                key,
+                value,
+                causal=False,
+                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+                dropout_p=dropout_p,
+                softcap=softcap,
+                alibi_slopes=alibi_slopes,
+            )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
 
