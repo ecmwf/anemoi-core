@@ -20,16 +20,12 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import pytest
 from git import GitCommandError
 from git import InvalidGitRepositoryError
 from git import Repo
-from omegaconf import DictConfig
-from torch.cuda import memory_stats
-from torch.cuda import reset_peak_memory_stats
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from torch.cuda import memory_stats
 
-from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
@@ -37,6 +33,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce mem
 LOGGER = logging.getLogger(__name__)
 
 BENCHMARK_SERVER_ARTIFACT_LIMIT = 10
+
 
 class BenchmarkValue:
     def __init__(
@@ -69,7 +66,7 @@ class BenchmarkValue:
         return result
 
 
-def _make_tarfile(output_filename:str, source_dir:str) -> None:
+def _make_tarfile(output_filename: str, source_dir: str) -> None:
     """Tars 'source_dir' to 'output_filename'"""
     with tarfile.open(output_filename, "w:gz") as tar:
         tar.add(source_dir, arcname=os.path.basename(source_dir))
@@ -93,14 +90,14 @@ def _is_repo_on_branch(branch):
 
     return branch == current_branch
 
+
 # example output
 #   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a13")=False
 #   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a18")=True
 #   cd .. # Not a git repository.
 #   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a18")=False
-def _isCommitInProject(commit:str) -> bool:
-    """
-    This function should be called from inside a git repo
+def _isCommitInProject(commit: str) -> bool:
+    """This function should be called from inside a git repo
     It takes a given commit str and returns true if it is somewhere in the branches history
     This function is used when selecting which result to benchmark against, we will take the latest commit which is present in the branch
     This prevents tests failing because someone pushed a performance improvement and a developer hasnt merged
@@ -135,12 +132,10 @@ def _isCommitInProject(commit:str) -> bool:
 
 
 def _findLatestSharedCommitRow(df) -> str | None:
-    """
-    this function goes through the csv of past benchmark results and finds
+    """This function goes through the csv of past benchmark results and finds
     the latest commit which is present in both the csv and the project
     It must be called from inside a git repo
     """
-
     if "commit" not in df.columns:
         raise ValueError("CSV must contain a 'commit' column")
 
@@ -212,7 +207,7 @@ class BenchmarkServer:
             LOGGER.info("'%s' is a local store pointing to %s", store, str(self.store))
 
     def _mount_remote(self):
-        """mounts the remote server over sftp using self.remote_host and self.remote_user"""
+        """Mounts the remote server over sftp using self.remote_host and self.remote_user"""
         from sshfs import SSHFileSystem
 
         self.fs = SSHFileSystem(self.remote_host, username=self.remote_user)
@@ -285,7 +280,7 @@ class BenchmarkServer:
         for name in names:
             self.getValue(name)
 
-    def compare(self, localValue: BenchmarkValue, failOnMiss:bool=False) -> bool:
+    def compare(self, localValue: BenchmarkValue, failOnMiss: bool = False) -> bool:
         """Tests a given benchmark result against what is found on the server.
         Takes a given benchmark value, and checks the server if there is a matching benchmark value.
         returns true if the given value is 'better' then the value on the benchmark
@@ -340,11 +335,9 @@ class BenchmarkServer:
         return passed
 
     def setValue(self, value: BenchmarkValue, overwrite=False):
-        """
-        trys to update a metric on a remote server, with a given benchmarkValue
+        """Trys to update a metric on a remote server, with a given benchmarkValue
         if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
         """
-
         # Check do we have an existing value
         output = Path(f"{self.store}/{value.name}")
         exists = True
@@ -384,13 +377,11 @@ class BenchmarkServer:
         self.benchmarkValues[value.name] = value
 
     def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
-        """
-        takes a list of files and stores them on the server, under a commit folder
+        """Takes a list of files and stores them on the server, under a commit folder
         if the files exist already, by default nothing will be stored
         Optionally (but strongly recomended) the artifacts will be tar-ed by default
         tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
         """
-
         if not self.local and not tar:
             LOGGER.info("Uploading untarred to server not supported")
             return
@@ -454,6 +445,7 @@ class BenchmarkServer:
             for commit in commitsToDelete:
                 remove(commit)
 
+
 def get_git_revision_hash() -> str:
     """Gets the commit of a given git repo"""
     try:
@@ -462,12 +454,13 @@ def get_git_revision_hash() -> str:
     except InvalidGitRepositoryError:
         raise RuntimeError("Not a Git repository")
 
-def maybe_raise_error(msg:str,raiseError:bool)->None:
-    """if raiseError=True, raise an error. otherwise, just print a message"""
+
+def maybe_raise_error(msg: str, raiseError: bool) -> None:
+    """If raiseError=True, raise an error. otherwise, just print a message"""
     if raiseError:
         raise ValueError(msg)
-    else:
-        LOGGER.info(msg)
+    LOGGER.info(msg)
+
 
 # this functon will find and open the profiler logs from the most recent benchmarking training run
 # return_val = value for speed profiler or 'avg_time' for time_profiler
@@ -488,7 +481,7 @@ def open_log_file(profilerPath: str, filename: str):
         profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
     except IndexError as e:
         raise IndexError(f"Could not find a profiler dir under {profilerPath}. Full error message: {e}")
-    file_path=f"{profilerDir}/{filename}"
+    file_path = f"{profilerDir}/{filename}"
     with Path(file_path).open(newline="") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
@@ -499,8 +492,7 @@ def open_log_file(profilerPath: str, filename: str):
 
 
 def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
-    """
-    Function which runs after a profiler run
+    """Function which runs after a profiler run
     It parses the profiler logs and creates BenchmarkValue objects from them
 
     Returns [BenchmarkValue]
@@ -554,12 +546,10 @@ def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
 
 
 def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
-    """
-    Runs after a benchmark and returns a list of paths to files  (e.g. trace file, memory snapshots) produced by the profiler
-    """
+    """Runs after a benchmark and returns a list of paths to files  (e.g. trace file, memory snapshots) produced by the profiler"""
     profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
 
-    #get memory snapshot
+    # get memory snapshot
     memory_snapshot = Path(f"{profilerDir}/memory_snapshot.pickle")
     if not memory_snapshot.exists():
         raise RuntimeError(f"Memory snapshot not found at: {memory_snapshot}")
@@ -579,6 +569,7 @@ def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
         artifacts.append(trace_file)
 
     return artifacts
+
 
 @rank_zero_only
 def benchmark(cfg, testCase: str, store_artifacts: bool = True, throw_error: bool = True) -> None:
