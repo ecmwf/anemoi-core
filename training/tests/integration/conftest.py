@@ -229,6 +229,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     OmegaConf.resolve(cfg)
     return cfg
 
+
 @pytest.fixture(
     params=[  # selects different test cases
         "graphtransformer",
@@ -242,7 +243,7 @@ def benchmark_config(
     get_tmp_paths: callable,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
-    base_config="config" #which config we start from in anemoi/training/configs/
+    base_config = "config"  # which config we start from in anemoi/training/configs/
     # base_config="config" =>  anemoi/training/configs/config.yaml
     # LAM and Stretched need different base configs
 
@@ -251,17 +252,19 @@ def benchmark_config(
         overrides = ["model=graphtransformer", "graph=multi_scale"]
     elif test_case == "stretched":
         overrides = []
-        base_config="stretched" 
+        base_config = "stretched"
     elif test_case == "lam":
         overrides = []
-        base_config="lam" 
+        base_config = "lam"
     else:
         raise ValueError(f"Error. Unknown benchmark configuration: {test_case}")
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
         template = compose(config_name=base_config, overrides=overrides)
 
-    use_case_modifications = OmegaConf.load( Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml" )
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
+    )
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, test_case
