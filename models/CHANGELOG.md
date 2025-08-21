@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.2](https://github.com/ecmwf/anemoi-core/compare/models-0.9.1...models-0.9.2) (2025-08-20)
+
+
+### Features
+
+* Diffusion training ([#401](https://github.com/ecmwf/anemoi-core/issues/401)) ([f35ad67](https://github.com/ecmwf/anemoi-core/commit/f35ad673f680ba64acb5c6770a3114262b3b97fd))
+
 ## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/models-0.9.0...models-0.9.1) (2025-08-08)
 
 
