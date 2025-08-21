@@ -40,8 +40,6 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 from typing import Any
-from typing import Dict
-from typing import Optional
 
 import torch.nn as nn
 from omegaconf import DictConfig
@@ -100,13 +98,13 @@ class CheckpointContext:
     {'source': 'local', 'stage': 'loading', 'status': 'success'}
     """
 
-    checkpoint_path: Optional[Path] = None
-    checkpoint_data: Optional[Dict[str, Any]] = None
-    model: Optional[nn.Module] = None
-    optimizer: Optional[Optimizer] = None
-    scheduler: Optional[Any] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    config: Optional[DictConfig] = None
+    checkpoint_path: Path | None = None
+    checkpoint_data: dict[str, Any] | None = None
+    model: nn.Module | None = None
+    optimizer: Optimizer | None = None
+    scheduler: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    config: DictConfig | None = None
 
     def __post_init__(self):
         """Validate context after initialization."""

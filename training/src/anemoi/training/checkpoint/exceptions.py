@@ -12,9 +12,6 @@
 import logging
 from pathlib import Path
 from typing import Any
-from typing import Dict
-from typing import List
-from typing import Optional
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +30,7 @@ class CheckpointError(Exception):
         Additional error details for debugging
     """
 
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         """Initialize checkpoint error.
 
         Parameters
@@ -80,7 +77,7 @@ class CheckpointNotFoundError(CheckpointError):
         Additional error details
     """
 
-    def __init__(self, path: Any, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, path: Any, details: dict[str, Any] | None = None):
         """Initialize checkpoint not found error.
 
         Parameters
@@ -117,7 +114,7 @@ class CheckpointLoadError(CheckpointError):
         Additional error details
     """
 
-    def __init__(self, path: Any, original_error: Exception, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, path: Any, original_error: Exception, details: dict[str, Any] | None = None):
         """Initialize checkpoint load error.
 
         Parameters
@@ -169,10 +166,10 @@ class CheckpointIncompatibleError(CheckpointError):
     def __init__(
         self,
         message: str,
-        missing_keys: Optional[List[str]] = None,
-        unexpected_keys: Optional[List[str]] = None,
-        shape_mismatches: Optional[Dict[str, tuple]] = None,
-        details: Optional[Dict[str, Any]] = None,
+        missing_keys: list[str] | None = None,
+        unexpected_keys: list[str] | None = None,
+        shape_mismatches: dict[str, tuple] | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize checkpoint incompatible error.
 
@@ -235,8 +232,8 @@ class CheckpointSourceError(CheckpointError):
         self,
         source_type: str,
         source_path: str,
-        original_error: Optional[Exception] = None,
-        details: Optional[Dict[str, Any]] = None,
+        original_error: Exception | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize checkpoint source error.
 
@@ -290,8 +287,8 @@ class CheckpointValidationError(CheckpointError):
     def __init__(
         self,
         message: str,
-        validation_errors: Optional[List[str]] = None,
-        details: Optional[Dict[str, Any]] = None,
+        validation_errors: list[str] | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize checkpoint validation error.
 
@@ -333,7 +330,7 @@ class CheckpointTimeoutError(CheckpointError):
         Additional error details
     """
 
-    def __init__(self, operation: str, timeout: float, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, operation: str, timeout: float, details: dict[str, Any] | None = None):
         """Initialize checkpoint timeout error.
 
         Parameters
@@ -374,7 +371,7 @@ class CheckpointConfigError(CheckpointError):
         Additional error details
     """
 
-    def __init__(self, message: str, config_path: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, config_path: str | None = None, details: dict[str, Any] | None = None):
         """Initialize checkpoint configuration error.
 
         Parameters

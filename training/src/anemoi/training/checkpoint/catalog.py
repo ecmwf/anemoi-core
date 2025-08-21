@@ -47,7 +47,6 @@ Example
 import importlib
 import inspect
 import logging
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -91,12 +90,12 @@ class ComponentCatalog:
     """
 
     # Cached registries (populated on first access)
-    _sources: Optional[Dict[str, str]] = None
-    _loaders: Optional[Dict[str, str]] = None
-    _modifiers: Optional[Dict[str, str]] = None
+    _sources: dict[str, str] | None = None
+    _loaders: dict[str, str] | None = None
+    _modifiers: dict[str, str] | None = None
 
     @classmethod
-    def _discover_components(cls, module_name: str, base_class_name: str) -> Dict[str, str]:
+    def _discover_components(cls, module_name: str, base_class_name: str) -> dict[str, str]:
         """Discover all classes in a module that inherit from a base class.
 
         This method finds concrete implementations by looking for classes that:
@@ -146,18 +145,18 @@ class ComponentCatalog:
                 # 1. ABC-based: Classes that inherit from ABC or have abstract methods
                 # 2. Name-based: Classes following the "Base*" naming convention
                 is_abstract = (
-                    ABC in obj.__bases__ or
-                    (hasattr(obj, '__abstractmethods__') and obj.__abstractmethods__) or
-                    obj.__name__.startswith('Base')
+                    ABC in obj.__bases__
+                    or (hasattr(obj, "__abstractmethods__") and obj.__abstractmethods__)
+                    or obj.__name__.startswith("Base")
                 )
 
                 if is_abstract:
                     reason = []
                     if ABC in obj.__bases__:
                         reason.append("inherits from ABC")
-                    if hasattr(obj, '__abstractmethods__') and obj.__abstractmethods__:
+                    if hasattr(obj, "__abstractmethods__") and obj.__abstractmethods__:
                         reason.append("has abstract methods")
-                    if obj.__name__.startswith('Base'):
+                    if obj.__name__.startswith("Base"):
                         reason.append("follows Base* naming convention")
 
                     logger.debug(f"Skipping abstract class {name}: {', '.join(reason)}")
@@ -181,7 +180,8 @@ class ComponentCatalog:
     def _class_to_simple_name(cls, class_name: str) -> str:
         """Convert a class name to a simple identifier.
 
-        Examples:
+        Examples
+        --------
         - S3Source -> s3
         - LocalSource -> local
         - WeightsOnlyLoader -> weights_only
@@ -199,50 +199,42 @@ class ComponentCatalog:
         """
         # Remove common suffixes
         name = class_name
-        for suffix in ['Source', 'Loader', 'Modifier', 'Strategy']:
+        for suffix in ["Source", "Loader", "Modifier", "Strategy"]:
             if name.endswith(suffix):
-                name = name[:-len(suffix)]
+                name = name[: -len(suffix)]
                 break
 
         # Convert from CamelCase to snake_case
         import re
-        name = re.sub('([a-z0-9])([A-Z])', r'\1_\2', name)
-        name = re.sub('([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
+
+        name = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
+        name = re.sub("([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
 
         return name.lower()
 
     @classmethod
-    def _get_sources(cls) -> Dict[str, str]:
+    def _get_sources(cls) -> dict[str, str]:
         """Get the registry of checkpoint sources, discovering if needed."""
         if cls._sources is None:
-            cls._sources = cls._discover_components(
-                'anemoi.training.checkpoint.sources',
-                'CheckpointSource'
-            )
+            cls._sources = cls._discover_components("anemoi.training.checkpoint.sources", "CheckpointSource")
         return cls._sources
 
     @classmethod
-    def _get_loaders(cls) -> Dict[str, str]:
+    def _get_loaders(cls) -> dict[str, str]:
         """Get the registry of loaders, discovering if needed."""
         if cls._loaders is None:
-            cls._loaders = cls._discover_components(
-                'anemoi.training.checkpoint.loaders',
-                'LoadingStrategy'
-            )
+            cls._loaders = cls._discover_components("anemoi.training.checkpoint.loaders", "LoadingStrategy")
         return cls._loaders
 
     @classmethod
-    def _get_modifiers(cls) -> Dict[str, str]:
+    def _get_modifiers(cls) -> dict[str, str]:
         """Get the registry of modifiers, discovering if needed."""
         if cls._modifiers is None:
-            cls._modifiers = cls._discover_components(
-                'anemoi.training.checkpoint.modifiers',
-                'ModelModifier'
-            )
+            cls._modifiers = cls._discover_components("anemoi.training.checkpoint.modifiers", "ModelModifier")
         return cls._modifiers
 
     @classmethod
-    def list_sources(cls) -> List[str]:
+    def list_sources(cls) -> list[str]:
         """List available checkpoint sources.
 
         Returns
@@ -259,7 +251,7 @@ class ComponentCatalog:
         return sorted(cls._get_sources().keys())
 
     @classmethod
-    def list_loaders(cls) -> List[str]:
+    def list_loaders(cls) -> list[str]:
         """List available loading strategies.
 
         Returns
@@ -276,7 +268,7 @@ class ComponentCatalog:
         return sorted(cls._get_loaders().keys())
 
     @classmethod
-    def list_modifiers(cls) -> List[str]:
+    def list_modifiers(cls) -> list[str]:
         """List available model modifiers.
 
         Returns
@@ -319,11 +311,8 @@ class ComponentCatalog:
         """
         sources = cls._get_sources()
         if name not in sources:
-            available = ', '.join(sorted(sources.keys()))
-            raise ValueError(
-                f"Unknown checkpoint source: '{name}'. "
-                f"Available sources: {available}"
-            )
+            available = ", ".join(sorted(sources.keys()))
+            raise ValueError(f"Unknown checkpoint source: '{name}'. Available sources: {available}")
         return sources[name]
 
     @classmethod
@@ -347,11 +336,8 @@ class ComponentCatalog:
         """
         loaders = cls._get_loaders()
         if name not in loaders:
-            available = ', '.join(sorted(loaders.keys()))
-            raise ValueError(
-                f"Unknown loader strategy: '{name}'. "
-                f"Available loaders: {available}"
-            )
+            available = ", ".join(sorted(loaders.keys()))
+            raise ValueError(f"Unknown loader strategy: '{name}'. Available loaders: {available}")
         return loaders[name]
 
     @classmethod
@@ -375,9 +361,6 @@ class ComponentCatalog:
         """
         modifiers = cls._get_modifiers()
         if name not in modifiers:
-            available = ', '.join(sorted(modifiers.keys()))
-            raise ValueError(
-                f"Unknown model modifier: '{name}'. "
-                f"Available modifiers: {available}"
-            )
+            available = ", ".join(sorted(modifiers.keys()))
+            raise ValueError(f"Unknown model modifier: '{name}'. Available modifiers: {available}")
         return modifiers[name]
