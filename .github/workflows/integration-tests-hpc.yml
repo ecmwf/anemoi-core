@@ -73,23 +73,19 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
-            #TODO try launch with srun
-            # when launched with python rank 0 runs alone for the first 3 mins
-            # until 'Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/2'
-            # then the other processes are launched
-            # maybe srun will launch all at once
+            # Launching with srun starts both processes in parallel
             srun python3 -m pytest -v training/tests/integration --slow --multigpu -s -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
             #SBATCH --job-name=anemoi_core_benchmark_pytest
-            #SBATCH --time=00:30:00
-            #SBATCH --qos=dg
+            #SBATCH --time=2:00:00
+            #SBATCH --qos=ng
             #SBATCH --gpus=2
             #SBATCH --gres=gpu:2
             #SBATCH --ntasks-per-node=2
             #SBATCH --cpus-per-task=32
-            #SBATCH --mem=64G
+            #SBATCH --mem=128G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
   notify-team:
