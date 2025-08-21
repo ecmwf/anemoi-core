@@ -77,6 +77,7 @@ class Boolean1DMask(BaseMask):
         x: torch.Tensor,
         dim: int,
         fill_value: float | torch.Tensor = np.nan,
+        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Apply the mask to the input tensor.
 
@@ -94,10 +95,13 @@ class Boolean1DMask(BaseMask):
         torch.Tensor
             The masked tensor with fill_value in the positions where the mask is False.
         """
+        mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
+
         if isinstance(fill_value, torch.Tensor):
-            indices = (~self.mask).nonzero(as_tuple=True)[0].to(x.device)
+            indices = (~mask).nonzero(as_tuple=True)[0].to(x.device)
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
+        # TODO(Jan): also fix this case
         mask = self.broadcast_like(x, dim)
         return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
@@ -106,6 +110,7 @@ class Boolean1DMask(BaseMask):
         pred_state: torch.Tensor,
         true_state: torch.Tensor,
         data_indices: IndexCollection,
+        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Rollout the boundary forcing.
 
@@ -127,6 +132,7 @@ class Boolean1DMask(BaseMask):
             pred_state[..., data_indices.model.input.prognostic],
             dim=2,
             fill_value=true_state[..., data_indices.data.output.prognostic],
+            grid_shard_slice=grid_shard_slice,
         )
 
         return pred_state
