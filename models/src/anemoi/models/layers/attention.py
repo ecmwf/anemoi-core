@@ -36,17 +36,22 @@ class MultiHeadSelfAttention(nn.Module):
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
 
-    scaled dot product attention is a pytorch function, so it is easiest to use but the least performant.
+    The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
+
+    scaled dot product attention (SDPA)
+        SDPA is a pytorch function, so it is easiest to use but the least performant.
         It runs on CPUs and GPUs.
 
-    flash attention is optimised for efficient usage of the GPUs memory hierarchy. It loads smaller chunks
+    flash attention v2
+        Flash-Attn v2 is optimised for efficient usage of the GPUs memory hierarchy. It loads smaller chunks
         into fast local memory, and fuses attention into a single kernel to reduce the passes through memory.
         It runs on Nvidia Ampere (e.g. A100) GPUs or newer and AMD MI200 GPUs or newer. Check the GitHub for
         the full requirements.
         You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
         wheels available on the GitHub. On an aarch64 system, you have to build flash attention from source.
 
-    flash attention v3 uses new GPU features to achieve an up to 2x speedup compared to flash attention v2.
+    flash attention v3
+        Flash-Attn v3  uses new GPU features to achieve an up to 2x speedup compared to flash attention v2.
         The new features include more efficient tensor core usage via the WGMMA instruction and hardware
         accelerated memory accesses via the Tensor Memory Accelerator.
         It requires Nvidia Hopper (e.g. H100) or newer GPUs. Check the Github for the full requirements.
@@ -223,7 +228,9 @@ class MultiHeadSelfAttention(nn.Module):
 
 
 class SDPAAttentionWrapper(nn.Module):
-    """Wrapper for Pytorch scaled dot product attention"""
+    """Wrapper for Pytorch scaled dot product attention
+    To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
+    """
 
     def __init__(self):
         super().__init__()
@@ -375,7 +382,7 @@ class FlashAttentionWrapper(nn.Module):
                 softcap=softcap,
             )[
                 0
-            ]  # migth not need [0] in newer versions of fav3, seem to have made returning the tuple optional
+            ]  # fav3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
         else:
             out = self.attention(
                 query,
