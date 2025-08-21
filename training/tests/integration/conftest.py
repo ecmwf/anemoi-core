@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -20,6 +21,8 @@ from omegaconf import OmegaConf
 
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
+
+LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
@@ -232,14 +235,24 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 
 
 @pytest.fixture
-def gnn_config_with_checkpoint(
-    gnn_config: tuple[DictConfig, str],
+def architecture_config_with_checkpoint(
+    architecture_config: tuple[DictConfig, str],
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
-    cfg, dataset_url = gnn_config
-    existing_ckpt = get_test_data(
-        "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-07-31.ckpt",
-    )
+    cfg, dataset_url = architecture_config
+
+    # Pick checkpoint path based on the model
+    if "gnn" in cfg.model.architecture:
+        ckpt_name = ("anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2025-07-31.ckpt",)
+    elif "graphtransformer" in cfg.model.architecture:
+        ckpt_name = (
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
+        )
+    else:
+        msg_error = f"Unknown architecture in config: {cfg.model.architecture}"
+        raise ValueError(msg_error)
+
+    existing_ckpt = get_test_data(ckpt_name)
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(existing_ckpt, checkpoint_dir / "last.ckpt")

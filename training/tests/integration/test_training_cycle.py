@@ -158,10 +158,10 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
 @skip_if_offline
 @pytest.mark.slow
 def test_restart_from_existing_checkpoint(
-    gnn_config_with_checkpoint: tuple[DictConfig, str],
+    architecture_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = gnn_config_with_checkpoint
+    cfg, url = architecture_config_with_checkpoint
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
