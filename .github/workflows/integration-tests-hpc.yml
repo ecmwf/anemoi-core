@@ -30,6 +30,7 @@ jobs:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
+            env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
             REPO_NAME=anemoi-core
@@ -60,6 +61,7 @@ jobs:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
+            env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
             REPO_NAME=anemoi-core
