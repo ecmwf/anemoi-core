@@ -86,6 +86,7 @@ def architecture_config(
     get_tmp_paths: GetTmpPaths,
 ) -> tuple[DictConfig, str]:
     overrides = request.param
+    model_architecture = overrides[0].split("=")[1]
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(
             config_name="config",
@@ -106,7 +107,7 @@ def architecture_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, imputer_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, dataset_urls[0]
+    return cfg, dataset_urls[0], model_architecture
 
 
 @pytest.fixture
@@ -236,20 +237,17 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 
 @pytest.fixture
 def architecture_config_with_checkpoint(
-    request: pytest.FixtureRequest,
     architecture_config: tuple[DictConfig, str],
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
-    cfg, dataset_url = architecture_config
-
-    model_type = request._pyfuncitem.callspec.params["architecture_config"][0]
+    cfg, dataset_url, model_architecture = architecture_config
 
     # Pick checkpoint path based on the model
-    if "gnn" in model_type:
+    if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
             "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2025-07-31.ckpt",
         )
-    elif "graphtransformer" in model_type:
+    elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
             "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
         )

@@ -31,13 +31,13 @@ def test_training_cycle_architecture_configs(
     architecture_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = architecture_config
+    cfg, url, _ = architecture_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
 def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = architecture_config
+    cfg, _, _ = architecture_config
     BaseSchema(**cfg)
 
 
