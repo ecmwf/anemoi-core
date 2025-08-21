@@ -71,7 +71,12 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --slow --multigpu -s -k "test_benchmark_training_cycle"
+            #TODO try launch with srun
+            # when launched with python rank 0 runs alone for the first 3 mins
+            # until 'Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/2'
+            # then the other processes are launched
+            # maybe srun will launch all at once
+            srun python3 -m pytest -v training/tests/integration --slow --multigpu -s -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
