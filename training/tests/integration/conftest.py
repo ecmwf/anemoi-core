@@ -229,15 +229,11 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     OmegaConf.resolve(cfg)
     return cfg
 
-
-# TODO make graphtransformer_1g the default test case, and only run that
-# TODO add small o48 test case which can be run anywhere
-# TODO change it so i can inherit from stretched_config etc. rather then rewriting
 @pytest.fixture(
     params=[  # selects different test cases
-        "graphtransformer_n320_1g",
-        # "stretched",
-        # "lam",
+        "graphtransformer",
+        "stretched",
+        "lam",
     ],
 )
 def benchmark_config(
@@ -246,28 +242,26 @@ def benchmark_config(
     get_tmp_paths: callable,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
+    base_config="config" #which config we start from in anemoi/training/configs/
+    # base_config="config" =>  anemoi/training/configs/config.yaml
+    # LAM and Stretched need different base configs
 
     # change configs based on test case
-    if test_case == "graphtransformer_n320_1g":
+    if test_case == "graphtransformer":
         overrides = ["model=graphtransformer", "graph=multi_scale"]
-        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark/graphtransformer.yaml"
-    elif test_case == "gnn_n320_1g":
-        overrides = []
-        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark/gnn.yaml"
     elif test_case == "stretched":
         overrides = []
-        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmakr/stretched.yaml"
+        base_config="stretched" 
     elif test_case == "lam":
         overrides = []
-        top_level_yaml = Path.cwd() / "training/tests/integration/config/benchmark/lam.yaml"
+        base_config="lam" 
     else:
-        raise ValueError(f"Error. Unknown benchmark configuration: {testCase}")
+        raise ValueError(f"Error. Unknown benchmark configuration: {test_case}")
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
-        template = compose(config_name="config", overrides=overrides)
+        template = compose(config_name=base_config, overrides=overrides)
 
-    use_case_modifications = OmegaConf.load(top_level_yaml)
-
+    use_case_modifications = OmegaConf.load( Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml" )
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, test_case

@@ -37,7 +37,9 @@ def test_benchmark_training_cycle(
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
-    benchmark(cfg, testCase, throw_error=True)
+    store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks",
+    #store: str = "./local"
+    benchmark(cfg, testCase, store, throw_error=True)
 
 # TODO add benchmark flag to pytest
 # TODO update docs showing how to run

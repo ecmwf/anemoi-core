@@ -1,25 +1,40 @@
-# Modifications for the local area model template "lam.yaml"
+# Config for LAM benchmark
+
+hardware:
+  accelerator: cuda
+  num_gpus_per_node: 2
+  num_nodes: 1
+  num_gpus_per_model: 2
+  paths:
+    data: /home/mlx/ai-ml/datasets/
+  files:
+    dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-6h-v3-hmsi.zarr
+    forcing_dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
+    graph: lam-bm-graph.pt  #TODO change to store under anemoi-integration-tests/... so it is resused across processes
+
 dataloader:
   dataset:
     cutout:
       - dataset: ${hardware.paths.data}/${hardware.files.dataset}
-        thinning: 25 # ???-value in lam template
       - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+    adjust: all
+    min_distance_km: 0
   training:
-    start: "2017-01-01"
-    end: "2017-01-07"
+    end: 2017-12-29
   validation:
-    start: "2017-01-08"
-    end: "2017-01-10"
+    start: 2017-12-30
+  num_workers:
+    training: 8
+    validation: 8
+  limit_batches:
+    training: 100
+    validation: 1
+  batch_size:
+    training: 1
+    validation: 1
 
-hardware:
-  paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
-  files:
-    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
-    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
-    # We only use the graph file in test_training_cycle_lam_with_existing_graph, not in test_training_cycle_lam
-    graph: anemoi-integration-tests/training/graphs/lam-graph.pt
+graph:
+  overwrite: False #this plus hardware.files.graph to ensure each process doesnt build the graph sequentially
 
 # need this modification since some variables set in the default zarr config are not part of the dataset
 data:
@@ -50,3 +65,43 @@ data:
     - "cos_local_time"
     - "sin_julian_day"
     - "sin_local_time"
+
+
+training:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+
+model:
+  output_mask:
+    _target_: anemoi.training.utils.masks.Boolean1DMask
+    nodes_name: ${graph.data}
+    attribute_name: cutout_mask
+  encoder:
+    num_chunks: 2
+  decoder:
+    num_chunks: 2
+  processor:
+    num_chunks: 2
+  num_channels: 1024
+
+diagnostics:
+  callbacks: []
+  enable_checkpointing: False
+  print_memory_summary: true
+  benchmark_profiler:
+    memory:
+      enabled: true
+    time:
+      verbose: true
+    model_summary:
+      enabled: false
+    snapshot:
+      enabled: true
+    system:
+      enabled: false #some error about metric key in extract_gpu_metrics being invalid
+  log:
+    mlflow:
+      enabled: true
+      offline: True
+      tracking_uri: ""
+    interval: 1

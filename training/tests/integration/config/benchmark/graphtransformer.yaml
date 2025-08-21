@@ -5,17 +5,17 @@ hardware:
   num_nodes: 1
   num_gpus_per_model: 2
   files:
-          #dataset:  aifs-ea-an-oper-0001-mars-n320-2020-2020-6h-v6.zarr #q50
-    dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr #q50
+    dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
+    graph: graphtransformer-bm-graph.pt  #TODO change to store under anemoi-integration-tests/... so it is resused across processes
   paths:
     data:  /home/mlx/ai-ml/datasets/
 
 dataloader:
   num_workers:
-    training: 6
-    validation: 6
+    training: 8
+    validation: 8
   limit_batches:
-    training: 10
+    training: 100
     validation: 1
   training:
     end: 2020-11-30
@@ -26,6 +26,7 @@ dataloader:
     validation: 1
 
 graph:
+  overwrite: False
   nodes:
     hidden:
       node_builder:
@@ -33,18 +34,19 @@ graph:
 
 model:
   encoder:
-    num_chunks: 4
+    num_chunks: 2
   decoder:
-    num_chunks: 4
+    num_chunks: 2
   processor:
     num_chunks: 2
-  num_channels: 1024 #32-2-32 didnt fit for 1024 1g
+  num_channels: 1024
 
 training:
   max_epochs: 1
   num_sanity_val_steps: 0
 
 diagnostics:
+  callbacks: []
   enable_checkpointing: False
   print_memory_summary: true
   benchmark_profiler:
