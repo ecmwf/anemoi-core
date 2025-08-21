@@ -8,18 +8,20 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import pytest
 import os
+
+import pytest
 from omegaconf import DictConfig
 from torch.cuda import reset_peak_memory_stats
 
-from anemoi.training.train.profiler import AnemoiProfiler
 from anemoi.training.diagnostics.benchmark_server import benchmark
+from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
 
 LOGGER = logging.getLogger(__name__)
+
 
 @pytest.mark.multigpu
 @pytest.mark.slow
@@ -40,6 +42,7 @@ def test_benchmark_training_cycle(
     store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks"
     #store: str = "./local"
     benchmark(cfg, testCase, store, throw_error=True)
+
 
 # TODO add benchmark flag to pytest
 # TODO update docs showing how to run
