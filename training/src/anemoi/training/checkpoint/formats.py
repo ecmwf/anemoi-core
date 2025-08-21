@@ -15,7 +15,7 @@ between different checkpoint types (Lightning, PyTorch, safetensors, state_dict)
 
 from __future__ import annotations
 
-import pickle  # noqa: S403 - Required for PyTorch checkpoint loading
+import pickle
 from pathlib import Path
 from typing import Any
 from typing import Literal

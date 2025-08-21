@@ -110,7 +110,9 @@ class TestCheckpointContext:
     def test_context_repr(self):
         """Test context string representation."""
         context = CheckpointContext(
-            checkpoint_path=Path("/tmp/checkpoint.pt"), model=SimpleModel(), metadata={"epoch": 5, "loss": 0.1},
+            checkpoint_path=Path("/tmp/checkpoint.pt"),
+            model=SimpleModel(),
+            metadata={"epoch": 5, "loss": 0.1},
         )
 
         repr_str = repr(context)

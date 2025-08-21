@@ -97,7 +97,8 @@ class TestComponentCatalog:
 
             # Test discovery
             components = ComponentCatalog._discover_components(
-                "anemoi.training.checkpoint.sources", "MockCheckpointSource",
+                "anemoi.training.checkpoint.sources",
+                "MockCheckpointSource",
             )
 
             # Should find the concrete implementations
@@ -169,7 +170,8 @@ class TestComponentCatalog:
 
             # Test discovery - should find concrete classes but skip both types of abstract classes
             components = ComponentCatalog._discover_components(
-                "anemoi.training.checkpoint.sources", "BaseNamedSource",  # This matches BaseNamedSource
+                "anemoi.training.checkpoint.sources",
+                "BaseNamedSource",  # This matches BaseNamedSource
             )
 
             # Should find concrete implementations but skip abstract ones
@@ -177,7 +179,8 @@ class TestComponentCatalog:
 
             # Now test with ABCSource as base
             components_abc = ComponentCatalog._discover_components(
-                "anemoi.training.checkpoint.sources", "ABCSource",  # This matches ABCSource
+                "anemoi.training.checkpoint.sources",
+                "ABCSource",  # This matches ABCSource
             )
 
             # Should find the ABC-based concrete implementation
