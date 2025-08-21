@@ -571,7 +571,12 @@ def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
 
 @rank_zero_only
 def benchmark(
-    cfg, testCase: str, store: str, store_artifacts: bool = True, throw_error: bool = True, update_data: bool = True,
+    cfg,
+    testCase: str,
+    store: str,
+    store_artifacts: bool = True,
+    throw_error: bool = True,
+    update_data: bool = True,
 ) -> None:
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
