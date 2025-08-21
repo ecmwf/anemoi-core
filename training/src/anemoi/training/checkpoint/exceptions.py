@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 """Exception classes for checkpoint operations."""
+from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -46,9 +47,9 @@ class CheckpointError(Exception):
 
         # Log the error with details
         if self.details:
-            LOGGER.error(f"{self.__class__.__name__}: {message}. Details: {self.details}")
+            LOGGER.error("%s: %s. Details: %s", self.__class__.__name__, message, self.details)
         else:
-            LOGGER.error(f"{self.__class__.__name__}: {message}")
+            LOGGER.error("%s: %s", self.__class__.__name__, message)
 
     def __str__(self) -> str:
         """String representation of the error.

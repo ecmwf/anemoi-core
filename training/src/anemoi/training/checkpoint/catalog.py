@@ -44,6 +44,8 @@ Example
 >>> source = instantiate(config)
 """
 
+from __future__ import annotations
+
 import importlib
 import inspect
 import logging
@@ -95,6 +97,22 @@ class ComponentCatalog:
     _modifiers: dict[str, str] | None = None
 
     @classmethod
+    def _is_abstract_class(cls, obj: type) -> bool:
+        """Check if a class is abstract."""
+        from abc import ABC
+
+        return (
+            ABC in obj.__bases__
+            or (hasattr(obj, "__abstractmethods__") and obj.__abstractmethods__)
+            or obj.__name__.startswith("Base")
+        )
+
+    @classmethod
+    def _has_base_class(cls, obj: type, base_class_name: str) -> bool:
+        """Check if a class has the expected base class in its hierarchy."""
+        return any(base.__name__ == base_class_name and base != obj for base in inspect.getmro(obj))
+
+    @classmethod
     def _discover_components(cls, module_name: str, base_class_name: str) -> dict[str, str]:
         """Discover all classes in a module that inherit from a base class.
 
@@ -121,9 +139,6 @@ class ComponentCatalog:
             # Import the module to scan
             module = importlib.import_module(module_name)
 
-            # Import ABC locally for checking abstract classes
-            from abc import ABC
-
             # Scan all classes in the module
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 # Skip if it's not defined in this module
@@ -131,48 +146,25 @@ class ComponentCatalog:
                     continue
 
                 # Check if this class has the expected base class in its hierarchy
-                # Look through the Method Resolution Order (MRO)
-                has_expected_base = False
-                for base in inspect.getmro(obj):
-                    if base.__name__ == base_class_name and base != obj:
-                        has_expected_base = True
-                        break
-
-                if not has_expected_base:
+                if not cls._has_base_class(obj, base_class_name):
                     continue
 
-                # Skip abstract classes using hybrid detection:
-                # 1. ABC-based: Classes that inherit from ABC or have abstract methods
-                # 2. Name-based: Classes following the "Base*" naming convention
-                is_abstract = (
-                    ABC in obj.__bases__
-                    or (hasattr(obj, "__abstractmethods__") and obj.__abstractmethods__)
-                    or obj.__name__.startswith("Base")
-                )
-
-                if is_abstract:
-                    reason = []
-                    if ABC in obj.__bases__:
-                        reason.append("inherits from ABC")
-                    if hasattr(obj, "__abstractmethods__") and obj.__abstractmethods__:
-                        reason.append("has abstract methods")
-                    if obj.__name__.startswith("Base"):
-                        reason.append("follows Base* naming convention")
-
-                    logger.debug(f"Skipping abstract class {name}: {', '.join(reason)}")
+                # Skip abstract classes
+                if cls._is_abstract_class(obj):
+                    logger.debug("Skipping abstract class %s", name)
                     continue
 
                 # This is a concrete implementation!
                 simple_name = cls._class_to_simple_name(name)
                 full_path = f"{module_name}.{name}"
                 components[simple_name] = full_path
-                logger.debug(f"Discovered {simple_name} -> {full_path}")
+                logger.debug("Discovered %s -> %s", simple_name, full_path)
 
         except ImportError as e:
             # This is expected if the module doesn't exist yet
-            logger.debug(f"Module {module_name} not found (this is normal if not yet implemented): {e}")
-        except Exception as e:
-            logger.error(f"Error discovering components in {module_name}: {e}")
+            logger.debug("Module %s not found (this is normal if not yet implemented): %s", module_name, e)
+        except (AttributeError, TypeError, ValueError):
+            logger.exception("Error discovering components in %s", module_name)
 
         return components
 
@@ -207,8 +199,8 @@ class ComponentCatalog:
         # Convert from CamelCase to snake_case
         import re
 
-        name = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
-        name = re.sub("([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+        name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+        name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
 
         return name.lower()
 
@@ -312,7 +304,8 @@ class ComponentCatalog:
         sources = cls._get_sources()
         if name not in sources:
             available = ", ".join(sorted(sources.keys()))
-            raise ValueError(f"Unknown checkpoint source: '{name}'. Available sources: {available}")
+            msg = f"Unknown checkpoint source: '{name}'. Available sources: {available}"
+            raise ValueError(msg)
         return sources[name]
 
     @classmethod
@@ -337,7 +330,8 @@ class ComponentCatalog:
         loaders = cls._get_loaders()
         if name not in loaders:
             available = ", ".join(sorted(loaders.keys()))
-            raise ValueError(f"Unknown loader strategy: '{name}'. Available loaders: {available}")
+            msg = f"Unknown loader strategy: '{name}'. Available loaders: {available}"
+            raise ValueError(msg)
         return loaders[name]
 
     @classmethod
@@ -362,5 +356,6 @@ class ComponentCatalog:
         modifiers = cls._get_modifiers()
         if name not in modifiers:
             available = ", ".join(sorted(modifiers.keys()))
-            raise ValueError(f"Unknown model modifier: '{name}'. Available modifiers: {available}")
+            msg = f"Unknown model modifier: '{name}'. Available modifiers: {available}"
+            raise ValueError(msg)
         return modifiers[name]

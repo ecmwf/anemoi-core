@@ -34,16 +34,21 @@ Example
 >>> # result = await stage.process(context)
 """
 
+from __future__ import annotations
+
 from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
+from typing import Literal
 
-import torch.nn as nn
-from omegaconf import DictConfig
-from torch.optim import Optimizer
+if TYPE_CHECKING:
+    import torch.nn as nn
+    from omegaconf import DictConfig
+    from torch.optim import Optimizer
 
 
 @dataclass
@@ -69,7 +74,8 @@ class CheckpointContext:
         Loaded checkpoint data dictionary containing model weights,
         optimizer state, training metadata, etc.
     model : nn.Module, optional
-        PyTorch model being modified by the pipeline
+        PyTorch model being modified by the pipeline. Can be either
+        AnemoiModelInterface (pure PyTorch) or extracted from GraphForecaster
     optimizer : Optimizer, optional
         Optional optimizer to restore state to (for warm starts)
     scheduler : Any, optional
@@ -79,6 +85,11 @@ class CheckpointContext:
         Each stage can add information here for tracking.
     config : DictConfig, optional
         Hydra configuration object containing pipeline settings
+    checkpoint_format : str, optional
+        Format of the checkpoint: 'lightning', 'pytorch', 'safetensors', or 'state_dict'
+    pl_module : pl.LightningModule, optional
+        Lightning module (GraphForecaster) if loading from Lightning checkpoint.
+        This preserves the full Lightning context for training resumption
 
     Examples
     --------
@@ -105,6 +116,8 @@ class CheckpointContext:
     scheduler: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     config: DictConfig | None = None
+    checkpoint_format: Literal["lightning", "pytorch", "safetensors", "state_dict"] | None = None
+    pl_module: Any | None = None  # Type hint as Any to avoid circular imports, actually pl.LightningModule
 
     def __post_init__(self):
         """Validate context after initialization."""

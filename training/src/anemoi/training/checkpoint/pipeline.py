@@ -49,17 +49,20 @@ Example
 >>> context = CheckpointContext(model=my_model)
 >>> result = await pipeline.execute(context)
 """
+from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Union
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from .base import CheckpointContext
-from .base import PipelineStage
+if TYPE_CHECKING:
+    from .base import CheckpointContext
+    from .base import PipelineStage
 
 LOGGER = logging.getLogger(__name__)
 
@@ -82,15 +85,18 @@ class CheckpointPipeline:
 
     Parameters
     ----------
-    stages : list of PipelineStage
-        List of pipeline stages to execute in order. Each stage
-        must inherit from PipelineStage and implement the process method.
+    stages : list of PipelineStage, dict, or DictConfig, optional
+        List of pipeline stages to execute in order. Each item can be:
+        - An instantiated PipelineStage object
+        - A dict/DictConfig with '_target_' for Hydra instantiation
     async_execution : bool, optional
         Whether to use async execution (default: True). Set to False
         for synchronous execution in non-async contexts.
     continue_on_error : bool, optional
         Whether to continue pipeline on stage errors (default: False).
         If True, failed stages will be logged but won't stop the pipeline.
+    config : DictConfig, optional
+        If provided, overrides other parameters with config values
 
     Attributes
     ----------
@@ -151,9 +157,9 @@ class CheckpointPipeline:
         # Instantiate stages
         self.stages = self._instantiate_stages(stages or [])
 
-        LOGGER.info(f"Initialized pipeline with {len(self.stages)} stages")
+        LOGGER.info("Initialized pipeline with %d stages", len(self.stages))
         for i, stage in enumerate(self.stages):
-            LOGGER.debug(f"  Stage {i}: {stage}")
+            LOGGER.debug("  Stage %d: %s", i, stage)
 
     def _instantiate_stages(self, stages: list[Any]) -> list[PipelineStage]:
         """Instantiate stages from configs or pass through existing instances.
@@ -175,9 +181,9 @@ class CheckpointPipeline:
                 try:
                     instantiated_stage = instantiate(stage)
                     instantiated.append(instantiated_stage)
-                    LOGGER.debug(f"Instantiated stage {i} from config: {instantiated_stage}")
-                except Exception as e:
-                    LOGGER.error(f"Failed to instantiate stage {i} from config: {e}")
+                    LOGGER.debug("Instantiated stage %d from config: %s", i, instantiated_stage)
+                except Exception:
+                    LOGGER.exception("Failed to instantiate stage %d from config", i)
                     raise
             else:
                 # Already instantiated
@@ -185,7 +191,7 @@ class CheckpointPipeline:
         return instantiated
 
     @classmethod
-    def from_config(cls, config: DictConfig) -> "CheckpointPipeline":
+    def from_config(cls, config: DictConfig) -> CheckpointPipeline:
         """Create a pipeline from Hydra configuration.
 
         This is a convenience method that creates a pipeline entirely
@@ -256,23 +262,23 @@ class CheckpointPipeline:
 
         for i, stage in enumerate(self.stages):
             stage_name = stage.__class__.__name__
-            LOGGER.debug(f"Executing stage {i}/{len(self.stages)}: {stage_name}")
+            LOGGER.debug("Executing stage %d/%d: %s", i, len(self.stages), stage_name)
 
             try:
                 context = await stage.process(context)
-                LOGGER.debug(f"Stage {stage_name} completed successfully")
+                LOGGER.debug("Stage %s completed successfully", stage_name)
 
                 # Update metadata with stage execution
                 context.update_metadata(**{f"stage_{i}_{stage_name}": "completed"})
 
             except Exception as e:
-                LOGGER.error(f"Stage {stage_name} failed: {e}")
+                LOGGER.exception("Stage %s failed", stage_name)
                 context.update_metadata(**{f"stage_{i}_{stage_name}": f"failed: {e!s}"})
 
                 if not self.continue_on_error:
                     raise
 
-                LOGGER.warning(f"Continuing pipeline despite error in {stage_name}")
+                LOGGER.warning("Continuing pipeline despite error in %s", stage_name)
 
         LOGGER.info("Pipeline execution completed")
         return context
@@ -360,7 +366,7 @@ class CheckpointPipeline:
         if isinstance(stage, (dict, DictConfig)):
             stage = instantiate(stage)
         self.stages.append(stage)
-        LOGGER.debug(f"Added stage {stage} to pipeline")
+        LOGGER.debug("Added stage %s to pipeline", stage)
 
     def remove_stage(self, stage: PipelineStage) -> None:
         """Remove a stage from the pipeline.
@@ -372,9 +378,9 @@ class CheckpointPipeline:
         """
         if stage in self.stages:
             self.stages.remove(stage)
-            LOGGER.debug(f"Removed stage {stage} from pipeline")
+            LOGGER.debug("Removed stage %s from pipeline", stage)
         else:
-            LOGGER.warning(f"Stage {stage} not found in pipeline")
+            LOGGER.warning("Stage %s not found in pipeline", stage)
 
     def clear_stages(self) -> None:
         """Clear all stages from the pipeline."""

@@ -43,28 +43,28 @@ from .utils import get_checkpoint_metadata
 from .utils import validate_checkpoint
 
 __all__ = [
+    "CheckpointConfigError",
     # Core classes
     "CheckpointContext",
-    "PipelineStage",
-    "CheckpointPipeline",
-    "ComponentCatalog",
     # Exceptions
     "CheckpointError",
-    "CheckpointNotFoundError",
-    "CheckpointLoadError",
     "CheckpointIncompatibleError",
+    "CheckpointLoadError",
+    "CheckpointNotFoundError",
+    "CheckpointPipeline",
     "CheckpointSourceError",
-    "CheckpointValidationError",
     "CheckpointTimeoutError",
-    "CheckpointConfigError",
-    # Utilities
-    "download_with_retry",
-    "validate_checkpoint",
-    "get_checkpoint_metadata",
+    "CheckpointValidationError",
+    "ComponentCatalog",
+    "PipelineStage",
     "calculate_checksum",
     "compare_state_dicts",
-    "format_size",
+    # Utilities
+    "download_with_retry",
     "estimate_checkpoint_memory",
+    "format_size",
+    "get_checkpoint_metadata",
+    "validate_checkpoint",
 ]
 
 __version__ = "0.1.0"
