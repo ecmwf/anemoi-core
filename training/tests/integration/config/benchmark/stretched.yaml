@@ -77,7 +77,7 @@ training:
 
 model:
         #not sure if this makes sense in stretched, but we use it for the LAM benchmark config
-        #output_mask: 
+        #output_mask:
         #  _target_: anemoi.training.utils.masks.Boolean1DMask
         #  nodes_name: ${graph.data}
         #  attribute_name: cutout_mask

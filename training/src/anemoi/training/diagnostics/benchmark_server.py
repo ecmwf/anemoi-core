@@ -26,7 +26,6 @@ from git import Repo
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.cuda import memory_stats
 
-
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
 
@@ -571,7 +570,9 @@ def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
 
 
 @rank_zero_only
-def benchmark(cfg, testCase: str, store: str, store_artifacts: bool = True, throw_error: bool = True, update_data: bool = True) -> None:
+def benchmark(
+    cfg, testCase: str, store: str, store_artifacts: bool = True, throw_error: bool = True, update_data: bool = True,
+) -> None:
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
