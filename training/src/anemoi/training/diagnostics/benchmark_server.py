@@ -159,7 +159,6 @@ class BenchmarkServer:
     # def __init__(self, store:str="./local", testCase:str=""):  # use a local folder to store data instead of a remote server
     def __init__(
         self,
-        # store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks",
         store: str = "./local",
         testCase: str = "",
     ):  # use a local folder to store data instead of a remote server
@@ -581,11 +580,11 @@ def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
     return artifacts
 
 @rank_zero_only
-def benchmark(cfg, testCase: str, store_artifacts: bool = True, throw_error: bool = True) -> None:
+def benchmark(cfg, testCase: str, store: str, store_artifacts: bool = True, throw_error: bool = True, update_data: bool = True) -> None:
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
-    benchmarkServer = BenchmarkServer(testCase=testCase)
+    benchmarkServer = BenchmarkServer(testCase=testCase, store=store)
 
     benchmarks = [benchmarkValue.name for benchmarkValue in localBenchmarkResults]
     benchmarkServer.getValues(benchmarks)
@@ -611,7 +610,7 @@ def benchmark(cfg, testCase: str, store_artifacts: bool = True, throw_error: boo
         maybe_raise_error(f"The following tests failed: {failedTests}", throw_error)
     else:
         # the tests have passed, possibly update the data on the server
-        update_data = _is_repo_on_branch("main")  # update if our branch is main
+        update_data = update_data or _is_repo_on_branch("main")  # update if our branch is main
         if update_data:
             LOGGER.info("Updating metrics on server")
             for localBenchmarkValue in localBenchmarkResults:
