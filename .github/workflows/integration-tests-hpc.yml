@@ -87,6 +87,8 @@ jobs:
             #SBATCH --qos=dg
             #SBATCH --gpus=2
             #SBATCH --gres=gpu:2
+            #SBATCH --ntasks-per-node=2
+            #SBATCH --cpus-per-task=32
             #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
