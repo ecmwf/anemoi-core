@@ -29,8 +29,7 @@ ordered list of scripts. Each script contains:
    system, or the version of anemoi-models,
 -  a ``migrate`` function to migrate checkpoints
 -  optionnally a ``rollback`` function to reverse the migration function
--  optionnally a ``migrate_setup`` or ``rollback_setup`` function to fix
-   import issues.
+-  optionnally a ``migrate_setup`` function to fix import issues.
 
 Similarly, the checkpoint contain some migration information that
 informs on its migration state:
@@ -47,8 +46,6 @@ informs on its migration state:
 
 -  the ``rollback`` function: the same as in the script, in case you
    need the checkpoint in an older version,
-
--  the ``rollback_setup`` function: same as in the script.
 
 **********************
  Compatibility groups
@@ -70,23 +67,26 @@ look at this list of migration in anemoi-models:
 | group             |           |           |               |           |              |           |
 +-------------------+-----------+-----------+---------------+-----------+--------------+-----------+
 
-This also shows the ``compatibility groups``: the migrations that are
-compatible with one-another.
+This also shows the ``compatibility groups`` that groups migrations that
+are compatible with one-another.
 
-Let's assume that a checkpoint was trained on version 0.8.1. This means
-that ``migration 1`` is already registered in the checkpoint. This
-checkpoint can be migrated to be used with all versions of compatibility
-group 1: up until (and excluding) 0.9.0.
+For example, for a checkpoint trained on version 0.8.1, ``migration 1``
+is already registered in the checkpoint. This checkpoint can be migrated
+to be used with all versions of its compatibility group (group 1) up
+until (and excluding) 0.9.0.
 
 Similarly, a checkpoint trained on version 0.12.2 can be downgraded up
 until (and including) 0.12.0.
 
 .. note::
 
-   Checkpoint only store migration information of its own compatibility
-   group. The final migration, which is always the first registered
-   migration (except for the first group which does not have one) acts
-   as a marker of which group the checkpoint is part of.
+   Checkpoints only store migration information of their own
+   compatibility group. The "final" migration of a group can also be
+   seen as the first migration of the following group. In fact, "final"
+   migrations are always the first registered migration of a group, and
+   acts as a marker of the compatibility group of the checkpoint. The
+   first compatibility group is an exception, and does not start with a
+   "final" migration.
 
 **********************
  Resolution algorithm

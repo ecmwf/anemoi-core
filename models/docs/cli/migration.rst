@@ -1,8 +1,12 @@
-.. _other-migration:
+.. _user-migration:
 
 ##########################
  Migrating your checkpoint
 ##########################
+
+.. note::
+
+   For more technical details about migrations, see :ref:`migrations`.
 
 anemoi-models provides a way for users to migrate old checkpoints so that they can be
 used with recent versions of anemoi-models.

@@ -4,6 +4,10 @@
  Create checkpoint migrations
 ##############################
 
+.. note::
+
+   For more technical details about migrations, see :ref:`migrations`.
+
 *********
  Migrate
 *********
@@ -430,11 +434,11 @@ Here is a full example of a migration to fix `PR 433
        """
        return ckpt
 
-***************
- Best practice
-***************
+****************
+ Best practices
+****************
 
 Here are best practices that will help you create good migration
 scripts.
 
--  Use a `if` guard to only apply scripts to specific architecture
+-  Use a `if` guard to only apply scripts to specific architecture.
