@@ -27,23 +27,14 @@ LOGGER = logging.getLogger(__name__)
 @pytest.mark.slow
 def test_benchmark_training_cycle(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
-    get_test_archive: callable,
 ) -> None:
-    """Runs a benchmark and then compares them against the values stored on a server.
-    This test should run on unmerged PRs
-    """
-    cfg, testCase = benchmark_config
-    LOGGER.info(f"Benchmarking the configuration: {testCase}")
+    """Runs a benchmark and then compares them against the values stored on a server."""
+    cfg, test_case = benchmark_config
+    LOGGER.info("Benchmarking the configuration: %s", test_case)
 
     # Run model with profiler
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
-    # store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks"
-    store: str = "./local"
-    benchmark(cfg, testCase, store, throw_error=True)
-
-
-# TODO add benchmark flag to pytest
-# TODO update docs showing how to run
-# TODO throw error when update_server fails
+    store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks"
+    benchmark(cfg, test_case, store, throw_error=True)

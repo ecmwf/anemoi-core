@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import csv
-import glob
 import logging
 import operator
 import os
@@ -17,7 +16,8 @@ import re
 import shutil
 import tarfile
 from collections.abc import Callable
-from datetime import date
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ import pandas as pd
 from git import GitCommandError
 from git import InvalidGitRepositoryError
 from git import Repo
+from omegaconf import DictConfig
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.cuda import memory_stats
 
@@ -42,7 +43,7 @@ class BenchmarkValue:
         name: str,
         value: float,
         unit: str,
-        date: date,
+        date: str,
         commit: str,
         op: Callable[[Any, Any], bool] = operator.le,
         tolerance: int = 0,  # percentage
@@ -134,8 +135,8 @@ def _is_commit_in_project(commit: str) -> bool:
 
 
 def _find_latest_shared_commit(df: pd.DataFrame) -> str | None:
-    """ Finds the last shared commit betwen a csv and your current github repo.
-    
+    """Finds the last shared commit betwen a csv and your current github repo.
+
     This function goes through the csv of past benchmark results and finds
     the latest commit which is present in both the csv and the project
     It must be called from inside a git repo
@@ -150,7 +151,7 @@ def _find_latest_shared_commit(df: pd.DataFrame) -> str | None:
         if _is_commit_in_project(commit):
             LOGGER.debug("commit '%s' is present in both server and project. returning row %s.", commit, i)
             return df.loc[i]
-        LOGGER.debug(f"commit '%s' is not found in project history.", commit)
+        LOGGER.debug("commit '%s' is not found in project history.", commit)
 
     LOGGER.debug("No matching commits found between server and project")
     return None
@@ -215,7 +216,7 @@ class BenchmarkServer:
         from sshfs import SSHFileSystem
 
         self.fs = SSHFileSystem(self.remote_host, username=self.remote_user)
-        return None
+        return
 
     def __str__(self):
         string = ""
@@ -231,17 +232,18 @@ class BenchmarkServer:
         return string
 
     def get_value(self, benchmark_name: str, force_get_from_server: bool = False) -> None:
-        """Retrieves a given benchmark from the benchmark store and stores it under self.benchmark_values[benchmark_name]
+        """Retrieves a given benchmark from the store and stores it under self.benchmark_values[benchmark_name].
 
-        If a benchmark value e.g. "avThroughputIterPerS" as already been loaded, return it. you can force to retrieve from the server with the
-            force_get_from_server parameter.
-        If the benchmark store is remote, the CSV is downloaded. Then the CSV is opend and the value retrieved.
+        If a benchmark value has already been loaded, return it.
+        you can force to retrieve from the server with the force_get_from_server parameter.
+        If the benchmark store is remote, the CSV is downloaded.
+        Then the CSV is opend and the value retrieved.
         If the name cant be found in the benchmark store, the function returns
-        trys to read a row from a csv stored on a server and create a benchmark value from that
+        trys to read a row from a csv and create a benchmark value from that
         If a benchmark value is found, update list of benchmark values.
         """
         if not force_get_from_server and benchmark_name in self.benchmark_values:
-            LOGGER.debug(f"entry for {benchmark_name} found locally, not retrieving from server")
+            LOGGER.debug("entry for %s found locally, not retrieving from server", benchmark_name)
             return self.benchmark_values[benchmark_name]
 
         bench_file = Path(f"{self.store}/{benchmark_name}")
@@ -249,7 +251,7 @@ class BenchmarkServer:
             if bench_file.exists():
                 df = pd.read_csv(bench_file)
             else:
-                LOGGER.info(f"Could not find file at {bench_file}.")
+                LOGGER.info("Could not find file at %s.", bench_file)
                 return None
         else:
             local_file = Path(f"./{benchmark_name}")
@@ -257,17 +259,17 @@ class BenchmarkServer:
                 self.fs.get(str(bench_file), str(local_file))
                 df = pd.read_csv(local_file)
             except OSError:
-                LOGGER.info(f"Could not find file at {bench_file}.")
+                LOGGER.info("Could not find file at %s.", bench_file)
                 return None
 
         # find last element with a commit present in this branch
         # If no such can be found, error and recomend merging main to get a new enough commit
-        maybeRow = _find_latest_shared_commit(df)
-        if maybeRow is None:
-            raise RuntimeError(
-                "Error. Couldn't find an entry in the server sharing a commit with your branch. Please consider pulling 'main' to enable performance benchmarks",
-            )
-        row = maybeRow
+        maybe_row = _find_latest_shared_commit(df)
+        if maybe_row is None:
+            msg = "Error. Couldn't find an entry in the server sharing a commit with your branch.\n"
+            msg+="Please consider merging 'main' to enable performance benchmarks"
+            raise RuntimeError(msg)
+        row = maybe_row
 
         assert row["testName"] == benchmark_name  # sanity check, should always pass
         benchmark_value = BenchmarkValue(
@@ -283,77 +285,76 @@ class BenchmarkServer:
 
         return None
 
-    def get_values(self, names: list[str]):
+    def get_values(self, names: list[str]) -> None:
+        """Retrieves a list of benchmarks from the server."""
         for name in names:
             self.get_value(name)
 
-    def compare(self, localValue: BenchmarkValue, failOnMiss: bool = False) -> bool:
+    def compare(self, local_value: BenchmarkValue, fail_on_miss: bool = False) -> bool:
         """Tests a given benchmark result against what is found on the server.
+
         Takes a given benchmark value, and checks the server if there is a matching benchmark value.
         returns true if the given value is 'better' then the value on the benchmark
 
         """
         # check if the server has a reference value
-        referenceValue = self.get_value(localValue.name)
-        if referenceValue is None:
-            if failOnMiss:
-                LOGGER.info(f"Benchmark server does not contain a measurement for {localValue.name}")
+        reference_value = self.get_value(local_value.name)
+        if reference_value is None:
+            if fail_on_miss:
+                LOGGER.info("Benchmark server does not contain a measurement for %s", local_value.name)
                 return False
-            LOGGER.info(f"{localValue.name} not found on server. Passing anyway because 'failOnMiss=False'")
+            LOGGER.info("%s not found on server. Passing anyway because 'fail_on_miss=False'", local_value.name)
             return True
 
         passed = False
 
-        comp = localValue.op
-        refVal = referenceValue.value
-        localVal = localValue.value
-        tolerance = localValue.tolerance
+        comp = local_value.op
+        ref_val = reference_value.value
+        local_val = local_value.value
+        tolerance = local_value.tolerance
 
         # Sanity checking that benchmark metadata matches
-        # assert localValue.op == referenceValue.op #wont work, need to pass some inputs
-        assert localValue.unit == referenceValue.unit
+        assert local_value.unit == reference_value.unit
 
         # Check if tests pass outright
-        percent_diff = 1 - (refVal / localVal)
-        passedWithinTolerance = False
+        percent_diff = 1 - (ref_val / local_val)
+        passed_within_tolerance = False
         if comp(percent_diff, 0):
             passed = True
         # didnt pass straight away, try pass within tolerance
         elif tolerance != 0 and tolerance / 100 >= abs(percent_diff):
             passed = True
-            passedWithinTolerance = True
+            passed_within_tolerance = True
         else:
             passed = False
 
         result_str = ""
         if passed:
-            if passedWithinTolerance:
+            if passed_within_tolerance:
                 result_str += (
-                    f"PASS. Local value for {localValue.name} is within {tolerance}% tolerance of the reference value "
+                    f"PASS. Local value for {local_value.name} is within {tolerance}% tolerance of the reference value "
                 )
             else:
-                result_str += f"PASS. Local value for {localValue.name} has improved compared to the reference value "
+                result_str += f"PASS. Local value for {local_value.name} has improved compared to the reference value "
 
         else:
-            result_str += f"FAIL. Local value for {localValue.name} has degraded compared to the reference value "
-        result_str += f"({localVal:.2f}{localValue.unit} local vs {refVal:.2f}{referenceValue.unit} reference)"
+            result_str += f"FAIL. Local value for {local_value.name} has degraded compared to the reference value "
+        result_str += f"({local_val:.2f}{local_value.unit} local vs {ref_val:.2f}{reference_value.unit} reference)"
         LOGGER.info(result_str)
 
         return passed
 
-    def setValue(self, value: BenchmarkValue, overwrite=False):
-        """Trys to update a metric on a remote server, with a given benchmark_value
-        if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
+    def set_value(self, value: BenchmarkValue, overwrite: bool = False) -> None:
+        """Trys to update a metric on a remote server, with a given benchmark_value.
+
+        if overwrite is true, set_value wont try append. it will be like the exisitng file doesnt exist
         """
         # Check do we have an existing value
         output = Path(f"{self.store}/{value.name}")
         exists = True
         if overwrite:
             exists = False
-        if self.local:
-            exists = output.exists()
-        else:
-            exists = self.fs.exists(str(output))
+        exists = output.exists() if self.local else self.fs.exists(str(output))
 
         # If we have an existing copy, get it into local_file
         local_file = Path(f"./{value.name}")
@@ -365,26 +366,29 @@ class BenchmarkServer:
 
         # If the file exists just write value
         if exists:
-            with open(local_file, "a") as f:
+            with local_file.open("a") as f:
                 f.write(value.to_csv() + "\n")
         else:
             # if file doesnt exist, write header
-            with open(local_file, "w") as f:
+            with local_file.open("w") as f:
                 f.write(value.to_csv(include_header=True) + "\n")
 
         # Copy  local_file back to server and delete it
         if self.local:
             shutil.copy(local_file, output)
         else:
-            LOGGER.info(f"Copying {local_file} to {self.store}/{value.name}")
+            LOGGER.info("Copying %s to %s/%s", local_file, self.store, value.name)
             self.fs.put_file(str(local_file), str(output))
         local_file.unlink()  # delete local file
 
         # update dict of results
         self.benchmark_values[value.name] = value
 
-    def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
-        """Takes a list of files and stores them on the server, under a commit folder
+        return
+
+    def store_artifacts(self, artifacts: list[Path], commit: str, tar: bool = True) -> None:
+        """Takes a list of files and stores them on the server, under a commit folder.
+
         if the files exist already, by default nothing will be stored
         Optionally (but strongly recomended) the artifacts will be tar-ed by default
         tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
@@ -393,38 +397,36 @@ class BenchmarkServer:
             LOGGER.info("Uploading untarred to server not supported")
             return
 
-        artifactDir = Path(f"{self.store}/artifacts")
-        commitDir = Path(f"{artifactDir}/{commit}")
+        artifact_dir = Path(f"{self.store}/artifacts")
+        commit_dir = Path(f"{artifact_dir}/{commit}")
         if not self.local:  # copy locally before tarring and sending to server
-            commitDir = Path(f"./{commit}")
-        commitTar = Path(f"{commitDir}.tar.gz")
-        output = commitDir
+            commit_dir = Path(f"./{commit}")
+        commitTar = Path(f"{commit_dir}.tar.gz")
+        output = commit_dir
         if tar:
             output = commitTar
 
-        LOGGER.debug(f"Saving artifacts for commit {commit} under {output}")
+        LOGGER.debug("Saving artifacts for commit %s under %s", commit, output)
         if output.exists():
-            # TODO this doesnt work remote, but it should just overwrite
-            LOGGER.info(f"Artifacts have already been saved for commit {commit} under {output}. Not saving...")
-            # return
-        else:
-            commitDir.mkdir(parents=True)  # might need to make artifacts too
+            LOGGER.info("Artifacts have already been saved for commit %s under %s. Not saving...", commit, output)
+            return
+        commit_dir.mkdir(parents=True)  # might need to make artifacts too
 
-            for artifact in artifacts:
-                LOGGER.debug(f"Copying {artifact} to {commitDir}...")
-                shutil.copy(artifact, commitDir)
+        for artifact in artifacts:
+            LOGGER.debug(f"Copying {artifact} to {commit_dir}...")
+            shutil.copy(artifact, commit_dir)
 
-            if tar:
-                LOGGER.debug("Tar-ing artifacts {commitDir} to {commitTar}")
-                _make_tarfile(commitTar, commitDir)
-                # cleanup untar-ed file
-                LOGGER.debug("Deleting {commitDir}")
-                shutil.rmtree(commitDir)
+        if tar:
+            LOGGER.debug("Tar-ing artifacts {commit_dir} to {commitTar}")
+            _make_tarfile(commitTar, commit_dir)
+            # cleanup untar-ed file
+            LOGGER.debug("Deleting {commit_dir}")
+            shutil.rmtree(commit_dir)
 
         if not self.local:
-            LOGGER.info(f"Copying tar file from {commitTar} to {artifactDir}")
-            self.fs.mkdir(str(artifactDir), create_parents=True)
-            self.fs.put_file(str(commitTar), str(artifactDir))
+            LOGGER.info(f"Copying tar file from {commitTar} to {artifact_dir}")
+            self.fs.mkdir(str(artifact_dir), create_parents=True)
+            self.fs.put_file(str(commitTar), str(artifact_dir))
             commitTar.unlink()  # delete local commit tar
 
         # cleanup oldest artifact if we are over artifact limit
@@ -432,11 +434,11 @@ class BenchmarkServer:
         if self.local:
             remove = os.remove
             # listdir gets commit name, and the list compression makes it a complete path
-            commits = [f"{artifactDir}/{commit}" for commit in os.listdir(f"{artifactDir}")]
+            commits = [str(p) for p in artifact_dir.iterdir()]
             commits.sort(key=os.path.getmtime)  # sorts the list, oldest first
         else:
             remove = self.fs.rm_file
-            commits = self.fs.listdir(f"{artifactDir}")  # returns a list of info dicts
+            commits = self.fs.listdir(f"{artifact_dir}")  # returns a list of info dicts
             commits = sorted(commits, key=lambda d: d["mtime"])
             commits = [
                 commit["name"] for commit in commits
@@ -444,34 +446,39 @@ class BenchmarkServer:
 
         if len(commits) > self.artifactLimit:
             LOGGER.info(
-                f"{len(commits)} commits stored under {artifactDir}, greater then server limit of {self.artifactLimit}",
+                f"{len(commits)} commits stored under {artifact_dir}, greater then server limit of {self.artifactLimit}",
+                len(commits),
+                artifact_dir,
+                self.artifactLimit,
             )
 
-            commitsToDelete = commits[: len(commits) - self.artifactLimit]
-            LOGGER.info(f"Deleting {commitsToDelete}...")
-            for commit in commitsToDelete:
+            commits_to_delete = commits[: len(commits) - self.artifactLimit]
+            LOGGER.info(f"Deleting {commits_to_delete}...")
+            for commit in commits_to_delete:
                 remove(commit)
 
 
 def get_git_revision_hash() -> str:
-    """Gets the commit of a given git repo"""
+    """Gets the commit of a given git repo."""
     try:
         repo = Repo(".", search_parent_directories=True)
-        return repo.head.commit.hexsha
     except InvalidGitRepositoryError:
-        raise RuntimeError("Not a Git repository")
+        msg = "Not a Git repository"
+        raise RuntimeError(msg)
+    else:
+        return repo.head.commit.hexsha
 
 
-def maybe_raise_error(msg: str, raiseError: bool) -> None:
-    """If raiseError=True, raise an error. otherwise, just print a message"""
-    if raiseError:
+def maybe_raise_error(msg: str, raise_error: bool) -> None:
+    """If raise_error=True, raise an error. otherwise, just print a message."""
+    if raise_error:
         raise ValueError(msg)
     LOGGER.info(msg)
 
 
 # this functon will find and open the profiler logs from the most recent benchmarking training run
 # return_val = value for speed profiler or 'avg_time' for time_profiler
-def open_log_file(profilerPath: str, filename: str):
+def open_log_file(profiler_path: str, filename: str) -> float:
     if filename == "time_profiler.csv":
         return_val = "avg_time"
         row_selector = "name"
@@ -481,14 +488,16 @@ def open_log_file(profilerPath: str, filename: str):
         row_selector = "metric"
         row_name = "training_avg_throughput"
     else:
-        raise ValueError
+        msg = f"Tried to open unknown log file: {filename}"
+        raise ValueError(msg)
 
-    # under /{profilerPath} there is a single random alphanumeric dir
+    # under /{profiler_path} there is a single random alphanumeric dir
     try:
-        profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
+        profiler_dir = profiler_path.glob("/[a-z0-9]*/")[0]
     except IndexError as e:
-        raise IndexError(f"Could not find a profiler dir under {profilerPath}. Full error message: {e}")
-    file_path = f"{profilerDir}/{filename}"
+        msg = f"Could not find a profiler dir under {profiler_path}."
+        raise IndexError(msg) from e
+    file_path = f"{profiler_dir}/{filename}"
     with Path(file_path).open(newline="") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
@@ -498,8 +507,9 @@ def open_log_file(profilerPath: str, filename: str):
     return float(result)
 
 
-def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
-    """Function which runs after a profiler run
+def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
+    """Function which runs after a profiler run.
+
     It parses the profiler logs and creates BenchmarkValue objects from them
 
     Returns [BenchmarkValue]
@@ -508,16 +518,16 @@ def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
     # read memory and mlflow stats
     stats = memory_stats(device=0)
     peak_active_mem_mb = stats["active_bytes.all.peak"] / 1024 / 1024
-    av_training_throughput = open_log_file(profilerPath, "speed_profiler.csv")
-    av_training_batch_time_s = open_log_file(profilerPath, "time_profiler.csv")
+    av_training_throughput = open_log_file(profiler_path, "speed_profiler.csv")
+    av_training_batch_time_s = open_log_file(profiler_path, "time_profiler.csv")
 
     # get metadata
     commit = get_git_revision_hash()
-    yyyy_mm_dd = date.today().strftime("%Y-%m-%d")
+    yyyy_mm_dd = datetime.now(tz=timezone.utc).date()
 
     # create Benchmark value objects
-    localBenchmarkResults = []
-    localBenchmarkResults.append(
+    local_benchmark_results = []
+    local_benchmark_results.append(
         BenchmarkValue(
             name="avThroughputIterPerS",
             value=av_training_throughput,
@@ -528,7 +538,7 @@ def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
             tolerance=5,
         ),
     )
-    localBenchmarkResults.append(
+    local_benchmark_results.append(
         BenchmarkValue(
             name="avTimePerBatchS",
             value=av_training_batch_time_s,
@@ -538,7 +548,7 @@ def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
             tolerance=5,
         ),
     )
-    localBenchmarkResults.append(
+    local_benchmark_results.append(
         BenchmarkValue(
             name="peakMemoryMB",
             value=peak_active_mem_mb,
@@ -549,78 +559,89 @@ def getLocalBenchmarkResults(profilerPath: str) -> list[BenchmarkValue]:
         ),
     )  # added 1% tolerance here so it doesnt fail over a few stray kilobytes
 
-    return localBenchmarkResults
+    return local_benchmark_results
 
 
-def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
-    """Runs after a benchmark and returns a list of paths to files  (e.g. trace file, memory snapshots) produced by the profiler"""
-    profilerDir = glob.glob(f"{profilerPath}/[a-z0-9]*/")[0]
+def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
+    """Runs after a benchmark and returns a list of paths to artifacts produced by the profiler.
+
+    Currently it captures the pytorhc trace file and the memory snapshot
+    """
+    profiler_path = Path(profiler_path)
+    profiler_dir = profiler_path.glob("/[a-z0-9]*/")[0]
 
     # get memory snapshot
-    memory_snapshot = Path(f"{profilerDir}/memory_snapshot.pickle")
+    memory_snapshot = Path(f"{profiler_dir}/memory_snapshot.pickle")
     if not memory_snapshot.exists():
-        raise RuntimeError(f"Memory snapshot not found at: {memory_snapshot}")
+        msg = f"Memory snapshot not found at: {memory_snapshot}"
+        raise RuntimeError(msg)
 
     artifacts = [memory_snapshot]
 
     # get trace file
     # there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
     # but luckily if we take the first one thats always training on rank 0.
-    trace_files = glob.glob(f"{profilerDir}/*.pt.trace.json")
+    trace_files = profiler_dir.glob(f"{profiler_dir}/*.pt.trace.json")
     if len(trace_files) == 0:
-        LOGGER.info(f"Can't find a trace file under {profilerDir}")
+        LOGGER.info("Can't find a trace file under %s", profiler_dir)
     else:
         trace_file = Path(trace_files[0])
         if not trace_file.exists():
-            raise RuntimeError(f"trace file not found at: {trace_file}")
+            msg = f"trace file not found at: {trace_file}"
+            raise RuntimeError(msg)
         artifacts.append(trace_file)
 
     return artifacts
 
 
+def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:
+    local_results_str = "Local benchmark results:\n"
+    local_results_str += "-" * 20 + "\n"
+    for benchmark_value in local_benchmark_results:
+        local_results_str += benchmark_value + "\n"
+    local_results_str += "-" * 20 + "\n"
+    return local_results_str
+
+
 @rank_zero_only
 def benchmark(
-    cfg,
+    cfg: DictConfig,
     test_case: str,
     store: str,
     store_artifacts: bool = True,
     throw_error: bool = True,
     update_data: bool = True,
 ) -> None:
-    localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
+    local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
-    benchmarkServer = BenchmarkServer(test_case=test_case, store=store)
+    benchmark_server = BenchmarkServer(test_case=test_case, store=store)
 
-    benchmarks = [benchmark_value.name for benchmark_value in localBenchmarkResults]
-    benchmarkServer.get_values(benchmarks)
+    benchmarks = [benchmark_value.name for benchmark_value in local_benchmark_results]
+    benchmark_server.get_values(benchmarks)
 
     # print local and reference results
-    LOGGER.info(f"Reference benchmark results:\n{benchmarkServer}")
-    LOGGER.info("Local benchmark results:")
-    LOGGER.info("-" * 20)
-    for benchmark_value in localBenchmarkResults:
-        LOGGER.info(benchmark_value)
-    LOGGER.info("-" * 20 + "\n")
+    LOGGER.info(f"Reference benchmark results:\n{benchmark_server}")
+    LOGGER.info(_print_local_benchmark_results(local_benchmark_results))
 
     # compare reference results against local results
     LOGGER.info("Comparing local benchmark results against reference values from the server")
 
-    failedTests = []
-    for localBenchmarkValue in localBenchmarkResults:
-        passed = benchmarkServer.compare(localBenchmarkValue)
+    failed_tests = []
+    for local_benchmark_value in local_benchmark_results:
+        passed = benchmark_server.compare(local_benchmark_value)
         if not passed:
-            failedTests.append(localBenchmarkValue.name)
+            failed_tests.append(local_benchmark_value.name)
 
-    if len(failedTests) > 0:
-        maybe_raise_error(f"The following tests failed: {failedTests}", throw_error)
+    if len(failed_tests) > 0:
+        maybe_raise_error(f"The following tests failed: {failed_tests}", throw_error)
     else:
         # the tests have passed, possibly update the data on the server
         update_data = update_data or _is_repo_on_branch("main")  # update if our branch is main
         if update_data:
             LOGGER.info("Updating metrics on server")
-            for localBenchmarkValue in localBenchmarkResults:
-                benchmarkServer.setValue(localBenchmarkValue)
+            for local_benchmark_value in local_benchmark_results:
+                benchmark_server.set_value(local_benchmark_value)
             if store_artifacts:
-                artifacts = getLocalBenchmarkArtifacts(cfg.hardware.paths.profiler)
-                benchmarkServer.storeArtifacts(artifacts, localBenchmarkResults[0].commit)
+                artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+                benchmark_server.store_artifacts(artifacts, local_benchmark_results[0].commit)

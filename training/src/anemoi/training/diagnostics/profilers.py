@@ -644,7 +644,7 @@ class BenchmarkProfiler(Profiler):
 
                 memory_df = memory_df[~memory_df["Name"].isin(time_rows)]
         except ValueError as e:
-            LOGGER.info(f"Error saving memory df: {e}")
+            LOGGER.info("Error saving memory df: %s", e)
 
         self.memory_report_fname = self.dirpath / "memory_profiler.csv"
         self._save_report(memory_df, self.memory_report_fname)

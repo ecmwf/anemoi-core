@@ -241,7 +241,6 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 def benchmark_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
-    get_tmp_paths: callable,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
     base_config = "config"  # which config we start from in anemoi/training/configs/
@@ -258,7 +257,8 @@ def benchmark_config(
         overrides = []
         base_config = "lam"
     else:
-        raise ValueError(f"Error. Unknown benchmark configuration: {test_case}")
+        msg = f"Error. Unknown benchmark configuration: {test_case}"
+        raise ValueError(msg)
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
         template = compose(config_name=base_config, overrides=overrides)
