@@ -9,15 +9,16 @@
 
 
 import os
-import shutil
 from pathlib import Path
 
 import pytest
+import torch
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.migrations import Migrator
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
@@ -231,8 +232,14 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     return cfg, dataset_urls[0]
 
 
+@pytest.fixture(scope="session")
+def migrator() -> Migrator:
+    return Migrator()
+
+
 @pytest.fixture
 def gnn_config_with_checkpoint(
+    migrator: Migrator,
     gnn_config: tuple[DictConfig, str],
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
@@ -240,9 +247,12 @@ def gnn_config_with_checkpoint(
     existing_ckpt = get_test_data(
         "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-07-31.ckpt",
     )
+
+    _, new_ckpt, _ = migrator.sync(existing_ckpt)
+
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(existing_ckpt, checkpoint_dir / "last.ckpt")
+    torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
     cfg.training.run_id = "dummy_id"
     cfg.training.max_epochs = 3
