@@ -39,8 +39,8 @@ def test_benchmark_training_cycle(
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
-    store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks"
-    # store: str = "./local"
+    # store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks"
+    store: str = "./local"
     benchmark(cfg, testCase, store, throw_error=True)
 
 

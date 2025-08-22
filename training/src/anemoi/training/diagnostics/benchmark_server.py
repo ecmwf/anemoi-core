@@ -16,8 +16,10 @@ import os.path
 import re
 import shutil
 import tarfile
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from git import GitCommandError
@@ -42,7 +44,7 @@ class BenchmarkValue:
         unit: str,
         date: date,
         commit: str,
-        op=operator.le,
+        op: Callable[[Any, Any], bool] = operator.le,
         tolerance: int = 0,  # percentage
     ):
         self.name = name
@@ -56,7 +58,7 @@ class BenchmarkValue:
     def __str__(self):
         return f"{self.name}: {self.value:.2f}{self.unit} (commit: {self.commit[:5]}, date: {self.date})"
 
-    def to_csv(self, include_header=False):
+    def to_csv(self, include_header: bool = False) -> str:
         header = "testName,unit,date,commit,value"
 
         result = f"{self.name},{self.unit},{self.date},{self.commit},{self.value}"
@@ -66,13 +68,13 @@ class BenchmarkValue:
 
 
 def _make_tarfile(output_filename: str, source_dir: str) -> None:
-    """Tars 'source_dir' to 'output_filename'"""
+    """Tars 'source_dir' to 'output_filename'."""
     with tarfile.open(output_filename, "w:gz") as tar:
-        tar.add(source_dir, arcname=os.path.basename(source_dir))
+        tar.add(source_dir, arcname=Path.name(source_dir))
 
 
-def _is_repo_on_branch(branch):
-    """Checks if a repo is on a given branch"""
+def _is_repo_on_branch(branch: str) -> bool:
+    """Checks if a repo is on a given branch."""
     # find repo
     try:
         repo = Repo(".", search_parent_directories=True)
@@ -95,10 +97,13 @@ def _is_repo_on_branch(branch):
 #   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a18")=True
 #   cd .. # Not a git repository.
 #   isCommitInProject("34d9c6f4a3c7563d7a4a646e9d69544912932a18")=False
-def _isCommitInProject(commit: str) -> bool:
-    """This function should be called from inside a git repo
+def _is_commit_in_project(commit: str) -> bool:
+    """Checks if a given commit is in the history of the repo this function was called inside.
+
+    This function should be called from inside a git repo.
     It takes a given commit str and returns true if it is somewhere in the branches history
-    This function is used when selecting which result to benchmark against, we will take the latest commit which is present in the branch
+    This function is used when selecting which result to benchmark against,
+    we will take the latest commit which is present in the branch
     This prevents tests failing because someone pushed a performance improvement and a developer hasnt merged
     """
     # find repo
@@ -117,55 +122,56 @@ def _isCommitInProject(commit: str) -> bool:
 
     try:
         # Check if the commit is an ancestor of the current branch
-        if current_branch is not None:
-            branch_commit = repo.commit(current_branch)
-        else:
-            # In detached HEAD state, compare with HEAD
-            branch_commit = repo.head.commit
+        # if None -> In detached HEAD state, compare with HEAD
+        branch_commit = repo.commit(current_branch) if current_branch is not None else repo.head.commit
 
         # Check if the given commit is reachable from the branch
         repo.git.merge_base("--is-ancestor", commit, branch_commit.hexsha)
-        return True
     except GitCommandError:
         return False  # commit is not an ancestor or doesn't exist
+    else:
+        return True
 
 
-def _findLatestSharedCommitRow(df) -> str | None:
-    """This function goes through the csv of past benchmark results and finds
+def _find_latest_shared_commit(df: pd.DataFrame) -> str | None:
+    """ Finds the last shared commit betwen a csv and your current github repo.
+    
+    This function goes through the csv of past benchmark results and finds
     the latest commit which is present in both the csv and the project
     It must be called from inside a git repo
     """
     if "commit" not in df.columns:
-        raise ValueError("CSV must contain a 'commit' column")
+        msg = "CSV must contain a 'commit' column"
+        raise ValueError(msg)
 
     # Iterate from bottom to top
     for i in reversed(df.index):
         commit = str(df.at[i, "commit"]).strip()
-        if _isCommitInProject(commit):
-            LOGGER.debug(f"commit '{commit}' is present in both server and project. returning row {i}.")
+        if _is_commit_in_project(commit):
+            LOGGER.debug("commit '%s' is present in both server and project. returning row %s.", commit, i)
             return df.loc[i]
-        LOGGER.debug(f"commit '{commit}' is not found in project history.")
+        LOGGER.debug(f"commit '%s' is not found in project history.", commit)
 
     LOGGER.debug("No matching commits found between server and project")
+    return None
 
 
 class BenchmarkServer:
-    # def __init__(self, store:str="./local", testCase:str=""):  # use a local folder to store data instead of a remote server
     def __init__(
         self,
         store: str = "./local",
-        testCase: str = "",
+        test_case: str = "",
     ):  # use a local folder to store data instead of a remote server
-        self.benchmarkValues = {}
+        self.benchmark_values = {}
 
         self._parse_store_location(store)
 
         # TestCase creates an optional subdir under BenchmarkServer to store the results
         # So that you can store GNN_n320_1g and graphtransformer_n320_1g results under the same server
         # If testcase is "" then no subdirs are created
-        self.testCase = testCase
-        if self.testCase != "":
-            self.store = Path(f"{self.store}/{self.testCase}")
+        self.test_case = test_case
+        if self.test_case != "":
+            self.store = Path(f"{self.store}/{self.test_case}")
 
         if not self.local:
             self._mount_remote()
@@ -181,7 +187,7 @@ class BenchmarkServer:
         # Artifacts can be reproduced by reverting to a given commit and running the pytests locally
 
     def _parse_store_location(self, store: str) -> None:
-        """Parses an input string to determine where to store the benchmark servers files
+        """Parses an input string to determine where to store the benchmark servers files.
 
         store: str -> either a local path or a remote path. Remote paths should be in the form
                     "ssh://<user>@<dest>:<remote_path>"
@@ -192,7 +198,7 @@ class BenchmarkServer:
         remote_pattern = r"^ssh://.*@.*:.*$"
         if re.match(remote_pattern, store):
             # looks like a remote string
-            parts = store.strip("ssh://").split(":")
+            parts = store.removeprefix("ssh://").split(":")
             remote = parts[0].split("@")
             self.remote_user = str(remote[0])
             self.remote_host = str(remote[1])
@@ -204,17 +210,18 @@ class BenchmarkServer:
             self.store = Path(store)
             LOGGER.info("'%s' is a local store pointing to %s", store, str(self.store))
 
-    def _mount_remote(self):
-        """Mounts the remote server over sftp using self.remote_host and self.remote_user"""
+    def _mount_remote(self) -> None:
+        """Mounts the remote server over sftp using self.remote_host and self.remote_user."""
         from sshfs import SSHFileSystem
 
         self.fs = SSHFileSystem(self.remote_host, username=self.remote_user)
+        return None
 
     def __str__(self):
         string = ""
         string += "-" * 20 + "\n"
-        # benchmark values is a dict of "benchmarkName: BenchmarkValue"
-        for benchmark in self.benchmarkValues.values():
+        # benchmark values is a dict of "benchmark_name: BenchmarkValue"
+        for benchmark in self.benchmark_values.values():
             string += str(benchmark) + "\n"
         string += "-" * 20 + "\n"
         if self.local:
@@ -223,21 +230,21 @@ class BenchmarkServer:
             string += f"(Server location: '{self.remote_host}:{self.store}')\n"
         return string
 
-    def getValue(self, benchmarkName: str, forceGetFromServer: bool = False) -> None:
-        """Retrieves a given benchmark e.g. "avThroughputIterPerS" from the benchmark store
-            and stores it under self.benchmarkValues[benchmarkName]
-        If a benchmark value has already been loaded, return it. you can force to retrieve from the server with the
-            forceGetFromServer parameter.
+    def get_value(self, benchmark_name: str, force_get_from_server: bool = False) -> None:
+        """Retrieves a given benchmark from the benchmark store and stores it under self.benchmark_values[benchmark_name]
+
+        If a benchmark value e.g. "avThroughputIterPerS" as already been loaded, return it. you can force to retrieve from the server with the
+            force_get_from_server parameter.
         If the benchmark store is remote, the CSV is downloaded. Then the CSV is opend and the value retrieved.
         If the name cant be found in the benchmark store, the function returns
         trys to read a row from a csv stored on a server and create a benchmark value from that
         If a benchmark value is found, update list of benchmark values.
         """
-        if not forceGetFromServer and benchmarkName in self.benchmarkValues:
-            LOGGER.debug(f"entry for {benchmarkName} found locally, not retrieving from server")
-            return self.benchmarkValues[benchmarkName]
+        if not force_get_from_server and benchmark_name in self.benchmark_values:
+            LOGGER.debug(f"entry for {benchmark_name} found locally, not retrieving from server")
+            return self.benchmark_values[benchmark_name]
 
-        bench_file = Path(f"{self.store}/{benchmarkName}")
+        bench_file = Path(f"{self.store}/{benchmark_name}")
         if self.local:
             if bench_file.exists():
                 df = pd.read_csv(bench_file)
@@ -245,7 +252,7 @@ class BenchmarkServer:
                 LOGGER.info(f"Could not find file at {bench_file}.")
                 return None
         else:
-            local_file = Path(f"./{benchmarkName}")
+            local_file = Path(f"./{benchmark_name}")
             try:
                 self.fs.get(str(bench_file), str(local_file))
                 df = pd.read_csv(local_file)
@@ -255,28 +262,30 @@ class BenchmarkServer:
 
         # find last element with a commit present in this branch
         # If no such can be found, error and recomend merging main to get a new enough commit
-        maybeRow = _findLatestSharedCommitRow(df)
+        maybeRow = _find_latest_shared_commit(df)
         if maybeRow is None:
             raise RuntimeError(
                 "Error. Couldn't find an entry in the server sharing a commit with your branch. Please consider pulling 'main' to enable performance benchmarks",
             )
         row = maybeRow
 
-        assert row["testName"] == benchmarkName  # sanity check, should always pass
-        benchmarkValue = BenchmarkValue(
-            name=benchmarkName,
+        assert row["testName"] == benchmark_name  # sanity check, should always pass
+        benchmark_value = BenchmarkValue(
+            name=benchmark_name,
             value=row["value"],
             unit=row["unit"],
             date=row["date"],
             commit=row["commit"],
         )
-        LOGGER.debug(benchmarkValue)
+        LOGGER.debug(benchmark_value)
         # update dict of results
-        self.benchmarkValues[benchmarkValue.name] = benchmarkValue
+        self.benchmark_values[benchmark_value.name] = benchmark_value
 
-    def getValues(self, names: list[str]):
+        return None
+
+    def get_values(self, names: list[str]):
         for name in names:
-            self.getValue(name)
+            self.get_value(name)
 
     def compare(self, localValue: BenchmarkValue, failOnMiss: bool = False) -> bool:
         """Tests a given benchmark result against what is found on the server.
@@ -285,7 +294,7 @@ class BenchmarkServer:
 
         """
         # check if the server has a reference value
-        referenceValue = self.getValue(localValue.name)
+        referenceValue = self.get_value(localValue.name)
         if referenceValue is None:
             if failOnMiss:
                 LOGGER.info(f"Benchmark server does not contain a measurement for {localValue.name}")
@@ -333,7 +342,7 @@ class BenchmarkServer:
         return passed
 
     def setValue(self, value: BenchmarkValue, overwrite=False):
-        """Trys to update a metric on a remote server, with a given benchmarkValue
+        """Trys to update a metric on a remote server, with a given benchmark_value
         if overwrite is true, setValue wont try append. it will be like the exisitng file doesnt exist
         """
         # Check do we have an existing value
@@ -372,7 +381,7 @@ class BenchmarkServer:
         local_file.unlink()  # delete local file
 
         # update dict of results
-        self.benchmarkValues[value.name] = value
+        self.benchmark_values[value.name] = value
 
     def storeArtifacts(self, artifacts: list[Path], commit: str, tar=True) -> None:
         """Takes a list of files and stores them on the server, under a commit folder
@@ -572,7 +581,7 @@ def getLocalBenchmarkArtifacts(profilerPath: str) -> list[Path]:
 @rank_zero_only
 def benchmark(
     cfg,
-    testCase: str,
+    test_case: str,
     store: str,
     store_artifacts: bool = True,
     throw_error: bool = True,
@@ -581,17 +590,17 @@ def benchmark(
     localBenchmarkResults = getLocalBenchmarkResults(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
-    benchmarkServer = BenchmarkServer(testCase=testCase, store=store)
+    benchmarkServer = BenchmarkServer(test_case=test_case, store=store)
 
-    benchmarks = [benchmarkValue.name for benchmarkValue in localBenchmarkResults]
-    benchmarkServer.getValues(benchmarks)
+    benchmarks = [benchmark_value.name for benchmark_value in localBenchmarkResults]
+    benchmarkServer.get_values(benchmarks)
 
     # print local and reference results
     LOGGER.info(f"Reference benchmark results:\n{benchmarkServer}")
     LOGGER.info("Local benchmark results:")
     LOGGER.info("-" * 20)
-    for benchmarkValue in localBenchmarkResults:
-        LOGGER.info(benchmarkValue)
+    for benchmark_value in localBenchmarkResults:
+        LOGGER.info(benchmark_value)
     LOGGER.info("-" * 20 + "\n")
 
     # compare reference results against local results
