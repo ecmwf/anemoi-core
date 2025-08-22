@@ -16,6 +16,7 @@ from typing import TypedDict
 
 class MigrationContext:
     """A context object allowing setup callbacks to access some utilities:
+
     * ``context.move_attribute("pkg.start.MyClass", "pkg.end.MyRenamedClass")`` to update paths
         to attributes.
     * ``context.move_module("pkg.start", "pkg.end")`` to move a full module.
