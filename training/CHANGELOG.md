@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.3](https://github.com/ecmwf/anemoi-core/compare/training-0.6.2...training-0.6.3) (2025-08-22)
+
+
+### Bug Fixes
+
+* GraphInterpolator Lightning Module - add rollout member for compa… ([#496](https://github.com/ecmwf/anemoi-core/issues/496)) ([40aa71c](https://github.com/ecmwf/anemoi-core/commit/40aa71c8eb097442ce33e7f0ff82e81b0947716e))
+
 ## [0.6.2](https://github.com/ecmwf/anemoi-core/compare/training-0.6.1...training-0.6.2) (2025-08-20)
 
 
