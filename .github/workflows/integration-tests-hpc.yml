@@ -73,8 +73,7 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
-            # Launching with srun starts both processes in parallel
-            srun python3 -m pytest -v training/tests/integration --slow --multigpu -s -k "test_benchmark_training_cycle"
+            python3 -m pytest -v training/tests/integration --slow --multigpu -s -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
