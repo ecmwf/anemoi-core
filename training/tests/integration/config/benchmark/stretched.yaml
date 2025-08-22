@@ -12,8 +12,8 @@ hardware:
     data:  /home/mlx/ai-ml/datasets/
 dataloader:
   num_workers:
-    training: 8
-    validation: 8
+    training: 6
+    validation: 6
   limit_batches:
     training: 100
     validation: 1

@@ -24,8 +24,8 @@ dataloader:
   validation:
     start: 2017-12-30
   num_workers:
-    training: 8
-    validation: 8
+    training: 6
+    validation: 6
   limit_batches:
     training: 100
     validation: 1
