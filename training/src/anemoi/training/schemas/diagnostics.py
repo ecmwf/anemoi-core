@@ -293,6 +293,8 @@ class MlflowSchema(BaseModel):
     "If using AML to log with MLFlow, name of the workspace"
     aml_subscription_id: str | None = None
     "If using AML to log with MLFlow, subscription ID"
+    azure_log_level: str = "WARNING"
+    "Log level for all azure packages (azure-identity, azure-core, etc)"
 
     @root_validator(pre=True)
     def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805

@@ -80,6 +80,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         kw["aml_workspace_name"] = config.diagnostics.log.mlflow.aml_workspace_name
         kw["aml_subscription_id"] = config.diagnostics.log.mlflow.aml_subscription_id
         kw["aml_identity"] = config.diagnostics.log.mlflow.aml_identity
+        kw["azure_log_level"] = config.diagnostics.log.mlflow.azure_log_level
 
     max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
     LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)

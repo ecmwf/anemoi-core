@@ -133,6 +133,7 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         aml_subscription_id: str | None = None,
         aml_resource_group: str | None = None,
         aml_workspace_name: str | None = None,
+        azure_log_level: str = "WARNING",
         experiment_name: str = "lightning_logs",
         project_name: str = "anemoi",
         run_name: str | None = None,
@@ -162,6 +163,8 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
             Name of the Azure ML resource group
         aml_workspace: str | None, optional
             Name of the Azure ML workspace
+        azure_log_level: str, optional
+            Log level for all azure packages (azure-identity, azure-core, etc)
         experiment_name : str, optional
             Name of experiment, by default "lightning_logs"
         project_name : str, optional
@@ -209,6 +212,13 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         # <-- Azure specific stuff -->
         # we don't need authenticate, this just lets us easily subclass the logger
         self.auth = NoAuth()
+
+        # Set azure logging to warning, since otherwise it's way too much
+        azure_logger = logging.getLogger("azure")
+        numeric_level = getattr(logging, azure_log_level.upper(), None)
+        if not isinstance(numeric_level, int):
+            raise ValueError(f'Invalid log level: {azure_log_level.upper()}')
+        azure_logger.setLevel(numeric_level)
 
         # Azure ML jobs (should) set this for us:
         tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI")
