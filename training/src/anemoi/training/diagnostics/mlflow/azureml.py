@@ -217,7 +217,7 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         azure_logger = logging.getLogger("azure")
         numeric_level = getattr(logging, azure_log_level.upper(), None)
         if not isinstance(numeric_level, int):
-            raise ValueError(f'Invalid log level: {azure_log_level.upper()}')
+            raise ValueError(f"Invalid log level: {azure_log_level.upper()}")
         azure_logger.setLevel(numeric_level)
 
         # Azure ML jobs (should) set this for us:
