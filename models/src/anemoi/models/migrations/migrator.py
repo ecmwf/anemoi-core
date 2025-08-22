@@ -467,7 +467,7 @@ class Migrator:
         for executed_migration in history:
             if (
                 executed_migration["name"] in migration_signatures
-                and executed_migration["signature"] != migration_signatures["name"]
+                and executed_migration["signature"] != migration_signatures[executed_migration["name"]]
             ):
                 LOGGER.warning(
                     "Your checkpoint has executed migration %s, but the script has changed. "
