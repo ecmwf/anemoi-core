@@ -875,7 +875,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             metadata_variables=self.metadata_variables,
         )
         self.parameter_names = [self.parameter_names[i] for i in argsort_indices]
-        if not isinstance(pl_module.loss, BaseLoss):
+        if not isinstance(self.loss, BaseLoss):
             LOGGER.warning(
                 "Loss function must be a subclass of BaseLoss, or provide `squash`.",
                 RuntimeWarning,
@@ -891,7 +891,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
-            loss = pl_module.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
+            loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
@@ -903,6 +903,30 @@ class PlotLoss(BasePerBatchPlotCallback):
                 epoch=epoch,
                 tag=f"loss_rstep_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
                 exp_log_tag=f"loss_sample_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+            )
+
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        output: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
+
+        if batch_idx % self.every_n_batches == 0:
+
+            self.loss = copy.deepcopy(pl_module.loss)
+
+            if hasattr(self.loss.scaler, "nan_mask_weights"):
+                self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
+
+            super().on_validation_batch_end(
+                trainer,
+                pl_module,
+                output,
+                batch,
+                batch_idx,
             )
 
 
@@ -994,11 +1018,12 @@ class PlotSample(BasePerBatchPlotCallback):
             .cpu()
         )
         data = self.post_processors(input_tensor)[self.sample_idx]
-
-        output_tensor = self.post_processors(
-            torch.cat(tuple(x[:, ...].detach().cpu() for x in outputs[1])),
-            in_place=False,
-        )[self.sample_idx : self.sample_idx + 1]
+        output_tensor = torch.cat(
+            tuple(
+                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
+                for x in outputs[1]
+            ),
+        )
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
@@ -1051,9 +1076,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             .cpu()
         )
         data = self.post_processors(input_tensor)[self.sample_idx]
-        output_tensor = self.post_processors(
-            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].detach().cpu() for x in outputs[1])),
-            in_place=False,
+        output_tensor = torch.cat(
+            tuple(
+                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
+                for x in outputs[1]
+            ),
         )
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
