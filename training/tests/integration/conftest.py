@@ -227,7 +227,8 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
-    return cfg
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0]
 
 
 @pytest.fixture(
