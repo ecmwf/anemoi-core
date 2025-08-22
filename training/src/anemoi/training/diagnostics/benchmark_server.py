@@ -70,7 +70,7 @@ class BenchmarkValue:
 def _make_tarfile(output_filename: str, source_dir: str) -> None:
     """Tars 'source_dir' to 'output_filename'."""
     with tarfile.open(output_filename, "w:gz") as tar:
-        tar.add(source_dir, arcname=Path.name(source_dir))
+        tar.add(source_dir, arcname=Path(source_dir).name)
 
 
 def _is_repo_on_branch(branch: str) -> bool:
