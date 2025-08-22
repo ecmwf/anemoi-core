@@ -267,7 +267,7 @@ class BenchmarkServer:
         maybe_row = _find_latest_shared_commit(df)
         if maybe_row is None:
             msg = "Error. Couldn't find an entry in the server sharing a commit with your branch.\n"
-            msg+="Please consider merging 'main' to enable performance benchmarks"
+            msg += "Please consider merging 'main' to enable performance benchmarks"
             raise RuntimeError(msg)
         row = maybe_row
 
@@ -386,25 +386,18 @@ class BenchmarkServer:
 
         return
 
-    def store_artifacts(self, artifacts: list[Path], commit: str, tar: bool = True) -> None:
+    def store_artifacts(self, artifacts: list[Path], commit: str) -> None:
         """Takes a list of files and stores them on the server, under a commit folder.
 
         if the files exist already, by default nothing will be stored
-        Optionally (but strongly recomended) the artifacts will be tar-ed by default
         tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
         """
-        if not self.local and not tar:
-            LOGGER.info("Uploading untarred to server not supported")
-            return
-
         artifact_dir = Path(f"{self.store}/artifacts")
         commit_dir = Path(f"{artifact_dir}/{commit}")
         if not self.local:  # copy locally before tarring and sending to server
             commit_dir = Path(f"./{commit}")
-        commitTar = Path(f"{commit_dir}.tar.gz")
-        output = commit_dir
-        if tar:
-            output = commitTar
+        commit_tar = Path(f"{commit_dir}.tar.gz")
+        output = commit_tar
 
         LOGGER.debug("Saving artifacts for commit %s under %s", commit, output)
         if output.exists():
@@ -413,21 +406,20 @@ class BenchmarkServer:
         commit_dir.mkdir(parents=True)  # might need to make artifacts too
 
         for artifact in artifacts:
-            LOGGER.debug(f"Copying {artifact} to {commit_dir}...")
+            LOGGER.debug("Copying %s to %s...", artifact, commit_dir)
             shutil.copy(artifact, commit_dir)
 
-        if tar:
-            LOGGER.debug("Tar-ing artifacts {commit_dir} to {commitTar}")
-            _make_tarfile(commitTar, commit_dir)
-            # cleanup untar-ed file
-            LOGGER.debug("Deleting {commit_dir}")
-            shutil.rmtree(commit_dir)
+        LOGGER.debug("Tar-ing artifacts %s to %s", commit_dir, commit_tar)
+        _make_tarfile(commit_tar, commit_dir)
+        # cleanup untar-ed file
+        LOGGER.debug("Deleting %s", commit_dir)
+        shutil.rmtree(commit_dir)
 
         if not self.local:
-            LOGGER.info(f"Copying tar file from {commitTar} to {artifact_dir}")
+            LOGGER.info("Copying tar file from %s to %s", commit_tar, artifact_dir)
             self.fs.mkdir(str(artifact_dir), create_parents=True)
-            self.fs.put_file(str(commitTar), str(artifact_dir))
-            commitTar.unlink()  # delete local commit tar
+            self.fs.put_file(str(commit_tar), str(artifact_dir))
+            commit_tar.unlink()  # delete local commit tar
 
         # cleanup oldest artifact if we are over artifact limit
 
@@ -446,14 +438,14 @@ class BenchmarkServer:
 
         if len(commits) > self.artifactLimit:
             LOGGER.info(
-                f"{len(commits)} commits stored under {artifact_dir}, greater then server limit of {self.artifactLimit}",
+                "%s commits stored under %s, greater then server limit of %s",
                 len(commits),
                 artifact_dir,
                 self.artifactLimit,
             )
 
             commits_to_delete = commits[: len(commits) - self.artifactLimit]
-            LOGGER.info(f"Deleting {commits_to_delete}...")
+            LOGGER.info("Deleting %s...", commits_to_delete)
             for commit in commits_to_delete:
                 remove(commit)
 
@@ -462,9 +454,9 @@ def get_git_revision_hash() -> str:
     """Gets the commit of a given git repo."""
     try:
         repo = Repo(".", search_parent_directories=True)
-    except InvalidGitRepositoryError:
+    except InvalidGitRepositoryError as e:
         msg = "Not a Git repository"
-        raise RuntimeError(msg)
+        raise RuntimeError(msg) from e
     else:
         return repo.head.commit.hexsha
 
@@ -621,7 +613,7 @@ def benchmark(
     benchmark_server.get_values(benchmarks)
 
     # print local and reference results
-    LOGGER.info(f"Reference benchmark results:\n{benchmark_server}")
+    LOGGER.info("Reference benchmark results:\n%s", benchmark_server)
     LOGGER.info(_print_local_benchmark_results(local_benchmark_results))
 
     # compare reference results against local results

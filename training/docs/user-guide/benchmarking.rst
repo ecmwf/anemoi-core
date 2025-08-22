@@ -745,34 +745,38 @@ Improvements​​
 
 -  Support other components of Anemoi like ``anemoi-inference``
 
-***************************************
+*********************
  Benchmarking pytest
-***************************************
+*********************
 
-Anemoi training now supports automatic and reproducible benchmarking as an integration test. Currently
-the following components are benchmarked: 'throughput, time per batch and total memory usage'.
-Each time a commit is merged into Anemoi, these benchmark tests are run. The score is then logged, alongside the date and commit, on a database.
-In this way we can track the performance of anemoi over time and ensure that no pull requests unintentionally reduce performance.
+Anemoi training now supports automatic and reproducible benchmarking as
+an integration test. Currently the following components are benchmarked:
+'throughput, time per batch and total memory usage'. Each time a commit
+is merged into Anemoi, these benchmark tests are run. The score is then
+logged, alongside the date and commit, on a database. In this way we can
+track the performance of anemoi over time and ensure that no pull
+requests unintentionally reduce performance.
 
 A suite of different anemoi configurations are tested. The current list of configurations is
-  - global GraphTransformer model, n320 source resolution, 1 GPU
-  - global GNN model, n320 source resolution, 1 GPU
-  - LAM model
-  - Stretched grid model
+   -  global GraphTransformer model, n320 source resolution, 1 GPU
+   -  global GNN model, n320 source resolution, 1 GPU
+   -  LAM model
+   -  Stretched grid model
 
-You can also run the benchmark integration test while developing a PR to anemoi. For information on how to trigger
-integration tests see ``docs/user-guide/contributing.html#integration-tests-and-use-cases``. When you trigger the
-benchmark integration test on a PR, the benchmark score will be compared against the latest shared commit present in
-the benchmark database. If the performance degrades beyond an acceptable percentage, the tests will fail. Benchmarking tests
-failing does not necessarily mean your PR will be rejected. At this point, the PR authour and reviewers should investigate the performance more closely.
+You can also run the benchmark integration test while developing a PR to
+anemoi. For information on how to trigger integration tests see
+``docs/user-guide/contributing.html#integration-tests-and-use-cases``.
+When you trigger the benchmark integration test on a PR, the benchmark
+score will be compared against the latest shared commit present in the
+benchmark database. If the performance degrades beyond an acceptable
+percentage, the tests will fail. Benchmarking tests failing does not
+necessarily mean your PR will be rejected. At this point, the PR authour
+and reviewers should investigate the performance more closely.
 
-For details on how this is implemented the code is found here: ``tests/integration/test_benchmark.py``
+For details on how this is implemented the code is found here:
+``tests/integration/test_benchmark.py``
 
 Local Benchmarking
-===================
+==================
 
 The benchmarking tests can also be run locally.
-
-.. code:: bash
-   cd anemoi-core
-   python3 -m pytest training/tests/integration --longtests -s -k "test_benchmark_training_cycle"
