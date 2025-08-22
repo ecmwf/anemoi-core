@@ -443,6 +443,38 @@ class Migrator:
             return None
         return self._grouped_migrations[group + 1][0].metadata.versions["anemoi-models"]
 
+    def _check_executed_migrations(self, ckpt: CkptType, migrations: list[Migration]) -> bool:
+        """Checks whether the checkpoint has run a migration that had its script changed.
+        We use the signature stored in the history to detect it.
+
+        Parameters
+        ----------
+        ckpt : CkptType
+            The checkpoint
+        migrations : list[Migration]
+            The compatible migrations for the checkpoint.
+
+        Returns
+        -------
+        bool
+            Whether one script in the history has been modified.
+        """
+        migration_signatures = {migration.name: migration.signature for migration in migrations}
+        history = ckpt.get("hyper_parameters", {}).get("metadata", {}).get("migrations", {}).get("history", [])
+        has_run_modified_migrations = False
+        for executed_migration in history:
+            if (
+                executed_migration["name"] in migration_signatures
+                and executed_migration["signature"] != migration_signatures["name"]
+            ):
+                LOGGER.warning(
+                    "Your checkpoint has executed migration %s, but the script has changed. "
+                    "Re-run the migrations if possible to use the new updated script.",
+                    executed_migration["name"],
+                )
+                has_run_modified_migrations = True
+        return has_run_modified_migrations
+
     def _resolve_operations(
         self, ckpt: CkptType, migrations: list[Migration]
     ) -> tuple[list[Callable[[MigrationContext], None]], list[BaseOp]]:
@@ -488,12 +520,7 @@ class Migrator:
                 len(migrations) > n_ckpt_migrations - k
                 and migrations[n_ckpt_migrations - k].name == ckpt_migration.name
             ):
-                if migrations[n_ckpt_migrations - k].signature != ckpt_migration.signature:
-                    LOGGER.warning(
-                        "The script for %s has changed. Re-run the migrations if possible to use the new script.",
-                        ckpt_migration.name,
-                    )
-                continue
+                break
 
             if ckpt_migration.rollback is None:
                 raise IncompatibleCheckpointException(
@@ -509,11 +536,6 @@ class Migrator:
                 len(ckpt_migrations[: len(ckpt_migrations) - num_rollbacks]) > k
                 and migration.name == ckpt_migrations[k].name
             ):
-                if migration.signature != ckpt_migrations[k].signature:
-                    LOGGER.warning(
-                        "The script for %s has changed. Re-run the migrations if possible to use the new script.",
-                        migration.name,
-                    )
                 continue
             if migration.migrate is None:
                 raise IncompatibleCheckpointException(
@@ -576,6 +598,7 @@ class Migrator:
                 f"Use a version of anemoi-models < {first_incompatible_version}."
             )
         compatible_migrations = self._grouped_migrations[-1]
+        self._check_executed_migrations(ckpt, compatible_migrations)
         setups, ops = self._resolve_operations(ckpt, compatible_migrations)
         replace_attrs: list[str] = []
         if len(setups):
@@ -592,13 +615,13 @@ class Migrator:
                 ckpt = op.run(ckpt)
                 ckpt[_ckpt_migration_key].pop()
                 ckpt["hyper_parameters"]["metadata"]["migrations"]["history"].append(
-                    {"type": "rollback", "name": op.migration.name}
+                    {"type": "rollback", "name": op.migration.name, "signature": op.migration.signature}
                 )
             else:
                 ckpt = op.run(ckpt)
                 ckpt[_ckpt_migration_key].append(op.migration.serialize())
                 ckpt["hyper_parameters"]["metadata"]["migrations"]["history"].append(
-                    {"type": "migrate", "name": op.migration.name}
+                    {"type": "migrate", "name": op.migration.name, "signature": op.migration.signature}
                 )
         return old_ckpt, ckpt, ops
 

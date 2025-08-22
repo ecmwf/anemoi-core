@@ -125,6 +125,21 @@ In the example, it will produce:
 -  MIGRATE migration 6
 -  MIGRATE migration 7
 
+*********************
+ Executed migrations
+*********************
+
+The whole history of migrations is stored in the metadata of the
+checkpoint. It can be accessed through:
+
+.. code::
+
+   >>> history = metadata.get("migrations", {}).get("history", [])
+   >>> for executed_migration in history:
+   ...    print(executed_migration)
+   { "type": "rollback", "name": "migration_name1.py", "signature": "[...]" }
+   { "type": "migrate", "name": "migration_name2.py", "signature": "[...]" }
+
 **********
  Migrator
 **********
