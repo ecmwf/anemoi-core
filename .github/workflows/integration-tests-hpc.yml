@@ -73,17 +73,17 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --slow --multigpu -s -k "test_benchmark_training_cycle"
+            srun python -m pytest -v training/tests/integration --slow --multigpu -s -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
             #SBATCH --job-name=anemoi_core_benchmark_pytest
-            #SBATCH --time=2:00:00
-            #SBATCH --qos=ng
-            #SBATCH --gpus=2
-            #SBATCH --gres=gpu:2
+            #SBATCH --nodes=1
             #SBATCH --ntasks-per-node=2
             #SBATCH --cpus-per-task=32
+            #SBATCH --gpus-per-node=2
+            #SBATCH --time=1:00:00
+            #SBATCH --qos=ng
             #SBATCH --mem=128G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
