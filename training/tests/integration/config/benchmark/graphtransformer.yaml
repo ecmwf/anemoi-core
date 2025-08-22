@@ -1,4 +1,6 @@
 # configuration for the "graphtransformed_2g_n320" benchmark
+config_validation: False # I want to disable validation
+
 hardware:
   accelerator: cuda
   num_gpus_per_node: 2
@@ -12,11 +14,11 @@ hardware:
 
 dataloader:
   num_workers:
-    training: 6
-    validation: 6
+    training: 8
+    validation: 8
   limit_batches:
     training: 100
-    validation: 1
+    validation: 0
   training:
     end: 2020-11-30
   validation:

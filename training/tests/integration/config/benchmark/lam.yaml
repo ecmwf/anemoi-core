@@ -1,4 +1,5 @@
 # Config for LAM benchmark
+config_validation: False # I want to disable validation
 
 hardware:
   accelerator: cuda
@@ -24,11 +25,11 @@ dataloader:
   validation:
     start: 2017-12-30
   num_workers:
-    training: 6
-    validation: 6
+    training: 8
+    validation: 8
   limit_batches:
     training: 100
-    validation: 1
+    validation: 0
   batch_size:
     training: 1
     validation: 1
