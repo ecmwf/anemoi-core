@@ -28,8 +28,6 @@ from pickle import Unpickler
 from typing import Any
 from typing import TypedDict
 
-import cloudpickle
-
 from anemoi.models.migrations.setup_context import DeserializeMigrationContext
 from anemoi.models.migrations.setup_context import MigrationContext
 from anemoi.models.migrations.setup_context import ReversedSetupCallback
@@ -90,6 +88,8 @@ class _SerializedRollback:
 
     @cached_property
     def rollback(self) -> Callable[[CkptType], CkptType]:
+        import cloudpickle
+
         return cloudpickle.loads(self._rollback_bytes)
 
     def __call__(self, ckpt: CkptType) -> CkptType:
@@ -153,6 +153,8 @@ class Migration:
         SerializedMigration
             The serialized dict to store in the checkpoint.
         """
+        import cloudpickle
+
         serialized_rollback: _SerializedRollback | None = None
         if self.rollback is not None:
             cloudpickle.register_pickle_by_value(sys.modules[self.rollback.__module__])
