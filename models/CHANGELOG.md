@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.3](https://github.com/ecmwf/anemoi-core/compare/models-0.9.2...models-0.9.3) (2025-08-22)
+
+
+### Bug Fixes
+
+* Convert pre_processors from attribute to variable in models/encoder_processor_decoder ([#503](https://github.com/ecmwf/anemoi-core/issues/503)) ([60eb52b](https://github.com/ecmwf/anemoi-core/commit/60eb52b465ba260573566223966dede67cd44913))
+
 ## [0.9.2](https://github.com/ecmwf/anemoi-core/compare/models-0.9.1...models-0.9.2) (2025-08-20)
 
 
