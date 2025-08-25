@@ -60,4 +60,5 @@ log:
   interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
+check_val_every_n_epoch: 1
 print_memory_summary: False

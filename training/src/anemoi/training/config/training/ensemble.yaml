@@ -86,7 +86,7 @@ validation_metrics:
   # loss class to initialise, can be anything subclassing torch.nn.Module
   fkcrps:
     _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-    scalers: []
+    scalers: ['node_weights']
     ignore_nans: False
     alpha: 1.0
 
