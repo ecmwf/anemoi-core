@@ -485,7 +485,7 @@ def open_log_file(profiler_path: str, filename: str) -> float:
 
     # under /{profiler_path} there is a single random alphanumeric dir
     try:
-        profiler_dir = profiler_path.glob("/[a-z0-9]*/")[0]
+        profiler_dir = list(Path(profiler_path).glob("[a-z0-9]*/"))[0]
     except IndexError as e:
         msg = f"Could not find a profiler dir under {profiler_path}."
         raise IndexError(msg) from e
@@ -560,7 +560,7 @@ def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
     Currently it captures the pytorhc trace file and the memory snapshot
     """
     profiler_path = Path(profiler_path)
-    profiler_dir = profiler_path.glob("/[a-z0-9]*/")[0]
+    profiler_dir = list(profiler_path.glob("[a-z0-9]*/"))[0]
 
     # get memory snapshot
     memory_snapshot = Path(f"{profiler_dir}/memory_snapshot.pickle")
@@ -573,7 +573,7 @@ def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
     # get trace file
     # there can be multiple ${hostname}_${pid}\.None\.[0-9]+\.pt\.trace\.json files. 1 training + 1 valdation per device
     # but luckily if we take the first one thats always training on rank 0.
-    trace_files = profiler_dir.glob(f"{profiler_dir}/*.pt.trace.json")
+    trace_files = list(profiler_dir.glob(f"*.pt.trace.json"))
     if len(trace_files) == 0:
         LOGGER.info("Can't find a trace file under %s", profiler_dir)
     else:
@@ -590,7 +590,7 @@ def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]
     local_results_str = "Local benchmark results:\n"
     local_results_str += "-" * 20 + "\n"
     for benchmark_value in local_benchmark_results:
-        local_results_str += benchmark_value + "\n"
+        local_results_str += str(benchmark_value) + "\n"
     local_results_str += "-" * 20 + "\n"
     return local_results_str
 
