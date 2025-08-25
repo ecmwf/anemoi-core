@@ -38,11 +38,14 @@ class BaseMask:
         raise NotImplementedError(error_message)
 
 
-class Boolean1DMask(BaseMask):
+class Boolean1DMask(torch.nn.Module, BaseMask):
     """1D Boolean mask."""
 
     def __init__(self, graph_data: HeteroData, nodes_name: str, attribute_name: str) -> None:
-        self.mask = graph_data[nodes_name][attribute_name].bool().squeeze()
+        super().__init__()
+
+        mask = graph_data[nodes_name][attribute_name].bool().squeeze()
+        self.register_buffer("mask", mask)
 
     @property
     def supporting_arrays(self) -> dict:
@@ -55,8 +58,7 @@ class Boolean1DMask(BaseMask):
         target_shape = [1 for _ in range(x.ndim)]
         target_shape[dim] = len(self.mask)
         mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
-        mask = mask.reshape(target_shape)
-        return mask.to(x.device)
+        return mask.reshape(target_shape)
 
     @staticmethod
     def _fill_tensor_with_tensor(
@@ -99,7 +101,7 @@ class Boolean1DMask(BaseMask):
         mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
 
         if isinstance(fill_value, torch.Tensor):
-            indices = (~mask).nonzero(as_tuple=True)[0].to(x.device)
+            indices = (~mask).nonzero(as_tuple=True)[0]
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
         mask = self.broadcast_like(x, dim, grid_shard_slice)
