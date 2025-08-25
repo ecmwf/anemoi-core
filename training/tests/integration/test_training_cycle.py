@@ -28,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_architecture_configs(
-    architecture_config: tuple[DictConfig, str],
+    architecture_config: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
 ) -> None:
     cfg, url, _ = architecture_config
@@ -36,7 +36,7 @@ def test_training_cycle_architecture_configs(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str]) -> None:
+def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = architecture_config
     BaseSchema(**cfg)
 
@@ -156,7 +156,10 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
 
 
 @skip_if_offline
-def test_loading_checkpoint(architecture_config_with_checkpoint: DictConfig, get_test_archive: callable) -> None:
+def test_loading_checkpoint(
+    architecture_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
     cfg, url = architecture_config_with_checkpoint
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)

@@ -85,7 +85,7 @@ def architecture_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
-) -> tuple[DictConfig, str]:
+) -> tuple[DictConfig, str, str]:
     overrides = request.param
     model_architecture = overrides[0].split("=")[1]
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
@@ -244,7 +244,7 @@ def migrator() -> Migrator:
 @pytest.fixture
 def architecture_config_with_checkpoint(
     migrator: Migrator,
-    architecture_config: tuple[DictConfig, str],
+    architecture_config: tuple[DictConfig, str, str],
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
     cfg, dataset_url, model_architecture = architecture_config
