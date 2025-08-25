@@ -236,6 +236,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
         "graphtransformer",
         "stretched",
         "lam",
+        "ensemble_crps",
     ],
 )
 def benchmark_config(
@@ -256,6 +257,9 @@ def benchmark_config(
     elif test_case == "lam":
         overrides = []
         base_config = "lam"
+    elif test_case == "ensemble_crps":
+        overrides = ["model=graphtransformer", "graph=multi_scale"]
+        base_config = "ensemble_crps"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
         raise ValueError(msg)
