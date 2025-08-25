@@ -38,13 +38,6 @@ graph:
         resolution: 6
 
 model:
-        #encoder:
-          #num_chunks: 2
-    #decoder:
-          #num_chunks: 2
-    #processor:
-          #num_chunks: 2
-    #num_channels: 512 #run a smaller model then other benchmarks since we only have 1 gpu per model here
   encoder:
     num_chunks: 2
   decoder:

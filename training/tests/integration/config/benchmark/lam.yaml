@@ -1,4 +1,5 @@
 # Config for LAM benchmark
+# A small model, run for longer to try and reduce variation across runs
 config_validation: False # I want to disable validation
 
 hardware:
@@ -28,7 +29,7 @@ dataloader:
     training: 8
     validation: 8
   limit_batches:
-    training: 100
+    training: 400
     validation: 0
   batch_size:
     training: 1
@@ -83,7 +84,7 @@ model:
     num_chunks: 2
   processor:
     num_chunks: 2
-  num_channels: 1024
+  num_channels: 256
 
 diagnostics:
   callbacks: []
