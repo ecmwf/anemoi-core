@@ -48,13 +48,14 @@ class Boolean1DMask(BaseMask):
     def supporting_arrays(self) -> dict:
         return {"output_mask": self.mask.numpy()}
 
-    def broadcast_like(self, x: torch.Tensor, dim: int) -> torch.Tensor:
+    def broadcast_like(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
         assert x.shape[dim] == len(
             self.mask,
         ), f"Dimension mismatch: dimension {dim} has size {x.shape[dim]}, but mask length is {len(self.mask)}."
         target_shape = [1 for _ in range(x.ndim)]
         target_shape[dim] = len(self.mask)
-        mask = self.mask.reshape(target_shape)
+        mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
+        mask = mask.reshape(target_shape)
         return mask.to(x.device)
 
     @staticmethod
@@ -101,8 +102,7 @@ class Boolean1DMask(BaseMask):
             indices = (~mask).nonzero(as_tuple=True)[0].to(x.device)
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
-        # TODO(Jan): also fix this case
-        mask = self.broadcast_like(x, dim)
+        mask = self.broadcast_like(x, dim, grid_shard_slice)
         return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
     def rollout_boundary(
