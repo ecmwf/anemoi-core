@@ -693,12 +693,10 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 json.dump(params, f, cls=StrEncoder)
             client.log_artifact(run_id=run_id, local_path=path)
 
-
     @override
     @rank_zero_only
     def after_save_checkpoint(self, checkpoint_callback: "pl.callbacks.Checkpoint") -> None:
         """Logs model checkpoint as an artifact, sanitizing the path correctly."""
-
         if not self._log_model:
             return
 
@@ -726,7 +724,9 @@ class AnemoiMLflowLogger(MLFlowLogger):
             artifact_subdir = "checkpoints"
 
             # 5. Log the sanitized temporary file into the 'checkpoints' directory
-            LOGGER.info(f"Logging checkpoint '{model_path}' to MLflow artifact path '{artifact_subdir}/{safe_filename}'")
+            LOGGER.info(
+                f"Logging checkpoint '{model_path}' to MLflow artifact path '{artifact_subdir}/{safe_filename}'",
+            )
             try:
                 self.experiment.log_artifact(self.run_id, tmp_model_path, artifact_subdir)
             except Exception as e:
