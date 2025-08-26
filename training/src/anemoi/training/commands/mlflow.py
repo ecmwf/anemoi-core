@@ -88,6 +88,12 @@ class MlFlow(Command):
             help="The destination server requires authentication.",
         )
         sync.add_argument(
+            "--source_authentication",
+            "-A",
+            action="store_true",
+            help="The source server requires authentication.",
+        )
+        sync.add_argument(
             "--export-deleted-runs",
             "-x",
             action="store_true",
@@ -154,6 +160,12 @@ class MlFlow(Command):
                 from anemoi.utils.mlflow.auth import TokenAuth
 
                 auth = TokenAuth(url=args.destination)
+                auth.login()
+                auth.authenticate()
+            if args.source_authentication:
+                from anemoi.utils.mlflow.auth import TokenAuth
+
+                auth = TokenAuth(url=args.source)
                 auth.login()
                 auth.authenticate()
 
