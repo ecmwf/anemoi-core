@@ -692,3 +692,42 @@ class AnemoiMLflowLogger(MLFlowLogger):
             with Path.open(path, "w") as f:
                 json.dump(params, f, cls=StrEncoder)
             client.log_artifact(run_id=run_id, local_path=path)
+
+
+    @override
+    @rank_zero_only
+    def after_save_checkpoint(self, checkpoint_callback: "pl.callbacks.Checkpoint") -> None:
+        """Logs model checkpoint as an artifact, sanitizing the path correctly."""
+
+        if not self._log_model:
+            return
+
+        import shutil
+        import tempfile
+
+        # Get the path to the checkpoint file saved by the callback
+        model_path = checkpoint_callback.last_model_path or checkpoint_callback.best_model_path
+        if not model_path or not os.path.exists(model_path):
+            LOGGER.warning("after_save_checkpoint failed: Checkpoint path not found.")
+            return
+
+        # Use a temporary directory to handle the sanitized file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 1. Create a safe filename by replacing the colon
+            safe_filename = Path(model_path).name.replace(":", "-")
+
+            # 2. Create the full path for the temporary, sanitized file
+            tmp_model_path = os.path.join(tmpdir, safe_filename)
+
+            # 3. Copy the original checkpoint to this new temporary path
+            shutil.copy2(model_path, tmp_model_path)
+
+            # 4. Define ONLY the destination directory for MLflow
+            artifact_subdir = "checkpoints"
+
+            # 5. Log the sanitized temporary file into the 'checkpoints' directory
+            LOGGER.info(f"Logging checkpoint '{model_path}' to MLflow artifact path '{artifact_subdir}/{safe_filename}'")
+            try:
+                self.experiment.log_artifact(self.run_id, tmp_model_path, artifact_subdir)
+            except Exception as e:
+                LOGGER.error(f"Failed to log checkpoint artifact: {e}")
