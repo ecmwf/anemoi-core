@@ -263,6 +263,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         log_hyperparams: bool | None = True,
         on_resume_create_child: bool | None = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
+        system_metrics_sampling_interval: int | None = 100,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -309,7 +310,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         self._parent_run_server2server = None
         self._parent_dry_run = False
         self._max_params_length = max_params_length
-
+        self._system_metrics_sampling_interval = system_metrics_sampling_interval
         enabled = authentication and not offline
         self.auth = TokenAuth(tracking_uri, enabled=enabled)
 
@@ -511,8 +512,9 @@ class AnemoiMLflowLogger(MLFlowLogger):
         mlflow.enable_system_metrics_logging()
         # https://mlflow.org/docs/latest/system-metrics/
         # By default, system metrics are sampled every 10 seconds
-        # we choose to update this to 100 - system metrics are logged every 1 min 30 seconds
-        mlflow.set_system_metrics_sampling_interval(interval=100)
+        # we choose to update this to 100 by default - system metrics are logged every 1 min 40 seconds
+        if not mlflow.environment_variables.MLFLOW_SYSTEM_METRICS_SAMPLING_INTERVAL.is_set():
+            mlflow.set_system_metrics_sampling_interval(interval=self._system_metrics_sampling_interval)
         system_monitor = CustomSystemMetricsMonitor(
             self.run_id,
             resume_logging=self.run_id is not None,

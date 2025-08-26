@@ -271,6 +271,8 @@ class MlflowSchema(BaseModel):
     "Name of project."
     system: bool
     "Activate system metrics."
+    system_metrics_sampling_interval: PositiveInt = Field(example=100)
+    "Specifies the sampling interval (in seconds) of system metrics, if enabled."
     terminal: bool
     "Log terminal logs to MLflow."
     run_name: str | None
