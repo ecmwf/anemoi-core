@@ -754,14 +754,14 @@ an integration test. Currently the following components are benchmarked:
     - throughput
     - time per batch
     - total memory
-'throughput, time per batch and total memory usage'. The benchmark tests are 
+'throughput, time per batch and total memory usage'. The benchmark tests are
 run once a day on the main branch. The results are then logged, alongside the
 date and the commit, to a server. In this way we can
 track the performance of anemoi over time
 and ensure that no pull
 requests unintentionally reduce performance.
 The benchmarking CI tests can also be run on a PR. The modified code will run the
-benchmarks and its score will be compared against the most recent shared commit in 
+benchmarks and its score will be compared against the most recent shared commit in
 the servers database. To run the benchmarking tests on a PR, you can navigate to
 this page_, select your branch and run.
 If the performance degrades beyond an acceptable
@@ -780,7 +780,7 @@ A suite of different anemoi configurations are tested. The current list of confi
 The exact configuration for each benchmark can be found under ``anemoi-core/training/tests/integration/config/benchmark``.
 Each benchmark is run over two GPUs to ensure the model sharding performance is captured in the automatic benchmarks.
 The tests take approximately 40 minutes. A successful test looks like
-:: 
+::
 
 	 11:54:52 INFO Reference benchmark results:
 	--------------------
@@ -863,4 +863,4 @@ The server location is read from a file "~/.config/anemoi-benchmark.yaml". The e
 	hostname: ...
 	path: ...
 
-Alternatively you can edit the code in ``tests/integration/test_benchmark.py`` to pass a local folder. 
+Alternatively you can edit the code in ``tests/integration/test_benchmark.py`` to pass a local folder.
