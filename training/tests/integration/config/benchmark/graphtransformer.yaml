@@ -8,9 +8,10 @@ hardware:
   num_gpus_per_model: 2
   files:
     dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
-    graph: graphtransformer-bm-graph.pt  #TODO change to store under anemoi-integration-tests/... so it is resused across processes
+    graph: graphtransformer-bm-graph.pt
   paths:
     data:  /home/mlx/ai-ml/datasets/
+    graph: ./ #store locally so graph will be reused by non-zero processes
 
 dataloader:
   num_workers:
