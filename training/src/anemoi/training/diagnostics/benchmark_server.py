@@ -604,7 +604,7 @@ def benchmark(
     test_case: str,
     store: str,
     store_artifacts: bool = True,
-    update_data: bool = True,
+    update_data: bool = False,
 ) -> None:
     local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
 
