@@ -8,18 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 import os
-import shutil
 from pathlib import Path
 
 import pytest
+import torch
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.migrations import Migrator
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
+
+LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
@@ -81,8 +85,9 @@ def architecture_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
-) -> tuple[DictConfig, str]:
+) -> tuple[DictConfig, str, str]:
     overrides = request.param
+    model_architecture = overrides[0].split("=")[1]
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
         template = compose(
             config_name="config",
@@ -103,7 +108,7 @@ def architecture_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, imputer_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, dataset_urls[0]
+    return cfg, dataset_urls[0], model_architecture
 
 
 @pytest.fixture
@@ -274,19 +279,37 @@ def benchmark_config(
     OmegaConf.resolve(cfg)
     return cfg, test_case
 
+@pytest.fixture(scope="session")
+def migrator() -> Migrator:
+    return Migrator()
+
 
 @pytest.fixture
-def gnn_config_with_checkpoint(
-    gnn_config: tuple[DictConfig, str],
+def architecture_config_with_checkpoint(
+    migrator: Migrator,
+    architecture_config: tuple[DictConfig, str, str],
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
-    cfg, dataset_url = gnn_config
-    existing_ckpt = get_test_data(
-        "anemoi-integration-tests/training/checkpoints/testing-checkpoint-global-2025-07-31.ckpt",
-    )
+    cfg, dataset_url, model_architecture = architecture_config
+
+    # Pick checkpoint path based on the model
+    if "gnn" in model_architecture:
+        existing_ckpt = get_test_data(
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2025-07-31.ckpt",
+        )
+    elif "graphtransformer" in model_architecture:
+        existing_ckpt = get_test_data(
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
+        )
+    else:
+        msg_error = f"Unknown architecture in config: {cfg.model.architecture}"
+        raise ValueError(msg_error)
+
+    _, new_ckpt, _ = migrator.sync(existing_ckpt)
+
     checkpoint_dir = Path(cfg.hardware.paths.output + "checkpoint/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(existing_ckpt, checkpoint_dir / "last.ckpt")
+    torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
     cfg.training.run_id = "dummy_id"
     cfg.training.max_epochs = 3
