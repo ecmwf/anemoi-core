@@ -84,6 +84,22 @@ def _make_tarfile(output_filename: str, source_dir: str) -> None:
         tar.add(source_dir, arcname=Path(source_dir).name)
 
 
+def _tar_files(files: list[Path], tar_file: Path) -> None:
+    """Takes a list of files and tars them, returns a path to the tar file."""
+    tmp_dir = Path("./.tmp-tar-dir")
+    tmp_dir.mkdir()
+    for f in files:
+        LOGGER.debug("Copying %s to %s...", f, tmp_dir)
+        shutil.copy(f, tmp_dir)
+
+    LOGGER.debug("Tar-ing files %s to %s", tmp_dir, tar_file)
+    _make_tarfile(tar_file, tmp_dir)
+
+    # clean up tmp_dir
+    LOGGER.debug("Deleting %s", tmp_dir)
+    shutil.rmtree(tmp_dir)
+
+
 def _is_repo_on_branch(branch: str) -> bool:
     """Checks if a repo is on a given branch."""
     # find repo
@@ -403,27 +419,20 @@ class BenchmarkServer:
         tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
         """
         artifact_dir = Path(f"{self.store}/artifacts")
-        commit_dir = Path(f"{artifact_dir}/{commit}")
-        if not self.local:  # copy locally before tarring and sending to server
-            commit_dir = Path(f"./{commit}")
-        commit_tar = Path(f"{commit_dir}.tar.gz")
+        if self.local:
+            artifact_dir.mkdir(parents=True)
+            commit_tar = Path(f"{artifact_dir}/{commit}.tar.gz")
+        else:
+            # if not local store, make a local tar file and copy it later
+            commit_tar = Path(f"./{commit}.tar.gz")
         output = commit_tar
 
         LOGGER.debug("Saving artifacts for commit %s under %s", commit, output)
         if output.exists():
             LOGGER.info("Artifacts have already been saved for commit %s under %s. Not saving...", commit, output)
             return
-        commit_dir.mkdir(parents=True)  # might need to make artifacts too
 
-        for artifact in artifacts:
-            LOGGER.debug("Copying %s to %s...", artifact, commit_dir)
-            shutil.copy(artifact, commit_dir)
-
-        LOGGER.debug("Tar-ing artifacts %s to %s", commit_dir, commit_tar)
-        _make_tarfile(commit_tar, commit_dir)
-        # cleanup untar-ed file
-        LOGGER.debug("Deleting %s", commit_dir)
-        shutil.rmtree(commit_dir)
+        _tar_files(artifacts, commit_tar)
 
         if not self.local:
             LOGGER.info("Copying tar file from %s to %s", commit_tar, artifact_dir)
@@ -604,7 +613,7 @@ def benchmark(
     test_case: str,
     store: str,
     store_artifacts: bool = True,
-    update_data: bool = False,
+    update_data: bool = False,  # when this is true, data is always updated
 ) -> None:
     local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
 
@@ -629,6 +638,10 @@ def benchmark(
 
     if len(failed_tests) > 0:
         msg = f"The following tests failed: {failed_tests}"
+        artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+        artifacts_tar = Path(f"./{test_case}_artifacts.tar.gz")
+        _tar_files(artifacts, artifacts_tar)
+        LOGGER.info("Profiling artifacts from failed run stored under: %s", artifacts_tar)
         raise ValueError(msg)
     # the tests have passed, possibly update the data on the server
     update_data = update_data or _is_repo_on_branch("main")  # update if our branch is main
