@@ -9,7 +9,7 @@ hardware:
   files:
     dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-6h-v3-hmsi.zarr
     forcing_dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
-    graph: stretched-bm-graph.pt 
+    graph: stretched-bm-graph.pt
   paths:
     data:  /home/mlx/ai-ml/datasets/
     graph: ./ #store locally so graph will be reused by non-zero processes
