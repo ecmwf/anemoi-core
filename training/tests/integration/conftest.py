@@ -238,10 +238,10 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 
 @pytest.fixture(
     params=[  # selects different test cases
+        "lam",
         "graphtransformer",
         "stretched",
         "ensemble_crps",
-        "lam"
     ],
 )
 def benchmark_config(
@@ -278,6 +278,7 @@ def benchmark_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, test_case
+
 
 @pytest.fixture(scope="session")
 def migrator() -> Migrator:

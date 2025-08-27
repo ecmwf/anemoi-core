@@ -9,12 +9,14 @@
 
 import logging
 import os
+from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
 from torch.cuda import reset_peak_memory_stats
 
 from anemoi.training.diagnostics.benchmark_server import benchmark
+from anemoi.training.diagnostics.benchmark_server import parse_benchmark_config
 from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
@@ -36,5 +38,9 @@ def test_benchmark_training_cycle(
     reset_peak_memory_stats()
     AnemoiProfiler(cfg).profile()
 
-    store: str = "ssh://data@anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks"
+    # determine store from benchmark config
+    config_path = Path("~/.config/anemoi-benchmark.yaml").expanduser()
+    user, hostname, path = parse_benchmark_config(config_path)
+    store: str = f"ssh://{user}@{hostname}:{path}"
+
     benchmark(cfg, test_case, store, throw_error=True)

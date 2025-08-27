@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import yaml
 from git import GitCommandError
 from git import InvalidGitRepositoryError
 from git import Repo
@@ -35,6 +36,15 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce mem
 LOGGER = logging.getLogger(__name__)
 
 BENCHMARK_SERVER_ARTIFACT_LIMIT = 10
+
+
+def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
+    with path.open("r") as f:
+        benchmark_config = yaml.safe_load(f)
+    user = benchmark_config["user"]
+    hostname = benchmark_config["hostname"]
+    path = benchmark_config["path"]
+    return user, hostname, path
 
 
 class BenchmarkValue:
@@ -461,13 +471,6 @@ def get_git_revision_hash() -> str:
         return repo.head.commit.hexsha
 
 
-def maybe_raise_error(msg: str, raise_error: bool) -> None:
-    """If raise_error=True, raise an error. otherwise, just print a message."""
-    if raise_error:
-        raise ValueError(msg)
-    LOGGER.info(msg)
-
-
 # this functon will find and open the profiler logs from the most recent benchmarking training run
 # return_val = value for speed profiler or 'avg_time' for time_profiler
 def open_log_file(profiler_path: str, filename: str) -> float:
@@ -601,7 +604,6 @@ def benchmark(
     test_case: str,
     store: str,
     store_artifacts: bool = True,
-    throw_error: bool = True,
     update_data: bool = True,
 ) -> None:
     local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
@@ -626,14 +628,14 @@ def benchmark(
             failed_tests.append(local_benchmark_value.name)
 
     if len(failed_tests) > 0:
-        maybe_raise_error(f"The following tests failed: {failed_tests}", throw_error)
-    else:
-        # the tests have passed, possibly update the data on the server
-        update_data = update_data or _is_repo_on_branch("main")  # update if our branch is main
-        if update_data:
-            LOGGER.info("Updating metrics on server")
-            for local_benchmark_value in local_benchmark_results:
-                benchmark_server.set_value(local_benchmark_value)
-            if store_artifacts:
-                artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
-                benchmark_server.store_artifacts(artifacts, local_benchmark_results[0].commit)
+        msg = f"The following tests failed: {failed_tests}"
+        raise ValueError(msg)
+    # the tests have passed, possibly update the data on the server
+    update_data = update_data or _is_repo_on_branch("main")  # update if our branch is main
+    if update_data:
+        LOGGER.info("Updating metrics on server")
+        for local_benchmark_value in local_benchmark_results:
+            benchmark_server.set_value(local_benchmark_value)
+        if store_artifacts:
+            artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+            benchmark_server.store_artifacts(artifacts, local_benchmark_results[0].commit)
