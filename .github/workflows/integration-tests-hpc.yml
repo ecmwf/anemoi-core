@@ -71,6 +71,8 @@ jobs:
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
+            wget https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/anemoi-integration-tests/training/benchmarks/anemoi-benchmark.yaml
+            mv anemoi-benchmark.yaml ~/.config/anemoi-benchmark.yaml
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
             srun python -m pytest -v training/tests/integration --slow --multigpu -k "test_benchmark_training_cycle"
