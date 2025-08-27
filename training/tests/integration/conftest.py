@@ -236,7 +236,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
         "graphtransformer",
         "stretched",
         "ensemble_crps",
-        #"lam", #disable lam as it fails sporadically
+        "lam"
     ],
 )
 def benchmark_config(

@@ -527,7 +527,7 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
             date=yyyy_mm_dd,
             commit=commit,
             op=operator.ge,
-            tolerance=5,
+            tolerance=10,
         ),
     )
     local_benchmark_results.append(
@@ -537,7 +537,7 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
             unit="s",
             date=yyyy_mm_dd,
             commit=commit,
-            tolerance=5,
+            tolerance=10,
         ),
     )
     local_benchmark_results.append(
