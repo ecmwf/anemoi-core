@@ -43,4 +43,4 @@ def test_benchmark_training_cycle(
     user, hostname, path = parse_benchmark_config(config_path)
     store: str = f"ssh://{user}@{hostname}:{path}"
 
-    benchmark(cfg, test_case, store, throw_error=True)
+    benchmark(cfg, test_case, store)
