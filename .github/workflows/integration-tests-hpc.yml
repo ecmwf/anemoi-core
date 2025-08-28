@@ -84,7 +84,7 @@ jobs:
             #SBATCH --gpus-per-node=2
             #SBATCH --time=1:00:00
             #SBATCH --qos=ng
-            #SBATCH --mem=128G
+            #SBATCH --mem=0
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
   notify-team:
