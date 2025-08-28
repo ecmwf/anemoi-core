@@ -12,8 +12,9 @@ import os
 from pathlib import Path
 
 import pytest
+import gc
 from omegaconf import DictConfig
-from torch.cuda import reset_peak_memory_stats
+from torch.cuda import reset_peak_memory_stats, empty_cache
 
 from anemoi.training.diagnostics.benchmark_server import benchmark
 from anemoi.training.diagnostics.benchmark_server import parse_benchmark_config
@@ -34,8 +35,11 @@ def test_benchmark_training_cycle(
     cfg, test_case = benchmark_config
     LOGGER.info("Benchmarking the configuration: %s", test_case)
 
-    # Run model with profiler
+    #Reset memory logging and free all possible memory between runs
     reset_peak_memory_stats()
+    empty_cache()
+    gc.collect()
+    # Run model with profiler
     AnemoiProfiler(cfg).profile()
 
     # determine store from benchmark config
