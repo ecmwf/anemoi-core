@@ -7,14 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import gc
 import logging
 import os
 from pathlib import Path
 
 import pytest
-import gc
 from omegaconf import DictConfig
-from torch.cuda import reset_peak_memory_stats, empty_cache
+from torch.cuda import empty_cache
+from torch.cuda import reset_peak_memory_stats
 
 from anemoi.training.diagnostics.benchmark_server import benchmark
 from anemoi.training.diagnostics.benchmark_server import parse_benchmark_config
@@ -35,7 +36,7 @@ def test_benchmark_training_cycle(
     cfg, test_case = benchmark_config
     LOGGER.info("Benchmarking the configuration: %s", test_case)
 
-    #Reset memory logging and free all possible memory between runs
+    # Reset memory logging and free all possible memory between runs
     reset_peak_memory_stats()
     empty_cache()
     gc.collect()
