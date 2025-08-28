@@ -48,6 +48,8 @@ def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
 
 
 class BenchmarkValue:
+    """A class which stores information about a benchmark, and functions to output them."""
+
     def __init__(
         self,
         name: str,
@@ -67,7 +69,7 @@ class BenchmarkValue:
         self.tolerance = tolerance
 
     def __str__(self):
-        return f"{self.name}: {self.value:.2f}{self.unit} (commit: {self.commit[:5]}, date: {self.date})"
+        return f"{self.name}: {self.value:.2f}{self.unit} (date: {self.date}, commit: {self.commit})"
 
     def to_csv(self, include_header: bool = False) -> str:
         header = "testName,unit,date,commit,value"
@@ -184,6 +186,11 @@ def _find_latest_shared_commit(df: pd.DataFrame) -> str | None:
 
 
 class BenchmarkServer:
+    """Stores information from past benchmarks.
+
+    includes methods to retrieve benchmark data and compare against new benchmark data.
+    """
+
     def __init__(
         self,
         store: str = "./local",
@@ -569,7 +576,7 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
 def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
     """Runs after a benchmark and returns a list of paths to artifacts produced by the profiler.
 
-    Currently it captures the pytorhc trace file and the memory snapshot
+    Currently it captures the pytorch trace file and the memory snapshot
     """
     profiler_path = Path(profiler_path)
     profiler_dir = next(iter(profiler_path.glob("[a-z0-9]*/")))
@@ -612,7 +619,6 @@ def benchmark(
     cfg: DictConfig,
     test_case: str,
     store: str,
-    store_artifacts: bool = True,
     update_data: bool = False,  # when this is true, data is always updated
 ) -> None:
     local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
@@ -649,6 +655,5 @@ def benchmark(
         LOGGER.info("Updating metrics on server")
         for local_benchmark_value in local_benchmark_results:
             benchmark_server.set_value(local_benchmark_value)
-        if store_artifacts:
             artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
             benchmark_server.store_artifacts(artifacts, local_benchmark_results[0].commit)
