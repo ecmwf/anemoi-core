@@ -18,6 +18,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
 from pydantic import PositiveInt
+from pydantic import NonNegativeInt
 from pydantic import RootModel
 from pydantic import computed_field
 
@@ -71,11 +72,11 @@ class DatasetSchema(PydanticBaseModel):
 
 
 class LoaderSet(BaseModel):
-    training: PositiveInt | None = Field(example=None)
+    training: NonNegativeInt | None = Field(example=None)
     "Value for training dataset"
-    validation: PositiveInt | None = Field(example=None)
+    validation: NonNegativeInt | None = Field(example=None)
     "Value for validation dataset"
-    test: PositiveInt | None = Field(example=None)
+    test: NonNegativeInt | None = Field(example=None)
     "Value for test dataset"
 
 

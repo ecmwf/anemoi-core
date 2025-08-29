@@ -1,28 +1,13 @@
-# Config for the stretched grid benchmark
-config_validation: False # I want to disable validation
+# Config for the stretched grid benchmark, will be merged with the base benchmark config
 
 hardware:
-  accelerator: cuda
-  num_gpus_per_node: 2
-  num_nodes: 1
   num_gpus_per_model: 2
   files:
     dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-6h-v3-hmsi.zarr
     forcing_dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
     graph: stretched-bm-graph.pt
-  paths:
-    data:  /home/mlx/ai-ml/datasets/
-    graph: ./ #store locally so graph will be reused by non-zero processes
+
 dataloader:
-  num_workers:
-    training: 8
-    validation: 8
-  limit_batches:
-    training: 100
-    validation: 0
-  batch_size:
-    training: 1
-    validation: 1
   dataset:
     cutout:
       - dataset: ${hardware.paths.data}/${hardware.files.dataset}
@@ -64,52 +49,16 @@ data:
     - "sin_local_time"
 
 graph:
-  overwrite: False
   nodes:
     hidden:
       node_builder:
         lam_resolution: 7
         global_resolution: 5
 
+model:
+  num_channels: 512
+
 training:
-  max_epochs: 1
-  num_sanity_val_steps: 0
   scalers:
     node_weights:
       weight_frac_of_total: 0.25
-
-model:
-        #not sure if this makes sense in stretched, but we use it for the LAM benchmark config
-        #output_mask:
-        #  _target_: anemoi.training.utils.masks.Boolean1DMask
-        #  nodes_name: ${graph.data}
-        #  attribute_name: cutout_mask
-  encoder:
-    num_chunks: 2
-  decoder:
-    num_chunks: 2
-  processor:
-    num_chunks: 2
-  num_channels: 1024
-
-diagnostics:
-  callbacks: []
-  enable_checkpointing: False
-  print_memory_summary: true
-  benchmark_profiler:
-    memory:
-      enabled: true
-    time:
-      verbose: true
-    model_summary:
-      enabled: false
-    snapshot:
-      enabled: true
-    system:
-      enabled: false #some error about metric key in extract_gpu_metrics being invalid
-  log:
-    mlflow:
-      enabled: true
-      offline: True
-      tracking_uri: ""
-    interval: 1

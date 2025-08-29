@@ -1,9 +1,6 @@
 # configuration for the "ensemble_crps" benchmark
-config_validation: False # I want to disable validation
+
 hardware:
-  accelerator: cuda
-  num_gpus_per_node: 2
-  num_nodes: 1
   num_gpus_per_model: 1
   num_gpus_per_ensemble: 2
   files:
@@ -11,65 +8,21 @@ hardware:
     graph: ens-bm-graph.pt
     truncation: null
     truncation_inv: null
-  paths:
-    data:  /home/mlx/ai-ml/datasets/
-    truncation: null
-    graph: ./ #store locally so graph will be reused by non-zero processes
 
 dataloader:
-  num_workers:
-    training: 8
-    validation: 8
-  limit_batches:
-    training: 400
-    validation: 0
   training:
     end: 2020-11-30
   validation:
     start: 2020-12-31
-  batch_size:
-    training: 1
-    validation: 1
 
 graph:
-  overwrite: False
   nodes:
     hidden:
       node_builder:
         resolution: 6
 
 model:
-  encoder:
-    num_chunks: 2
-  decoder:
-    num_chunks: 2
-  processor:
-    num_chunks: 2
-  num_channels: 256 #run a smaller model then other benchmarks since we only have 1 gpu per model here
+  num_channels: 256
 
 training:
-  max_epochs: 1
-  num_sanity_val_steps: 0
   ensemble_size_per_device: 1
-
-diagnostics:
-  callbacks: []
-  enable_checkpointing: False
-  print_memory_summary: true
-  benchmark_profiler:
-    memory:
-      enabled: true
-    time:
-      verbose: true
-    model_summary:
-      enabled: false
-    snapshot:
-      enabled: true
-    system:
-      enabled: false #some error about metric key in extract_gpu_metrics being invalid
-  log:
-    mlflow:
-      enabled: true
-      offline: True
-      tracking_uri: ""
-    interval: 1

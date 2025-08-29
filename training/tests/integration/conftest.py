@@ -272,10 +272,14 @@ def benchmark_config(
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
         template = compose(config_name=base_config, overrides=overrides)
 
+    # Settings for benchmarking in general (sets atos paths, enables profiling, disables plotting etc)
+    base_benchmark_config =  OmegaConf.load( Path.cwd() / Path("training/tests/integration/config/benchmark/base.yaml"))
+
+    # Settings for the specific benchmark test case
     use_case_modifications = OmegaConf.load(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
     )
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
     OmegaConf.resolve(cfg)
     return cfg, test_case
 
