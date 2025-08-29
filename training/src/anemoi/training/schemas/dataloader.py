@@ -17,8 +17,8 @@ from omegaconf import DictConfig
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
-from pydantic import PositiveInt
 from pydantic import NonNegativeInt
+from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 

@@ -273,7 +273,7 @@ def benchmark_config(
         template = compose(config_name=base_config, overrides=overrides)
 
     # Settings for benchmarking in general (sets atos paths, enables profiling, disables plotting etc)
-    base_benchmark_config =  OmegaConf.load( Path.cwd() / Path("training/tests/integration/config/benchmark/base.yaml"))
+    base_benchmark_config = OmegaConf.load(Path.cwd() / Path("training/tests/integration/config/benchmark/base.yaml"))
 
     # Settings for the specific benchmark test case
     use_case_modifications = OmegaConf.load(

@@ -15,6 +15,8 @@ import os.path
 import re
 import shutil
 import tarfile
+from abc import ABC
+from abc import abstractmethod
 from collections.abc import Callable
 from datetime import datetime
 from datetime import timezone
@@ -185,71 +187,27 @@ def _find_latest_shared_commit(df: pd.DataFrame) -> str | None:
     return None
 
 
-class BenchmarkServer:
+class BenchmarkServer(ABC):
     """Stores information from past benchmarks.
 
     includes methods to retrieve benchmark data and compare against new benchmark data.
     """
 
-    def __init__(
-        self,
-        store: str = "./local",
-        test_case: str = "",
-    ):  # use a local folder to store data instead of a remote server
+    def __init__(self, store: Path, test_case: str = ""):
         self.benchmark_values = {}
 
-        self._parse_store_location(store)
-
         # TestCase creates an optional subdir under BenchmarkServer to store the results
-        # So that you can store GNN_n320_1g and graphtransformer_n320_1g results under the same server
         # If testcase is "" then no subdirs are created
         self.test_case = test_case
-        if self.test_case != "":
-            self.store = Path(f"{self.store}/{self.test_case}")
-
-        if not self.local:
-            self._mount_remote()
-
-        if self.local:
-            self.store.mkdir(parents=True, exist_ok=True)
+        if self.test_case:
+            self.store = Path(f"{store}/{self.test_case}")
         else:
-            self.fs.mkdir(str(self.store), create_parents=True)
+            self.store = Path(f"{store}")
 
         self.artifactLimit = BENCHMARK_SERVER_ARTIFACT_LIMIT  # How many commits artifacts will be saved at once.
         # currently the trace file and memory snapshot are saved
         # When the artifactLimit is hit, the oldest commits artifacts are deleted
         # Artifacts can be reproduced by reverting to a given commit and running the pytests locally
-
-    def _parse_store_location(self, store: str) -> None:
-        """Parses an input string to determine where to store the benchmark servers files.
-
-        store: str -> either a local path or a remote path. Remote paths should be in the form
-                    "ssh://<user>@<dest>:<remote_path>"
-
-        retuns: None, but sets self.store and self.remote_user,self.remote_host if remote
-        """
-        # a string which starts with ".ssh" and has a "@" and ":" in the middle
-        remote_pattern = r"^ssh://.*@.*:.*$"
-        if re.match(remote_pattern, store):
-            # looks like a remote string
-            parts = store.removeprefix("ssh://").split(":")
-            remote = parts[0].split("@")
-            self.remote_user = str(remote[0])
-            self.remote_host = str(remote[1])
-            self.store = Path(parts[1])
-            LOGGER.debug("'%s' looks like a remote store pointing to %s on %s", store, self.store, remote)
-            self.local = False
-        else:
-            self.local = True
-            self.store = Path(store)
-            LOGGER.info("'%s' is a local store pointing to %s", store, str(self.store))
-
-    def _mount_remote(self) -> None:
-        """Mounts the remote server over sftp using self.remote_host and self.remote_user."""
-        from sshfs import SSHFileSystem
-
-        self.fs = SSHFileSystem(self.remote_host, username=self.remote_user)
-        return
 
     def __str__(self):
         string = ""
@@ -258,10 +216,7 @@ class BenchmarkServer:
         for benchmark in self.benchmark_values.values():
             string += str(benchmark) + "\n"
         string += "-" * 20 + "\n"
-        if self.local:
-            string += f"(Server location: '{self.store}')\n"
-        else:
-            string += f"(Server location: '{self.remote_host}:{self.store}')\n"
+        string += f"(Server location: '{self.store}')\n"
         return string
 
     def get_value(self, benchmark_name: str) -> None:
@@ -279,20 +234,15 @@ class BenchmarkServer:
             return self.benchmark_values[benchmark_name]
 
         bench_file = Path(f"{self.store}/{benchmark_name}")
-        if self.local:
-            if bench_file.exists():
-                df = pd.read_csv(bench_file)
-            else:
-                LOGGER.info("Could not find file at %s.", bench_file)
-                return None
+        local_file = Path(f"./{benchmark_name}")
+
+        if self._exists(bench_file):
+            self._get(bench_file, local_file)
+            df = pd.read_csv(local_file)
+            local_file.unlink()  # clean up local file
         else:
-            local_file = Path(f"./{benchmark_name}")
-            try:
-                self.fs.get(str(bench_file), str(local_file))
-                df = pd.read_csv(local_file)
-            except OSError:
-                LOGGER.info("Could not find file at %s.", bench_file)
-                return None
+            LOGGER.info("Could not find file at %s.", bench_file)
+            return None
 
         # find last element with a commit present in this branch
         # If no such can be found, error and recomend merging main to get a new enough commit
@@ -386,15 +336,11 @@ class BenchmarkServer:
         exists = True
         if overwrite:
             exists = False
-        exists = output.exists() if self.local else self.fs.exists(str(output))
+        exists = self._exists(output)
 
         # If we have an existing copy, get it into local_file
         local_file = Path(f"./{value.name}")
-        if exists:
-            if self.local:
-                shutil.copy(output, local_file)
-            else:
-                self.fs.get(str(output), str(local_file))
+        self._get(output, local_file)
 
         # If the file exists just write value
         if exists:
@@ -406,11 +352,7 @@ class BenchmarkServer:
                 f.write(value.to_csv(include_header=True) + "\n")
 
         # Copy  local_file back to server and delete it
-        if self.local:
-            shutil.copy(local_file, output)
-        else:
-            LOGGER.info("Copying %s to %s/%s", local_file, self.store, value.name)
-            self.fs.put_file(str(local_file), str(output))
+        self._put(local_file, output)
         local_file.unlink()  # delete local file
 
         # update dict of results
@@ -425,41 +367,22 @@ class BenchmarkServer:
         tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
         """
         artifact_dir = Path(f"{self.store}/artifacts")
-        if self.local:
-            artifact_dir.mkdir(parents=True)
-            commit_tar = Path(f"{artifact_dir}/{commit}.tar.gz")
-        else:
-            # if not local store, make a local tar file and copy it later
-            commit_tar = Path(f"./{commit}.tar.gz")
-        output = commit_tar
+        commit_tar = Path(f"./{commit}.tar.gz")  # store commits locally before copuing them to the server
 
-        LOGGER.debug("Saving artifacts for commit %s under %s", commit, output)
-        if output.exists():
-            LOGGER.info("Artifacts have already been saved for commit %s under %s. Not saving...", commit, output)
+        LOGGER.debug("Saving artifacts for commit %s under %s", commit, commit_tar)
+        if commit_tar.exists():
+            LOGGER.info("Artifacts have already been saved for commit %s under %s. Not saving...", commit, commit_tar)
             return
 
         _tar_files(artifacts, commit_tar)
 
-        if not self.local:
-            LOGGER.info("Copying tar file from %s to %s", commit_tar, artifact_dir)
-            self.fs.mkdir(str(artifact_dir), create_parents=True)
-            self.fs.put_file(str(commit_tar), str(artifact_dir))
-            commit_tar.unlink()  # delete local commit tar
+        # Move tar to server and delete local copy
+        self._mkdir(artifact_dir)
+        self._put(commit_tar, artifact_dir)
+        commit_tar.unlink()  # delete local commit tar
 
         # cleanup oldest artifact if we are over artifact limit
-
-        if self.local:
-            remove = os.remove
-            # listdir gets commit name, and the list compression makes it a complete path
-            commits = [str(p) for p in artifact_dir.iterdir()]
-            commits.sort(key=os.path.getmtime)  # sorts the list, oldest first
-        else:
-            remove = self.fs.rm_file
-            commits = self.fs.listdir(f"{artifact_dir}")  # returns a list of info dicts
-            commits = sorted(commits, key=lambda d: d["mtime"])
-            commits = [
-                commit["name"] for commit in commits
-            ]  # commit is a dict of info, now that we've sorted drop to just paths
+        commits = self._sort_files_by_age(artifact_dir)
 
         if len(commits) > self.artifactLimit:
             LOGGER.info(
@@ -472,7 +395,60 @@ class BenchmarkServer:
             commits_to_delete = commits[: len(commits) - self.artifactLimit]
             LOGGER.info("Deleting %s...", commits_to_delete)
             for commit in commits_to_delete:
-                remove(commit)
+                self._rm(commit)
+
+    @abstractmethod
+    def _exists(self, path: Path) -> bool:
+        """Check if a path exists on a server."""
+        ...
+
+    @abstractmethod
+    def _mkdir(self, path: Path) -> None:
+        """Creates a directory on the server."""
+        ...
+
+    @abstractmethod
+    def _get(self, src: Path, dest: Path) -> None:
+        """Retrieves a file from the server."""
+        ...
+
+    @abstractmethod
+    def _put(self, src: Path, dest: Path) -> None:
+        """Puts a file into the server."""
+        ...
+
+    @abstractmethod
+    def _rm(self, path: Path) -> None:
+        """Deletes a file from a server."""
+        ...
+
+    @abstractmethod
+    def _sort_files_by_age(self, path: Path) -> list[str]:
+        """Sorts files under path, oldest first."""
+        ...
+
+
+def parse_benchmark_location(store: str, test_case: str = "") -> BenchmarkServer:
+    """Parses an input string to determine where to store the benchmark servers files.
+
+    store: str -> either a local path or a remote path. Remote paths should be in the form
+                "ssh://<user>@<dest>:<remote_path>"
+
+    retuns: A local or remote benchmark server based on the store location.
+    """
+    # a string which starts with ".ssh" and has a "@" and ":" in the middle
+    remote_pattern = r"^ssh://.*@.*:.*$"
+    if re.match(remote_pattern, store):
+        # looks like a remote string
+        parts = store.removeprefix("ssh://").split(":")
+        remote = parts[0].split("@")
+        remote_user = str(remote[0])
+        remote_host = str(remote[1])
+        store_path = Path(parts[1])
+        LOGGER.debug("'%s' looks like a remote store pointing to %s on %s", store, store_path, remote)
+        return RemoteBenchmarkServer(store_path, remote_user, remote_host, test_case=test_case)
+    store = Path(store)
+    return LocalBenchmarkServer(store, test_case=test_case)
 
 
 def get_git_revision_hash() -> str:
@@ -484,6 +460,122 @@ def get_git_revision_hash() -> str:
         raise RuntimeError(msg) from e
     else:
         return repo.head.commit.hexsha
+
+
+class LocalBenchmarkServer(BenchmarkServer):
+
+    def __init__(self, store: Path, test_case: str = ""):
+        super().__init__(store, test_case=test_case)
+
+        # create store locally
+        self.store.mkdir(parents=True, exist_ok=True)
+
+    def _exists(self, path: Path) -> bool:
+        """Check if a path exists on a local server."""
+        return path.exists()
+
+    def _mkdir(self, path: Path) -> None:
+        """Creates a directory on the local server."""
+        path.mkdir(parents=True)
+
+    def _get(self, src: Path, dest: Path) -> None:
+        """Retrieves a file from the server."""
+        shutil.copy(src, dest)
+
+    def _put(self, src: Path, dest: Path) -> None:
+        """Puts a file into the server."""
+        shutil.copy(src, dest)
+
+    def _rm(self, path: Path) -> None:
+        """Deletes a file from local server."""
+        path.unlink()
+
+    def _sort_files_by_age(self, path: Path) -> list[str]:
+        """Sorts files under path, oldest first."""
+        # listdir gets file name name, and the list compression makes it a complete path
+        files = [str(p) for p in path.iterdir()]
+        files.sort(key=os.path.getmtime)  # sorts the list, oldest first
+        return files
+
+
+class RemoteBenchmarkServer(BenchmarkServer):
+
+    def __init__(
+        self,
+        store: str,
+        remote_user: str,
+        remote_host: str,
+        test_case: str = "",
+    ):
+        super().__init__(store, test_case=test_case)
+
+        self.remote_user = remote_user
+        self.remote_host = remote_host
+
+        # mount the remote server
+        self._mount_remote()
+
+        # create store remotely
+        self._mkdir(self.store)
+
+    def _mkdir(self, path: Path) -> None:
+        """Creates a directory on the remote server."""
+        if self.fs is None:
+            msg = f"Error. Tried to make a directory at {path} on an unmounted remote server"
+            raise ValueError(msg)
+        self.fs.mkdir(str(path), create_parents=True)
+
+    def _get(self, src: Path, dest: Path) -> None:
+        """Retrieves a file from the server.
+
+        src: path to file on the remote server
+        dest: path to file locally
+        """
+        if self.fs is None:
+            msg = f"Error. Tried to retrieve {src} from an unmounted remote server"
+            raise ValueError(msg)
+        self.fs.get(str(src), str(dest))
+
+    def _put(self, src: Path, dest: Path) -> None:
+        """Puts a file into the server.
+
+        src: path to file on local server
+        dest: path to file on remote server
+        """
+        if self.fs is None:
+            msg = f"Error. Tried to put a file to {dest} on an unmounted remote server"
+            raise ValueError(msg)
+        self.fs.put_file(str(src), str(dest))
+
+    def _exists(self, path: Path) -> bool:
+        """Checks if a path exists on a remote server."""
+        if self.fs is None:
+            msg = f"Error. Tried to check the existance of {path} on an unmounted remote server"
+            raise ValueError(msg)
+        return self.fs.exists(str(path))
+
+    def _rm(self, path: Path) -> None:
+        """Deletes a file from a remote server."""
+        if self.fs is None:
+            msg = f"Error. Tried to delete a file at {path} on an unmounted remote server"
+            raise ValueError(msg)
+        self.fs.rm_file(path)
+
+    def _sort_files_by_age(self, path: Path) -> list[str]:
+        """Sorts files under path, oldest first."""
+        if self.fs is None:
+            msg = f"Error. Tried to sort files under {path} on an unmounted remote server"
+            raise ValueError(msg)
+        files = self.fs.listdir(str(path))  # returns a list of info dicts
+        files = sorted(files, key=lambda d: d["mtime"])
+        return [f["name"] for f in files]  # f is a dict of info, f["name"] is just the path
+
+    def _mount_remote(self) -> None:
+        """Mounts the remote server over sftp using self.remote_host and self.remote_user."""
+        from sshfs import SSHFileSystem
+
+        self.fs = SSHFileSystem(self.remote_host, username=self.remote_user)
+        return
 
 
 # this functon will find and open the profiler logs from the most recent benchmarking training run
@@ -529,7 +621,6 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
     stats = memory_stats(device=0)
     peak_active_mem_mb = stats["active_bytes.all.peak"] / 1024 / 1024
     av_training_throughput = open_log_file(profiler_path, "speed_profiler.csv")
-    av_training_batch_time_s = open_log_file(profiler_path, "time_profiler.csv")
 
     # get metadata
     commit = get_git_revision_hash()
@@ -545,16 +636,6 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
             date=yyyy_mm_dd,
             commit=commit,
             op=operator.ge,
-            tolerance=10,
-        ),
-    )
-    local_benchmark_results.append(
-        BenchmarkValue(
-            name="avTimePerBatchS",
-            value=av_training_batch_time_s,
-            unit="s",
-            date=yyyy_mm_dd,
-            commit=commit,
             tolerance=10,
         ),
     )
@@ -623,7 +704,7 @@ def benchmark(
     local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
 
     # Get reference benchmark results
-    benchmark_server = BenchmarkServer(test_case=test_case, store=store)
+    benchmark_server = parse_benchmark_location(store, test_case=test_case)
 
     benchmarks = [benchmark_value.name for benchmark_value in local_benchmark_results]
     benchmark_server.get_values(benchmarks)
