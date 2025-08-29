@@ -264,18 +264,17 @@ class BenchmarkServer:
             string += f"(Server location: '{self.remote_host}:{self.store}')\n"
         return string
 
-    def get_value(self, benchmark_name: str, force_get_from_server: bool = False) -> None:
+    def get_value(self, benchmark_name: str) -> None:
         """Retrieves a given benchmark from the store and stores it under self.benchmark_values[benchmark_name].
 
         If a benchmark value has already been loaded, return it.
-        you can force to retrieve from the server with the force_get_from_server parameter.
         If the benchmark store is remote, the CSV is downloaded.
         Then the CSV is opend and the value retrieved.
         If the name cant be found in the benchmark store, the function returns
         trys to read a row from a csv and create a benchmark value from that
         If a benchmark value is found, update list of benchmark values.
         """
-        if not force_get_from_server and benchmark_name in self.benchmark_values:
+        if benchmark_name in self.benchmark_values:
             LOGGER.debug("entry for %s found locally, not retrieving from server", benchmark_name)
             return self.benchmark_values[benchmark_name]
 
