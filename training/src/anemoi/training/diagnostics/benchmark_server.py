@@ -700,7 +700,7 @@ def benchmark(
     cfg: DictConfig,
     test_case: str,
     store: str,
-    update_data: bool = True,  # when this is true, data is always updated
+    update_data: bool = False,  # when this is true, data is always updated
 ) -> None:
     local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
 
