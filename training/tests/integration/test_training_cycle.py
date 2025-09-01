@@ -28,16 +28,16 @@ LOGGER = logging.getLogger(__name__)
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_architecture_configs(
-    architecture_config: tuple[DictConfig, str],
+    architecture_config: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = architecture_config
+    cfg, url, _ = architecture_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = architecture_config
+def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = architecture_config
     BaseSchema(**cfg)
 
 
@@ -156,12 +156,23 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
 
 
 @skip_if_offline
+def test_loading_checkpoint(
+    architecture_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    cfg, url = architecture_config_with_checkpoint
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.model
+
+
+@skip_if_offline
 @pytest.mark.slow
 def test_restart_from_existing_checkpoint(
-    gnn_config_with_checkpoint: tuple[DictConfig, str],
+    architecture_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = gnn_config_with_checkpoint
+    cfg, url = architecture_config_with_checkpoint
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
@@ -181,4 +192,17 @@ def test_training_cycle_interpolator(
 def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
     """Schema-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = diffusion_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = diffusion_config
     BaseSchema(**cfg)

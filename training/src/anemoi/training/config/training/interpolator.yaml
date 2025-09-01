@@ -105,7 +105,8 @@ validation_metrics:
 
 # If more complex grouping is required, groups can be defined as a dictionary, such that all
 # keys must be evaluate to True.
-# .e.g.:
+# .e.g. to set the variable group based on if the metadata specifies the variable is a pressure level
+# you can write the following:
 #   variable_groups:
 #     default: sfc
 #     pl:
