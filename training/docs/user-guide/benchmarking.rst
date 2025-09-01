@@ -781,21 +781,18 @@ minutes. A successful test looks like
     11:54:52 INFO Reference benchmark results:
    --------------------
    avThroughputIterPerS: 0.41iter/s (commit: 1d58f, date: 2025-08-25)
-   avTimePerBatchS: 1.97s (commit: 1d58f, date: 2025-08-25)
    peakMemoryMB: 21541.33MB (commit: 1d58f, date: 2025-08-25)
    --------------------
-   (Server location: 'anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks/graphtransformer')
+   (Server location: '/home/data/public/anemoi-integration-tests/training/benchmarks/graphtransformer')
 
    11:54:52 INFO Local benchmark results:
    --------------------
    avThroughputIterPerS: 0.41iter/s (commit: 1d58f, date: 2025-08-25)
-   avTimePerBatchS: 1.97s (commit: 1d58f, date: 2025-08-25)
    peakMemoryMB: 21541.33MB (commit: 1d58f, date: 2025-08-25)
    --------------------
 
    11:54:52 INFO Comparing local benchmark results against reference values from the server
    11:54:52 INFO PASS. Local value for avThroughputIterPerS has improved compared to the reference value (0.41iter/s local vs 0.41iter/s reference)
-   11:54:52 INFO PASS. Local value for avTimePerBatchS is within 5% tolerance of the reference value (1.97s local vs 1.97s reference)
    11:54:52 INFO PASS. Local value for peakMemoryMB has improved compared to the reference value (21541.33MB local vs 21541.33MB reference)
    11:54:52 INFO Updating metrics on server
 
@@ -806,21 +803,18 @@ A failed test looks like
    11:26:24 INFO Reference benchmark results:
    --------------------
    avThroughputIterPerS: 0.56iter/s (commit: 3641c, date: 2025-08-22)
-   avTimePerBatchS: 1.41s (commit: 3641c, date: 2025-08-22)
    peakMemoryMB: 26890.89MB (commit: 3641c, date: 2025-08-22)
    --------------------
-   (Server location: 'anemoi.ecmwf.int:/home/data/public/anemoi-integration-tests/training/benchmarks/lam')
+   (Server location: '/home/data/public/anemoi-integration-tests/training/benchmarks/lam')
 
    11:26:24 INFO Local benchmark results:
    --------------------
    avThroughputIterPerS: 0.51iter/s (commit: 1d58f, date: 2025-08-25)
-   avTimePerBatchS: 1.52s (commit: 1d58f, date: 2025-08-25)
    peakMemoryMB: 26890.89MB (commit: 1d58f, date: 2025-08-25)
    --------------------
 
    11:26:24 INFO Comparing local benchmark results against reference values from the server
    11:26:24 INFO FAIL. Local value for avThroughputIterPerS has degraded compared to the reference value (0.51iter/s local vs 0.56iter/s reference)
-   11:26:24 INFO FAIL. Local value for avTimePerBatchS has degraded compared to the reference value (1.52s local vs 1.41s reference)
    11:26:24 INFO PASS. Local value for peakMemoryMB is within 1% tolerance of the reference value (26890.89MB local vs 26890.89MB reference)
    11:26:24 INFO Profiling artifacts from failed run are stored under: lam_artifacts.tar.gz
 
