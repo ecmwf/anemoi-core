@@ -37,6 +37,8 @@ def test_benchmark_training_cycle(
     LOGGER.info("Benchmarking the configuration: %s", test_case)
 
     # Reset memory logging and free all possible memory between runs
+    # this ensures we report the peak memory used during each run,
+    # and not the peak memory used by the run with the highest memory usage
     reset_peak_memory_stats()
     empty_cache()
     gc.collect()

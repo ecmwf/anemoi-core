@@ -868,4 +868,7 @@ The server location is read from a file
    path: ...
 
 Alternatively you can edit the code in
-``tests/integration/test_benchmark.py`` to pass a local folder.
+``tests/integration/test_benchmark.py`` to pass a local folder. The
+benchmark datasets are read from a path defined at
+``tests/integration/configs/benchmark/base.yaml``. This path should be
+updated if running locally.

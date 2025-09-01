@@ -13,7 +13,7 @@ dataloader:
     training: 8
     validation: 8
   limit_batches:
-    training: 10 #200
+    training: 200
     validation: 0
   batch_size:
     training: 1
