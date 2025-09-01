@@ -340,7 +340,8 @@ class BenchmarkServer(ABC):
 
         # If we have an existing copy, get it into local_file
         local_file = Path(f"./{value.name}")
-        self._get(output, local_file)
+        if exists:
+            self._get(output, local_file)
 
         # If the file exists just write value
         if exists:
