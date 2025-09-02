@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/models-0.9.3...models-0.9.4) (2025-09-02)
+
+
+### Features
+
+* Checkpoint migrations ([#386](https://github.com/ecmwf/anemoi-core/issues/386)) ([028f6eb](https://github.com/ecmwf/anemoi-core/commit/028f6eb6426c5ada0c5d95e6492accc99083b46f))
+
+## [0.9.3](https://github.com/ecmwf/anemoi-core/compare/models-0.9.2...models-0.9.3) (2025-08-22)
+
+
+### Bug Fixes
+
+* Convert pre_processors from attribute to variable in models/encoder_processor_decoder ([#503](https://github.com/ecmwf/anemoi-core/issues/503)) ([60eb52b](https://github.com/ecmwf/anemoi-core/commit/60eb52b465ba260573566223966dede67cd44913))
+
+## [0.9.2](https://github.com/ecmwf/anemoi-core/compare/models-0.9.1...models-0.9.2) (2025-08-20)
+
+
+### Features
+
+* Diffusion training ([#401](https://github.com/ecmwf/anemoi-core/issues/401)) ([f35ad67](https://github.com/ecmwf/anemoi-core/commit/f35ad673f680ba64acb5c6770a3114262b3b97fd))
+
 ## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/models-0.9.0...models-0.9.1) (2025-08-08)
 
 

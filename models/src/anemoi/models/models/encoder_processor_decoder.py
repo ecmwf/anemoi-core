@@ -454,7 +454,7 @@ class AnemoiModelEncProcDec(nn.Module):
                 grid_shard_shapes = [shape[-2] for shape in shard_shapes]
                 x = shard_tensor(x, -2, shard_shapes, model_comm_group)
 
-            x = self.pre_processors(x, in_place=False)
+            x = pre_processors(x, in_place=False)
 
             # Perform forward pass
             y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
