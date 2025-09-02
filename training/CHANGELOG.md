@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.4](https://github.com/ecmwf/anemoi-core/compare/training-0.6.3...training-0.6.4) (2025-09-02)
+
+
+### Features
+
+* Checkpoint migrations ([#386](https://github.com/ecmwf/anemoi-core/issues/386)) ([028f6eb](https://github.com/ecmwf/anemoi-core/commit/028f6eb6426c5ada0c5d95e6492accc99083b46f))
+* Extend restart checkpoint to consider graphtransformer ([#497](https://github.com/ecmwf/anemoi-core/issues/497)) ([b8fc40e](https://github.com/ecmwf/anemoi-core/commit/b8fc40ec9d559ffab9f17af0d029444b884daf56))
+
+
+### Bug Fixes
+
+* **training:** LAM sharding ([#481](https://github.com/ecmwf/anemoi-core/issues/481)) ([e513c19](https://github.com/ecmwf/anemoi-core/commit/e513c19a0f80e1f0850627fe51eab992cdd6fa8d))
+
 ## [0.6.3](https://github.com/ecmwf/anemoi-core/compare/training-0.6.2...training-0.6.3) (2025-08-22)
 
 
