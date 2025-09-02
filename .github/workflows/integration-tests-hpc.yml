@@ -55,6 +55,7 @@ jobs:
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
   benchmark-tests:
     runs-on: hpc
+    timeout-minutes: 360 #increase timeout, if slurm queues for ~1 hour then github actions can timeout
     needs: check_date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
     steps:
