@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
 from typing import Optional
 
 import einops
@@ -126,6 +127,16 @@ class MultiHeadSelfAttention(nn.Module):
         else:
             self.alibi_slopes = None
 
+        if self.attention_implementation == "flex_attention":
+            assert (
+                self.embed_dim / self.num_heads >= 16
+            ), f"Embedding dimension ({self.embed_dim}) divided by number of heads ({self.num_heads}) must be >= 16."
+            assert math.log2(
+                self.embed_dim
+            ).is_integer(), f"Embedding dimension must be a power of 2. {self.embed_dim} is not valid."
+
+        # we compile flex attn once at the first iteration
+
         linear = layer_kernels.Linear
         self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
         self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
@@ -146,7 +157,6 @@ class MultiHeadSelfAttention(nn.Module):
             self.attention_implementation in attn_funcs
         ), f"{self.attention_implementation} not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
-        LOGGER.info(f"Using {self.attention_implementation}")
 
         # initalise the attn func here
         if self.attention_implementation == "flash_attention":
@@ -232,6 +242,7 @@ class SDPAAttentionWrapper(nn.Module):
         self.attention = scaled_dot_product_attention
         self.mask = None
         self.window_size = None
+        LOGGER.info("Using scaled_dot_product_attention.")
 
     def update_mask(self, seq_len, window_size: int, device: str):
 
@@ -297,7 +308,28 @@ class FlashAttentionWrapper(nn.Module):
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
 
-        self.use_flash_attn_v3 = False
+        flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
+
+        flash_attn_version = version.parse(flash_attn.__version__)
+        self._init_rotary_embeddings(use_rotary_embeddings, head_dim, flash_attn_version)
+
+        self.attention = flash_attn.flash_attn_func
+
+    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
+        self.use_rotary_embeddings = False
+        if use_rotary_embeddings:
+            if self.use_flash_attn_v3:
+                raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
+            elif flash_attn_version <= version.parse("2.6"):
+                raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
+
+            from flash_attn.layers.rotary import RotaryEmbedding
+
+            self.use_rotary_embeddings = True
+            self.rotary_emb = RotaryEmbedding(dim=head_dim)
+
+    def _import_flash_attn(self) -> (Any, bool):
+        use_flash_attn_v3 = False
 
         # to detect which flash-attn interface we're using we try import them
         # Since each import is semantically different we use this to
@@ -306,37 +338,22 @@ class FlashAttentionWrapper(nn.Module):
             # first try import flash attn v2
             import flash_attn
 
-            flash_attn_func = flash_attn.flash_attn_func
         except ImportError as e_v2:
 
             # failed importing flash attn v2,
             # try import flash attn v3
             try:
-                import flash_attn_interface
+                import flash_attn_interface as flash_attn
 
-                flash_attn_func = flash_attn_interface.flash_attn_func
             except ImportError as e_v3:
                 # print both errors if both fail
                 raise ImportError(f"Error importing flash-attn v2: {e_v2}\nError importing flash-attn v2: {e_v3}")
             else:
-                LOGGER.info("Using flash-attn v3")
-                self.use_flash_attn_v3 = True
-                if use_rotary_embeddings:
-                    raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
-
+                LOGGER.info("Using flash attention v3")
+                use_flash_attn_v3 = True
         else:
-            LOGGER.info("Using flash-attn v2")
-            if version.parse(flash_attn.__version__):
-                raise RuntimeError("Error: Flash-attn version is too low. Update to 2.6.0 or higher.")
-            else:
-                from flash_attn.layers.rotary import RotaryEmbedding
-
-        self.attention = flash_attn_func
-
-        self.use_rotary_embeddings = use_rotary_embeddings
-
-        if self.use_rotary_embeddings:  # find alternative implementation
-            self.rotary_emb = RotaryEmbedding(dim=head_dim)
+            LOGGER.info("Using flash attention v2")
+        return flash_attn, use_flash_attn_v3
 
     def forward(
         self,
