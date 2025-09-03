@@ -69,7 +69,7 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
 
 
 @pytest.fixture
-def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
+def fake_data_no_param() -> tuple[DictConfig, IndexCollection]:
     config = DictConfig(
         {
             "data": {
@@ -81,7 +81,7 @@ def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
                     "_target_": "anemoi.training.losses.MSELoss",
                     "scalers": ["variable_masking"],
                 },
-                 "variable_groups": {
+                "variable_groups": {
                     "default": "sfc",
                     "pl": ["y"],
                 },
@@ -90,12 +90,12 @@ def fake_data_no_param()->tuple[DictConfig, IndexCollection]:
                         "variable_masking": {
                             "_target_": "anemoi.training.losses.scalers.VariableMaskingLossScaler",
                             "variables": ["z", "other", "q"],
-                            },
                         },
                     },
                 },
-                "metrics": [],
             },
+            "metrics": [],
+        },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
