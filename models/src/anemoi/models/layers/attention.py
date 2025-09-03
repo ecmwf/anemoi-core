@@ -38,25 +38,17 @@ class MultiHeadSelfAttention(nn.Module):
 
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
 
-    scaled dot product attention (SDPA)
+    "scaled_dot_product_attention" (SDPA)
         SDPA is a pytorch function, so it is easiest to use but the least performant.
         It runs on CPUs and GPUs.
 
-    flash attention v2
-        Flash-Attn v2 is optimised for efficient usage of the GPUs memory hierarchy. It loads smaller chunks
+    "flash_attention"
+        Flash attention is optimised for efficient usage of the GPUs memory hierarchy. It loads smaller chunks
         into fast local memory, and fuses attention into a single kernel to reduce the passes through memory.
         It runs on Nvidia Ampere (e.g. A100) GPUs or newer and AMD MI200 GPUs or newer. Check the GitHub for
         the full requirements.
         You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
-        wheels available on the GitHub. On an aarch64 system, you have to build flash attention from source.
-
-    flash attention v3
-        Flash-Attn v3  uses new GPU features to achieve an up to 2x speedup compared to flash attention v2.
-        The new features include more efficient tensor core usage via the WGMMA instruction and hardware
-        accelerated memory accesses via the Tensor Memory Accelerator.
-        It requires Nvidia Hopper (e.g. H100) or newer GPUs. Check the Github for the full requirements.
-        You have to install flash attention v3 yourself. There are currently no pre-built wheels, so it must
-        be built from source.
+        wheels available on the GitHub repo. On an aarch64 system, you have to build flash attention from source.
     """
 
     def __init__(
@@ -268,7 +260,7 @@ class SDPAAttentionWrapper(nn.Module):
             )
         if alibi_slopes is not None:
             NotImplementedError(
-                "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention or disable alibi slopes."
+                "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
 
         sequence_len = query.shape[-2]
@@ -294,8 +286,12 @@ class SDPAAttentionWrapper(nn.Module):
 
 class FlashAttentionWrapper(nn.Module):
     """Wrapper for Flash attention.
-    Will use either flash attn v2 or flash attn v3 (optimised for hoppers and newer), based on
-    what is installed
+
+    Either flash attn v2 or flash attn v3 (optimised for hoppers and newer), based on
+    what is installed.
+    flash attention v3 does not support rotary embeddings or alibi slopes. To use these
+    features, you should downgrade to flash attention v2.
+
     """
 
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
@@ -337,9 +333,7 @@ class FlashAttentionWrapper(nn.Module):
 
         self.attention = flash_attn_func
 
-        self.use_rotary_embeddings = (
-            use_rotary_embeddings and not self.use_flash_attn_v3
-        )  # disable rotary embeddings with fav3 for now
+        self.use_rotary_embeddings = use_rotary_embeddings
 
         if self.use_rotary_embeddings:  # find alternative implementation
             self.rotary_emb = RotaryEmbedding(dim=head_dim)
@@ -359,6 +353,11 @@ class FlashAttentionWrapper(nn.Module):
         query, key, value = (
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
+
+        if alibi_slopes is not None and self.use_flash_attn_v3:
+            NotImplementedError(
+                "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
+            )
 
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
 
