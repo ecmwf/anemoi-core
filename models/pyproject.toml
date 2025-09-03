@@ -49,7 +49,7 @@ dependencies = [
   "torch-geometric>=2.3",
 ]
 
-optional-dependencies.all = [  ]
+optional-dependencies.all = [ "anemoi-models[migrations]" ]
 
 optional-dependencies.dev = [
   "anemoi-models[all,docs,tests]",
