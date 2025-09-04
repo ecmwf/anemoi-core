@@ -127,16 +127,6 @@ class MultiHeadSelfAttention(nn.Module):
         else:
             self.alibi_slopes = None
 
-        if self.attention_implementation == "flex_attention":
-            assert (
-                self.embed_dim / self.num_heads >= 16
-            ), f"Embedding dimension ({self.embed_dim}) divided by number of heads ({self.num_heads}) must be >= 16."
-            assert math.log2(
-                self.embed_dim
-            ).is_integer(), f"Embedding dimension must be a power of 2. {self.embed_dim} is not valid."
-
-        # we compile flex attn once at the first iteration
-
         linear = layer_kernels.Linear
         self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
         self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
@@ -316,9 +306,10 @@ class FlashAttentionWrapper(nn.Module):
         self.attention = flash_attn.flash_attn_func
 
     def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
+        """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
         self.use_rotary_embeddings = False
         if use_rotary_embeddings:
-            if self.use_flash_attn_v3:
+            if flash_attn_version >= version.parse("3"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
             elif flash_attn_version <= version.parse("2.6"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
@@ -329,6 +320,12 @@ class FlashAttentionWrapper(nn.Module):
             self.rotary_emb = RotaryEmbedding(dim=head_dim)
 
     def _import_flash_attn(self) -> (Any, bool):
+        """imports either flash attention v2 or v3.
+
+        returns:
+            flash attention module
+            use_flash_attention_v3 (bool)
+        """
         use_flash_attn_v3 = False
 
         # to detect which flash-attn interface we're using we try import them
