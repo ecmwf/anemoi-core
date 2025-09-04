@@ -340,7 +340,6 @@ class GraphEnsForecaster(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple:
         """Training / validation step."""
-
         LOGGER.debug(
             "SHAPES: batch[0].shape = %s, batch[1].shape == %s",
             list(batch[0].shape),
@@ -386,6 +385,8 @@ class GraphEnsForecaster(BaseGraphModule):
             train_loss:
                 Training loss
         """
+        del batch_idx
+
         train_loss, _, _, _ = self._step(batch)
 
         self.log(
@@ -432,6 +433,8 @@ class GraphEnsForecaster(BaseGraphModule):
         tuple[torch.Tensor, torch.Tensor]
             Tuple containing the validation loss, the predictions, and the ensemble initial conditions
         """
+        del batch_idx
+
         with torch.no_grad():
             val_loss, metrics, y_preds, ens_ic = self._step(batch, validation_mode=True)
         self.log(
