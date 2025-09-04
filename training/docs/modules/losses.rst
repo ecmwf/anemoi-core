@@ -56,8 +56,8 @@ The following probabilistic loss functions are available by default:
 -  ``KernelCRPSLoss``: Kernel CRPS loss.
 -  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
    et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
--  ``WeightedMSELoss`` : is WeightedMSELoss used for the diffussion
-   model to handle noise weights
+-  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
+   handle noise weights
 
 The config for these loss functions is the same as for the
 deterministic:
