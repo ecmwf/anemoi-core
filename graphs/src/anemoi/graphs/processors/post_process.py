@@ -207,33 +207,33 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
         save_mask_indices_to_attr: str | None = None,
     ) -> None:
         super().__init__(nodes_name, save_mask_indices_to_attr)
-        self.area = area
-
-    @staticmethod
-    def points_inside_area(
-        lats: torch.Tensor, lons: torch.Tensor, area: tuple[float, float, float, float]
-    ) -> torch.Tensor:
-        north, west, south, east = area
+        self.north, self.west, self.south, self.east = area
 
         # Convert area limits to [-90, 90]x[0,360]
-        west, east = west % 360, (east - 1) % 360 + 1
-        assert (west - east) % 360 != 0, "West and East limits must be different."
+        self.west, self.east = self.west % 360, (self.east - 1) % 360 + 1
+        assert (self.west - self.east) % 360 != 0, "West and East limits must be different."
 
+    def points_inside_area(
+        self, lats: torch.Tensor, lons: torch.Tensor,
+    ) -> torch.Tensor:
         # Convert lat & lons to [-90, 90]x[0,360)
         lons %= 360
 
-        in_lat_range = (lats >= south) & (lats <= north)
-        if west < east:
-            in_lon_range = (lons >= west) & (lons <= east)
+        assert (-90 <= lats).all() and (lats <= 90).all(), "Latitude values must be in the range [-90, 90]."
+        assert (0 <= lons).all() and (lons <= 360).all(), "Longitude values must be in the range [0, 360]."
+
+        in_lat_range = (lats >= self.south) & (lats <= self.north)
+        if self.west < self.east:
+            in_lon_range = (lons >= self.west) & (lons <= self.east)
         else:
             # e.g: W=-10,E=10. They will be mapped to west=350, east=10.
-            in_lon_range = (lons >= west) | (lons <= east)
+            in_lon_range = (lons >= self.west) | (lons <= self.east)
         return in_lat_range & in_lon_range
 
     def compute_mask(self, graph: HeteroData, nodes_name: str) -> torch.Tensor:
         """Compute the mask of connected nodes."""
-        latlons = graph[nodes_name].x * 180 / torch.pi
-        mask = SubsetNodesInArea.points_inside_area(lats=latlons[:, 0], lons=latlons[:, 1], area=self.area)
+        latlons = torch.rad2deg(graph[nodes_name].x)
+        mask = self.points_inside_area(lats=latlons[:, 0], lons=latlons[:, 1])
         assert mask.any(), f"The area selected does not contain any {nodes_name} node."
         return mask
 
