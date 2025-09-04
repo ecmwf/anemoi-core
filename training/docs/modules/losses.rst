@@ -25,11 +25,12 @@ in the config file at ``config.training.training_loss``, and
 
 The following loss functions are available by default:
 
--  ``WeightedMSELoss``: Latitude-weighted mean-squared-error.
--  ``WeightedMAELoss``: Latitude-weighted mean-absolute-error.
--  ``WeightedHuberLoss``: Latitude-weighted Huber loss.
--  ``WeightedLogCoshLoss``: Latitude-weighted log-cosh loss.
--  ``WeightedRMSELoss``: Latitude-weighted root-mean-squared-error.
+-  ``MSELoss``: Latitude-weighted node-weighted mean-squared-error.
+-  ``RMSELoss``: Latitude-weighted node-weighted root
+   mean-squared-error.
+-  ``MAELoss``: Latitude-weighted mean-absolute-error.
+-  ``HuberLoss``: Latitude-weighted Huber loss.
+-  ``LogCoshLoss``: Latitude-weighted log-cosh loss.
 -  ``CombinedLoss``: Combined component weighted loss.
 
 These are available in the ``anemoi.training.losses`` module, at
@@ -55,6 +56,8 @@ The following probabilistic loss functions are available by default:
 -  ``KernelCRPSLoss``: Kernel CRPS loss.
 -  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
    et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+-  ``WeightedMSELoss`` : is WeightedMSELoss used for the diffussion
+   model to handle noise weights
 
 The config for these loss functions is the same as for the
 deterministic:
