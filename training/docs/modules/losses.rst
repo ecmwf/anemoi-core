@@ -25,13 +25,16 @@ in the config file at ``config.training.training_loss``, and
 
 The following loss functions are available by default:
 
--  ``MSELoss``: Latitude-weighted node-weighted mean-squared-error.
--  ``RMSELoss``: Latitude-weighted node-weighted root
-   mean-squared-error.
--  ``MAELoss``: Latitude-weighted mean-absolute-error.
--  ``HuberLoss``: Latitude-weighted Huber loss.
--  ``LogCoshLoss``: Latitude-weighted log-cosh loss.
+-  ``MSELoss``: mean-squared-error.
+-  ``RMSELoss``: root mean-squared-error.
+-  ``MAELoss``: mean-absolute-error.
+-  ``HuberLoss``: Huber loss.
+-  ``LogCoshLoss``: log-cosh loss.
 -  ``CombinedLoss``: Combined component weighted loss.
+
+All the above losses by default are averaged across the grid nodes. To
+apply latitude-weighted scaling one needs to pass ``node_weights`` as a
+scaler.
 
 These are available in the ``anemoi.training.losses`` module, at
 ``anemoi.training.losses.{short_name}.{class_name}``.
