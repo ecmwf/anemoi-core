@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -117,6 +118,7 @@ class GraphForecaster(BaseGraphModule):
             x[:, -1],
             batch[:, self.multi_step + rollout_step],
             self.data_indices,
+            grid_shard_slice=self.grid_shard_slice,
         )
 
         # get new "constants" needed for time-varying fields
@@ -164,8 +166,10 @@ class GraphForecaster(BaseGraphModule):
 
         # Delayed scalers need to be initialized after the pre-processors once
         if self.is_first_step:
-            self.define_delayed_scalers()
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
+
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         # start rollout of preprocessed batch
         x = batch[

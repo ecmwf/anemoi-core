@@ -8,6 +8,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.4](https://github.com/ecmwf/anemoi-core/compare/training-0.6.3...training-0.6.4) (2025-09-02)
+
+
+### Features
+
+* Checkpoint migrations ([#386](https://github.com/ecmwf/anemoi-core/issues/386)) ([028f6eb](https://github.com/ecmwf/anemoi-core/commit/028f6eb6426c5ada0c5d95e6492accc99083b46f))
+* Extend restart checkpoint to consider graphtransformer ([#497](https://github.com/ecmwf/anemoi-core/issues/497)) ([b8fc40e](https://github.com/ecmwf/anemoi-core/commit/b8fc40ec9d559ffab9f17af0d029444b884daf56))
+
+
+### Bug Fixes
+
+* **training:** LAM sharding ([#481](https://github.com/ecmwf/anemoi-core/issues/481)) ([e513c19](https://github.com/ecmwf/anemoi-core/commit/e513c19a0f80e1f0850627fe51eab992cdd6fa8d))
+
+## [0.6.3](https://github.com/ecmwf/anemoi-core/compare/training-0.6.2...training-0.6.3) (2025-08-22)
+
+
+### Bug Fixes
+
+* GraphInterpolator Lightning Module - add rollout member for compa… ([#496](https://github.com/ecmwf/anemoi-core/issues/496)) ([40aa71c](https://github.com/ecmwf/anemoi-core/commit/40aa71c8eb097442ce33e7f0ff82e81b0947716e))
+
+## [0.6.2](https://github.com/ecmwf/anemoi-core/compare/training-0.6.1...training-0.6.2) (2025-08-20)
+
+
+### Features
+
+* Diffusion training ([#401](https://github.com/ecmwf/anemoi-core/issues/401)) ([f35ad67](https://github.com/ecmwf/anemoi-core/commit/f35ad673f680ba64acb5c6770a3114262b3b97fd))
+
+
+### Bug Fixes
+
+* Mlflow sync cleaning ([#460](https://github.com/ecmwf/anemoi-core/issues/460)) ([50ef49b](https://github.com/ecmwf/anemoi-core/commit/50ef49ba6b5dc09186ae513d908a57e985daae2a))
+* **training:** Callbacks when using rollout  ([#490](https://github.com/ecmwf/anemoi-core/issues/490)) ([7c9442a](https://github.com/ecmwf/anemoi-core/commit/7c9442aeb8fdfa8378e531b2ea9bf051fca1cfd0))
+* **training:** Sharding nan_loss_mask scaler ([#491](https://github.com/ecmwf/anemoi-core/issues/491)) ([9299991](https://github.com/ecmwf/anemoi-core/commit/92999916b7a81a05b364aa1d4ca3d53e3ed35dbb))
+* Update variable groups in lam, ensemble and stretched config files ([#466](https://github.com/ecmwf/anemoi-core/issues/466)) ([8db81f0](https://github.com/ecmwf/anemoi-core/commit/8db81f068e415a913014cdb01b68d048368fd6ff))
+
+
+### Performance Improvements
+
+* Avoid heavy imports through MlflowSchema ([#482](https://github.com/ecmwf/anemoi-core/issues/482)) ([8e97af5](https://github.com/ecmwf/anemoi-core/commit/8e97af5ddb7fa2c025f101075d3bfddfa4126690))
+
+
+### Documentation
+
+* Explain inference overrides ([#487](https://github.com/ecmwf/anemoi-core/issues/487)) ([d1996f9](https://github.com/ecmwf/anemoi-core/commit/d1996f9ec4be78d921feba775c2aeb14c52f102c))
+* Update diffusion documentation ([#486](https://github.com/ecmwf/anemoi-core/issues/486)) ([ff8f9f2](https://github.com/ecmwf/anemoi-core/commit/ff8f9f2d07985312c9196150ed0c1753c1f78703))
+
+## [0.6.1](https://github.com/ecmwf/anemoi-core/compare/training-0.6.0...training-0.6.1) (2025-08-08)
+
+
+### Features
+
+* Add extensible checkpoint loading system                                                                                     │ ([ebc55fc](https://github.com/ecmwf/anemoi-core/commit/ebc55fc9564d03d8e090bafab2fdd93042daa6cf))
+* Extend DelayedScalers into arbitary UpdatingScalers [#371](https://github.com/ecmwf/anemoi-core/issues/371)  ([b9d7726](https://github.com/ecmwf/anemoi-core/commit/b9d772659679b1d1744c9be6a6602673eb9e6969))
+* **models:** Nan locations in imputer calculated on the fly [#378](https://github.com/ecmwf/anemoi-core/issues/378) ([b9d7726](https://github.com/ecmwf/anemoi-core/commit/b9d772659679b1d1744c9be6a6602673eb9e6969))
+* **models:** Postprocessor for nans in diagnostic fields ([#461](https://github.com/ecmwf/anemoi-core/issues/461)) ([a7ff22e](https://github.com/ecmwf/anemoi-core/commit/a7ff22e44b956635bcd3e91b9d780aa041a617d3))
+
+
+### Bug Fixes
+
+* Improve device movement of scalers [#390](https://github.com/ecmwf/anemoi-core/issues/390) ([b9d7726](https://github.com/ecmwf/anemoi-core/commit/b9d772659679b1d1744c9be6a6602673eb9e6969))
+* Introducing SLURMID based cuda device selection to fix cuda busy devices error ([#431](https://github.com/ecmwf/anemoi-core/issues/431)) ([c6d2844](https://github.com/ecmwf/anemoi-core/commit/c6d284421ffe4a876e5caca5f73d86faa9ff6e3b))
+
 ## [0.6.0](https://github.com/ecmwf/anemoi-core/compare/training-0.5.1...training-0.6.0) (2025-08-01)
 
 

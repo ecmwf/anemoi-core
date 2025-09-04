@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
@@ -275,8 +276,9 @@ class GraphEnsForecaster(BaseGraphModule):
 
         # Scalers which are delayed need to be initialized after the pre-processors
         if self.is_first_step:
-            self.define_delayed_scalers()
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
             self.is_first_step = False
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (

@@ -106,7 +106,7 @@ class AnemoiTrainer:
         )
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
-        LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
+        LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
         return datamodule
 
     @cached_property
@@ -128,7 +128,7 @@ class AnemoiTrainer:
         rnd_seed = pl.seed_everything(initial_seed, workers=True)
         np_rng = np.random.default_rng(rnd_seed)
         (torch.rand(1), np_rng.random())
-        LOGGER.debug(
+        LOGGER.info(
             "Initial seed: Rank %d, initial seed %d, running with random seed: %d",
             self.strategy.global_rank,
             initial_seed,
@@ -149,8 +149,10 @@ class AnemoiTrainer:
             )
 
             if graph_filename.exists() and not self.config.graph.overwrite:
+                from anemoi.graphs.utils import get_distributed_device
+
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, weights_only=False)
+                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
 
         else:
             graph_filename = None
@@ -407,8 +409,8 @@ class AnemoiTrainer:
     def _log_information(self) -> None:
         # Log number of variables (features)
         num_fc_features = len(self.datamodule.ds_train.data.variables) - len(self.config.data.forcing)
-        LOGGER.debug("Total number of prognostic variables: %d", num_fc_features)
-        LOGGER.debug("Total number of auxiliary variables: %d", len(self.config.data.forcing))
+        LOGGER.info("Total number of prognostic variables: %d", num_fc_features)
+        LOGGER.info("Total number of auxiliary variables: %d", len(self.config.data.forcing))
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
         total_number_of_model_instances = (
@@ -417,11 +419,11 @@ class AnemoiTrainer:
             / self.config.hardware.num_gpus_per_model
         )
 
-        LOGGER.debug(
+        LOGGER.info(
             "Total GPU count / model group size: %d - NB: the learning rate will be scaled by this factor!",
             total_number_of_model_instances,
         )
-        LOGGER.debug(
+        LOGGER.info(
             "Effective learning rate: %.3e",
             int(total_number_of_model_instances) * self.config.training.lr.rate,
         )
@@ -517,6 +519,7 @@ class AnemoiTrainer:
             use_distributed_sampler=False,
             profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
+            check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
         LOGGER.debug("Starting training..")

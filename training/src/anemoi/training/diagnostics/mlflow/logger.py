@@ -30,6 +30,7 @@ from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from typing_extensions import override
 
+from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
@@ -37,9 +38,6 @@ from anemoi.utils.mlflow.auth import TokenAuth
 from anemoi.utils.mlflow.utils import health_check
 
 LOGGER = logging.getLogger(__name__)
-
-MAX_PARAMS_LENGTH = 2000
-LOG_MODEL = False
 
 
 class LogsMonitor:
@@ -317,7 +315,11 @@ class AnemoiMLflowLogger(MLFlowLogger):
             if offline:
                 LOGGER.info("MLflow is logging offline.")
             else:
-                LOGGER.info("MLflow token authentication %s for %s", "enabled" if enabled else "disabled", tracking_uri)
+                LOGGER.info(
+                    "MLflow token authentication %s for %s",
+                    "enabled" if enabled else "disabled",
+                    tracking_uri,
+                )
                 self.auth.authenticate()
                 health_check(tracking_uri)
 
@@ -425,7 +427,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 run = mlflow_client.get_run(run_id)
                 run_name = run.info.run_name
                 self._check_server2server_lineage(run)
-                self._check_dry_run(parent_run)
+                self._check_dry_run(run)
                 mlflow_client.update_run(run_id=run_id, status="RUNNING")
                 tags["resumedRun"] = "True"
             # This block is used when a run is forked and an existing run ID is specified
@@ -538,7 +540,12 @@ class AnemoiMLflowLogger(MLFlowLogger):
         log_monitor.start()
 
     @rank_zero_only
-    def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:
+    def log_hyperparams(
+        self,
+        params: dict[str, Any] | Namespace,
+        *,
+        expand_keys: list[str] | None = None,
+    ) -> None:
         """Overwrite the log_hyperparams method.
 
         - flatten config params using '.'.
