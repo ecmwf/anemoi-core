@@ -445,6 +445,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
         self.projection = Linear(out_channels, out_channels)
+        
         if self.qk_norm:
             self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
             self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
@@ -814,6 +815,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
         query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
+        
         if self.qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
