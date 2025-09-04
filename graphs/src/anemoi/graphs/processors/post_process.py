@@ -214,7 +214,9 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
         assert (self.west - self.east) % 360 != 0, "West and East limits must be different."
 
     def points_inside_area(
-        self, lats: torch.Tensor, lons: torch.Tensor,
+        self,
+        lats: torch.Tensor,
+        lons: torch.Tensor,
     ) -> torch.Tensor:
         # Convert lat & lons to [-90, 90]x[0,360)
         lons %= 360
