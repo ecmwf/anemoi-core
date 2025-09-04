@@ -38,8 +38,6 @@ class SubsetNodesInAreaSchema(BaseModel):
     "Nodes from which to remove the unconnected nodes."
     area: tuple[float, float, float, float] = Field(default=(40, 10, 30, 20))
     "Area of interest to crop the nodes, (north, west, south, east)."
-    nodes_name: str | Iterable[str]
-    "Nodes from which to remove the unconnected nodes."
     save_mask_indices_to_attr: str = Field(example=None)
     "New attribute name to store the mask indices."
 
