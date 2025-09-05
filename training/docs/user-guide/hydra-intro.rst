@@ -72,18 +72,16 @@ added to the training command like so:
 
 The following missing config options which must be overridden by users:
 
--  ``hardware.paths.data``: Location of base directory where datasets
-   are stored
-
 -  ``hardware.paths.graph``: Location of graph directory
 
 -  ``hardware.paths.output``: Location of output directory
 
--  ``hardware.files.dataset``: Filename(s) of datasets used for training
-
 -  ``hardware.files.graph``: If you have pre-computed a specific graph,
    specify its filename here. Otherwise, a new graph will be constructed
    on the fly and written to the filename given.
+
+-  ``dataloader.data``: Description of the dataset, as provided to
+   `anemoi.datasets.open_dataset`
 
 *********************************
  Validation of the Configuration

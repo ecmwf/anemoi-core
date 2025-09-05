@@ -1,10 +1,15 @@
 # Modifications for the local area model template "lam.yaml"
 dataloader:
+  dataset_defaults:
+    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+
+
   dataset:
     cutout:
-      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      - dataset: ${dataloader.dataset_defaults.dataset}
         thinning: 25 # ???-value in lam template
-      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+      - dataset: ${dataloader.dataset_defaults.forcing_dataset}
   training:
     start: "2017-01-01"
     end: "2017-01-07"
@@ -13,11 +18,7 @@ dataloader:
     end: "2017-01-10"
 
 hardware:
-  paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:
-    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
-    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
     # We only use the graph file in test_training_cycle_lam_with_existing_graph, not in test_training_cycle_lam
     graph: anemoi-integration-tests/training/graphs/lam-graph.pt
 
