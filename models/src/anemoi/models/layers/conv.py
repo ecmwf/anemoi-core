@@ -60,15 +60,21 @@ class GraphConv(MessagePassing):
             n_extra_layers=mlp_extra_layers,
         )
 
-    def forward(self, x: OptPairTensor, edge_attr: Tensor, edge_index: Adj, size: Optional[Size] = None):
+    def forward(
+        self, x: OptPairTensor, edge_attr: Tensor, edge_index: Adj, size: Optional[Size] = None, **layer_kwargs
+    ):
         dim_size = x.shape[0] if isinstance(x, Tensor) else x[1].shape[0]
 
-        out, edges_new = self.propagate(edge_index, x=x, edge_attr=edge_attr, size=size, dim_size=dim_size)
+        out, edges_new = self.propagate(
+            edge_index, x=x, edge_attr=edge_attr, size=size, dim_size=dim_size, **layer_kwargs
+        )
 
         return out, edges_new
 
-    def message(self, x_i: Tensor, x_j: Tensor, edge_attr: Tensor, dim_size: Optional[int] = None) -> Tensor:
-        edges_new = self.edge_mlp(torch.cat([x_i, x_j, edge_attr], dim=1)) + edge_attr
+    def message(
+        self, x_i: Tensor, x_j: Tensor, edge_attr: Tensor, dim_size: Optional[int] = None, **layer_kwargs
+    ) -> Tensor:
+        edges_new = self.edge_mlp(torch.cat([x_i, x_j, edge_attr], dim=1), **layer_kwargs) + edge_attr
 
         return edges_new
 

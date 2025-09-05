@@ -1,4 +1,4 @@
-num_channels: 1024
+num_channels: 512
 cpu_offload: False
 
 keep_batch_sharded: True
@@ -14,7 +14,7 @@ model:
     sigma_min: 0.02
     rho: 7.0
     use_node_conditioning: True
-    use_edge_conditioning: False  # GNN only
+    use_edge_conditioning: True  # Enable edge conditioning for GNN
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.diffusion.noise_channels}
@@ -36,56 +36,40 @@ model:
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
     _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
     normalized_shape: ${model.num_channels}
     condition_shape: 16
     w_one_bias_zero_init: True
-    autocast: false
+    autocast: True
   Linear:
     _target_: torch.nn.Linear
   Activation:
-    _target_: torch.nn.GELU
-  QueryNorm:
-    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-    bias: False
-  KeyNorm:
-    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
-    bias: False
+    _target_: torch.nn.SiLU
 
 processor:
-  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  _target_: anemoi.models.layers.processor.GNNProcessor
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: True
-  cpu_offload: ${model.cpu_offload}
+  num_chunks: 2
+  mlp_extra_layers: 0
   layer_kernels: ${model.layer_kernels}
 
 encoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  _target_: anemoi.models.layers.mapper.GNNForwardMapper
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: True
-  cpu_offload: ${model.cpu_offload}
+  num_chunks: 1
+  mlp_extra_layers: 0
   layer_kernels: ${model.layer_kernels}
 
-
 decoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  _target_: anemoi.models.layers.mapper.GNNBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: False
-  qk_norm: True
-  cpu_offload: ${model.cpu_offload}
+  num_chunks: 1
+  mlp_extra_layers: 0
   layer_kernels: ${model.layer_kernels}
 
 output_mask:

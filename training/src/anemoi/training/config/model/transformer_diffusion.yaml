@@ -13,6 +13,8 @@ model:
     sigma_max: 100.0
     sigma_min: 0.02
     rho: 7.0
+    use_node_conditioning: True
+    use_edge_conditioning: False  # GNN only
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.diffusion.noise_channels}

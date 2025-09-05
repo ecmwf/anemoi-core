@@ -46,11 +46,31 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             truncation_data=truncation_data,
         )
         model_config = DotDict(model_config)
+
         self.noise_injector = instantiate(
             model_config.model.noise_injector,
             _recursive_=False,
             num_channels=self.num_channels,
         )
+
+    def _prepare_noise_references(
+        self, x_hidden_latent, shard_shapes_hidden, bse, model_comm_group, requires_node_ref, requires_edge_ref
+    ):
+        """Prepare noise reference tensors for both node and edge conditioning."""
+        noise_ref = x_hidden_latent if requires_node_ref else None
+        node_noise_shard_shapes = shard_shapes_hidden if requires_node_ref else None
+
+        noise_edge_ref = None
+        edge_noise_shard_shapes = None
+        if requires_edge_ref:
+            edge_key = (self._graph_name_hidden, "to", self._graph_name_hidden)
+            edge_attr_key = next(iter(self._graph_data[edge_key].keys()))
+            edge_attr = self._graph_data[edge_key][edge_attr_key]
+            base_edge_ref = torch.zeros_like(edge_attr)
+            noise_edge_ref = torch.cat([base_edge_ref for _ in range(bse)], dim=0)
+            edge_noise_shard_shapes = get_shard_shapes(noise_edge_ref, 0, model_comm_group)
+
+        return noise_ref, node_noise_shard_shapes, noise_edge_ref, edge_noise_shard_shapes
 
     def _calculate_input_dim(self, model_config):
         base_input_dim = super()._calculate_input_dim(model_config)
@@ -148,14 +168,32 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
 
-        x_latent_proc, latent_noise = self.noise_injector(
-            x=x_latent,
-            noise_ref=x_hidden_latent,
-            shard_shapes=shard_shapes_hidden,
-            model_comm_group=model_comm_group,
+        # Prepare noise reference tensors based on injector requirements
+        noise_ref, node_noise_shard_shapes, noise_edge_ref, edge_noise_shard_shapes = self._prepare_noise_references(
+            x_hidden_latent,
+            shard_shapes_hidden,
+            bse,
+            model_comm_group,
+            self.noise_injector.requires_node_noise_ref,
+            self.noise_injector.requires_edge_noise_ref,
         )
 
-        processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
+        # Generate noise and return conditionings or inject into the latent representation
+        x_latent_proc, latent_noise, edge_noise = self.noise_injector(
+            x=x_latent,
+            noise_ref=noise_ref,
+            shard_shapes=node_noise_shard_shapes,
+            model_comm_group=model_comm_group,
+            noise_edge_ref=noise_edge_ref,
+            edge_shard_shapes=edge_noise_shard_shapes,
+        )
+
+        # Build conditioning kwargs for processor, empty for injection
+        processor_kwargs = {}
+        if latent_noise is not None:
+            processor_kwargs["cond"] = latent_noise
+        if edge_noise is not None:
+            processor_kwargs["cond_edges"] = edge_noise
 
         x_latent_proc = self.processor(
             x=x_latent_proc,

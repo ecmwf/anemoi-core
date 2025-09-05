@@ -55,6 +55,10 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         self.sigma_min = diffusion_config.sigma_min
         self.inference_defaults = diffusion_config.inference_defaults
 
+        # Conditioning configuration
+        self.use_node_conditioning = diffusion_config.use_node_conditioning
+        self.use_edge_conditioning = diffusion_config.use_edge_conditioning
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -113,17 +117,23 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         out = einops.rearrange(out, "batch ensemble grid vars -> (batch ensemble grid) vars")
         return out
 
-    def _generate_noise_conditioning(self, sigma: torch.Tensor, edge_conditioning: bool = False) -> torch.Tensor:
+    def _generate_noise_conditioning(
+        self, sigma: torch.Tensor, node_conditioning: bool = True, edge_conditioning: bool = False
+    ) -> torch.Tensor:
         noise_cond = self.noise_embedder(sigma)
         noise_cond = self.noise_cond_mlp(noise_cond)
 
-        c_data = self._make_noise_emb(
-            noise_cond,
-            repeat=self.node_attributes.num_nodes[self._graph_name_data],
-        )
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
+        if node_conditioning:
+            c_data = self._make_noise_emb(
+                noise_cond,
+                repeat=self.node_attributes.num_nodes[self._graph_name_data],
+            )
+            c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
+        else:
+            c_data = None
+            c_hidden = None
 
-        if edge_conditioning:  # this is currently not used but could be useful for edge conditioning of GNN
+        if edge_conditioning:
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
                 repeat=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)]["edge_length"].shape[0],
@@ -160,17 +170,37 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         in_out_sharded = grid_shard_shapes is not None
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
-        # prepare noise conditionings
-        c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
-        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group)
-        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group)
+        c_data, c_hidden, c_data_to_hidden, c_hidden_to_data, c_hidden_to_hidden = self._generate_noise_conditioning(
+            sigma, node_conditioning=self.use_node_conditioning, edge_conditioning=self.use_edge_conditioning
+        )
 
-        c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
-        c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
+        if self.use_node_conditioning:
+            shape_c_data = get_shard_shapes(c_data, 0, model_comm_group)
+            shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group)
+            c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
+            c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
 
-        fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
-        processor_kwargs = {"cond": c_hidden}
-        bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
+        if self.use_edge_conditioning:
+            shape_c_data_to_hidden = get_shard_shapes(c_data_to_hidden, 0, model_comm_group)
+            shape_c_hidden_to_data = get_shard_shapes(c_hidden_to_data, 0, model_comm_group)
+            shape_c_hidden_to_hidden = get_shard_shapes(c_hidden_to_hidden, 0, model_comm_group)
+            c_data_to_hidden = shard_tensor(c_data_to_hidden, 0, shape_c_data_to_hidden, model_comm_group)
+            c_hidden_to_data = shard_tensor(c_hidden_to_data, 0, shape_c_hidden_to_data, model_comm_group)
+            c_hidden_to_hidden = shard_tensor(c_hidden_to_hidden, 0, shape_c_hidden_to_hidden, model_comm_group)
+
+        fwd_mapper_kwargs = {}
+        processor_kwargs = {}
+        bwd_mapper_kwargs = {}
+
+        if self.use_node_conditioning:
+            fwd_mapper_kwargs["cond"] = (c_data, c_hidden)
+            processor_kwargs["cond"] = c_hidden
+            bwd_mapper_kwargs["cond"] = (c_hidden, c_data)
+
+        if self.use_edge_conditioning:
+            fwd_mapper_kwargs["cond_edges"] = c_data_to_hidden
+            processor_kwargs["cond_edges"] = c_hidden_to_hidden
+            bwd_mapper_kwargs["cond_edges"] = c_hidden_to_data
 
         x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
             x, y_noised, bse, grid_shard_shapes, model_comm_group

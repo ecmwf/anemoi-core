@@ -57,6 +57,16 @@ class NoiseInjector(nn.Module):
 
         LOGGER.debug("processor noise channels = %d", self.noise_channels)
 
+    @property
+    def requires_node_noise_ref(self):
+        """Whether this noise injector requires node noise reference tensor."""
+        return True  # Base NoiseInjector always needs noise_ref
+
+    @property
+    def requires_edge_noise_ref(self):
+        """Whether this noise injector requires edge noise reference tensor."""
+        return False
+
     def make_noise(self, noise_ref):
         tensor_shape = (*noise_ref.shape[:-1], self.noise_channels)
         noise = torch.randn(size=tensor_shape, dtype=noise_ref.dtype, device=noise_ref.device) * self.noise_std
@@ -87,11 +97,12 @@ class NoiseInjector(nn.Module):
                 ),
             ),
             None,
+            None,
         )
 
 
 class NoiseConditioning(NoiseInjector):
-    """Noise Conditioning."""
+    """Noise Conditioning with optional edge conditioning support."""
 
     def __init__(
         self,
@@ -102,6 +113,8 @@ class NoiseConditioning(NoiseInjector):
         num_channels: int,
         layer_kernels: DotDict,
         inject_noise: bool = True,
+        use_node_noise: bool = True,
+        use_edge_noise: bool = False,
     ) -> None:
         """Initialize NoiseConditioning."""
         super().__init__(
@@ -113,19 +126,56 @@ class NoiseConditioning(NoiseInjector):
             inject_noise=inject_noise,
         )
         self.projection = None
+        self.use_node_noise = use_node_noise
+        self.use_edge_noise = use_edge_noise
+
+    @property
+    def requires_node_noise_ref(self):
+        """Whether this noise injector requires node noise reference tensor."""
+        return self.use_node_noise
+
+    @property
+    def requires_edge_noise_ref(self):
+        """Whether this noise injector requires edge noise reference tensor."""
+        return self.use_edge_noise
+
+    def make_edge_noise(self, noise_edge_ref):
+        """Generate noise for edges."""
+        tensor_shape = (*noise_edge_ref.shape[:-1], self.noise_channels)
+        edge_noise = (
+            torch.randn(size=tensor_shape, dtype=noise_edge_ref.dtype, device=noise_edge_ref.device) * self.noise_std
+        )
+        edge_noise.requires_grad = False
+        return edge_noise
 
     def forward(
         self,
         x: Tensor,
-        noise_ref: Tensor,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        noise_ref: Optional[Tensor] = None,
+        shard_shapes: Optional[tuple] = None,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> tuple[Tensor, Tensor]:
+        noise_edge_ref: Optional[Tensor] = None,
+        edge_shard_shapes: Optional[tuple] = None,
+    ) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
 
-        noise = self.make_noise(noise_ref)
+        # Generate node noise if enabled
+        noise = None
+        if self.use_node_noise:
+            assert noise_ref is not None, "noise_ref must be provided when use_node_noise=True"
+            assert shard_shapes is not None, "shard_shapes must be provided when use_node_noise=True"
+            noise = self.make_noise(noise_ref)
+            node_shapes_sharding = change_channels_in_shape(shard_shapes, self.noise_channels)
+            noise = shard_tensor(noise, 0, node_shapes_sharding, model_comm_group)
+            noise = checkpoint(self.noise_mlp, noise, use_reentrant=False)
 
-        shapes_sharding = change_channels_in_shape(shard_shapes, self.noise_channels)
-        noise = shard_tensor(noise, 0, shapes_sharding, model_comm_group)
-        noise = checkpoint(self.noise_mlp, noise, use_reentrant=False)
+        # Generate edge noise if enabled
+        edge_noise = None
+        if self.use_edge_noise:
+            assert noise_edge_ref is not None, "noise_edge_ref must be provided when use_edge_noise=True"
+            assert edge_shard_shapes is not None, "edge_shard_shapes must be provided when use_edge_noise=True"
+            edge_noise = self.make_edge_noise(noise_edge_ref)
+            edge_shapes_sharding = change_channels_in_shape(edge_shard_shapes, self.noise_channels)
+            edge_noise = shard_tensor(edge_noise, 0, edge_shapes_sharding, model_comm_group)
+            edge_noise = checkpoint(self.noise_mlp, edge_noise, use_reentrant=False)
 
-        return x, noise
+        return x, noise, edge_noise

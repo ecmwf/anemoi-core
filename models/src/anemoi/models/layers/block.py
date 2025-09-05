@@ -273,6 +273,8 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        cond: Optional[Tensor] = None,
+        cond_edges: Optional[Tensor] = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
@@ -281,20 +283,28 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         if self.num_chunks > 1:
             edge_index_list = torch.tensor_split(edge_index, self.num_chunks, dim=1)
             edge_attr_list = torch.tensor_split(edge_attr, self.num_chunks, dim=0)
+            if cond_edges is not None:
+                cond_edges_list = torch.tensor_split(cond_edges, self.num_chunks, dim=0)
+
             edges_out = []
             for i in range(self.num_chunks):
-                out1, edges_out1 = self.conv(x_in, edge_attr_list[i], edge_index_list[i], size=size)
+                conv_layer_kwargs = {"cond": cond_edges_list[i]} if cond_edges is not None else {}
+                out1, edges_out1 = self.conv(
+                    x_in, edge_attr_list[i], edge_index_list[i], size=size, **conv_layer_kwargs
+                )
                 edges_out.append(edges_out1)
                 if i == 0:
                     out = torch.zeros_like(out1)
                 out = out + out1
             edges_new = torch.cat(edges_out, dim=0)
         else:
-            out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
+            conv_layer_kwargs = {"cond": cond_edges} if cond_edges is not None else {}
+            out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size, **conv_layer_kwargs)
 
         out = shard_tensor(out, 0, shapes[1], model_comm_group, gather_in_backward=False)
 
-        nodes_new = self.node_mlp(torch.cat([x, out], dim=1)) + x
+        node_layer_kwargs = {"cond": cond} if cond is not None else {}
+        nodes_new = self.node_mlp(torch.cat([x, out], dim=1), **node_layer_kwargs) + x
 
         return nodes_new, edges_new
 
@@ -350,6 +360,8 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         shapes: tuple,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+        cond_edges: Optional[Tensor] = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
@@ -360,24 +372,37 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         if self.num_chunks > 1:
             edge_index_list = torch.tensor_split(edge_index, self.num_chunks, dim=1)
             edge_attr_list = torch.tensor_split(edge_attr, self.num_chunks, dim=0)
+            if cond_edges is not None:
+                cond_edges_list = torch.tensor_split(cond_edges, self.num_chunks, dim=0)
+
             edges_out = []
             for i in range(self.num_chunks):
-                out1, edges_out1 = self.conv(x_in, edge_attr_list[i], edge_index_list[i], size=size)
+                conv_layer_kwargs = {"cond": cond_edges_list[i]} if cond_edges is not None else {}
+                out1, edges_out1 = self.conv(
+                    x_in, edge_attr_list[i], edge_index_list[i], size=size, **conv_layer_kwargs
+                )
                 edges_out.append(edges_out1)
                 if i == 0:
                     out = torch.zeros_like(out1)
                 out = out + out1
             edges_new = torch.cat(edges_out, dim=0)
         else:
-            out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
+            conv_layer_kwargs = {"cond": cond_edges} if cond_edges is not None else {}
+            out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size, **conv_layer_kwargs)
 
         out = shard_tensor(out, 0, shapes[1], model_comm_group, gather_in_backward=False)
 
-        nodes_new_dst = self.node_mlp(torch.cat([x[1], out], dim=1)) + x[1]
+        node_cond_dst = cond[1] if cond is not None else None
+        node_cond_src = cond[0] if cond is not None else None
 
-        # update only needed in forward mapper
-        nodes_new_src = x[0] if not self.update_src_nodes else self.node_mlp(torch.cat([x[0], x[0]], dim=1)) + x[0]
+        dst_layer_kwargs = {"cond": node_cond_dst} if node_cond_dst is not None else {}
+        nodes_new_dst = self.node_mlp(torch.cat([x[1], out], dim=1), **dst_layer_kwargs) + x[1]
 
+        if not self.update_src_nodes:
+            nodes_new_src = x[0]
+        else:
+            src_layer_kwargs = {"cond": node_cond_src} if node_cond_src is not None else {}
+            nodes_new_src = self.node_mlp(torch.cat([x[0], x[0]], dim=1), **src_layer_kwargs) + x[0]
         nodes_new = (nodes_new_src, nodes_new_dst)
 
         return nodes_new, edges_new
