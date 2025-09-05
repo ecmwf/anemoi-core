@@ -17,8 +17,8 @@ scaler multiplication, and graph node weighting.
  Deterministic Loss Functions
 ******************************
 
-By default anemoi-training trains the model using a latitude-weighted
-mean-squared-error, which is defined in the ``WeightedMSELoss`` class in
+By default anemoi-training trains the model using a mean-squared-error,
+which is defined in the ``MSELoss`` class in
 ``anemoi/training/losses/mse.py``. The loss function can be configured
 in the config file at ``config.training.training_loss``, and
 ``config.training.validation_metrics``.
@@ -32,9 +32,13 @@ The following loss functions are available by default:
 -  ``LogCoshLoss``: log-cosh loss.
 -  ``CombinedLoss``: Combined component weighted loss.
 
-All the above losses by default are averaged across the grid nodes. To
-apply latitude-weighted scaling one needs to pass ``node_weights`` as a
-scaler.
+All the above losses by default are averaged across the grid nodes,
+ensemble dimension and batch size. Losses can also consider specific
+weighting either spatial, vertical or specific to the variables used.
+Those weights are defined via `scalers`. For example spatial scaling
+based on the area of the nodes needs is done using the ``node_weights``
+as a scaler. For more details on the loss function scaling please refer
+to :ref: `_loss_function_scaling`
 
 These are available in the ``anemoi.training.losses`` module, at
 ``anemoi.training.losses.{short_name}.{class_name}``.
