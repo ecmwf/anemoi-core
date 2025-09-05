@@ -38,7 +38,7 @@ weighting either spatial, vertical or specific to the variables used.
 Those weights are defined via `scalers`. For example spatial scaling
 based on the area of the nodes needs is done using the ``node_weights``
 as a scaler. For more details on the loss function scaling please refer
-to :ref: `_loss_function_scaling`
+to :ref:`loss-function-scaling`.
 
 These are available in the ``anemoi.training.losses`` module, at
 ``anemoi.training.losses.{short_name}.{class_name}``.
