@@ -62,6 +62,9 @@ decoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
 
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection
+
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
@@ -73,18 +76,17 @@ trainable_parameters:
 
 attributes:
   edges:
-  - edge_length
-  - edge_dirs
+    - edge_length
+    - edge_dirs
   nodes: []
 
 # Bounding configuration
 bounding: #These are applied in order
-
   # Bound tp (total precipitation) with a Relu bounding layer
   # ensuring a range of [0, infinity) to avoid negative precipitation values.
   - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
     variables:
-    - tp
+      - tp
 
   # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
   # This guarantees that cp is physically consistent with tp by restricting cp
