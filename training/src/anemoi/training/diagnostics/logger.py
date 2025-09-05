@@ -38,6 +38,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
 
     from anemoi.training.diagnostics.mlflow import LOG_MODEL
     from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+    from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
     resumed = config.training.run_id is not None
@@ -70,11 +71,21 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         )
         log_hyperparams = False
 
+    kw = {}
+    if not config.diagnostics.log.mlflow.use_azure:
+        logger_class = AnemoiMLflowLogger
+    else:
+        logger_class = AnemoiAzureMLflowLogger
+        kw["aml_resource_group"] = config.diagnostics.log.mlflow.aml_resource_group
+        kw["aml_workspace_name"] = config.diagnostics.log.mlflow.aml_workspace_name
+        kw["aml_subscription_id"] = config.diagnostics.log.mlflow.aml_subscription_id
+        kw["aml_identity"] = config.diagnostics.log.mlflow.aml_identity
+        kw["azure_log_level"] = config.diagnostics.log.mlflow.azure_log_level
+
     max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
     LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
     log_model = getattr(config.diagnostics.log.mlflow, "log_model", LOG_MODEL)
-
-    logger = AnemoiMLflowLogger(
+    logger = logger_class(
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
         project_name=config.diagnostics.log.mlflow.project_name,
         tracking_uri=tracking_uri,
@@ -90,6 +101,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         authentication=config.diagnostics.log.mlflow.authentication,
         on_resume_create_child=config.diagnostics.log.mlflow.on_resume_create_child,
         max_params_length=max_params_length,
+        **kw,
     )
     config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
     logger.log_hyperparams(
