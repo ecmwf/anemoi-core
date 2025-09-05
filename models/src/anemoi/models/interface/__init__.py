@@ -82,8 +82,8 @@ class AnemoiModelInterface(torch.nn.Module):
         """Builds the model and pre- and post-processors."""
         # Instantiate processors
         processors = [
-            [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
-            for name, processor in self.config.data.processors.items()
+            instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)
+            for processor in self.config.data.processors
         ]
 
         # Assign the processor list pre- and post-processors
@@ -93,8 +93,8 @@ class AnemoiModelInterface(torch.nn.Module):
         # If tendencies statistics are provided, instantiate the tendencies processors
         if self.statistics_tendencies is not None:
             processors = [
-                [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics_tendencies)]
-                for name, processor in self.config.data.processors.items()
+                instantiate(processor, data_indices=self.data_indices, statistics=self.statistics_tendencies)
+                for processor in self.config.data.processors
             ]
             # Assign the processor list pre- and post-processors
             self.pre_processors_tendencies = Processors(processors)
