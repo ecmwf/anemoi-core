@@ -1,4 +1,4 @@
-.. _usage-getting-started:
+.. _usage-getting_started:
 
 #########################
  Create your first graph

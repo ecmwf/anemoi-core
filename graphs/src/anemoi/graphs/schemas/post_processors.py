@@ -10,6 +10,7 @@
 
 import logging
 from typing import Annotated
+from typing import Iterable
 from typing import Literal
 
 from pydantic import Field
@@ -22,10 +23,21 @@ LOGGER = logging.getLogger(__name__)
 class RemoveUnconnectedNodesSchema(BaseModel):
     target_: Literal["anemoi.graphs.processors.RemoveUnconnectedNodes"] = Field(..., alias="_target_")
     "Post processor to remove unconnected nodes."
-    nodes_name: str
+    nodes_name: str | Iterable[str]
     "Nodes from which to remove the unconnected nodes."
     ignore: str = Field(example=None)
     "Attribute name of nodes to be ignored."
+    save_mask_indices_to_attr: str = Field(example=None)
+    "New attribute name to store the mask indices."
+
+
+class SubsetNodesInAreaSchema(BaseModel):
+    target_: Literal["anemoi.graphs.processors.SubsetNodesInArea"] = Field(..., alias="_target_")
+    "Post processor to remove unconnected nodes."
+    nodes_name: str | Iterable[str]
+    "Nodes from which to remove the unconnected nodes."
+    area: tuple[float, float, float, float] = Field(default=(40, 10, 30, 20))
+    "Area of interest to crop the nodes, (north, west, south, east)."
     save_mask_indices_to_attr: str = Field(example=None)
     "New attribute name to store the mask indices."
 
@@ -56,6 +68,6 @@ class SortEdgeIndexSchema(BaseModel):
 
 
 ProcessorSchemas = Annotated[
-    RemoveUnconnectedNodesSchema | RestrictEdgeLengthSchema | SortEdgeIndexSchema,
+    RemoveUnconnectedNodesSchema | SubsetNodesInAreaSchema | RestrictEdgeLengthSchema | SortEdgeIndexSchema,
     Field(discriminator="target_"),
 ]
