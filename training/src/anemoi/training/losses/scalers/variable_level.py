@@ -10,10 +10,13 @@
 
 import logging
 from abc import abstractmethod
+from typing import Any
 
 import torch
+from hydra.utils import instantiate
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.variable import BaseVariableLossScaler
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -22,6 +25,71 @@ LOGGER = logging.getLogger(__name__)
 
 class BaseVariableLevelScaler(BaseVariableLossScaler):
     """Configurable method converting variable level to loss scalings."""
+
+    def __init__(
+        self,
+        data_indices: IndexCollection,
+        group: str,
+        metadata_extractor: ExtractVariableGroupAndLevel,
+        norm: str | None = None,
+        **kwargs,
+    ) -> None:
+        """Initialise variable level scaler.
+
+        Parameters
+        ----------
+        data_indices : IndexCollection
+            Collection of data indices.
+        group : str
+            Group of variables to scale.
+        metadata_extractor : ExtractVariableGroupAndLevel
+            Metadata extractor for variable groups and levels.
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
+        """
+        super().__init__(data_indices, metadata_extractor=metadata_extractor, norm=norm)
+        del kwargs
+        self.scaling_group = group
+
+    @abstractmethod
+    def get_level_scaling(self, variable_level: int) -> float:
+        """Get the scaling of a variable level.
+
+        Parameters
+        ----------
+        variable_level : int
+            Variable level to scale.
+
+        Returns
+        -------
+        float
+            Scaling of the variable level.
+        """
+        ...
+
+    def get_scaling_values(self, **_kwargs) -> torch.Tensor:
+        variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
+
+        LOGGER.info(
+            "Variable Level Scaling: Applying %s scaling to %s variables (%s)",
+            self.__class__.__name__,
+            self.scaling_group,
+            self.variable_metadata_extractor.get_group_specification(self.scaling_group),
+        )
+
+        for variable_name, idx in self.data_indices.model.output.name_to_index.items():
+            variable_group, _, variable_level = self.variable_metadata_extractor.get_group_and_level(variable_name)
+            if variable_group != self.scaling_group:
+                continue
+            # Apply variable level scaling
+            assert variable_level is not None, f"Variable {variable_name} has no level to scale."
+            variable_level_scaling[idx] = self.get_level_scaling(variable_level)
+
+        return variable_level_scaling
+
+
+class BaseLinearVariableLevelScaler(BaseVariableLevelScaler):
+    """Configurable method converting variable level to loss scalings with a slope and intercept."""
 
     def __init__(
         self,
@@ -50,72 +118,59 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
-        super().__init__(data_indices, metadata_extractor=metadata_extractor, norm=norm)
+        super().__init__(data_indices, group, metadata_extractor, norm)
         del kwargs
-        self.scaling_group = group
         self.y_intercept = y_intercept
         self.slope = slope
 
-    @abstractmethod
-    def get_level_scaling(self, variable_level: int) -> float:
-        """Get the scaling of a variable level.
-
-        Parameters
-        ----------
-        variable_level : int
-            Variable level to scale.
-
-        Returns
-        -------
-        float
-            Scaling of the variable level.
-        """
-        ...
-
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
-        variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
-
-        LOGGER.info(
-            "Variable Level Scaling: Applying %s scaling to %s variables (%s)",
-            self.__class__.__name__,
-            self.scaling_group,
-            self.variable_metadata_extractor.get_group_specification(self.scaling_group),
-        )
         LOGGER.info("with slope = %s and y-intercept/minimum = %s.", self.slope, self.y_intercept)
 
-        for variable_name, idx in self.data_indices.model.output.name_to_index.items():
-            variable_group, _, variable_level = self.variable_metadata_extractor.get_group_and_level(variable_name)
-            if variable_group != self.scaling_group:
-                continue
-            # Apply variable level scaling
-            assert variable_level is not None, f"Variable {variable_name} has no level to scale."
-            variable_level_scaling[idx] = self.get_level_scaling(float(variable_level))
-
-        return variable_level_scaling
+        return super().get_scaling_values(**_kwargs)
 
 
-class LinearVariableLevelScaler(BaseVariableLevelScaler):
+class LinearVariableLevelScaler(BaseLinearVariableLevelScaler):
     """Linear with slope self.slope, yaxis shift by self.y_intercept."""
 
-    def get_level_scaling(self, variable_level: float) -> torch.Tensor:
+    def get_level_scaling(self, variable_level: float) -> float:
         return variable_level * self.slope + self.y_intercept
 
 
-class ReluVariableLevelScaler(BaseVariableLevelScaler):
+class ReluVariableLevelScaler(BaseLinearVariableLevelScaler):
     """Linear above self.y_intercept, taking constant value self.y_intercept below."""
 
-    def get_level_scaling(self, variable_level: float) -> torch.Tensor:
+    def get_level_scaling(self, variable_level: float) -> float:
         return max(self.y_intercept, variable_level * self.slope)
 
 
-class PolynomialVariableLevelScaler(BaseVariableLevelScaler):
+class PolynomialVariableLevelScaler(BaseLinearVariableLevelScaler):
     """Polynomial scaling, (slope * variable_level)^2, yaxis shift by self.y_intercept."""
 
-    def get_level_scaling(self, variable_level: float) -> torch.Tensor:
+    def get_level_scaling(self, variable_level: float) -> float:
         return (self.slope * variable_level) ** 2 + self.y_intercept
 
 
-class NoVariableLevelScaler(BaseVariableLevelScaler):
+class ConstantLevelScaler(BaseVariableLevelScaler):
+    """Constant scaling."""
+
+    def __init__(
+        self,
+        data_indices: IndexCollection,
+        group: str,
+        constant: float,
+        metadata_extractor: ExtractVariableGroupAndLevel,
+        **kwargs,
+    ) -> None:
+        """Initialise Scaler with constant scaling of 1."""
+        super().__init__(data_indices, group, metadata_extractor)
+        self.constant = constant
+        del kwargs
+
+    def get_level_scaling(self, variable_level: float) -> float:
+        return self.constant
+
+
+class NoVariableLevelScaler(ConstantLevelScaler):
     """Constant scaling by 1.0."""
 
     def __init__(
@@ -126,17 +181,50 @@ class NoVariableLevelScaler(BaseVariableLevelScaler):
         **kwargs,
     ) -> None:
         """Initialise Scaler with constant scaling of 1."""
-        del kwargs
         super().__init__(
             data_indices,
             group,
-            y_intercept=1.0,
-            slope=0.0,
+            constant=1.0,
             metadata_extractor=metadata_extractor,
         )
+        del kwargs
 
-    @staticmethod
-    def get_level_scaling(variable_level: float) -> torch.Tensor:
-        del variable_level  # unused
-        # no scaling, always return 1.0
-        return 1.0
+
+class StepVariableLevelScaler(BaseVariableLevelScaler):
+    """Step scaling"""
+
+    def __init__(
+        self,
+        data_indices: IndexCollection,
+        group: str,
+        steps: dict[int, Any],
+        metadata_extractor: ExtractVariableGroupAndLevel,
+        norm: str | None = None,
+        **kwargs,
+    ):
+        super().__init__(data_indices, group, metadata_extractor, norm)
+        del kwargs
+        self.steps = steps
+        self._data_indices = data_indices
+
+    def _get_step(self, level: int) -> int:
+        level_step: int | None = None
+        for step in self.steps:
+            if level >= step and (level_step is None or step > level_step):
+                level_step = step
+        if level_step is None:
+            raise ValueError(f"No valid step for level {level}.")
+        return level_step
+
+    def get_level_scaling(self, variable_level: int) -> float:
+        step_config = self.steps[self._get_step(variable_level)]
+        scaler: BaseScaler = instantiate(
+            step_config,
+            data_indices=self._data_indices,
+            metadata_extractor=self.variable_metadata_extractor,
+            _recursive_=False,
+        )
+        if not isinstance(scaler, BaseVariableLevelScaler):
+            raise ValueError(f"{step_config._target_} scaler should be a variable loss scaler")
+        scaling_values = scaler.get_level_scaling(variable_level)
+        return scaling_values

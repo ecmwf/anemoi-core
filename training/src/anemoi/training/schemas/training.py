@@ -159,7 +159,7 @@ class VariableLevelScalerTargets(str, Enum):
     no_scaler = "anemoi.training.losses.scalers.NoVariableLevelScaler"
 
 
-class VariableLevelScalerSchema(BaseModel):
+class LinearVariableLevelScalerSchema(BaseModel):
     target_: VariableLevelScalerTargets = Field(
         example="anemoi.training.losses.scalers.ReluVariableLevelScaler",
         alias="_target_",
@@ -170,6 +170,33 @@ class VariableLevelScalerSchema(BaseModel):
     "Slope of scaling function."
     y_intercept: float = Field(example=0.001)
     "Y-axis shift of scaling function."
+
+
+class ConstantVariableLevelScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.ConstantVariableLevelScaler"] = Field(..., alias="_target_")
+    group: str = Field(example="pl")
+    "Group of variables to scale."
+    constant: float = Field(example=1.0)
+    "Value of the coef."
+
+
+class NoVariableLevelScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.NoVariableLevelScaler"] = Field(..., alias="_target_")
+    group: str = Field(example="pl")
+    "Group of variables to scale."
+
+
+VariableLevelScalerSchema = (
+    LinearVariableLevelScalerSchema | ConstantVariableLevelScalerSchema | NoVariableLevelScalerSchema
+)
+
+
+class StepVariableLevelScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.StepVariableLevelScaler"] = Field(..., alias="_target_")
+    group: str = Field(example="pl")
+    "Group of variables to scale."
+    steps: dict[int, VariableLevelScalerSchema] = {}
+    "Steps of VariableLevelScalers indexed by levels"
 
 
 class GraphNodeAttributeScalerSchema(BaseModel):
@@ -203,6 +230,7 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 ScalerSchema = (
     GeneralVariableLossScalerSchema
     | VariableLevelScalerSchema
+    | StepVariableLevelScalerSchema
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
     | NaNMaskScalerSchema
