@@ -66,6 +66,16 @@ class AnemoiModelEncProcDec(nn.Module):
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
+
+        self.encoder_act_checkpointing = False
+        self.decoder_act_checkpointing = False
+        self.processor_act_checkpointing = False
+
+        self._calculate_shapes_and_indices(data_indices)
+        self._assert_matching_indices(data_indices)
+        self.data_indices = data_indices
+        self.statistics = statistics
+
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
@@ -281,7 +291,7 @@ class AnemoiModelEncProcDec(nn.Module):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
-        use_reentrant: bool = False,
+        act_checkpointing: bool = False,
         **kwargs,
     ) -> Tensor:
         """Run mapper with activation checkpoint.
@@ -305,8 +315,8 @@ class AnemoiModelEncProcDec(nn.Module):
             Destination data is sharded, by default False
         keep_x_dst_sharded : bool, optional
             Keep destination data sharded, by default False
-        use_reentrant : bool, optional
-            Use reentrant, by default False
+        act_checkpointing : bool, optional
+            Use activation checkpointing
 
         Returns
         -------
@@ -320,11 +330,16 @@ class AnemoiModelEncProcDec(nn.Module):
             "x_src_is_sharded": x_src_is_sharded,
             "x_dst_is_sharded": x_dst_is_sharded,
             "keep_x_dst_sharded": keep_x_dst_sharded,
+            "act_checkpointing": act_checkpointing,
             **kwargs,
         }
-        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
-            return mapper(data, **mapper_args)  # finer grained checkpointing inside GTM with edge sharding
-        return checkpoint(mapper, data, **mapper_args, use_reentrant=use_reentrant)
+        # Determine if checkpointing is needed, GTM with edge sharding has custom checkpointing
+        no_ckpt = (not act_checkpointing) or (
+            isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges"
+        )
+        if no_ckpt:
+            return mapper(data, **mapper_args)
+        return checkpoint(mapper, data, **mapper_args, use_reentrant=False)
 
     def forward(
         self,
@@ -372,6 +387,7 @@ class AnemoiModelEncProcDec(nn.Module):
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            act_checkpointing=self.encoder_act_checkpointing,
         )
 
         # Processor
@@ -380,6 +396,7 @@ class AnemoiModelEncProcDec(nn.Module):
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
             model_comm_group=model_comm_group,
+            act_checkpointing=self.processor_act_checkpointing,
         )
 
         # Skip
@@ -395,6 +412,7 @@ class AnemoiModelEncProcDec(nn.Module):
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
+            act_checkpointing=self.decoder_act_checkpointing,
         )
 
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
