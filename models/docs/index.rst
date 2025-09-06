@@ -38,6 +38,12 @@ weather forecasting.
 
 .. toctree::
    :maxdepth: 1
+   :caption: CLI
+
+   cli/migration.rst
+
+.. toctree::
+   :maxdepth: 1
    :glob:
    :caption: API Reference
 
@@ -48,6 +54,7 @@ weather forecasting.
    :caption: Contributing
 
    contributing
+   create-migrations
 
 *****************
  Anemoi packages

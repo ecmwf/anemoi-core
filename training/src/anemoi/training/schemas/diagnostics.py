@@ -18,7 +18,7 @@ from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 from pydantic import root_validator
 
-from anemoi.training.diagnostics.mlflow.logger import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)

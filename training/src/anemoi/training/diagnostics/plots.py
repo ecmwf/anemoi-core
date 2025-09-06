@@ -229,15 +229,15 @@ def plot_power_spectrum(
     grid_pc_lon, grid_pc_lat = np.meshgrid(regular_pc_lon, regular_pc_lat)
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        yt = y_true[..., variable_idx].squeeze()
-        yp = y_pred[..., variable_idx].squeeze()
+        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
         # check for any nan in yt
         nan_flag = np.isnan(yt).any()
 
         method = "linear" if nan_flag else "cubic"
         if output_only:
-            xt = x[..., variable_idx].squeeze()
+            xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1)
             yt_i = griddata((pc_lon, pc_lat), (yt - xt), (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
             yp_i = griddata((pc_lon, pc_lat), (yp - xt), (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
         else:
@@ -343,14 +343,14 @@ def plot_histogram(
         ax = [ax]
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        yt = y_true[..., variable_idx].squeeze()
-        yp = y_pred[..., variable_idx].squeeze()
+        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
         # postprocessed outputs so we need to handle possible NaNs
 
         # Calculate the histogram and handle NaNs
         if output_only:
             # histogram of true increment and predicted increment
-            xt = x[..., variable_idx].squeeze() * int(output_only)
+            xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
             yt_xt = yt - xt
             yp_xt = yp - xt
             # enforce the same binning for both histograms
@@ -439,9 +439,9 @@ def plot_predicted_multilevel_flat_sample(
         colormaps = {}
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        xt = x[..., variable_idx].squeeze() * int(output_only)
-        yt = y_true[..., variable_idx].squeeze()
-        yp = y_pred[..., variable_idx].squeeze()
+        xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
+        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
         # get the colormap for the variable as defined in config file
         cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
