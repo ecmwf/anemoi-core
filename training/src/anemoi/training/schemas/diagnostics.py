@@ -296,6 +296,7 @@ class MlflowSchema(BaseModel):
             values["tracking_uri"] = None
         return values
 
+
 class AzureMlflowSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"] = Field(
         ...,

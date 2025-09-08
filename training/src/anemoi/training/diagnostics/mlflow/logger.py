@@ -14,7 +14,8 @@ import os
 import re
 import sys
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 from argparse import Namespace
 from collections.abc import Mapping
 from pathlib import Path
@@ -340,7 +341,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
         # Report max parameters length
         LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
-
 
         self._init_authentication(
             tracking_uri=tracking_uri,
@@ -769,7 +769,6 @@ class AnemoiMLflowLogger(BaseAnemoiMLflowLogger):
         offline: bool,
     ) -> None:
         """Authentication for a standard MLFlow server"""
-
         enabled = authentication and not offline
         self.auth = TokenAuth(tracking_uri, enabled=enabled)
 
