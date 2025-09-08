@@ -253,6 +253,10 @@ class WandbSchema(BaseModel):
 
 
 class MlflowSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
+        ...,
+        alias="_target_",
+    )
 
     enabled: bool
     "Use MLflow logger."
@@ -283,21 +287,59 @@ class MlflowSchema(BaseModel):
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
     max_params_length: int = MAX_PARAMS_LENGTH
     "Maximum number of hpParams to be logged with mlflow"
-    use_azure: bool = False
-    "If true, log to azure ml workspace server"
+    save_dir: str | None = None
+    "Directory to save logs to when offline=True, default=config.hardware.paths.logs.mlflow"
+
+    @root_validator(pre=True)
+    def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+        if values["enabled"] is False:
+            values["tracking_uri"] = None
+        return values
+
+class AzureMlflowSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"] = Field(
+        ...,
+        alias="_target_",
+    )
+
+    enabled: bool
+    "Use AzureMLflow logger."
+    log_model: bool | Literal["all"] | None = None
+    "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
+            If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
+    tracking_uri: str | None = None
+    "Address of local or remote tracking server."
+    experiment_name: str
+    "Name of experiment."
+    project_name: str
+    "Name of project."
+    system: bool
+    "Activate system metrics."
+    terminal: bool
+    "Log terminal logs to MLflow."
+    run_name: str | None
+    "Name of run."
+    on_resume_create_child: bool
+    "Whether to create a child run when resuming a run."
+    expand_hyperparams: list[str] = Field(default_factory=lambda: ["config"])
+    "Keys to expand within params. Any key being expanded will have lists converted according to `expand_iterables`."
+    http_max_retries: PositiveInt = Field(example=35)
+    "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
+    max_params_length: int = MAX_PARAMS_LENGTH
+    "Maximum number of hpParams to be logged with mlflow"
     identity: str | None = None
     "Type of identity to use for logging in with Azure ML."
     resource_group: str | None = None
-    "If using AML to log with MLFlow, name of the resource group"
+    "Name of the AzureML resource group"
     workspace_name: str | None = None
-    "If using AML to log with MLFlow, name of the workspace"
+    "Name of the AzureML workspace"
     subscription_id: str | None = None
-    "If using AML to log with MLFlow, subscription ID"
+    "AzureML subscription ID"
     azure_log_level: str = "WARNING"
     "Log level for all azure packages (azure-identity, azure-core, etc)"
 
     @root_validator(pre=True)
-    def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+    def clean_entity(cls: type["AzureMlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["tracking_uri"] = None
         return values
@@ -313,7 +355,7 @@ class LoggingSchema(BaseModel):
     "W&B logging schema."
     tensorboard: TensorboardSchema
     "TensorBorad logging schema."
-    mlflow: MlflowSchema
+    mlflow: MlflowSchema | AzureMlflowSchema
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."

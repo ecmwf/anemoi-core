@@ -42,7 +42,6 @@ except ModuleNotFoundError as e:
     )
     raise ModuleNotFoundError(msg) from e
 
-from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
@@ -148,8 +147,9 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         log_hyperparams: bool | None = True,
         on_resume_create_child: bool | None = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
+        http_max_retries: int | None = 35,
     ) -> None:
-        """Initialize the AnemoiMLflowLogger.
+        """Initialize the AnemoiAzureMLflowLogger.
 
         Parameters
         ----------
@@ -190,20 +190,9 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         max_params_length: int | None, optional
             Maximum number of params to be logged to Mlflow
         """
+        # TODO: can we remove this?
+        # need to import to set_tracking_uri
         import mlflow
-
-        self._resumed = resumed
-        self._forked = forked
-        self._flag_log_hparams = log_hyperparams
-        self._max_params_length = max_params_length
-
-        self._fork_run_server2server = None
-        self._parent_run_server2server = None
-        self._parent_dry_run = False
-
-        # <-- Azure specific stuff -->
-        # we don't need authenticate, this just lets us easily subclass the logger
-        self.auth = NoAuth()
 
         # Set azure logging to warning, since otherwise it's way too much
         azure_logger = logging.getLogger("azure")
@@ -227,35 +216,40 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
                 workspace_name,
             ).mlflow_tracking_uri
 
+
         mlflow.set_tracking_uri(tracking_uri)
 
-        # <--/ End of Azure specific stuff -->
-
+        # TODO: add ocmment why this is necessary... i think this is more azure env var stuff
         run_id = run_id or os.getenv("MLFLOW_RUN_ID")
-        run_id, run_name, tags = self._get_mlflow_run_params(
+
+        super().__init__(
+            experiment_name=experiment_name,
             project_name=project_name,
             run_name=run_name,
-            config_run_id=run_id,
-            fork_run_id=fork_run_id,
             tracking_uri=tracking_uri,
-            on_resume_create_child=on_resume_create_child,
-        )
-
-        # Track logged metrics to prevent duplicate logs
-        # 2000 has been chosen as this should contain metrics form many steps
-        self._logged_metrics = FixedLengthSet(maxlen=2000)  # Track (key, step)
-
-        MLFlowLogger.__init__(
-            self,
-            experiment_name=experiment_name,
-            run_name=run_name,
-            tracking_uri=tracking_uri,
-            tags=tags,
             save_dir=None,
             log_model=log_model,
             prefix=prefix,
+            resumed=resumed,
+            forked=forked,
             run_id=run_id,
+            fork_run_id=fork_run_id,
+            offline=False,
+            authentication=False,
+            log_hyperparams=log_hyperparams,
+            on_resume_create_child=on_resume_create_child,
+            max_params_length=max_params_length,
         )
+
+    def _init_authentication(
+        self,
+        tracking_uri: str,
+        authentication: bool | None,
+        offline: bool,
+    ) -> None:
+        """No need to authenticate with Azure ML flavor of MLFlow logger"""
+        self.auth = NoAuth()
+
 
     @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:

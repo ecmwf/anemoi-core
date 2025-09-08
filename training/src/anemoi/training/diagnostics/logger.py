@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 
+from hydra.utils import instantiate
 import pytorch_lightning as pl
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -27,91 +28,46 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    # 35 retries allow for 1 hour of server downtime
-    http_max_retries = config.diagnostics.log.mlflow.http_max_retries
+    logger_config = OmegaConf.to_container(convert_to_omegaconf(config.diagnostics.log.mlflow))
+    logger_config.pop("enabled")
 
-    os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(http_max_retries)
-    os.environ["_MLFLOW_HTTP_REQUEST_MAX_RETRIES_LIMIT"] = str(http_max_retries + 1)
-    # these are the default values, but set them explicitly in case they change
-    os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR"] = "2"
-    os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_JITTER"] = "1"
+    # TODO: this seems a bit dirty
+    log_system = logger_config.pop("system")
+    log_terminal = logger_config.pop("terminal")
+    expand_hyperparams = logger_config.pop("expand_hyperparams")
 
-    from anemoi.training.diagnostics.mlflow import LOG_MODEL
-    from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
-    from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger
-    from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
-
+    # Defaults that exist outside the scope of config.diagnostics.log.mlflow
     resumed = config.training.run_id is not None
     forked = config.training.fork_run_id is not None
+    offline = logger_config.get("offline", False)
 
-    save_dir = config.hardware.paths.logs.mlflow
-
-    offline = config.diagnostics.log.mlflow.offline
-    if not offline:
-        tracking_uri = config.diagnostics.log.mlflow.tracking_uri
-        LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
-    else:
-        tracking_uri = None
-
+    # TODO: This does not make sense, and if we get rid of it, the 3 lines above can be removed too
     if (resumed or forked) and (offline):  # when resuming or forking offline -
-        # tracking_uri = ${hardware.paths.logs.mlflow}
-        tracking_uri = str(save_dir)
-    # create directory if it does not exist
-    Path(config.hardware.paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
+        logging_config["tracking_uri"] = str(save_dir)
 
-    log_hyperparams = True
-    if resumed and not config.diagnostics.log.mlflow.on_resume_create_child:
-        LOGGER.info(
-            (
-                "Resuming run without creating child run - MLFlow logs will not update the"
-                "initial runs hyperparameters with those of the resumed run."
-                "To update the initial run's hyperparameters, set "
-                "`diagnostics.log.mlflow.on_resume_create_child: True`."
-            ),
-        )
-        log_hyperparams = False
+    if "save_dir" in logger_config:
+        if logger_config["save_dir"] is None:
+            logger_config["save_dir"] = config.hardware.paths.logs.mlflow
 
-    kw = {}
-    if not config.diagnostics.log.mlflow.use_azure:
-        logger_class = AnemoiMLflowLogger
-    else:
-        logger_class = AnemoiAzureMLflowLogger
-        kw["resource_group"] = config.diagnostics.log.mlflow.resource_group
-        kw["workspace_name"] = config.diagnostics.log.mlflow.workspace_name
-        kw["subscription_id"] = config.diagnostics.log.mlflow.subscription_id
-        kw["identity"] = config.diagnostics.log.mlflow.identity
-        kw["azure_log_level"] = config.diagnostics.log.mlflow.azure_log_level
+        # only create save_dir if it's specified in schema (e.g. it's not for Azure)
+        Path(logger_config["save_dir"]).mkdir(parents=True, exist_ok=True)
 
-    max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
-    LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
-    log_model = getattr(config.diagnostics.log.mlflow, "log_model", LOG_MODEL)
-    logger = logger_class(
-        experiment_name=config.diagnostics.log.mlflow.experiment_name,
-        project_name=config.diagnostics.log.mlflow.project_name,
-        tracking_uri=tracking_uri,
-        save_dir=save_dir,
-        run_name=config.diagnostics.log.mlflow.run_name,
+    logger = instantiate(
+        logger_config,
         run_id=config.training.run_id,
         fork_run_id=config.training.fork_run_id,
-        log_model=log_model,
-        offline=offline,
         resumed=resumed,
         forked=forked,
-        log_hyperparams=log_hyperparams,
-        authentication=config.diagnostics.log.mlflow.authentication,
-        on_resume_create_child=config.diagnostics.log.mlflow.on_resume_create_child,
-        max_params_length=max_params_length,
-        **kw,
     )
     config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
     logger.log_hyperparams(
         config_params,
-        expand_keys=config.diagnostics.log.mlflow.expand_hyperparams,
+        expand_keys=expand_hyperparams,
     )
 
-    if config.diagnostics.log.mlflow.terminal:
+    if log_terminal:
         logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)
-    if config.diagnostics.log.mlflow.system:
+    if log_system:
         logger.log_system_metrics()
 
     return logger

@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import time
+from abc import ABC, abstractmethod
 from argparse import Namespace
 from collections.abc import Mapping
 from pathlib import Path
@@ -30,6 +31,7 @@ from pytorch_lightning.loggers.mlflow import _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from typing_extensions import override
 
+from anemoi.training.diagnostics.mlflow import LOG_MODEL
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
@@ -247,7 +249,7 @@ class LogsMonitor:
             pass
 
 
-class AnemoiMLflowLogger(MLFlowLogger):
+class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
     """A custom MLflow logger that logs terminal output."""
 
     def __init__(
@@ -257,7 +259,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         run_name: str | None = None,
         tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
         save_dir: str | None = "./mlruns",
-        log_model: Literal["all"] | bool = False,
+        log_model: Literal["all"] | bool = LOG_MODEL,
         prefix: str = "",
         resumed: bool | None = False,
         forked: bool | None = False,
@@ -268,6 +270,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         log_hyperparams: bool | None = True,
         on_resume_create_child: bool | None = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
+        http_max_retries: int | None = 35,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -305,30 +308,45 @@ class AnemoiMLflowLogger(MLFlowLogger):
             Whether to create a child run when resuming a run, by default False
         max_params_length: int | None, optional
             Maximum number of params to be logged to Mlflow
+        http_max_retries: int | None, optional
+            Maximum number of retries for MLflow HTTP requests, default 35
         """
         self._resumed = resumed
         self._forked = forked
         self._flag_log_hparams = log_hyperparams
+        if resumed and not on_resume_create_child:
+            LOGGER.info(
+                (
+                    "Resuming run without creating child run - MLFlow logs will not update the"
+                    "initial runs hyperparameters with those of the resumed run."
+                    "To update the initial run's hyperparameters, set "
+                    "`diagnostics.log.mlflow.on_resume_create_child: True`."
+                ),
+            )
+            self._flag_log_hparams = False
 
         self._fork_run_server2server = None
         self._parent_run_server2server = None
         self._parent_dry_run = False
         self._max_params_length = max_params_length
 
-        enabled = authentication and not offline
-        self.auth = TokenAuth(tracking_uri, enabled=enabled)
+        # max http retries
+        os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(http_max_retries)
+        os.environ["_MLFLOW_HTTP_REQUEST_MAX_RETRIES_LIMIT"] = str(http_max_retries + 1)
 
-        if rank_zero_only.rank == 0:
-            if offline:
-                LOGGER.info("MLflow is logging offline.")
-            else:
-                LOGGER.info(
-                    "MLflow token authentication %s for %s",
-                    "enabled" if enabled else "disabled",
-                    tracking_uri,
-                )
-                self.auth.authenticate()
-                health_check(tracking_uri)
+        # these are the default values, but set them explicitly in case they change
+        os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR"] = "2"
+        os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_JITTER"] = "1"
+
+        # Report max parameters length
+        LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
+
+
+        self._init_authentication(
+            tracking_uri=tracking_uri,
+            authentication=authentication,
+            offline=offline,
+        )
 
         run_id, run_name, tags = self._get_mlflow_run_params(
             project_name=project_name,
@@ -346,6 +364,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         else:
             # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
             # saving dir and save all artifacts/metrics to the remote server database
+            LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
             save_dir = None
 
         super().__init__(
@@ -362,6 +381,15 @@ class AnemoiMLflowLogger(MLFlowLogger):
         # Track logged metrics to prevent duplicate logs
         # 2000 has been chosen as this should contain metrics form many steps
         self._logged_metrics = FixedLengthSet(maxlen=2000)  # Track (key, step)
+
+    @abstractmethod
+    def _init_authentication(
+        self,
+        tracking_uri: str,
+        authentication: bool | None,
+        offline: bool,
+    ) -> None:
+        """Initialize authentication specific to each logger"""
 
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
         """Check if the parent run is a dry run.
@@ -731,3 +759,28 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 self.experiment.log_artifact(self.run_id, tmp_model_path, artifact_subdir)
             except Exception as e:
                 LOGGER.error(f"Failed to log checkpoint artifact: {e}")
+
+
+class AnemoiMLflowLogger(BaseAnemoiMLflowLogger):
+    def _init_authentication(
+        self,
+        tracking_uri: str,
+        authentication: bool | None,
+        offline: bool,
+    ) -> None:
+        """Authentication for a standard MLFlow server"""
+
+        enabled = authentication and not offline
+        self.auth = TokenAuth(tracking_uri, enabled=enabled)
+
+        if rank_zero_only.rank == 0:
+            if offline:
+                LOGGER.info("MLflow is logging offline.")
+            else:
+                LOGGER.info(
+                    "MLflow token authentication %s for %s",
+                    "enabled" if enabled else "disabled",
+                    tracking_uri,
+                )
+                self.auth.authenticate()
+                health_check(tracking_uri)
