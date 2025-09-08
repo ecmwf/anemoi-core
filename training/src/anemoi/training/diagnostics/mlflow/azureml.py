@@ -158,9 +158,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         azure_log_level: str, optional
             Log level for all azure packages (azure-identity, azure-core, etc)
         """
-        # TODO: can we remove this?
-        # need to import to set_tracking_uri
-        import mlflow
 
         # Set azure logging to warning, since otherwise it's way too much
         azure_logger = logging.getLogger("azure")
@@ -183,9 +180,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
                 resource_group,
                 workspace_name,
             ).mlflow_tracking_uri
-
-
-        mlflow.set_tracking_uri(tracking_uri)
 
         # Azure sets the mlflow run id when the user runs az ml job create,
         # so unless we are forking/resuming etc, we want to grab this environment variable
