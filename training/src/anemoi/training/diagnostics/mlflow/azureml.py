@@ -175,7 +175,7 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         # fall back to subscription-based method if not
         if not tracking_uri:
             LOGGER.warning(
-                "Could not retrieve Azure MLFlow uri automatically;trying to retrieve from subscription...",
+                "Could not retrieve Azure MLFlow uri automatically; trying to retrieve from subscription...",
             )
             tracking_uri = get_azure_workspace(
                 identity or "default",
@@ -187,7 +187,8 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
 
         mlflow.set_tracking_uri(tracking_uri)
 
-        # TODO: add ocmment why this is necessary... i think this is more azure env var stuff
+        # Azure sets the mlflow run id when the user runs az ml job create,
+        # so unless we are forking/resuming etc, we want to grab this environment variable
         run_id = run_id or os.getenv("MLFLOW_RUN_ID")
 
         super().__init__(
