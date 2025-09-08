@@ -14,6 +14,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.processors.post_process import RemoveUnconnectedNodes
 from anemoi.graphs.processors.post_process import RestrictEdgeLength
+from anemoi.graphs.processors.post_process import SubsetNodesInArea
 
 
 def test_remove_unconnected_nodes(graph_with_isolated_nodes: HeteroData):
@@ -162,3 +163,13 @@ def test_restrict_edge_length_target_mask(graph_long_and_short_edges: HeteroData
 
     assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
     assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
+
+
+def test_subset_nodes_in_area(graph_long_and_short_edges: HeteroData):
+    processor = SubsetNodesInArea("test_nodes", (90, -1, -90, 1))
+    graph = processor.update_graph(graph_long_and_short_edges)
+
+    # test the processor removes the nodes outside
+    assert graph["test_nodes"].num_nodes == 2
+    # test the processor removes the edges from/to removed nodes
+    assert torch.all(graph["test_nodes", "to", "test_nodes"].edge_index == torch.tensor([[0], [1]]))
