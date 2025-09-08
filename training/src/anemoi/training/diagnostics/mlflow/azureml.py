@@ -250,33 +250,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         """No need to authenticate with Azure ML flavor of MLFlow logger"""
         self.auth = NoAuth()
 
-
-    @rank_zero_only
-    def log_hyperparams(self, params: dict[str, Any] | Namespace, *, expand_keys: list[str] | None = None) -> None:
-        super().log_hyperparams(params=params, expand_keys=expand_keys)
-        # if not self._display_name_is_run_id:
-        #     # now set Azure display name to be equal to the run name anemoi sees
-        #     # this apparently should happen after the logger is initialized
-        #     from azureml.core import Run as AzureMLRun
-        #     from azureml.core import Workspace
-        #     from azureml.core.authentication import ServicePrincipalAuthentication
-        #
-        #     sp_auth = ServicePrincipalAuthentication(
-        #         tenant_id=os.environ["AZURE_TENANT_ID"],
-        #         service_principal_id=os.environ["AZURE_CLIENT_ID"],
-        #         service_principal_password=os.environ["AZURE_CLIENT_SECRET"],
-        #     )
-        #     ws = Workspace(
-        #         subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
-        #         resource_group=self.resource_group,
-        #         workspace_name=self.workspace_name,
-        #         auth=sp_auth,
-        #     )
-        #     run = AzureMLRun.get(ws, run_id=self.run_id)
-        #     run.display_name = self.run_id
-        #     run.flush()
-        #     self._display_name_is_run_id = True
-
     @staticmethod
     def log_hyperparams_in_mlflow(
         client: MlflowClient,
