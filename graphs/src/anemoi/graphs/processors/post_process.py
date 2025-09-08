@@ -70,13 +70,13 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
         idx_mapping = self.create_indices_mapper_from_mask(mask)
         for edges_name in graph.edge_types:
             if edges_name[0] == nodes_name:
-                valid_edges_mask = mask[graph[edges_name].edge_index[0]]
+                valid_edges_mask = mask[graph[edges_name].edge_index[0].cpu()]
                 if valid_edges_mask.any():
                     graph = self.remove_edges(graph, valid_edges_mask, edges_name)
                 graph[edges_name].edge_index[0] = graph[edges_name].edge_index[0].cpu().apply_(idx_mapping.get)
 
             if edges_name[2] == nodes_name:
-                valid_edges_mask = mask[graph[edges_name].edge_index[1]]
+                valid_edges_mask = mask[graph[edges_name].edge_index[1].cpu()]
                 if valid_edges_mask.any():
                     graph = self.remove_edges(graph, valid_edges_mask, edges_name)
                 graph[edges_name].edge_index[1] = graph[edges_name].edge_index[1].cpu().apply_(idx_mapping.get)

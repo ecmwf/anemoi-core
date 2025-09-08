@@ -229,11 +229,7 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
         if not file.is_file() and file.suffix != ".py" or file.name == "__init__.py":
             continue
         LOGGER.debug("Loading migration .%s from %s", file.stem, package)
-        try:
-            migration = importlib.import_module(f".{file.stem}", package)
-        except ImportError as e:
-            LOGGER.warning("Error loading %s: %s", file.name, str(e))
-            continue
+        migration = importlib.import_module(f".{file.stem}", package)
 
         args: dict[str, Any] = dict(
             name=file.stem, metadata=migration.metadata, signature=_get_code_digest(getsource(migration))
@@ -338,7 +334,9 @@ class Migrator:
         """
 
         if migrations is None:
-            migrations = _migrations_from_path(MIGRATION_PATH, f"{__name__}.scripts")
+            # remove the ".migrator" at the end to get parent folder as migration package
+            migration_pkg, _, _ = __name__.rpartition(".")
+            migrations = _migrations_from_path(MIGRATION_PATH, f"{migration_pkg}.scripts")
 
         # Compatibility groups. Checkpoints cannot be migrated past their
         # own group. This is useful to indicate when migrating checkpoints is no longer
