@@ -163,32 +163,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
             Name of the Azure ML workspace
         azure_log_level: str, optional
             Log level for all azure packages (azure-identity, azure-core, etc)
-        experiment_name : str, optional
-            Name of experiment, by default "lightning_logs"
-        project_name : str, optional
-            Name of the project, by default "anemoi"
-        run_name : str | None, optional
-            Name of run, by default None
-        tracking_uri : str | None, optional
-            Tracking URI of server, by default os.getenv("MLFLOW_TRACKING_URI")
-        log_model : Literal[True, False, "all"], optional
-            Log model checkpoints to server (expensive), by default False
-        prefix : str, optional
-            Prefix for experiments, by default ""
-        resumed : bool | None, optional
-            Whether the run was resumed or not, by default False
-        forked : bool | None, optional
-            Whether the run was forked or not, by default False
-        run_id : str | None, optional
-            Run id of current run, by default None
-        fork_run_id : str | None, optional
-            Fork Run id from parent run, by default None
-        log_hyperparams : bool | None, optional
-            Whether to log hyperparameters, by default True
-        on_resume_create_child: bool | None, optional
-            Whether to create a child run when resuming a run, by default False
-        max_params_length: int | None, optional
-            Maximum number of params to be logged to Mlflow
         """
         # TODO: can we remove this?
         # need to import to set_tracking_uri
