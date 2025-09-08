@@ -62,9 +62,9 @@ class AzureIdentity(StrEnum):
 
 def get_azure_workspace(
     auth_type: str,
-    aml_subscription_id: str | None = None,
-    aml_resource_group: str | None = None,
-    aml_workspace_name: str | None = None,
+    subscription_id: str | None = None,
+    resource_group: str | None = None,
+    workspace_name: str | None = None,
 ) -> Workspace:
     # validate auth_type
     try:
@@ -76,9 +76,9 @@ def get_azure_workspace(
 
     # these env variables are usually attatched to azure ml jobs,
     # so use them if they exist.
-    sub = aml_subscription_id or os.getenv("AZUREML_ARM_SUBSCRIPTION")
-    rg = aml_resource_group or os.getenv("AZUREML_ARM_RESOURCEGROUP")
-    wsname = aml_workspace_name or os.getenv("AZUREML_ARM_WORKSPACE_NAME")
+    sub = subscription_id or os.getenv("AZUREML_ARM_SUBSCRIPTION")
+    rg = resource_group or os.getenv("AZUREML_ARM_RESOURCEGROUP")
+    wsname = workspace_name or os.getenv("AZUREML_ARM_WORKSPACE_NAME")
 
     if sub and rg and wsname:
         LOGGER.info("Attempting Azure authentication with the following details:")
@@ -108,8 +108,8 @@ def get_azure_workspace(
         msg = (
             "Azure environment incorrectly configured; tried to use \n  "
             f"- subscription: {sub}\n  - resource_group: {rg}\n  - workspace: {wsname}.\n"
-            "Try explicitly setting your subscription details via `diagnostics.mlflow.aml_subscription_id`,"
-            "`diagnostics.mlflow.aml_resource_group`, `diagnostics.mlflow.aml_workspace_name`."
+            "Try explicitly setting your subscription details via `diagnostics.mlflow.subscription_id`,"
+            "`diagnostics.mlflow.resource_group`, `diagnostics.mlflow.workspace_name`."
         )
         raise ValueError(msg)
     LOGGER.info("Attempting to get Workspace object...")
@@ -129,10 +129,10 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
 
     def __init__(
         self,
-        aml_identity: AzureIdentity,
-        aml_subscription_id: str | None = None,
-        aml_resource_group: str | None = None,
-        aml_workspace_name: str | None = None,
+        identity: AzureIdentity,
+        subscription_id: str | None = None,
+        resource_group: str | None = None,
+        workspace_name: str | None = None,
         azure_log_level: str = "WARNING",
         experiment_name: str = "lightning_logs",
         project_name: str = "anemoi",
@@ -145,8 +145,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         forked: bool | None = False,
         run_id: str | None = None,
         fork_run_id: str | None = None,
-        offline: bool | None = False,
-        authentication: bool | None = None,
         log_hyperparams: bool | None = True,
         on_resume_create_child: bool | None = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
@@ -155,13 +153,13 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
 
         Parameters
         ----------
-        aml_identity: str | None, optional
+        identity: str | None, optional
             Type of authentication to fall back on for accessing the AzureML workspace.
-        aml_subscription_id: str | None, optional
+        subscription_id: str | None, optional
             The Azure subscription id
-        aml_resource_group: str | None, optional
+        resource_group: str | None, optional
             Name of the Azure ML resource group
-        aml_workspace: str | None, optional
+        workspace: str | None, optional
             Name of the Azure ML workspace
         azure_log_level: str, optional
             Log level for all azure packages (azure-identity, azure-core, etc)
@@ -173,8 +171,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
             Name of run, by default None
         tracking_uri : str | None, optional
             Tracking URI of server, by default os.getenv("MLFLOW_TRACKING_URI")
-        save_dir : str | None, optional
-            Directory to save logs to, by default "./mlruns"
         log_model : Literal[True, False, "all"], optional
             Log model checkpoints to server (expensive), by default False
         prefix : str, optional
@@ -187,10 +183,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
             Run id of current run, by default None
         fork_run_id : str | None, optional
             Fork Run id from parent run, by default None
-        offline : bool | None, optional
-            Whether to run offline or not, by default False
-        authentication : bool | None, optional
-            Whether to authenticate with server or not, by default None
         log_hyperparams : bool | None, optional
             Whether to log hyperparameters, by default True
         on_resume_create_child: bool | None, optional
@@ -229,23 +221,15 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
                 "Could not retrieve Azure MLFlow uri automatically;trying to retrieve from subscription...",
             )
             tracking_uri = get_azure_workspace(
-                aml_identity or "default",
-                aml_subscription_id,
-                aml_resource_group,
-                aml_workspace_name,
+                identity or "default",
+                subscription_id,
+                resource_group,
+                workspace_name,
             ).mlflow_tracking_uri
 
         mlflow.set_tracking_uri(tracking_uri)
 
-        if offline:
-            msg = (
-                "Logging with AzureML and saving offline simultaneously is currently unsupported."
-                "If you need this functionality, please open an issue on the `anemoi-core` repo."
-            )
-            raise ValueError(msg)
         # <--/ End of Azure specific stuff -->
-        if (rank_zero_only.rank == 0) and offline:
-            LOGGER.info("MLflow is logging offline.")
 
         run_id = run_id or os.getenv("MLFLOW_RUN_ID")
         run_id, run_name, tags = self._get_mlflow_run_params(
@@ -256,15 +240,6 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
             tracking_uri=tracking_uri,
             on_resume_create_child=on_resume_create_child,
         )
-        # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
-        if offline:
-            # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
-            tracking_uri = None
-
-        else:
-            # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
-            # saving dir and save all artifacts/metrics to the remote server database
-            save_dir = None
 
         # Track logged metrics to prevent duplicate logs
         # 2000 has been chosen as this should contain metrics form many steps
@@ -276,7 +251,7 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
             run_name=run_name,
             tracking_uri=tracking_uri,
             tags=tags,
-            save_dir=save_dir,
+            save_dir=None,
             log_model=log_model,
             prefix=prefix,
             run_id=run_id,
@@ -299,13 +274,13 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         #     )
         #     ws = Workspace(
         #         subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
-        #         resource_group=self.aml_resource_group,
-        #         workspace_name=self.aml_workspace_name,
+        #         resource_group=self.resource_group,
+        #         workspace_name=self.workspace_name,
         #         auth=sp_auth,
         #     )
-        #     aml_run = AzureMLRun.get(ws, run_id=self.run_id)
-        #     aml_run.display_name = self.run_id
-        #     aml_run.flush()
+        #     run = AzureMLRun.get(ws, run_id=self.run_id)
+        #     run.display_name = self.run_id
+        #     run.flush()
         #     self._display_name_is_run_id = True
 
     @staticmethod

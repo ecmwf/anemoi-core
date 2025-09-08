@@ -76,10 +76,10 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         logger_class = AnemoiMLflowLogger
     else:
         logger_class = AnemoiAzureMLflowLogger
-        kw["aml_resource_group"] = config.diagnostics.log.mlflow.aml_resource_group
-        kw["aml_workspace_name"] = config.diagnostics.log.mlflow.aml_workspace_name
-        kw["aml_subscription_id"] = config.diagnostics.log.mlflow.aml_subscription_id
-        kw["aml_identity"] = config.diagnostics.log.mlflow.aml_identity
+        kw["resource_group"] = config.diagnostics.log.mlflow.resource_group
+        kw["workspace_name"] = config.diagnostics.log.mlflow.workspace_name
+        kw["subscription_id"] = config.diagnostics.log.mlflow.subscription_id
+        kw["identity"] = config.diagnostics.log.mlflow.identity
         kw["azure_log_level"] = config.diagnostics.log.mlflow.azure_log_level
 
     max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
