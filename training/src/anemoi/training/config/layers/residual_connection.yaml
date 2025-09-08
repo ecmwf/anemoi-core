@@ -1,0 +1,11 @@
+truncated_connection:
+  _target_: anemoi.models.layers.residual.TruncatedConnection
+  data_nodes: data
+  truncation_nodes: hidden
+  edge_weight_attribute: edge_length
+
+skip_connection:
+  _target_: anemoi.models.layers.residual.SkipConnection
+
+no_connection:
+  _target_: anemoi.models.layers.residual.NoConnection
