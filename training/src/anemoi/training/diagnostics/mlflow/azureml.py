@@ -120,12 +120,6 @@ def get_azure_workspace(
 class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
     """A custom MLflow logger that logs terminal output."""
 
-    # By default, Azure sets a different 16 character (or so) run_id as the display name
-    # we may as well set this to the run_id that mlflow/anemoi creates so we don't have two
-    # of these to deal with
-    # However, it has to be done after we've already logged an artifact, otherwise we may get an error
-    _display_name_is_run_id = False
-
     def __init__(
         self,
         identity: AzureIdentity,
