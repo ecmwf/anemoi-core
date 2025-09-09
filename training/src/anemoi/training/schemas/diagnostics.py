@@ -252,14 +252,10 @@ class WandbSchema(BaseModel):
         return values
 
 
-class MlflowSchema(BaseModel):
+class BaseMlflowSchema(BaseModel):
 
     enabled: bool
     "Use MLflow logger."
-    offline: bool
-    "Run MLflow offline. Necessary if no internet access available."
-    authentication: bool
-    "Whether to authenticate with server or not"
     log_model: bool | Literal["all"] | None = None
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
@@ -285,10 +281,42 @@ class MlflowSchema(BaseModel):
     "Maximum number of hpParams to be logged with mlflow"
 
     @root_validator(pre=True)
-    def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+    def clean_entity(cls: type["BaseMlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["tracking_uri"] = None
         return values
+
+
+class MlflowSchema(BaseMlflowSchema):
+    target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
+        ...,
+        alias="_target_",
+    )
+
+    offline: bool
+    "Run MLflow offline. Necessary if no internet access available."
+    authentication: bool
+    "Whether to authenticate with server or not"
+    save_dir: str | None = None
+    "Directory to save logs to when offline=True, default=config.hardware.paths.logs.mlflow"
+
+
+class AzureMlflowSchema(BaseMlflowSchema):
+    target_: Literal["anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"] = Field(
+        ...,
+        alias="_target_",
+    )
+
+    identity: str | None = None
+    "Type of identity to use for logging in with Azure ML."
+    resource_group: str | None = None
+    "Name of the AzureML resource group"
+    workspace_name: str | None = None
+    "Name of the AzureML workspace"
+    subscription_id: str | None = None
+    "AzureML subscription ID"
+    azure_log_level: str = "WARNING"
+    "Log level for all azure packages (azure-identity, azure-core, etc)"
 
 
 class TensorboardSchema(BaseModel):
@@ -301,7 +329,7 @@ class LoggingSchema(BaseModel):
     "W&B logging schema."
     tensorboard: TensorboardSchema
     "TensorBorad logging schema."
-    mlflow: MlflowSchema
+    mlflow: MlflowSchema | AzureMlflowSchema
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."
