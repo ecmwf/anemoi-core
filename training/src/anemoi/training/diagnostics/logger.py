@@ -27,12 +27,15 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         return None
 
     logger_config = OmegaConf.to_container(convert_to_omegaconf(config.diagnostics.log.mlflow))
-    logger_config.pop("enabled")
 
-    # TODO: this seems a bit dirty
-    log_system = logger_config.pop("system")
-    log_terminal = logger_config.pop("terminal")
-    expand_hyperparams = logger_config.pop("expand_hyperparams")
+    # TODO: should all of these terminal loggings etc be moved to the logger class constructor?
+    log_system = logger_config.get("system")
+    log_terminal = logger_config.get("terminal")
+    expand_hyperparams = logger_config.get("expand_hyperparams")
+
+    for key in ["system", "terminal", "expand_hyperparams", "enabled"]:
+        if key in logger_config:
+            del logger_config[key]
 
     # Defaults that exist outside the scope of config.diagnostics.log.mlflow
     if "save_dir" in logger_config:
