@@ -164,7 +164,7 @@ class AnemoiModelEncProcDec(nn.Module):
     def _apply_truncation(self, x, grid_shard_shapes=None, model_comm_group=None):
         if self.A_down is not None or self.A_up is not None:
             if grid_shard_shapes is not None:
-                shard_shapes = self._get_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
+                shard_shapes = self._get_shard_shapes(x, -2, grid_shard_shapes, model_comm_group)
                 # grid-sharded input: reshard to channel-shards to apply truncation
                 x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
 
