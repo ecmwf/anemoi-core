@@ -44,11 +44,12 @@ except ModuleNotFoundError as e:
 
 from pytorch_lightning.loggers.mlflow import _convert_params
 
+from anemoi.training.diagnostics.mlflow import LOG_MODEL
+from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 from anemoi.utils.mlflow.auth import NoAuth
 
 LOGGER = logging.getLogger(__name__)
-MAX_PARAMS_LENGTH = 2000
 
 
 class AzureIdentity(StrEnum):
@@ -130,7 +131,7 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         run_name: str | None = None,
         tracking_uri: str | None = None,
         save_dir: str | None = "./mlruns",
-        log_model: Literal["all"] | bool = False,
+        log_model: Literal["all"] | bool = LOG_MODEL,
         prefix: str = "",
         run_id: str | None = None,
         fork_run_id: str | None = None,
