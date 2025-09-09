@@ -262,8 +262,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         save_dir: str | None = "./mlruns",
         log_model: Literal["all"] | bool = LOG_MODEL,
         prefix: str = "",
-        resumed: bool | None = False,
-        forked: bool | None = False,
         run_id: str | None = None,
         fork_run_id: str | None = None,
         offline: bool | None = False,
@@ -291,10 +289,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             Log model checkpoints to server (expensive), by default False
         prefix : str, optional
             Prefix for experiments, by default ""
-        resumed : bool | None, optional
-            Whether the run was resumed or not, by default False
-        forked : bool | None, optional
-            Whether the run was forked or not, by default False
         run_id : str | None, optional
             Run id of current run, by default None
         fork_run_id : str | None, optional
@@ -312,10 +306,10 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         http_max_retries: int | None, optional
             Maximum number of retries for MLflow HTTP requests, default 35
         """
-        self._resumed = resumed
-        self._forked = forked
+        self._resumed = run_id is not None
+        self._forked = fork_run_id is not None
         self._flag_log_hparams = log_hyperparams
-        if resumed and not on_resume_create_child:
+        if self._resumed and not on_resume_create_child:
             LOGGER.info(
                 (
                     "Resuming run without creating child run - MLFlow logs will not update the"
@@ -347,13 +341,21 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             authentication=authentication,
             offline=offline,
         )
+        if save_dir is not None:
+            Path(save_dir).mkdir(parents=True, exist_ok=True)
+
+        # Set a temporary working tracking_uri just for the get_mlflow_run_params
+        # for this special case
+        tracking_uri_for_mlflow = tracking_uri
+        if (self._resumed or self._forked) and offline:
+            tracking_uri_for_mlflow = save_dir
 
         run_id, run_name, tags = self._get_mlflow_run_params(
             project_name=project_name,
             run_name=run_name,
             config_run_id=run_id,
             fork_run_id=fork_run_id,
-            tracking_uri=tracking_uri,
+            tracking_uri=tracking_uri_for_mlflow,
             on_resume_create_child=on_resume_create_child,
         )
         # Before creating the run we need to overwrite the tracking_uri and save_dir if offline

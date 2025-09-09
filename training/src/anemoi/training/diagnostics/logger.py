@@ -9,7 +9,6 @@
 
 
 import logging
-from pathlib import Path
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate
@@ -36,27 +35,14 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     expand_hyperparams = logger_config.pop("expand_hyperparams")
 
     # Defaults that exist outside the scope of config.diagnostics.log.mlflow
-    resumed = config.training.run_id is not None
-    forked = config.training.fork_run_id is not None
-    offline = logger_config.get("offline", False)
-
-    # TODO: This does not make sense, and if we get rid of it, the 3 lines above can be removed too
-    if (resumed or forked) and (offline):  # when resuming or forking offline -
-        logging_config["tracking_uri"] = str(save_dir)
-
     if "save_dir" in logger_config:
         if logger_config["save_dir"] is None:
             logger_config["save_dir"] = config.hardware.paths.logs.mlflow
-
-        # only create save_dir if it's specified in schema (e.g. it's not for Azure)
-        Path(logger_config["save_dir"]).mkdir(parents=True, exist_ok=True)
 
     logger = instantiate(
         logger_config,
         run_id=config.training.run_id,
         fork_run_id=config.training.fork_run_id,
-        resumed=resumed,
-        forked=forked,
     )
     config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
     logger.log_hyperparams(
