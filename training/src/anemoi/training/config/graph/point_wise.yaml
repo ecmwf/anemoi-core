@@ -1,0 +1,36 @@
+---
+overwrite: True
+
+data: "data"
+hidden: "data"
+
+nodes:
+  # Data nodes
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
+      dataset: ${dataloader.dataset}
+    attributes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights # options: Area, Uniform
+        norm: unit-max # options: l1, l2, unit-max, unit-sum, unit-std
+        fill_value: 0
+
+edges:
+# Encoder configuration
+- source_name: ${graph.data}
+  target_name: ${graph.data}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges # options: KNNEdges, CutOffEdges
+    num_nearest_neighbours: 1 # only for knn method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []
