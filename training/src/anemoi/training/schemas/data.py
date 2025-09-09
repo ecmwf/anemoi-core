@@ -52,5 +52,11 @@ class DataSchema(PydanticBaseModel):
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
     diagnostic: list[str]
     "Features that are only part of the forecast state and are not used as an input to the model."
+    target: list[str]
+    (
+        "Features used to compute the loss against forecasted variables. "
+        "Cannot be prognostic or diagnostic, can have the same name as forcing variables "
+        "but have a different role. Such that: prognostic = diagnostic - forcing.union(target)."
+    )
     num_features: int | None
     "Number of features in the forecast state. To be set in the code."

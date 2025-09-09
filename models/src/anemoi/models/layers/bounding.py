@@ -56,7 +56,7 @@ class BaseBounding(nn.Module, ABC):
         self.name_to_index_stats = name_to_index_stats
 
     def _create_index(self, variables: list[str]) -> InputTensorIndex:
-        return torch.Tensor([i for name, i in self.name_to_index.items() if name in variables]).to(torch.int)
+        return torch.tensor([i for name, i in self.name_to_index.items() if name in variables], dtype=torch.int)
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
