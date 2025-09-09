@@ -99,12 +99,14 @@ Generally, hard-coded locations are to be avoided.
  Example Config with Target Indices
 ************************************
 
-An example config for someone trying to use Anemoi models to forecasts
-surface variables on very short term based on NWP forecasts, radar and
-synoptic observations, with a loss that combines a spectral loss
-comparing predicted precipitation to radar, a pointwise loss against the
-synoptic observations, and a spectral loss against the analysis data.
-Then one could use the following data config:
+An example usecase of target indices could be to use Anemoi to forecast
+surface variables on the very short term (up to 6 hours) based on NWP
+forecasts, radar, high-resolution topography and synoptic observations.
+
+Such usecase could involve a loss function combining a spectral
+component comparing predicted precipitation to radar, a pointwise loss
+against the synoptic observations, and a spectral loss against the
+analysis data. Then one could use the following data config:
 
 .. code:: yaml
 
