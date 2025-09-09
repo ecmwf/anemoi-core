@@ -251,6 +251,7 @@ class WandbSchema(BaseModel):
             values["entity"] = None
         return values
 
+
 class BaseMlflowSchema(BaseModel):
 
     enabled: bool
@@ -284,6 +285,7 @@ class BaseMlflowSchema(BaseModel):
         if values["enabled"] is False:
             values["tracking_uri"] = None
         return values
+
 
 class MlflowSchema(BaseMlflowSchema):
     target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
