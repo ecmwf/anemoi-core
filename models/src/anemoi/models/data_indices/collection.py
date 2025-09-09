@@ -39,13 +39,6 @@ class IndexCollection:
         )
         defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
         self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
-        # config.data.remapped is an optional dictionary with every remapper as one entry
-        self.remapped = (
-            dict()
-            if config.data.get("remapped") is None
-            else OmegaConf.to_container(config.data.remapped, resolve=True)
-        )
-        self.forcing_remapped = self.forcing.copy()
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
             f"Diagnostic and forcing variables overlap: {set(self.diagnostic).intersection(self.forcing)}. ",
@@ -54,13 +47,6 @@ class IndexCollection:
         assert set(self.diagnostic).isdisjoint(self.target), (
             f"Diagnostic and target variables overlap: {set(self.diagnostic).intersection(self.target)}. ",
             "Please drop them at a dataset-level to exclude them from the training data.",
-        )
-        assert set(self.remapped).isdisjoint(self.diagnostic), (
-            "Remapped variable overlap with diagnostic variables. Not implemented.",
-        )
-        assert set(self.remapped).issubset(self.name_to_index), (
-            "Remapping a variable that does not exist in the dataset. Check for typos: ",
-            f"{set(self.remapped).difference(self.name_to_index)}",
         )
         name_to_index_model_input = {
             name: i
@@ -72,42 +58,9 @@ class IndexCollection:
                 key for key in self.name_to_index if key in self.prognostic or key in self.diagnostic
             )
         }
-        # remove remapped variables from internal data and model indices
-        name_to_index_internal_data_input = {
-            name: i for i, name in enumerate(key for key in self.name_to_index if key not in self.remapped)
-        }
-        name_to_index_internal_model_input = {
-            name: i for i, name in enumerate(key for key in name_to_index_model_input if key not in self.remapped)
-        }
-        name_to_index_internal_model_output = {
-            name: i for i, name in enumerate(key for key in name_to_index_model_output if key not in self.remapped)
-        }
-        # for all variables to be remapped we add the resulting remapped variables to the end of the tensors
-        # keep track of that in the index collections
-        for key in self.remapped:
-            for mapped in self.remapped[key]:
-                # add index of remapped variables to dictionary
-                name_to_index_internal_model_input[mapped] = len(name_to_index_internal_model_input)
-                name_to_index_internal_data_input[mapped] = len(name_to_index_internal_data_input)
-                if key not in self.forcing:
-                    # do not include forcing variables in the remapped model output
-                    name_to_index_internal_model_output[mapped] = len(name_to_index_internal_model_output)
-                else:
-                    # add remapped forcing variables to forcing_remapped
-                    self.forcing_remapped += [mapped]
-            if key in self.forcing:
-                # if key is in forcing we need to remove it from forcing_remapped after remapped variables have been added
-                self.forcing_remapped.remove(key)
-
         self.data = DataIndex(
             diagnostic=self.diagnostic, forcing=self.forcing, target=self.target, name_to_index=self.name_to_index
         )
-        self.internal_data = DataIndex(
-            diagnostic=self.diagnostic,
-            forcing=self.forcing_remapped,
-            target=self.target,
-            name_to_index=name_to_index_internal_data_input,
-        )  # internal after the remapping applied to data (training)
         self.model = ModelIndex(
             diagnostic=self.diagnostic,
             forcing=self.forcing,
@@ -115,13 +68,6 @@ class IndexCollection:
             name_to_index_model_input=name_to_index_model_input,
             name_to_index_model_output=name_to_index_model_output,
         )
-        self.internal_model = ModelIndex(
-            diagnostic=self.diagnostic,
-            forcing=self.forcing_remapped,
-            target=self.target,
-            name_to_index_model_input=name_to_index_internal_model_input,
-            name_to_index_model_output=name_to_index_internal_model_output,
-        )  # internal after the remapping applied to model (inference)
 
     def __repr__(self) -> str:
         return f"IndexCollection(config={self.config}, name_to_index={self.name_to_index})"
@@ -131,12 +77,7 @@ class IndexCollection:
             # don't attempt to compare against unrelated types
             return NotImplemented
 
-        return (
-            self.model == other.model
-            and self.data == other.data
-            and self.internal_model == other.internal_model
-            and self.internal_data == other.internal_data
-        )
+        return self.model == other.model and self.data == other.data
 
     def __getitem__(self, key):
         return getattr(self, key)
@@ -145,8 +86,6 @@ class IndexCollection:
         return {
             "data": self.data.todict(),
             "model": self.model.todict(),
-            "internal_model": self.internal_model.todict(),
-            "internal_data": self.internal_data.todict(),
         }
 
     @staticmethod
