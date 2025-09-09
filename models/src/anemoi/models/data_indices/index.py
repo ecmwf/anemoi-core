@@ -16,8 +16,8 @@ class BaseIndex:
     """Base class for data and model indices."""
 
     def __init__(self) -> None:
-        self.input = None
-        self.output = None
+        self.input = NotImplementedError
+        self.output = NotImplementedError
 
     def __eq__(self, other):
         if not isinstance(other, BaseIndex):
