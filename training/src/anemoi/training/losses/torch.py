@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2025 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,22 +8,30 @@
 # nor does it submit to any jurisdiction.
 
 
-import logging
+from __future__ import annotations
 
-import torch
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
+    from collections.abc import Callable
 
 from anemoi.training.losses.base import FunctionalLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class MSELoss(FunctionalLoss):
-    """MSE loss."""
+class TorchLoss(FunctionalLoss):
+    """Loss function."""
 
-    name: str = "mse"
+    def __init__(self, loss: Callable, ignore_nans: bool = False, **_kwargs) -> None:
+        super().__init__(ignore_nans)
+        self.loss = loss
+        self.name = loss.__class__.__name__.lower().replace("loss", "")
 
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Calculate the MSE loss.
+        """Calculate the loss.
 
         Parameters
         ----------
@@ -35,6 +43,6 @@ class MSELoss(FunctionalLoss):
         Returns
         -------
         torch.Tensor
-            MSE loss
+            Loss
         """
-        return torch.square(pred - target)
+        return self.loss(pred, target)
