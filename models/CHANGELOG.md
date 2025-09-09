@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.5](https://github.com/ecmwf/anemoi-core/compare/models-0.9.4...models-0.9.5) (2025-09-09)
+
+
+### Features
+
+* Flash attention v3 ([#479](https://github.com/ecmwf/anemoi-core/issues/479)) ([00f52df](https://github.com/ecmwf/anemoi-core/commit/00f52df292f8fb8dc0a865f6d288fa151c630a2c))
+
+
+### Bug Fixes
+
+* Set correct base package for migrations imports ([#531](https://github.com/ecmwf/anemoi-core/issues/531)) ([cfb80fe](https://github.com/ecmwf/anemoi-core/commit/cfb80fe6d5105873e89f20a9213f782b55aa57dd))
+* Test dependencies ([#524](https://github.com/ecmwf/anemoi-core/issues/524)) ([3ac7d4f](https://github.com/ecmwf/anemoi-core/commit/3ac7d4fbc35e0ef0f54566454e235aeaf7f6da67))
+* Truncation shard shapes ([#536](https://github.com/ecmwf/anemoi-core/issues/536)) ([507b441](https://github.com/ecmwf/anemoi-core/commit/507b44143fc35acc1d3b927cea95e9e1be120407))
+
 ## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/models-0.9.3...models-0.9.4) (2025-09-02)
 
 
