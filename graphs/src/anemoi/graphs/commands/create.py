@@ -38,19 +38,25 @@ class Create(Command):
             help="Show the description of the graph.",
         )
         command_parser.add_argument(
+            "--validate",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Validate the graph configuration.",
+        )
+        command_parser.add_argument(
             "config", type=Path, help="Configuration yaml file path defining the recipe to create the graph."
         )
         command_parser.add_argument("save_path", type=Path, help="Path to store the created graph.")
 
     def run(self, args):
-        graph_creator = GraphCreator(config=args.config)
+        graph_creator = GraphCreator(config=args.config, config_validation=args.validate)
         graph_creator.create(save_path=args.save_path, overwrite=args.overwrite)
 
         if args.description:
             if args.save_path.exists():
                 GraphDescriptor(args.save_path).describe()
             else:
-                print("Graph description is not shown if the graph is not saved.")
+                LOGGER.info("Graph description is not shown if the graph is not saved.")
 
 
 command = Create

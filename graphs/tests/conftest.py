@@ -163,6 +163,8 @@ def config_file(tmp_path) -> tuple[str, str]:
                 "node_builder": {
                     "_target_": "anemoi.graphs.nodes.NPZFileNodes",
                     "npz_file": str(tmp_path) + "/grid-o16.npz",
+                    "lat_key": "latitudes",
+                    "lon_key": "longitudes",
                 },
             },
         },
@@ -174,12 +176,10 @@ def config_file(tmp_path) -> tuple[str, str]:
                     {
                         "_target_": "anemoi.graphs.edges.KNNEdges",
                         "num_nearest_neighbours": 3,
+                        "source_mask_attr_name": None,
+                        "target_mask_attr_name": None,
                     },
                 ],
-                "attributes": {
-                    "dist_norm": {"_target_": "anemoi.graphs.edges.attributes.EdgeLength"},
-                    "edge_dirs": {"_target_": "anemoi.graphs.edges.attributes.EdgeDirection"},
-                },
             },
         ],
     }
