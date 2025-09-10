@@ -341,6 +341,8 @@ For ensemble training, the following loss functions are available:
 -  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
    the number of ensemble members used.
 
+.. _loss-function-scaling:
+
 ***********************
  Loss function scaling
 ***********************
