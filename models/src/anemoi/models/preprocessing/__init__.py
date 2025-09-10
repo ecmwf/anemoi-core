@@ -164,7 +164,7 @@ class Processors(nn.Module):
             # e.g. first impute then normalise forward but denormalise then de-impute for inverse
             processors = processors[::-1]
 
-        self.processors = nn.ModuleDict(processors)
+        self.processors = nn.ModuleList(processors)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__} [{'inverse' if self.inverse else 'forward'}]({self.processors})"
@@ -186,7 +186,7 @@ class Processors(nn.Module):
         torch.Tensor
             Processed tensor
         """
-        for processor in self.processors.values():
+        for processor in self.processors:
             x = processor(x, in_place=in_place, inverse=self.inverse, **kwargs)
 
         if self.first_run:
