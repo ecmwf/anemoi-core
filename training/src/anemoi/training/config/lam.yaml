@@ -19,6 +19,10 @@ config_validation: True
 #   num_gpus_per_node: 1
 
 dataloader:
+  dataset_defaults:
+    dataset: ??
+    forcing_dataset: ??
+
   dataset:
     cutout:
       - dataset: ${hardware.paths.data}/${hardware.files.dataset}
@@ -35,7 +39,7 @@ model:
     _target_: anemoi.training.utils.masks.Boolean1DMask
     nodes_name: ${graph.data}
     attribute_name: cutout_mask
-hardware:
-  files:
-    dataset: ???
-    forcing_dataset: ???
+# hardware:
+#   files:
+#     dataset: ???
+#     forcing_dataset: ???

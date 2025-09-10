@@ -49,25 +49,18 @@ class GetTmpPaths:
         self.temporary_directory_for_test_data = temporary_directory_for_test_data
 
     def __call__(self, config: DictConfig, list_datasets: list[str]) -> tuple[str, list[str], list[str]]:
-        tmp_paths = []
-        dataset_names = []
         archive_urls = []
 
         for dataset in list_datasets:
-            url_archive = config.hardware.files[dataset] + ".tgz"
-            name_dataset = Path(config.hardware.files[dataset]).name
+            url_archive = str(Path(config.dataloader.dataset_defaults[dataset]).stem) + ".tgz"
+            name_dataset = Path(config.dataloader.dataset_defaults[dataset]).name
             tmp_path_dataset = self.temporary_directory_for_test_data(url_archive, archive=True)
 
-            tmp_paths.append(tmp_path_dataset)
-            dataset_names.append(name_dataset)
             archive_urls.append(url_archive)
 
-        if len(list_datasets) == 1:
-            return tmp_paths[0], dataset_names, archive_urls
+            config.dataloader.dataset_defaults[dataset] = tmp_path_dataset + name_dataset
 
-        tmp_dir = os.path.commonprefix([tmp_paths[0], tmp_paths[1]])[:-1]  # remove trailing slash
-        rel_paths = [Path(Path(path).name) / name for (name, path) in zip(dataset_names, tmp_paths, strict=False)]
-        return tmp_dir, rel_paths, archive_urls
+        return archive_urls
 
 
 @pytest.fixture
@@ -96,10 +89,7 @@ def architecture_config(
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
     assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
 
     # Add the imputer here as it's not part of the default config
     imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
@@ -122,11 +112,7 @@ def stretched_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
-    dataset, forcing_dataset = rel_paths
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = dataset
-    use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -145,11 +131,7 @@ def lam_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
-    dataset, forcing_dataset = rel_paths
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = dataset
-    use_case_modifications.hardware.files.forcing_dataset = forcing_dataset
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -187,9 +169,7 @@ def ensemble_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -208,9 +188,7 @@ def hierarchical_config(
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -226,9 +204,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -345,9 +321,7 @@ def interpolator_config(
     )
     assert isinstance(use_case_modifications, DictConfig)
 
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -376,9 +350,7 @@ def diffusion_config(
         template = compose(config_name="diffusion", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
