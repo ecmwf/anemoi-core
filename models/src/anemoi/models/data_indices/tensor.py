@@ -42,7 +42,7 @@ class BaseTensorIndex:
             List of target variable.
         """
         self.name_to_index = name_to_index
-        self.includes = includes
+        self.includes = sorted(includes)
         assert set(includes).issubset(
             self.name_to_index.keys(),
         ), f"Data indexing has invalid entries {[var for var in includes if var not in self.name_to_index]}, not in dataset."
@@ -51,7 +51,7 @@ class BaseTensorIndex:
         self.forcing = self._build_idx_from_list(forcing)
         self.target = self._build_idx_from_list(target)
         self.full = self._build_idx_from_list(includes)
-        self.excludes = list(set(self.name_to_index.keys()) - set(self.includes))
+        self.excludes = sorted(list(set(self.name_to_index.keys()) - set(self.includes)))
 
     def _build_idx_from_list(self, var_list):
         sorted_variables = torch.Tensor(sorted(i for name, i in self.name_to_index.items() if name in var_list)).to(
@@ -76,6 +76,8 @@ class BaseTensorIndex:
             and torch.allclose(self.forcing, other.forcing)
             and torch.allclose(self.target, other.target)
             and torch.allclose(self.full, other.full)
+            and self.includes == other.includes
+            and self.excludes == other.excludes
         )
 
     def __getitem__(self, key):
