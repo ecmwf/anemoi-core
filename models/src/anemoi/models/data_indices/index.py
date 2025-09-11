@@ -46,49 +46,72 @@ class BaseIndex:
 class DataIndex(BaseIndex):
     """Indexing for data variables."""
 
-    def __init__(self, diagnostic, forcing, name_to_index) -> None:
+    def __init__(self, diagnostic, forcing, name_to_index, target=[]) -> None:
         self._diagnostic = diagnostic
         self._forcing = forcing
+        self._target = target
+        self._prognostic = [v for v in name_to_index.keys() if v not in set(forcing + diagnostic + target)]
         self._name_to_index = name_to_index
         self.input = InputTensorIndex(
-            includes=forcing,
-            excludes=diagnostic,
+            includes=forcing + self._prognostic,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
             name_to_index=name_to_index,
         )
 
         self.output = OutputTensorIndex(
-            includes=diagnostic,
-            excludes=forcing,
+            includes=diagnostic + self._prognostic + target,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
             name_to_index=name_to_index,
         )
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(diagnostic={self._input}, forcing={self._output}, name_to_index={self._name_to_index})"
+        return f"{self.__class__.__name__}(diagnostic={self.output}, forcing={self.input}, name_to_index={self._name_to_index})"
 
 
 class ModelIndex(BaseIndex):
     """Indexing for model variables."""
 
-    def __init__(self, diagnostic, forcing, name_to_index_model_input, name_to_index_model_output) -> None:
+    def __init__(
+        self,
+        diagnostic,
+        forcing,
+        name_to_index_model_input,
+        name_to_index_model_output,
+        target=[],
+    ) -> None:
         self._diagnostic = diagnostic
         self._forcing = forcing
+        self._target = target
+        self._prognostic = [v for v in name_to_index_model_input.keys() if v not in set(forcing + diagnostic + target)]
         self._name_to_index_model_input = name_to_index_model_input
         self._name_to_index_model_output = name_to_index_model_output
         self.input = InputTensorIndex(
-            includes=forcing,
-            excludes=[],
+            includes=forcing + self._prognostic,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
             name_to_index=name_to_index_model_input,
         )
 
         self.output = OutputTensorIndex(
-            includes=diagnostic,
-            excludes=[],
+            includes=diagnostic + self._prognostic,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
             name_to_index=name_to_index_model_output,
         )
 
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}(diagnostic={self._input}, forcing={self._output}, "
+            f"{self.__class__.__name__}(diagnostic={self.input}, forcing={self.output}, "
             f"name_to_index_model_input={self._name_to_index_model_input}, "
             f"name_to_index_model_output={self._name_to_index_model_output})"
         )
