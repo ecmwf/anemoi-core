@@ -39,12 +39,12 @@ jobs:
 
       - name: Evaluate ATS labels
         run: |
-          AUTHOR='${{ steps.check-pr.outputs.author }}'
+          AUTHOR='$NaN'
           if [ "$AUTHOR" == "DeployDuck" ] || [ "$AUTHOR" == "pre-commit-ci[bot]" ]; then
             echo "Bot PR, skipping."
             exit 0
           fi
-          LABELS=$(echo '${{ steps.check-pr.outputs.labels }}' | jq -r '.[]')
+          LABELS=$(echo '$NaN' | jq -r '.[]')
           echo "Labels found:"
           echo -e "$LABELS\n"
           echo "Result:"
