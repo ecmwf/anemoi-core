@@ -20,8 +20,8 @@ You can define your graph in a YAML configuration file, following the
 same approach described in the other usage sections. This YAML file
 should specify the nodes, edges, and any attributes required for your
 graph. For more details on how to structure your recipe, refer to the
-examples in the :doc:`usage-getting_started` and
-:doc:`usage-limited_area` sections.
+examples in the :ref:`usage-getting_started` and
+:ref:`usage-limited_area` sections.
 
 .. literalinclude:: yaml/sparse_matrices.yaml
    :language: yaml

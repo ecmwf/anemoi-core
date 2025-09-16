@@ -1,0 +1,43 @@
+# This workflow runs on release PRs created by release-please (DeployDuck).
+# Here we can do extra things required before releasing.
+name: "[PR] Release"
+
+on:
+  pull_request:
+    branches:
+      - main
+      - hotfix/*
+    paths:
+      - .release-please-manifest.json
+    types: [opened, synchronize, reopened]
+
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      - name: "Replace migrations placeholder with next version"
+        run: |
+          MIGRATION_FOLDER=models/src/anemoi/models/migrations/scripts
+          NEXT_MODELS_VERSION=$(jq -r '."models"' .release-please-manifest.json)
+
+          echo "Next version: $NEXT_MODELS_VERSION"
+
+          find $MIGRATION_FOLDER -type f -name "*.py" -print0 | while IFS= read -r -d '' file; do
+            sed -i "s/%NEXT_ANEMOI_MODELS_VERSION%/$NEXT_MODELS_VERSION/g" "$file"
+          done
+
+          echo "$(git diff)"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "DeployDuck"
+            git config user.email "150700357+DeployDuck@users.noreply.github.com"
+            git add .
+            git commit -m "chore: Update checkpoint migrations placeholder to $NEXT_MODELS_VERSION"
+            git push
+          else
+            echo "Nothing to commit, migrations are up to date."
+          fi

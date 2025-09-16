@@ -15,10 +15,13 @@ import einops
 import torch
 from hydra.utils import instantiate
 from torch import Tensor
+from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiGraphModelBase
 from anemoi.utils.config import DotDict
@@ -66,7 +69,7 @@ class AnemoiModelEncProcDec(AnemoiGraphModelBase):
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.input_dim,
-            in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
+            in_channels_dst=self.input_dim_latent,
             hidden_dim=self.num_channels,
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -213,3 +216,70 @@ class AnemoiModelEncProcDec(AnemoiGraphModelBase):
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
+
+    def predict_step(
+        self,
+        batch: torch.Tensor,
+        pre_processors: nn.Module,
+        post_processors: nn.Module,
+        multi_step: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        gather_out: bool = True,
+        **kwargs,
+    ) -> Tensor:
+        """Prediction step for the model.
+
+        Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
+        Subclasses can override this for different behavior (e.g., sampling for diffusion models).
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Input batched data (before pre-processing)
+        pre_processors : nn.Module,
+            Pre-processing module
+        post_processors : nn.Module,
+            Post-processing module
+        multi_step : int,
+            Number of input timesteps
+        model_comm_group : Optional[ProcessGroup]
+            Process group for distributed training
+        gather_out : bool
+            Whether to gather output tensors across distributed processes
+        **kwargs
+            Additional arguments
+
+        Returns
+        -------
+        Tensor
+            Model output (after post-processing)
+        """
+        with torch.no_grad():
+
+            assert (
+                len(batch.shape) == 4
+            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
+            # Dimensions are
+            # batch, timesteps, grid, variables
+            x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+
+            # Handle distributed processing
+            grid_shard_shapes = None
+            if model_comm_group is not None:
+                shard_shapes = get_shard_shapes(x, -2, model_comm_group)
+                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
+                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+
+            x = pre_processors(x, in_place=False)
+
+            # Perform forward pass
+            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
+
+            # Apply post-processing
+            y_hat = post_processors(y_hat, in_place=False)
+
+            # Gather output if needed
+            if gather_out and model_comm_group is not None:
+                y_hat = gather_tensor(y_hat, -2, apply_shard_shapes(y_hat, -2, grid_shard_shapes), model_comm_group)
+
+        return y_hat

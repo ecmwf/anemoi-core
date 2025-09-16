@@ -13,10 +13,16 @@ from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .interpolator import AnemoiModelEncProcDecInterpolator
 
+from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec  # isort: skip
+from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec  # isort: skip
+
+
 __all__ = [
     "AnemoiGraphModelBase",
     "AnemoiModelEncProcDec",
     "AnemoiEnsModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiModelEncProcDecInterpolator",
+    "AnemoiDiffusionModelEncProcDec",
+    "AnemoiDiffusionTendModelEncProcDec",
 ]

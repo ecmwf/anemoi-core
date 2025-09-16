@@ -136,6 +136,8 @@ class VariableMaskingScalerSchema(BaseModel):
 
 class NaNMaskScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
+    use_processors_tendencies: bool = Field(default=False)
+    "Flag to include processors for tendencies when building the loss mask."
 
 
 class TendencyScalerTargets(str, Enum):
@@ -214,6 +216,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
+    weighted_mse = "anemoi.training.losses.WeightedMSELoss"
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
@@ -363,13 +366,24 @@ class ForecasterSchema(BaseTrainingSchema):
     "Rollout configuration."
 
 
-class ForecasterEnsSchema(BaseTrainingSchema):
+class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
     ensemble_size_per_device: PositiveInt = Field(example=1)
     "Number of ensemble member per device"
+
+
+class DiffusionForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+    "Training objective."
+
+
+class DiffusionTendForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
+        ...,
+        alias="model_task",
+    )
+    "Training objective."
 
 
 class InterpolationSchema(BaseTrainingSchema):
@@ -382,6 +396,10 @@ class InterpolationSchema(BaseTrainingSchema):
 
 
 TrainingSchema = Annotated[
-    ForecasterSchema | ForecasterEnsSchema | InterpolationSchema,
+    ForecasterSchema
+    | ForecasterEnsSchema
+    | InterpolationSchema
+    | DiffusionForecasterSchema
+    | DiffusionTendForecasterSchema,
     Discriminator("model_task"),
 ]

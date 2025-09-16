@@ -47,7 +47,7 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: -1
   dropout_p: 0.0
-  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  attention_implementation: flash_attention  # Possible values: scaled_dot_product_attention, flash_attention
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   qk_norm: False
@@ -64,7 +64,7 @@ decoder:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: -1
   dropout_p: 0.0
-  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  attention_implementation: flash_attention # Possible values: scaled_dot_product_attention, flash_attention
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   qk_norm: False

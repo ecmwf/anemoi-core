@@ -76,6 +76,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self._build_networks(model_config)
         self._build_boundings(model_config, self.data_indices, self.statistics)
 
+    def _calculate_input_dim_latent(self) -> int:
+        return self.node_attributes.attr_ndims[self._graph_hidden_names[0]]
+
     def _build_networks(self, model_config):
         """Builds the model components."""
 
@@ -84,7 +87,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.input_dim,
-            in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[0]],
+            in_channels_dst=self.input_dim_latent,
             hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_hidden_names[0])],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],

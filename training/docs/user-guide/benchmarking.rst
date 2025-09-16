@@ -744,3 +744,125 @@ Improvements​​
    able to profile other hardware like AMS GPUs or Graphcore IPUs
 
 -  Support other components of Anemoi like ``anemoi-inference``
+
+*********************
+ Benchmarking pytest
+*********************
+
+Anemoi training now supports automatic and reproducible benchmarking as
+an integration test. Currently the following components are benchmarked:
+* throughput * time per batch * total memory 'throughput, time per batch
+and total memory usage'. The benchmark tests are run once a day on the
+main branch. The results are then logged, alongside the date and the
+commit, to a server. In this way we can track the performance of anemoi
+over time and ensure that no pull requests unintentionally reduce
+performance. The benchmarking CI tests can also be run on a PR. The
+modified code will run the benchmarks and its score will be compared
+against the most recent shared commit in the servers database. To run
+the benchmarking tests on a PR, you can navigate to this page_, select
+your branch and run. If the performance degrades beyond an acceptable
+percentage, the tests will fail. Benchmarking tests failing does not
+necessarily mean your PR will be rejected. At this point, the PR authour
+and reviewers should investigate the performance more closely.
+
+.. _page: https://github.com/ecmwf/anemoi-core/actions/workflows/integration-tests-hpc.yml/
+
+A suite of different anemoi configurations are tested. The current list
+of configurations is * Global GraphTransformer model * LAM model *
+Stretched grid model * Ensemble model The exact configuration for each
+benchmark can be found under
+``anemoi-core/training/tests/integration/config/benchmark``. Each
+benchmark is run over two GPUs to ensure the model sharding performance
+is captured in the automatic benchmarks. The tests take approximately 40
+minutes. A successful test looks like
+
+.. code::
+
+    11:54:52 INFO Reference benchmark results:
+   --------------------
+   avThroughputIterPerS: 0.41iter/s (commit: 1d58f, date: 2025-08-25)
+   peakMemoryMB: 21541.33MB (commit: 1d58f, date: 2025-08-25)
+   --------------------
+   (Server location: '/home/data/public/anemoi-integration-tests/training/benchmarks/graphtransformer')
+
+   11:54:52 INFO Local benchmark results:
+   --------------------
+   avThroughputIterPerS: 0.41iter/s (commit: 1d58f, date: 2025-08-25)
+   peakMemoryMB: 21541.33MB (commit: 1d58f, date: 2025-08-25)
+   --------------------
+
+   11:54:52 INFO Comparing local benchmark results against reference values from the server
+   11:54:52 INFO PASS. Local value for avThroughputIterPerS has improved compared to the reference value (0.41iter/s local vs 0.41iter/s reference)
+   11:54:52 INFO PASS. Local value for peakMemoryMB has improved compared to the reference value (21541.33MB local vs 21541.33MB reference)
+   11:54:52 INFO Updating metrics on server
+
+A failed test looks like
+
+.. code::
+
+   11:26:24 INFO Reference benchmark results:
+   --------------------
+   avThroughputIterPerS: 0.56iter/s (commit: 3641c, date: 2025-08-22)
+   peakMemoryMB: 26890.89MB (commit: 3641c, date: 2025-08-22)
+   --------------------
+   (Server location: '/home/data/public/anemoi-integration-tests/training/benchmarks/lam')
+
+   11:26:24 INFO Local benchmark results:
+   --------------------
+   avThroughputIterPerS: 0.51iter/s (commit: 1d58f, date: 2025-08-25)
+   peakMemoryMB: 26890.89MB (commit: 1d58f, date: 2025-08-25)
+   --------------------
+
+   11:26:24 INFO Comparing local benchmark results against reference values from the server
+   11:26:24 INFO FAIL. Local value for avThroughputIterPerS has degraded compared to the reference value (0.51iter/s local vs 0.56iter/s reference)
+   11:26:24 INFO PASS. Local value for peakMemoryMB is within 1% tolerance of the reference value (26890.89MB local vs 26890.89MB reference)
+   11:26:24 INFO Profiling artifacts from failed run are stored under: lam_artifacts.tar.gz
+
+When a run fails, the artifacts will be stored locally for you to
+examine.
+
+Artifacts produced by the benchmarking CI test are stored on the server.
+These can be used to understand why a runs performance has degraded. The
+runtime trace file produced by the PyTorch profiler and the memory
+snapshot produced by 'torch.cuda.memory._record_memory_history()' is
+saved. The 10 most recent commits have their artifacts stored. To
+retrieve these, navigate to the artifacts directory under the test you
+are interested in. The server location, and commit compared against can
+be found in the pytest log.
+
+.. code::
+
+   cd lam/
+   ls artifacts/
+           1d58f3e70d74c6496afd023d8bcb3cf9d37c431b.tar.gz  cf54618d146d41ab0a90d813e90abb9f5cefbb12.tar.gz
+           3641c550afe69d7919f00b1a19445c69cb374f65.tar.gz  d89390ae6a34738d3f441e7c65bd4f0c33b13dcd.tar.gz
+
+The code implementing these tests can be found in
+``tests/integration/test_benchmark.py`` and
+``src/anemoi/training/diagnostics/benchmark_server.py``.
+
+Local Benchmarking
+==================
+
+The benchmarking tests can also be run locally.
+
+.. code:: bash
+
+   cd anemoi-core
+   pip install -e training[tests]
+   pytest -s -vvv -v training/tests/integration/ --slow --multigpu -k "test_benchmark_training_cycle"
+
+The server location is read from a file
+"~/.config/anemoi-benchmark.yaml". The expected format is
+
+.. code:: yaml
+
+   user: ...
+   hostname: ...
+   path: ...
+
+Alternatively you can edit the code in
+``tests/integration/test_benchmark.py`` to pass a local folder. The
+benchmark datasets are read from a path defined at
+``tests/integration/configs/benchmark/base.yaml``. This path should be
+updated if running locally.

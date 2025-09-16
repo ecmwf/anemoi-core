@@ -46,10 +46,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             truncation_data=truncation_data,
         )
 
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        super()._calculate_shapes_and_indices(data_indices)
-        self.input_dim += self.num_input_channels_prognostic
-        self.input_dim += 1
+    def _calculate_input_dim(self) -> int:
+        return super()._calculate_input_dim() + self.num_input_channels_prognostic + 1
 
     def _build_networks(self, model_config):
         super()._build_networks(model_config)

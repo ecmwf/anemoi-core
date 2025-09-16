@@ -125,15 +125,20 @@ class AnemoiGraphModelBase(nn.Module):
 
         return x
 
+    def _calculate_input_dim(self) -> int:
+        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+
+    def _calculate_input_dim_latent(self) -> int:
+        return self.node_attributes.attr_ndims[self._graph_name_hidden]
+
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         self.num_input_channels = len(data_indices.model.input)
         self.num_output_channels = len(data_indices.model.output)
         self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
         self._internal_input_idx = data_indices.model.input.prognostic
         self._internal_output_idx = data_indices.model.output.prognostic
-        self.input_dim = (
-            self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        )
+        self.input_dim = self._calculate_input_dim()
+        self.input_dim_latent = self._calculate_input_dim_latent()
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
@@ -178,6 +183,7 @@ class AnemoiGraphModelBase(nn.Module):
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
         use_reentrant: bool = False,
+        **kwargs,
     ) -> Tensor:
         """Run mapper with activation checkpoint.
 
@@ -208,19 +214,20 @@ class AnemoiGraphModelBase(nn.Module):
         Tensor
             Mapped data
         """
-        kwargs = {
+        mapper_args = {
             "batch_size": batch_size,
             "shard_shapes": shard_shapes,
             "model_comm_group": model_comm_group,
             "x_src_is_sharded": x_src_is_sharded,
             "x_dst_is_sharded": x_dst_is_sharded,
             "keep_x_dst_sharded": keep_x_dst_sharded,
+            **kwargs,
         }
 
         if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
-            return mapper(data, **kwargs)
+            return mapper(data, **mapper_args)  # finer grained checkpointing inside GTM with edge sharding
 
-        return checkpoint(mapper, data, **kwargs, use_reentrant=use_reentrant)
+        return checkpoint(mapper, data, **mapper_args, use_reentrant=use_reentrant)
 
     def _build_boundings(
         self,

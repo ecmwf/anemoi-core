@@ -118,6 +118,7 @@ class GraphForecaster(BaseGraphModule):
             x[:, -1],
             batch[:, self.multi_step + rollout_step],
             self.data_indices,
+            grid_shard_slice=self.grid_shard_slice,
         )
 
         # get new "constants" needed for time-varying fields

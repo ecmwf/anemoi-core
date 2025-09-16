@@ -1,0 +1,61 @@
+# Config for LAM benchmark, will be merged with the base benchmark config
+
+hardware:
+  num_gpus_per_model: 2
+  files:
+    dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-6h-v3-hmsi.zarr
+    forcing_dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
+    graph: lam-bm-graph.pt
+
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+    adjust: all
+    min_distance_km: 0
+  training:
+    end: 2017-12-29
+  validation:
+    start: 2017-12-30
+
+# need this modification since some variables set in the default zarr config are not part of the dataset
+data:
+  forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  diagnostic:
+  - "tp"
+
+  normalizer:
+    default: "mean-std"
+    std:
+    - "tp"
+    min-max:
+    max:
+    none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+
+training:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+
+model:
+  num_channels: 512
+  output_mask:
+    _target_: anemoi.training.utils.masks.Boolean1DMask
+    nodes_name: ${graph.data}
+    attribute_name: cutout_mask

@@ -633,15 +633,18 @@ class BenchmarkProfiler(Profiler):
         flag = ["--" not in row for row in memory_df["Name"]]
         memory_df = memory_df[flag]
         time_rows = [row for row in table.split("\n")[-3:] if row != ""]
-        if time_rows:
-            time_rows_dict = {}
-            for row in time_rows:
-                key, val = row.split(":")
-                val = convert_to_seconds(val.strip())
-                time_rows_dict[key] = val
-            self.time_rows_dict = time_rows_dict
+        try:
+            if time_rows:
+                time_rows_dict = {}
+                for row in time_rows:
+                    key, val = row.split(":")
+                    val = convert_to_seconds(val.strip())
+                    time_rows_dict[key] = val
+                self.time_rows_dict = time_rows_dict
 
-            memory_df = memory_df[~memory_df["Name"].isin(time_rows)]
+                memory_df = memory_df[~memory_df["Name"].isin(time_rows)]
+        except ValueError as e:
+            LOGGER.info("Error saving memory df: %s", e)
 
         self.memory_report_fname = self.dirpath / "memory_profiler.csv"
         self._save_report(memory_df, self.memory_report_fname)
@@ -688,7 +691,6 @@ class ProfilerProgressBar(TQDMProgressBar):
         batch_idx: int,
     ) -> None:
         """Appends the rate from the progress bar to the list of 'training_rates'."""
-        batch_idx + 1
         super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         if self.train_progress_bar.format_dict["n"] != 0:
             self.training_rates.append(self._extract_rate(self.train_progress_bar))

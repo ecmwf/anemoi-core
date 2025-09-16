@@ -1,0 +1,28 @@
+# configuration for the "ensemble_crps" benchmark
+
+hardware:
+  num_gpus_per_model: 1
+  num_gpus_per_ensemble: 2
+  files:
+    dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
+    graph: ens-bm-graph.pt
+    truncation: null
+    truncation_inv: null
+
+dataloader:
+  training:
+    end: 2020-11-30
+  validation:
+    start: 2020-12-31
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        resolution: 6
+
+model:
+  num_channels: 256
+
+training:
+  ensemble_size_per_device: 1

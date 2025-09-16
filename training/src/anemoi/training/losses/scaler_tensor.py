@@ -186,7 +186,7 @@ class ScaleTensor(nn.Module):
             dimension = [dimension]
 
         for scaler_dim, dim in enumerate(dimension):
-            if dim not in self or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1:
+            if dim not in self or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1 or dim == TensorDim.GRID:
                 continue
 
             if self.shape[dim] != scaler.shape[scaler_dim]:
@@ -558,7 +558,7 @@ class ScaleTensor(nn.Module):
         for dims, scaler in tensors.values():
             if TensorDim.GRID in dims and grid_shard_slice is not None:
                 grid_index = dims.index(TensorDim.GRID)
-                if scaler.shape[grid_index] > 1:
+                if scaler.shape[grid_index] >= grid_shard_slice.stop:
                     slices = [slice(None)] * len(dims)
                     slices[grid_index] = grid_shard_slice
                     scaler = scaler[tuple(slices)]
