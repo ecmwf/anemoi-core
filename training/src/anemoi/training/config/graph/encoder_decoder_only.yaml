@@ -9,7 +9,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes # options: AnemoiDatasetNodes, NPZFileNodes
-      dataset: ${dataloader.dataset}
+      dataset: ${dataloader.training.dataset}
     attributes: ${graph.attributes.nodes} # options: l1, l2, unit-max, unit-sum, unit-std
   # Hidden nodes
   hidden:

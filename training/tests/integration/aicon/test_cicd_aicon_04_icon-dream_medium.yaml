@@ -31,10 +31,8 @@ hardware:
     checkpoints: ${hardware.paths.output}checkpoint/
     plots: ${hardware.paths.output}plots/
     profiler: ${hardware.paths.output}profiler/
-    data: "placeholder-for-config-validation"
   files:
     graph: none
-    dataset: dataset_20220101_20230101_6H.zarr/3.zarr
     warm_start: null
     checkpoint:
       every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
