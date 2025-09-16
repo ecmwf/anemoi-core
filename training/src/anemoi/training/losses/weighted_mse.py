@@ -43,9 +43,9 @@ class WeightedMSELoss(MSELoss):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, gridpoints, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, gridpoints, n_outputs)
         weights : torch.Tensor | None, optional
             Weights to apply to the MSE difference, by default None
         squash : bool, optional
