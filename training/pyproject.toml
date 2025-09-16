@@ -51,8 +51,8 @@ dependencies = [
   "matplotlib>=3.7.1",
   "mlflow-skinny>=2.11.1",
   "numpy<2",                                         # Pinned until we can confirm it works with anemoi graphs
+  "nvidia-ml-py>=13.580.82",
   "pydantic>=2.9",
-  "pynvml>=11.5",
   "pyshtools>=4.13",
   "pytorch-lightning>=2.1",
   "timm>=0.9.2",
