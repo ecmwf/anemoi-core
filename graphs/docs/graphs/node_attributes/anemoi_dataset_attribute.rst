@@ -5,10 +5,16 @@
 Anemoi datasets are the standard format to define data nodes in
 :ref:`anemoi-graphs <anemoi-graphs:index-page>`. The user can define
 node attributes based on an Anemoi dataset variable. For example, the
-following recipe will define an attribute `land_mask` based on the `lsm`
-variable of the dataset.
+following recipe will create a mask of valid (not missing) values of 
+the `lsm` variable and store it in the attribute `land_mask`:
 
 .. literalinclude:: ../yaml/attributes_nonmissingzarr.yaml
+   :language: yaml
+
+Alternatively, to create a mask of non-zero values of the `lsm` variable,
+use the `NonzeroAnemoiDatasetNodes` class:
+
+.. literalinclude:: ../yaml/attributes_nonzerozarr.yaml
    :language: yaml
 
 In addition, if an user is using "cutout" operation to build their
