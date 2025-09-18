@@ -37,11 +37,6 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         if key in logger_config:
             del logger_config[key]
 
-    # Defaults that exist outside the scope of config.diagnostics.log.mlflow
-    if "save_dir" in logger_config:
-        if logger_config["save_dir"] is None:
-            logger_config["save_dir"] = config.hardware.paths.logs.mlflow
-
     logger = instantiate(
         logger_config,
         run_id=config.training.run_id,
