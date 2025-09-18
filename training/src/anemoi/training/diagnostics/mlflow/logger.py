@@ -266,7 +266,10 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         fork_run_id: str | None = None,
         offline: bool | None = False,
         authentication: bool | None = None,
+        system: bool | None = True,
+        terminal: bool | None = True,
         log_hyperparams: bool | None = True,
+        expand_hyperparams: list[str] | None = None,
         on_resume_create_child: bool | None = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
         http_max_retries: int | None = 35,
@@ -297,8 +300,14 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             Whether to run offline or not, by default False
         authentication : bool | None, optional
             Whether to authenticate with server or not, by default None
+        system: bool | None, optional
+            If True, log system metrics, by default True
+        terminal: bool | None, optional
+            If True, log terminal output to mlflow, by default True
         log_hyperparams : bool | None, optional
             Whether to log hyperparameters, by default True
+        expand_hyperparams: list[str] | None, optional
+            keys to expand within params. Any key being expanded will have lists converted according to `expand_iterables`. By default ['config']
         on_resume_create_child: bool | None, optional
             Whether to create a child run when resuming a run, by default False
         max_params_length: int | None, optional
@@ -306,6 +315,9 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         http_max_retries: int | None, optional
             Maximum number of retries for MLflow HTTP requests, default 35
         """
+        self.log_system = system
+        self.log_terminal = terminal
+        self.expand_hyperparams = expand_hyperparams if expand_hyperparams else ["config"]
         self._resumed = run_id is not None
         self._forked = fork_run_id is not None
         self._flag_log_hparams = log_hyperparams

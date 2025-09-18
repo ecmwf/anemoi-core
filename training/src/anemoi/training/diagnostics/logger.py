@@ -27,15 +27,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         return None
 
     logger_config = OmegaConf.to_container(convert_to_omegaconf(config.diagnostics.log.mlflow))
-
-    # TODO: should all of these terminal loggings etc be moved to the logger class constructor?
-    log_system = logger_config.get("system")
-    log_terminal = logger_config.get("terminal")
-    expand_hyperparams = logger_config.get("expand_hyperparams")
-
-    for key in ["system", "terminal", "expand_hyperparams", "enabled"]:
-        if key in logger_config:
-            del logger_config[key]
+    del logger_config["enabled"]
 
     logger = instantiate(
         logger_config,
@@ -45,12 +37,12 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
     logger.log_hyperparams(
         config_params,
-        expand_keys=expand_hyperparams,
+        expand_keys=logger.expand_hyperparams,
     )
 
-    if log_terminal:
+    if logger.log_terminal:
         logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)
-    if log_system:
+    if logger.log_system:
         logger.log_system_metrics()
 
     return logger
