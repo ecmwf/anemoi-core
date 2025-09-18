@@ -11,6 +11,7 @@
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import Any
 
 import numpy as np
 import torch
@@ -32,7 +33,7 @@ class BaseAnemoiDatasetVariable(BooleanBaseNodeAttribute):
     @abstractmethod
     def _get_mask(self, ds) -> np.ndarray: ...
 
-    def _read_dataset(self, nodes: NodeStorage, **kwargs) -> open_dataset.Dataset:
+    def _read_dataset(self, nodes: NodeStorage, **kwargs) -> Any:
         return open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
