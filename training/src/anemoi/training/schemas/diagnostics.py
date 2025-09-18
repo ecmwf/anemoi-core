@@ -251,6 +251,7 @@ class WandbSchema(BaseModel):
             values["entity"] = None
         return values
 
+
 class MlflowSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
         ...,
@@ -327,7 +328,7 @@ class LoggingSchema(BaseModel):
     "W&B logging schema."
     tensorboard: TensorboardSchema
     "TensorBorad logging schema."
-    mlflow: Annotated[MlflowSchema,AzureMlflowSchema,Field(discriminator="target_")]
+    mlflow: Annotated[MlflowSchema, AzureMlflowSchema, Field(discriminator="target_")]
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."

@@ -158,7 +158,7 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
             Log level for all azure packages (azure-identity, azure-core, etc)
         """
         if offline:
-            raise ValueError(f"Cannot run AnemoiAzureMLflowLogger offline")
+            raise ValueError("Cannot run AnemoiAzureMLflowLogger offline")
 
         # Set azure logging to warning, since otherwise it's way too much
         azure_logger = logging.getLogger("azure")
