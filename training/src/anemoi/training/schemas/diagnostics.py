@@ -251,11 +251,18 @@ class WandbSchema(BaseModel):
             values["entity"] = None
         return values
 
-
-class BaseMlflowSchema(BaseModel):
+class MlflowSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
+        ...,
+        alias="_target_",
+    )
 
     enabled: bool
     "Use MLflow logger."
+    offline: bool
+    "Run MLflow offline. Necessary if no internet access available."
+    authentication: bool
+    "Whether to authenticate with server or not"
     log_model: bool | Literal["all"] | None = None
     "Log checkpoints created by ModelCheckpoint as MLFlow artifacts. \
             If True, checkpoints are logged at the end of training. If 'all', checkpoints are logged during training."
@@ -279,34 +286,25 @@ class BaseMlflowSchema(BaseModel):
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
     max_params_length: int = MAX_PARAMS_LENGTH
     "Maximum number of hpParams to be logged with mlflow"
+    save_dir: str | None = None
+    "Directory to save logs to when offline=True, default=config.hardware.paths.logs.mlflow"
 
     @root_validator(pre=True)
-    def clean_entity(cls: type["BaseMlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+    def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         if values["enabled"] is False:
             values["tracking_uri"] = None
         return values
 
 
-class MlflowSchema(BaseMlflowSchema):
-    target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
-        ...,
-        alias="_target_",
-    )
-
-    offline: bool
-    "Run MLflow offline. Necessary if no internet access available."
-    authentication: bool
-    "Whether to authenticate with server or not"
-    save_dir: str | None = None
-    "Directory to save logs to when offline=True, default=config.hardware.paths.logs.mlflow"
-
-
-class AzureMlflowSchema(BaseMlflowSchema):
+class AzureMlflowSchema(MlflowSchema):
     target_: Literal["anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"] = Field(
         ...,
         alias="_target_",
     )
 
+    # This options is inherited, but doesn't make sense for Azure, so we enforce the required value
+    offline: Literal[False]
+    # These are specific to Azure
     identity: str | None = None
     "Type of identity to use for logging in with Azure ML."
     resource_group: str | None = None
@@ -329,7 +327,7 @@ class LoggingSchema(BaseModel):
     "W&B logging schema."
     tensorboard: TensorboardSchema
     "TensorBorad logging schema."
-    mlflow: MlflowSchema | AzureMlflowSchema
+    mlflow: Annotated[MlflowSchema,AzureMlflowSchema,Field(discriminator="target_")]
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."

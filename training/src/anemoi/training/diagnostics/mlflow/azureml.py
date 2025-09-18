@@ -129,12 +129,14 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         experiment_name: str = "lightning_logs",
         project_name: str = "anemoi",
         run_name: str | None = None,
-        tracking_uri: str | None = None,
-        save_dir: str | None = "./mlruns",
+        tracking_uri: str | None = os.getenv("MLFLOW_TRACKING_URI"),
+        save_dir: str | None = None,
         log_model: Literal["all"] | bool = LOG_MODEL,
         prefix: str = "",
         run_id: str | None = None,
         fork_run_id: str | None = None,
+        offline: bool | None = False,
+        authentication: bool | None = None,
         log_hyperparams: bool | None = True,
         on_resume_create_child: bool | None = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
@@ -155,6 +157,9 @@ class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
         azure_log_level: str, optional
             Log level for all azure packages (azure-identity, azure-core, etc)
         """
+        if offline:
+            raise ValueError(f"Cannot run AnemoiAzureMLflowLogger offline")
+
         # Set azure logging to warning, since otherwise it's way too much
         azure_logger = logging.getLogger("azure")
         numeric_level = getattr(logging, azure_log_level.upper(), None)
