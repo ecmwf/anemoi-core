@@ -102,8 +102,11 @@ class ComponentCatalog:
         from abc import ABC
 
         return (
+            # Only consider it abstract if ABC is a direct base class
             ABC in obj.__bases__
-            or (hasattr(obj, "__abstractmethods__") and obj.__abstractmethods__)
+            # Only abstract if it has unimplemented abstract methods
+            or (hasattr(obj, "__abstractmethods__") and bool(obj.__abstractmethods__))
+            # Convention-based check for base classes
             or obj.__name__.startswith("Base")
         )
 
@@ -163,8 +166,16 @@ class ComponentCatalog:
         except ImportError as e:
             # This is expected if the module doesn't exist yet
             logger.debug("Module %s not found (this is normal if not yet implemented): %s", module_name, e)
-        except (AttributeError, TypeError, ValueError):
-            logger.exception("Error discovering components in %s", module_name)
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.warning(
+                "Error discovering components in %s: %s. "
+                "This may indicate malformed component classes. "
+                "Components should inherit from the appropriate base class (%s) "
+                "and be properly importable.",
+                module_name,
+                e,
+                base_class_name,
+            )
 
         return components
 
@@ -205,10 +216,55 @@ class ComponentCatalog:
         return name.lower()
 
     @classmethod
+    def _warn_about_discovery_issues(cls, component_type: str, discovered: dict[str, str]) -> None:
+        """Provide smart warnings about component discovery results."""
+        if not discovered:
+            logger.warning(
+                "No %s components were discovered. This might indicate:\n"
+                "  • The %s module is not yet implemented\n"
+                "  • Import errors in the %s module\n"
+                "  • No concrete classes inherit from the base class\n"
+                "To check for issues, try importing the module manually:\n"
+                "  >>> from anemoi.training.checkpoint.%s import *",
+                component_type,
+                component_type,
+                component_type,
+                component_type,
+            )
+        elif len(discovered) < cls._get_expected_component_count(component_type):
+            expected = cls._get_expected_component_count(component_type)
+            logger.info(
+                "Discovered %d %s components (expected ~%d). Available: %s\n"
+                "This is normal during development when not all components are implemented yet.",
+                len(discovered),
+                component_type,
+                expected,
+                list(discovered.keys()),
+            )
+        else:
+            logger.debug(
+                "Successfully discovered %d %s components: %s",
+                len(discovered),
+                component_type,
+                list(discovered.keys()),
+            )
+
+    @classmethod
+    def _get_expected_component_count(cls, component_type: str) -> int:
+        """Get expected number of components for smart warnings."""
+        expectations = {
+            "sources": 5,  # local, s3, http, gcs, azure
+            "loaders": 4,  # weights_only, transfer_learning, warm_start, cold_start
+            "modifiers": 3,  # freeze, lora, quantize (initially)
+        }
+        return expectations.get(component_type, 1)
+
+    @classmethod
     def _get_sources(cls) -> dict[str, str]:
         """Get the registry of checkpoint sources, discovering if needed."""
         if cls._sources is None:
             cls._sources = cls._discover_components("anemoi.training.checkpoint.sources", "CheckpointSource")
+            cls._warn_about_discovery_issues("sources", cls._sources)
         return cls._sources
 
     @classmethod
@@ -216,6 +272,7 @@ class ComponentCatalog:
         """Get the registry of loaders, discovering if needed."""
         if cls._loaders is None:
             cls._loaders = cls._discover_components("anemoi.training.checkpoint.loaders", "LoadingStrategy")
+            cls._warn_about_discovery_issues("loaders", cls._loaders)
         return cls._loaders
 
     @classmethod
@@ -223,6 +280,7 @@ class ComponentCatalog:
         """Get the registry of modifiers, discovering if needed."""
         if cls._modifiers is None:
             cls._modifiers = cls._discover_components("anemoi.training.checkpoint.modifiers", "ModelModifier")
+            cls._warn_about_discovery_issues("modifiers", cls._modifiers)
         return cls._modifiers
 
     @classmethod
@@ -303,9 +361,40 @@ class ComponentCatalog:
         """
         sources = cls._get_sources()
         if name not in sources:
-            available = ", ".join(sorted(sources.keys()))
-            msg = f"Unknown checkpoint source: '{name}'. Available sources: {available}"
-            raise ValueError(msg)
+            available = sorted(sources.keys())
+            if not available:
+                from .exceptions import CheckpointConfigError
+
+                error_msg = (
+                    f"Unknown checkpoint source: '{name}' - no checkpoint sources are currently available.\n"
+                    "This usually means:\n"
+                    "  • The checkpoint.sources module hasn't been implemented yet\n"
+                    "  • There are import errors in the sources module\n"
+                    "  • No concrete CheckpointSource classes were found\n"
+                    "Check that checkpoint source classes inherit from CheckpointSource and are importable."
+                )
+                raise CheckpointConfigError(
+                    error_msg,
+                    config_path=f"source.type='{name}'",
+                )
+
+            # Provide helpful suggestions based on similar names
+            # Find suggestions using list comprehension
+            name_lower = name.lower()
+            suggestions = [
+                available_name
+                for available_name in available
+                if name_lower in available_name.lower() or available_name.lower() in name_lower
+            ]
+
+            error_msg = f"Unknown checkpoint source: '{name}'. Available sources: {', '.join(available)}"
+            if suggestions:
+                error_msg += f"\nDid you mean: {', '.join(suggestions)}?"
+            error_msg += f"\n\nExample usage:\n  source:\n    type: {available[0]}"
+
+            from .exceptions import CheckpointConfigError
+
+            raise CheckpointConfigError(error_msg, config_path=f"source.type='{name}'")
         return sources[name]
 
     @classmethod
@@ -329,10 +418,102 @@ class ComponentCatalog:
         """
         loaders = cls._get_loaders()
         if name not in loaders:
-            available = ", ".join(sorted(loaders.keys()))
-            msg = f"Unknown loader strategy: '{name}'. Available loaders: {available}"
-            raise ValueError(msg)
+            cls._handle_unknown_loader(name, loaders)
         return loaders[name]
+
+    @classmethod
+    def _handle_unknown_loader(cls, name: str, loaders: dict[str, str]) -> None:
+        """Handle unknown loader with helpful error message.
+
+        Parameters
+        ----------
+        name : str
+            The requested loader name
+        loaders : dict
+            Available loaders mapping
+
+        Raises
+        ------
+        CheckpointConfigError
+            Always raises with helpful error message
+        """
+        from .exceptions import CheckpointConfigError
+
+        available = sorted(loaders.keys())
+        if not available:
+            error_message = (
+                f"Unknown loader strategy: '{name}' - no loaders are currently available.\n"
+                "This usually means:\n"
+                "  • The checkpoint.loaders module hasn't been implemented yet\n"
+                "  • There are import errors in the loaders module\n"
+                "  • No concrete LoadingStrategy classes were found\n"
+                "Check that loader classes inherit from LoadingStrategy and are importable."
+            )
+            raise CheckpointConfigError(error_message, config_path=f"loading.type='{name}'")
+
+        # Build error message with suggestions
+        error_msg = cls._build_loader_error_message(name, available)
+        raise CheckpointConfigError(error_msg, config_path=f"loading.type='{name}'")
+
+    @classmethod
+    def _build_loader_error_message(cls, name: str, available: list[str]) -> str:
+        """Build detailed error message for unknown loader.
+
+        Parameters
+        ----------
+        name : str
+            The requested loader name
+        available : list[str]
+            List of available loader names
+
+        Returns
+        -------
+        str
+            Detailed error message with suggestions
+        """
+        error_msg = f"Unknown loader strategy: '{name}'. Available loaders: {', '.join(available)}"
+
+        # Add suggestions based on similar names
+        suggestions = cls._find_similar_names(name, available)
+        if suggestions:
+            error_msg += f"\nDid you mean: {', '.join(suggestions)}?"
+
+        # Add context about loader types
+        error_msg += cls._get_loader_type_descriptions(available)
+        error_msg += f"\n\nExample usage:\n  loading:\n    type: {available[0]}"
+
+        return error_msg
+
+    @classmethod
+    def _get_loader_type_descriptions(cls, available: list[str]) -> str:
+        """Get descriptions of available loader types.
+
+        Parameters
+        ----------
+        available : list[str]
+            List of available loader names
+
+        Returns
+        -------
+        str
+            Formatted descriptions of loader types
+        """
+        if not available:
+            return ""
+
+        descriptions = "\n\nCommon loader types:"
+        loader_docs = {
+            "weights_only": "Load only model weights (fastest)",
+            "transfer_learning": "Flexible loading with mismatch handling",
+            "warm_start": "Resume training with full state",
+            "cold_start": "Fresh training from pretrained weights",
+        }
+
+        for loader_name, description in loader_docs.items():
+            if loader_name in available:
+                descriptions += f"\n  • {loader_name}: {description}"
+
+        return descriptions
 
     @classmethod
     def get_modifier_target(cls, name: str) -> str:
@@ -355,7 +536,122 @@ class ComponentCatalog:
         """
         modifiers = cls._get_modifiers()
         if name not in modifiers:
-            available = ", ".join(sorted(modifiers.keys()))
-            msg = f"Unknown model modifier: '{name}'. Available modifiers: {available}"
-            raise ValueError(msg)
+            cls._handle_unknown_modifier(name, modifiers)
         return modifiers[name]
+
+    @classmethod
+    def _handle_unknown_modifier(cls, name: str, modifiers: dict[str, str]) -> None:
+        """Handle unknown modifier with helpful error message.
+
+        Parameters
+        ----------
+        name : str
+            The requested modifier name
+        modifiers : dict
+            Available modifiers mapping
+
+        Raises
+        ------
+        CheckpointConfigError
+            Always raises with helpful error message
+        """
+        from .exceptions import CheckpointConfigError
+
+        available = sorted(modifiers.keys())
+        if not available:
+            error_message = (
+                f"Unknown model modifier: '{name}' - no modifiers are currently available.\n"
+                "This usually means:\n"
+                "  • The checkpoint.modifiers module hasn't been implemented yet\n"
+                "  • There are import errors in the modifiers module\n"
+                "  • No concrete ModelModifier classes were found\n"
+                "Check that modifier classes inherit from ModelModifier and are importable."
+            )
+            raise CheckpointConfigError(error_message, config_path=f"modifiers[].type='{name}'")
+
+        # Build error message with suggestions
+        error_msg = cls._build_modifier_error_message(name, available)
+        raise CheckpointConfigError(error_msg, config_path=f"modifiers[].type='{name}'")
+
+    @classmethod
+    def _build_modifier_error_message(cls, name: str, available: list[str]) -> str:
+        """Build detailed error message for unknown modifier.
+
+        Parameters
+        ----------
+        name : str
+            The requested modifier name
+        available : list[str]
+            List of available modifier names
+
+        Returns
+        -------
+        str
+            Detailed error message with suggestions
+        """
+        error_msg = f"Unknown model modifier: '{name}'. Available modifiers: {', '.join(available)}"
+
+        # Add suggestions based on similar names
+        suggestions = cls._find_similar_names(name, available)
+        if suggestions:
+            error_msg += f"\nDid you mean: {', '.join(suggestions)}?"
+
+        # Add context about modifier types
+        error_msg += cls._get_modifier_type_descriptions(available)
+        error_msg += f"\n\nExample usage:\n  modifiers:\n    - type: {available[0]}"
+
+        return error_msg
+
+    @classmethod
+    def _get_modifier_type_descriptions(cls, available: list[str]) -> str:
+        """Get descriptions of available modifier types.
+
+        Parameters
+        ----------
+        available : list[str]
+            List of available modifier names
+
+        Returns
+        -------
+        str
+            Formatted descriptions of modifier types
+        """
+        if not available:
+            return ""
+
+        descriptions = "\n\nCommon modifier types:"
+        modifier_docs = {
+            "freeze": "Freeze specific layers/parameters",
+            "lora": "Low-Rank Adaptation fine-tuning",
+            "quantize": "Model quantization for efficiency",
+            "prune": "Remove less important connections",
+        }
+
+        for modifier_name, description in modifier_docs.items():
+            if modifier_name in available:
+                descriptions += f"\n  • {modifier_name}: {description}"
+
+        return descriptions
+
+    @classmethod
+    def _find_similar_names(cls, name: str, available: list[str]) -> list[str]:
+        """Find similar names from available options.
+
+        Parameters
+        ----------
+        name : str
+            The requested name
+        available : list[str]
+            List of available names
+
+        Returns
+        -------
+        list[str]
+            List of similar names that might be suggestions
+        """
+        name_lower = name.lower()
+        return [
+            available_name
+            for available_name in available
+            if name_lower in available_name.lower() or available_name.lower() in name_lower
+        ]
