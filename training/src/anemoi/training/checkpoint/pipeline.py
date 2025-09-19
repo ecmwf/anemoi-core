@@ -49,6 +49,7 @@ Example
 >>> context = CheckpointContext(model=my_model)
 >>> result = await pipeline.execute(context)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -161,6 +162,9 @@ class CheckpointPipeline:
         for i, stage in enumerate(self.stages):
             LOGGER.debug("  Stage %d: %s", i, stage)
 
+        # Smart warnings about pipeline configuration
+        self._validate_pipeline_composition()
+
     def _instantiate_stages(self, stages: list[Any]) -> list[PipelineStage]:
         """Instantiate stages from configs or pass through existing instances.
 
@@ -182,13 +186,133 @@ class CheckpointPipeline:
                     instantiated_stage = instantiate(stage)
                     instantiated.append(instantiated_stage)
                     LOGGER.debug("Instantiated stage %d from config: %s", i, instantiated_stage)
-                except Exception:
+                except Exception as e:
+                    from .exceptions import CheckpointConfigError
+
+                    stage_config_preview = str(stage)[:200] + "..." if len(str(stage)) > 200 else str(stage)
+                    error_msg = (
+                        f"Failed to instantiate pipeline stage {i} from configuration.\n"
+                        f"Stage config: {stage_config_preview}\n"
+                        f"Original error: {e}\n"
+                        "Suggestions:\n"
+                        "  • Check that the '_target_' path is correct and importable\n"
+                        "  • Verify all required parameters are provided\n"
+                        "  • Ensure the target class is a valid PipelineStage subclass"
+                    )
                     LOGGER.exception("Failed to instantiate stage %d from config", i)
-                    raise
+                    raise CheckpointConfigError(error_msg, config_path=f"stages[{i}]") from e
             else:
                 # Already instantiated
                 instantiated.append(stage)
         return instantiated
+
+    def _validate_pipeline_composition(self) -> None:
+        """Validate pipeline composition and provide smart warnings."""
+        if not self.stages:
+            LOGGER.warning(
+                "Pipeline has no stages configured. "
+                "Consider adding stages for source acquisition, loading, or model modification.",
+            )
+            return
+
+        stage_types = [stage.__class__.__name__ for stage in self.stages]
+
+        # Check for common composition issues
+        self._check_source_loading_order(stage_types)
+        self._check_modifier_placement(stage_types)
+        self._check_duplicate_stages(stage_types)
+        self._suggest_missing_stages(stage_types)
+
+    def _check_source_loading_order(self, stage_types: list[str]) -> None:
+        """Check that source stages come before loading stages."""
+        source_indices = [i for i, name in enumerate(stage_types) if "Source" in name]
+        loader_indices = [i for i, name in enumerate(stage_types) if "Loader" in name or "Loading" in name]
+
+        if source_indices and loader_indices:
+            last_source = max(source_indices)
+            first_loader = min(loader_indices)
+
+            if last_source > first_loader:
+                LOGGER.warning(
+                    "Source stage at position %d comes after loader stage at position %d. "
+                    "This may cause issues as loaders typically expect checkpoints to be already acquired. "
+                    "Consider reordering: sources first, then loaders, then modifiers.",
+                    last_source,
+                    first_loader,
+                )
+
+    def _check_modifier_placement(self, stage_types: list[str]) -> None:
+        """Check that modifier stages come after loading stages."""
+        loader_indices = [i for i, name in enumerate(stage_types) if "Loader" in name or "Loading" in name]
+        modifier_indices = [i for i, name in enumerate(stage_types) if "Modifier" in name]
+
+        if loader_indices and modifier_indices:
+            last_loader = max(loader_indices)
+            first_modifier = min(modifier_indices)
+
+            if first_modifier < last_loader:
+                LOGGER.warning(
+                    "Modifier stage at position %d comes before loader stage at position %d. "
+                    "Model modifications typically work best after checkpoint loading. "
+                    "Consider reordering: sources, loaders, then modifiers.",
+                    first_modifier,
+                    last_loader,
+                )
+
+    def _check_duplicate_stages(self, stage_types: list[str]) -> None:
+        """Check for potentially conflicting duplicate stages."""
+        from collections import Counter
+
+        type_counts = Counter(stage_types)
+        duplicates = {stage_type: count for stage_type, count in type_counts.items() if count > 1}
+
+        if duplicates:
+            for stage_type, count in duplicates.items():
+                if "Loader" in stage_type or "Loading" in stage_type:
+                    LOGGER.warning(
+                        "Found %d instances of %s. Multiple loading strategies may conflict. "
+                        "Consider using a single loading strategy appropriate for your use case.",
+                        count,
+                        stage_type,
+                    )
+                elif "Source" in stage_type and stage_type.endswith("Source"):
+                    LOGGER.warning(
+                        "Found %d instances of %s. Multiple checkpoint sources may be redundant. "
+                        "The pipeline will process them in sequence.",
+                        count,
+                        stage_type,
+                    )
+
+    def _suggest_missing_stages(self, stage_types: list[str]) -> None:
+        """Suggest potentially missing stages based on common patterns."""
+        has_source = any("Source" in name for name in stage_types)
+        has_loader = any("Loader" in name or "Loading" in name for name in stage_types)
+        has_modifier = any("Modifier" in name for name in stage_types)
+
+        suggestions = []
+
+        if has_loader and not has_source:
+            suggestions.append(
+                "You have a loading stage but no source stage. "
+                "Consider adding a source stage (LocalSource, S3Source, etc.) to specify where to load from.",
+            )
+
+        if has_source and not has_loader:
+            suggestions.append(
+                "You have a source stage but no loading strategy. "
+                "Consider adding a loading stage (WeightsOnlyLoader, TransferLearningLoader, etc.) "
+                "to specify how to apply the checkpoint.",
+            )
+
+        if has_modifier and not (has_source or has_loader):
+            suggestions.append(
+                "You have model modifiers but no checkpoint loading. "
+                "Modifiers work best when applied after loading a checkpoint. "
+                "Consider adding source and loading stages.",
+            )
+
+        if suggestions:
+            LOGGER.info("Pipeline composition suggestions:\n  • %s", "\n  • ".join(suggestions))
 
     @classmethod
     def from_config(cls, config: DictConfig) -> CheckpointPipeline:
@@ -260,6 +384,9 @@ class CheckpointPipeline:
         """
         context = initial_context
 
+        # Perform environment health check before pipeline execution
+        self._perform_pre_execution_validation(context)
+
         for i, stage in enumerate(self.stages):
             stage_name = stage.__class__.__name__
             LOGGER.debug("Executing stage %d/%d: %s", i, len(self.stages), stage_name)
@@ -272,13 +399,42 @@ class CheckpointPipeline:
                 context.update_metadata(**{f"stage_{i}_{stage_name}": "completed"})
 
             except Exception as e:
-                LOGGER.exception("Stage %s failed", stage_name)
-                context.update_metadata(**{f"stage_{i}_{stage_name}": f"failed: {e!s}"})
+                from .exceptions import CheckpointError
 
-                if not self.continue_on_error:
-                    raise
+                # Enhance error with pipeline context
+                stage_info = f"Pipeline stage {i + 1}/{len(self.stages)} ({stage_name})"
 
-                LOGGER.warning("Continuing pipeline despite error in %s", stage_name)
+                # If it's already a CheckpointError, add pipeline context to details
+                if isinstance(e, CheckpointError):
+                    if hasattr(e, "details") and e.details:
+                        e.details["pipeline_stage"] = stage_info
+                        e.details["pipeline_stage_index"] = i
+                        e.details["pipeline_total_stages"] = len(self.stages)
+                    LOGGER.exception("Pipeline stage %s failed", stage_info)
+                    context.update_metadata(**{f"stage_{i}_{stage_name}": f"failed: {e!s}"})
+
+                    if not self.continue_on_error:
+                        raise
+                else:
+                    # Wrap non-CheckpointError exceptions with context
+                    error_msg = f"{stage_info} failed: {e}"
+                    context.update_metadata(**{f"stage_{i}_{stage_name}": f"failed: {e!s}"})
+                    LOGGER.exception("Pipeline stage %s failed", stage_info)
+
+                    if not self.continue_on_error:
+                        wrapped_error = CheckpointError(
+                            error_msg,
+                            {
+                                "pipeline_stage": stage_info,
+                                "pipeline_stage_index": i,
+                                "pipeline_total_stages": len(self.stages),
+                                "original_error": str(e),
+                                "original_error_type": type(e).__name__,
+                            },
+                        )
+                        raise wrapped_error from e
+
+                LOGGER.warning("Continuing pipeline despite error in %s", stage_info)
 
         LOGGER.info("Pipeline execution completed")
         return context
@@ -364,7 +520,34 @@ class CheckpointPipeline:
         ... })
         """
         if isinstance(stage, (dict, DictConfig)):
-            stage = instantiate(stage)
+            try:
+                stage = instantiate(stage)
+            except Exception as e:
+                from .exceptions import CheckpointConfigError
+
+                stage_config_preview = str(stage)[:200] + "..." if len(str(stage)) > 200 else str(stage)
+                error_msg = (
+                    f"Failed to add stage to pipeline: cannot instantiate from configuration.\n"
+                    f"Stage config: {stage_config_preview}\n"
+                    f"Original error: {e}\n"
+                    "Suggestions:\n"
+                    "  • Check that the '_target_' path is correct and importable\n"
+                    "  • Verify all required parameters are provided\n"
+                    "  • Ensure the target class is a valid PipelineStage subclass"
+                )
+                raise CheckpointConfigError(error_msg, config_path="add_stage") from e
+
+        # Validate that it's actually a PipelineStage
+        if not hasattr(stage, "process") or not callable(stage.process):
+            from .exceptions import CheckpointConfigError
+
+            error_message = (
+                f"Invalid stage type: {type(stage).__name__}. "
+                "Stages must be PipelineStage instances with a 'process' method. "
+                f"Got: {stage}"
+            )
+            raise CheckpointConfigError(error_message)
+
         self.stages.append(stage)
         LOGGER.debug("Added stage %s to pipeline", stage)
 
@@ -416,3 +599,62 @@ class CheckpointPipeline:
         """
         stage_names = [s.__class__.__name__ for s in self.stages]
         return f"CheckpointPipeline(stages={stage_names}, async={self.async_execution})"
+
+    def _perform_pre_execution_validation(self, context: CheckpointContext) -> None:
+        """Perform pre-execution health checks and validations.
+
+        This method runs lightweight validations before pipeline execution
+        to catch common configuration and environment issues early.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            The context about to be processed
+        """
+        try:
+            from .validation import CheckpointPipelineValidator
+
+            # Perform environment validation
+            env_results = CheckpointPipelineValidator.validate_environment_setup()
+
+            # Log any issues found
+            for issue in env_results.get("issues", []):
+                LOGGER.error("Environment issue: %s", issue)
+
+            for warning in env_results.get("warnings", []):
+                LOGGER.warning("Environment warning: %s", warning)
+
+            for info in env_results.get("info", []):
+                LOGGER.debug("Environment info: %s", info)
+
+            # Validate configuration if provided
+            if context.config and hasattr(context.config, "training"):
+                config_results = CheckpointPipelineValidator.validate_configuration(context.config)
+
+                # Log configuration issues
+                for issue in config_results.get("issues", []):
+                    LOGGER.error("Configuration issue: %s", issue)
+
+                for warning in config_results.get("warnings", []):
+                    LOGGER.warning("Configuration warning: %s", warning)
+
+                # Add validation results to context metadata
+                context.update_metadata(
+                    validation_environment_status=env_results.get("status", "unknown"),
+                    validation_config_status=config_results.get("status", "unknown"),
+                    validation_performed=True,
+                )
+            else:
+                context.update_metadata(
+                    validation_environment_status=env_results.get("status", "unknown"),
+                    validation_performed=True,
+                )
+
+        except ImportError:
+            # Validation module not available - this is ok, validation is optional
+            LOGGER.debug("Validation module not available, skipping pre-execution validation")
+            context.update_metadata(validation_performed=False, validation_skipped="module_unavailable")
+        except (ValueError, TypeError, AttributeError) as e:
+            # Don't fail pipeline execution due to validation errors
+            LOGGER.warning("Pre-execution validation failed: %s", e)
+            context.update_metadata(validation_performed=False, validation_error=str(e))
