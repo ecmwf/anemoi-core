@@ -7,7 +7,32 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Core checkpoint pipeline base classes."""
+"""Core abstractions for checkpoint pipeline.
+
+This module provides the fundamental building blocks for the checkpoint
+pipeline system. It defines the context object that carries state through
+the pipeline and the abstract base class for all pipeline stages.
+
+The checkpoint pipeline follows a simple pattern:
+1. A CheckpointContext is created with initial state
+2. The context is passed through a series of PipelineStage implementations
+3. Each stage modifies the context and passes it to the next stage
+4. The final context contains the result of all transformations
+
+Example
+-------
+>>> from anemoi.training.checkpoint import CheckpointContext, PipelineStage
+>>>
+>>> class MyStage(PipelineStage):
+...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+...         context.update_metadata(processed_by='MyStage')
+...         return context
+>>>
+>>> context = CheckpointContext()
+>>> stage = MyStage()
+>>> # In async context:
+>>> # result = await stage.process(context)
+"""
 
 from __future__ import annotations
 
@@ -20,6 +45,7 @@ from typing import Any
 from typing import Literal
 
 if TYPE_CHECKING:
+    import logging
     from pathlib import Path
 
     import torch.nn as nn
@@ -29,7 +55,61 @@ if TYPE_CHECKING:
 
 @dataclass
 class CheckpointContext:
-    """Carries state through pipeline stages."""
+    """Carries state through pipeline stages.
+
+    This context object is passed through each stage of the checkpoint
+    pipeline, accumulating state and metadata as it progresses. It serves
+    as a shared data structure that allows stages to communicate and build
+    upon each other's work.
+
+    The context supports:
+    - Checkpoint data management (path and loaded data)
+    - Model and optimizer state tracking
+    - Metadata accumulation for debugging and logging
+    - Configuration passing for stage behavior
+
+    Parameters
+    ----------
+    checkpoint_path : Path, optional
+        Local path to checkpoint file (if fetched from remote source)
+    checkpoint_data : dict, optional
+        Loaded checkpoint data dictionary containing model weights,
+        optimizer state, training metadata, etc.
+    model : nn.Module, optional
+        PyTorch model being modified by the pipeline. Can be either
+        AnemoiModelInterface (pure PyTorch) or extracted from GraphForecaster
+    optimizer : Optimizer, optional
+        Optional optimizer to restore state to (for warm starts)
+    scheduler : Any, optional
+        Optional learning rate scheduler to restore state to
+    metadata : dict
+        Dictionary of accumulated metadata from pipeline stages.
+        Each stage can add information here for tracking.
+    config : DictConfig, optional
+        Hydra configuration object containing pipeline settings
+    checkpoint_format : str, optional
+        Format of the checkpoint: 'lightning', 'pytorch', 'safetensors', or 'state_dict'
+    pl_module : pl.LightningModule, optional
+        Lightning module (GraphForecaster) if loading from Lightning checkpoint.
+        This preserves the full Lightning context for training resumption
+
+    Examples
+    --------
+    >>> import torch.nn as nn
+    >>> from pathlib import Path
+    >>>
+    >>> # Create context with initial state
+    >>> context = CheckpointContext(
+    ...     checkpoint_path=Path('/tmp/model.ckpt'),
+    ...     model=nn.Linear(10, 5),
+    ...     metadata={'source': 'local'}
+    ... )
+    >>>
+    >>> # Update metadata during processing
+    >>> context.update_metadata(stage='loading', status='success')
+    >>> print(context.metadata)
+    {'source': 'local', 'stage': 'loading', 'status': 'success'}
+    """
 
     checkpoint_path: Path | None = None
     checkpoint_data: dict[str, Any] | None = None
@@ -39,20 +119,312 @@ class CheckpointContext:
     metadata: dict[str, Any] = field(default_factory=dict)
     config: DictConfig | None = None
     checkpoint_format: Literal["lightning", "pytorch", "safetensors", "state_dict"] | None = None
-    pl_module: Any | None = None
+    pl_module: Any | None = None  # Type hint as Any to avoid circular imports
 
-    def has_checkpoint_data(self) -> bool:
-        """Check if checkpoint data is loaded."""
-        return self.checkpoint_data is not None and bool(self.checkpoint_data)
+    def __post_init__(self):
+        """Validate context after initialization."""
+        from pathlib import Path
+
+        if self.checkpoint_path is not None and not isinstance(self.checkpoint_path, Path):
+            self.checkpoint_path = Path(self.checkpoint_path)
+
+        # Smart context validation
+        self._validate_context_consistency()
 
     def update_metadata(self, **kwargs) -> None:
-        """Update metadata dictionary with new values."""
+        """Update metadata dictionary with new values.
+
+        This method allows stages to add information to the shared metadata
+        dictionary. Existing keys will be overwritten with new values.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Key-value pairs to add to metadata
+
+        Examples
+        --------
+        >>> context = CheckpointContext()
+        >>> context.update_metadata(epoch=10, loss=0.5)
+        >>> context.update_metadata(epoch=11)  # Updates existing key
+        >>> print(context.metadata)
+        {'epoch': 11, 'loss': 0.5}
+        """
         self.metadata.update(kwargs)
+
+    def get_metadata(self, key: str, default: Any = None) -> Any:
+        """Get value from metadata with optional default.
+
+        Safe method to retrieve metadata values without raising KeyError.
+
+        Parameters
+        ----------
+        key : str
+            Metadata key to retrieve
+        default : Any, optional
+            Default value if key not found (default: None)
+
+        Returns
+        -------
+        Any
+            Metadata value or default if key doesn't exist
+
+        Examples
+        --------
+        >>> context = CheckpointContext(metadata={'epoch': 10})
+        >>> context.get_metadata('epoch')
+        10
+        >>> context.get_metadata('missing', 'default_value')
+        'default_value'
+        """
+        return self.metadata.get(key, default)
+
+    def has_checkpoint_data(self) -> bool:
+        """Check if checkpoint data is loaded.
+
+        This method verifies that checkpoint data exists and is not empty,
+        which is useful for stages that require checkpoint data to operate.
+
+        Returns
+        -------
+        bool
+            True if checkpoint_data is not None and not empty,
+            False otherwise
+
+        Examples
+        --------
+        >>> context = CheckpointContext()
+        >>> context.has_checkpoint_data()
+        False
+        >>> context.checkpoint_data = {'state_dict': {}}
+        >>> context.has_checkpoint_data()
+        True
+        """
+        return self.checkpoint_data is not None and len(self.checkpoint_data) > 0
+
+    def __repr__(self) -> str:
+        """String representation of context."""
+        parts = []
+        if self.checkpoint_path:
+            parts.append(f"path={self.checkpoint_path.name}")
+        if self.model:
+            parts.append(f"model={type(self.model).__name__}")
+        if self.metadata:
+            parts.append(f"metadata_keys={list(self.metadata.keys())}")
+        return f"CheckpointContext({', '.join(parts)})"
+
+    def _validate_context_consistency(self) -> None:
+        """Validate context consistency and provide smart warnings."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Split validation into smaller methods to reduce complexity
+        self._check_path_data_consistency(logger)
+        self._check_model_optimizer_consistency(logger)
+        self._check_format_consistency(logger)
+        self._check_missing_essentials(logger)
+
+    def _check_path_data_consistency(self, logger: logging.Logger) -> None:
+        """Check consistency between checkpoint path and data."""
+        if self.checkpoint_path and not self.has_checkpoint_data():
+            logger.debug(
+                "Checkpoint path provided (%s) but no checkpoint data loaded yet. "
+                "This is normal if the pipeline will load the data later.",
+                self.checkpoint_path,
+            )
+        elif not self.checkpoint_path and self.has_checkpoint_data():
+            logger.debug(
+                "Checkpoint data is loaded but no path is recorded. "
+                "This is normal for in-memory or generated checkpoints.",
+            )
+
+    def _check_model_optimizer_consistency(self, logger: logging.Logger) -> None:
+        """Check consistency between model and optimizer/scheduler."""
+        if self.optimizer and not self.model:
+            logger.warning(
+                "Optimizer provided without a model. "
+                "This may cause issues in loading stages that expect both. "
+                "Consider providing the model or removing the optimizer.",
+            )
+
+        if self.scheduler and not self.optimizer:
+            logger.warning(
+                "Learning rate scheduler provided without an optimizer. "
+                "Schedulers typically require an optimizer to be meaningful. "
+                "Consider providing the optimizer or removing the scheduler.",
+            )
+
+    def _check_format_consistency(self, logger: logging.Logger) -> None:
+        """Check format consistency with other context fields."""
+        if self.checkpoint_format == "lightning" and not self.pl_module:
+            logger.info(
+                "Lightning checkpoint format specified but no Lightning module provided. "
+                "Consider setting pl_module if you need full Lightning context restoration.",
+            )
+
+        if self.pl_module and self.checkpoint_format != "lightning":
+            logger.warning(
+                "Lightning module provided but checkpoint format is '%s', not 'lightning'. "
+                "This may cause issues with state restoration. "
+                "Consider setting checkpoint_format='lightning' or removing pl_module.",
+                self.checkpoint_format or "unspecified",
+            )
+
+    def _check_missing_essentials(self, logger: logging.Logger) -> None:
+        """Warn about potentially missing essential fields."""
+        if not self.model and not self.pl_module:
+            logger.info(
+                "No model or Lightning module provided in context. "
+                "Most checkpoint operations require at least a model. "
+                "Consider setting the model field before pipeline execution.",
+            )
+
+    def validate_for_stage(self, stage_name: str, required_fields: list[str]) -> None:
+        """Validate context for a specific pipeline stage.
+
+        This method allows pipeline stages to validate that the context
+        contains all required fields before processing.
+
+        Parameters
+        ----------
+        stage_name : str
+            Name of the stage for error messages
+        required_fields : list[str]
+            List of field names that must be non-None
+
+        Raises
+        ------
+        CheckpointError
+            If any required field is missing
+
+        Examples
+        --------
+        >>> context.validate_for_stage("LoadingStage", ["model", "checkpoint_data"])
+        """
+        missing_fields = []
+
+        for field_name in required_fields:
+            field_value = getattr(self, field_name, None)
+            if field_value is None or (field_name == "checkpoint_data" and not self.has_checkpoint_data()):
+                missing_fields.append(field_name)
+
+        if missing_fields:
+            from .exceptions import CheckpointError
+
+            error_msg = (
+                f"Stage '{stage_name}' requires fields {missing_fields} to be set in the context, "
+                f"but they are missing or empty. "
+                f"Ensure previous pipeline stages populate these fields."
+            )
+            raise CheckpointError(error_msg)
 
 
 class PipelineStage(ABC):
-    """Base class for all pipeline stages."""
+    """Base class for all pipeline stages.
+
+    Each stage in the checkpoint pipeline must inherit from this class
+    and implement the process method. Stages are composable and can be
+    chained together in a pipeline to create complex checkpoint processing
+    workflows.
+
+    Pipeline stages follow these principles:
+    - Single Responsibility: Each stage does one thing well
+    - Composability: Stages can be combined in different orders
+    - Immutability: Stages should not have mutable state between calls
+    - Error Handling: Stages should raise appropriate exceptions on failure
+
+    Examples
+    --------
+    >>> class ValidationStage(PipelineStage):
+    ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+    ...         if not context.has_checkpoint_data():
+    ...             raise CheckpointError("No checkpoint data to validate")
+    ...         # Perform validation
+    ...         context.update_metadata(validated=True)
+    ...         return context
+    >>>
+    >>> # Use in a pipeline
+    >>> from anemoi.training.checkpoint import CheckpointPipeline
+    >>> pipeline = CheckpointPipeline([ValidationStage()])
+    """
 
     @abstractmethod
     async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Process the context and return updated context."""
+        """Process the checkpoint context.
+
+        This method should perform the stage's operation on the context
+        and return the modified context for the next stage. The method
+        is async to support I/O operations like downloading checkpoints
+        or loading from disk.
+
+        Implementations should:
+        - Validate required context fields exist
+        - Perform their specific operation
+        - Update context with results
+        - Add relevant metadata for tracking
+        - Handle errors appropriately
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Current checkpoint context containing accumulated state
+            from previous stages
+
+        Returns
+        -------
+        CheckpointContext
+            Modified checkpoint context with this stage's contributions.
+            This should typically be the same object, modified in place.
+
+        Raises
+        ------
+        CheckpointError
+            Base exception for checkpoint operations
+        CheckpointNotFoundError
+            If a required checkpoint file doesn't exist
+        CheckpointLoadError
+            If checkpoint data cannot be loaded
+        CheckpointIncompatibleError
+            If checkpoint is incompatible with the model
+
+        Notes
+        -----
+        The process method is async to support:
+        - Network operations (downloading from S3, HTTP, etc.)
+        - Large file I/O operations
+        - Concurrent processing when needed
+
+        If your stage doesn't need async operations, you can still
+        implement it as an async method that doesn't use await.
+        """
+
+    def __repr__(self) -> str:
+        """String representation of stage."""
+        return f"{self.__class__.__name__}()"
+
+    async def __call__(self, context: CheckpointContext) -> CheckpointContext:
+        """Allow stage to be called directly.
+
+        This convenience method allows stages to be used as callables,
+        making them more intuitive to use outside of a pipeline.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Current checkpoint context
+
+        Returns
+        -------
+        CheckpointContext
+            Modified checkpoint context
+
+        Examples
+        --------
+        >>> # Instead of:
+        >>> result = await stage.process(context)
+        >>>
+        >>> # You can write:
+        >>> result = await stage(context)
+        """
+        return await self.process(context)
