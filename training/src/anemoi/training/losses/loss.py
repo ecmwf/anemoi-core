@@ -26,8 +26,6 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
-
-NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -136,57 +134,18 @@ def get_loss_function(
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
 
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
-        per_scale_loss_config = loss_config.pop("per_scale_loss")
-        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
-        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
-
     if scalers is None:
         scalers = {}
 
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
-    factory_context = LossFactoryContext(
-        available_scalers=available_scalers,
-        data_indices=data_indices,
-    )
-    constructor_kwargs, takes_scalers, takes_data_indices = _extract_constructor_context(
-        loss_config,
-        context=factory_context,
-    )
-
-    loss_function = instantiate(loss_config, **constructor_kwargs, **kwargs, _recursive_=False)
+    # Instantiate the loss function with the loss_init_config
+    loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
-
-    if takes_scalers:
-        scalers_to_include = []
-        scalers = {}
-    if takes_data_indices:
-        data_indices = None
-
-    if data_indices is not None:
-        loss_function = LossVariableMapper(
-            loss=loss_function,
-            predicted_variables=predicted_variables,
-            target_variables=target_variables,
-            data_indices=data_indices,
-        )
-    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
-    return loss_function
-
-
-def _apply_scalers(
-    loss_function: BaseLoss,
-    scalers_to_include: list,
-    scalers: dict[str, TENSOR_SPEC] | None,
-    data_indices: IndexCollection | None,
-) -> None:
-    """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
         if key not in scalers or []:
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
@@ -200,8 +159,13 @@ def _apply_scalers(
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
 
+        if hasattr(loss_function, "set_data_indices"):
+            loss_function.set_data_indices(data_indices)
 
-def get_metric_ranges(
+    return loss_function
+
+
+def _get_metric_ranges(
     extract_variable_group_and_level: ExtractVariableGroupAndLevel,
     output_data_indices: OutputTensorIndex,
     metrics_to_log: list,
@@ -221,3 +185,20 @@ def get_metric_ranges(
     # Add the full list of output indices
     metric_ranges["all"] = output_data_indices.full.tolist()
     return metric_ranges
+
+
+def get_metric_ranges(
+    config: DictConfig,
+    data_indices: IndexCollection,
+    metadata_extractor: ExtractVariableGroupAndLevel,
+    metrics_to_log: list | None = None,
+) -> tuple[METRIC_RANGE_DTYPE, METRIC_RANGE_DTYPE]:
+
+    if metrics_to_log is None:
+        metrics_to_log = config.training.metrics or []
+
+    return _get_metric_ranges(
+        metadata_extractor,
+        data_indices.model.output,
+        metrics_to_log,
+    )

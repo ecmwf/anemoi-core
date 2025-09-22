@@ -16,8 +16,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
 
@@ -33,8 +31,8 @@ class AnemoiModelInterface(torch.nn.Module):
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
-    n_step_input : int
-        Number of input timesteps provided to the model.
+    multi_step : bool
+        Whether the model uses multi-step input.
     graph_data : HeteroData
         Graph data for the model.
     statistics : dict
@@ -65,36 +63,32 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
         data_indices: dict,
         metadata: dict,
-        statistics_tendencies: dict | None = None,
-        supporting_arrays: dict | None = None,
+        statistics_tendencies: dict = None,
+        supporting_arrays: dict = None,
+        truncation_data: dict,
     ) -> None:
         super().__init__()
         self.config = config
         self.id = str(uuid.uuid4())
-        self.n_step_input = n_step_input
-        self.n_step_output = n_step_output
+        self.multi_step = self.config.training.multistep_input
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
+        self.truncation_data = truncation_data
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
         self._build_model()
-        self._update_metadata()
 
     def _build_processors_for_dataset(
-        self,
-        processors_configs: dict,
-        statistics: dict,
-        data_indices: dict,
-        statistics_tendencies: dict = None,
+        self, dataset_name: str, statistics: dict, data_indices: dict, statistics_tendencies: dict = None
     ):
         """Build processors for a single dataset.
 
         Parameters
         ----------
-        processors_configs : dict
-            Configuration for the processors
+        dataset_name : str
+            Name of the dataset
         statistics : dict
             Statistics for the dataset
         data_indices : dict
@@ -107,81 +101,79 @@ class AnemoiModelInterface(torch.nn.Module):
         tuple
             (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
         """
-        pre_processors, post_processors = self._build_processor_pair(
-            processors_configs,
-            data_indices,
-            statistics,
-        )
-        pre_processors_tendencies, post_processors_tendencies = self._build_tendency_processors(
-            processors_configs,
-            data_indices,
-            statistics_tendencies,
-        )
-        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
+        from anemoi.training.utils.config_utils import get_dataset_data_config
 
-    @staticmethod
-    def _build_processor_pair(
-        processors_configs: dict,
-        data_indices: dict,
-        statistics: dict,
-    ) -> tuple[Processors, Processors]:
+        # Get dataset-specific data config
+        dataset_data_config = get_dataset_data_config(self.config, dataset_name)
+
+        # Build processors for the dataset
         processors = [
             [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
-            for name, processor in processors_configs.items()
+            for name, processor in dataset_data_config.processors.items()
         ]
-        return Processors(processors), Processors(processors, inverse=True)
 
-    def _build_tendency_processors(
-        self,
-        processors_configs: dict,
-        data_indices: dict,
-        statistics_tendencies: dict | None,
-    ) -> tuple[Processors | StepwiseProcessors | None, Processors | StepwiseProcessors | None]:
-        if statistics_tendencies is None:
-            return None, None
+        pre_processors = Processors(processors)
+        post_processors = Processors(processors, inverse=True)
 
-        if "lead_times" not in statistics_tendencies:
-            return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
+        # Build tendencies processors if provided
+        pre_processors_tendencies = None
+        post_processors_tendencies = None
+        if statistics_tendencies is not None:
+            processors_tendencies = [
+                [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
+                for name, processor in dataset_data_config.processors.items()
+            ]
+            pre_processors_tendencies = Processors(processors_tendencies)
+            post_processors_tendencies = Processors(processors_tendencies, inverse=True)
 
-        lead_times = list(statistics_tendencies.get("lead_times") or [])
-        if self.n_step_output == 1:
-            step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
-            stats_for_tendencies = step_stats or statistics_tendencies
-            return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
-
-        pre_processors_tendencies = StepwiseProcessors(lead_times)
-        post_processors_tendencies = StepwiseProcessors(lead_times)
-        for lead_time in lead_times:
-            step_stats = statistics_tendencies.get(lead_time)
-            if step_stats is None:
-                continue
-            pre_step, post_step = self._build_processor_pair(processors_configs, data_indices, step_stats)
-            pre_processors_tendencies.set(lead_time, pre_step)
-            post_processors_tendencies.set(lead_time, post_step)
-        return pre_processors_tendencies, post_processors_tendencies
+        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
 
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
-        # Multi-dataset mode: create processors for each dataset
-        self.pre_processors = torch.nn.ModuleDict()
-        self.post_processors = torch.nn.ModuleDict()
-        self.pre_processors_tendencies = torch.nn.ModuleDict()
-        self.post_processors_tendencies = torch.nn.ModuleDict()
+        # Check if we're in multi-dataset mode
+        if isinstance(self.statistics, dict) and isinstance(self.data_indices, dict):
+            # Multi-dataset mode: create processors for each dataset
+            self.pre_processors = torch.nn.ModuleDict()
+            self.post_processors = torch.nn.ModuleDict()
+            self.pre_processors_tendencies = torch.nn.ModuleDict()
+            self.post_processors_tendencies = torch.nn.ModuleDict()
 
-        data_config = get_multiple_datasets_config(self.config.data)
-        for dataset_name in self.statistics.keys():
-            # Build processors for each dataset
-            pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
-                data_config[dataset_name].processors,
-                self.statistics[dataset_name],
-                self.data_indices[dataset_name],
-                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
-            )
-            self.pre_processors[dataset_name] = pre
-            self.post_processors[dataset_name] = post
-            if pre_tend is not None:
-                self.pre_processors_tendencies[dataset_name] = pre_tend
-                self.post_processors_tendencies[dataset_name] = post_tend
+            for dataset_name in self.statistics.keys():
+                # Build processors for each dataset
+                pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
+                    dataset_name,
+                    self.statistics[dataset_name],
+                    self.data_indices[dataset_name],
+                    self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
+                )
+                self.pre_processors[dataset_name] = pre
+                self.post_processors[dataset_name] = post
+                if pre_tend is not None:
+                    self.pre_processors_tendencies[dataset_name] = pre_tend
+                    self.post_processors_tendencies[dataset_name] = post_tend
+        else:
+            # Single dataset mode: original behavior
+            processors = [
+                [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
+                for name, processor in self.config.data.processors.items()
+            ]
+
+            # Assign the processor list pre- and post-processors
+            self.pre_processors = Processors(processors)
+            self.post_processors = Processors(processors, inverse=True)
+
+            # If tendencies statistics are provided, instantiate the tendencies processors
+            if self.statistics_tendencies is not None:
+                processors = [
+                    [
+                        name,
+                        instantiate(processor, data_indices=self.data_indices, statistics=self.statistics_tendencies),
+                    ]
+                    for name, processor in self.config.data.processors.items()
+                ]
+                # Assign the processor list pre- and post-processors
+                self.pre_processors_tendencies = Processors(processors)
+                self.post_processors_tendencies = Processors(processors, inverse=True)
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
@@ -195,8 +187,7 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
-            n_step_input=self.n_step_input,
-            n_step_output=self.n_step_output,
+            truncation_data=self.truncation_data,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
@@ -204,17 +195,13 @@ class AnemoiModelInterface(torch.nn.Module):
         self.forward = self.model.forward
 
     def predict_step(
-        self,
-        batch: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        gather_out: bool = True,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
+        self, batch: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, gather_out: bool = True, **kwargs
+    ) -> torch.Tensor:
         """Prediction step for the model.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        batch : torch.Tensor
             Input batched data.
         model_comm_group : Optional[ProcessGroup], optional
             model communication group, specifies which GPUs work together
@@ -223,7 +210,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
         Returns
         -------
-        dict[str, torch.Tensor]
+        torch.Tensor
             Predicted data.
         """
         # Prepare kwargs for model's predict_step
@@ -231,7 +218,7 @@ class AnemoiModelInterface(torch.nn.Module):
             "batch": batch,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
-            "n_step_input": self.n_step_input,
+            "multi_step": self.multi_step,
             "model_comm_group": model_comm_group,
         }
 
@@ -243,6 +230,3 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)
-
-    def _update_metadata(self) -> None:
-        self.model.fill_metadata(self.metadata)

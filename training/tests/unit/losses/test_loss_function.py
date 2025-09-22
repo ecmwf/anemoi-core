@@ -7,39 +7,34 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import einops
+
 import pytest
 import torch
+from hydra.errors import InstantiationException
 from omegaconf import DictConfig
 
 from anemoi.training.losses import AlmostFairKernelCRPS
-from anemoi.training.losses import FourierCorrelationLoss
+from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import HuberLoss
 from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
-from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
-from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.utils.enums import TensorDim
-
-losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
-spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
-losses += spectral_losses
 
 
 @pytest.mark.parametrize(
     "loss_cls",
-    losses,
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
-    loss = loss_cls(x_dim=4, y_dim=4) if loss_cls in spectral_losses else loss_cls()
+    loss = loss_cls()
     assert isinstance(loss, BaseLoss)
 
 
@@ -55,10 +50,10 @@ def functionalloss() -> type[FunctionalLoss]:
 @pytest.fixture
 def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 1, 1, 4, 2]
+    tensor_shape = [1, 1, 4, 2]
 
     pred = torch.zeros(tensor_shape)
-    pred[0, 0, 0, 0] = torch.tensor([1.0, 1.0])
+    pred[0, 0, 0] = torch.tensor([1.0, 1.0])
     target = torch.zeros(tensor_shape)
 
     # With only one "grid point" differing by 1 in all
@@ -90,20 +85,6 @@ def test_assert_of_grid_dim(functionalloss: type[FunctionalLoss]) -> None:
 
     with pytest.raises(RuntimeError):
         loss.scale(torch.ones((4, 2)))
-
-
-@pytest.mark.parametrize("add_grid_scaler", [False, True])
-def test_scale_subset_indices_requires_tuple(
-    functionalloss: type[FunctionalLoss],
-    add_grid_scaler: bool,
-) -> None:
-    loss = functionalloss()
-    if add_grid_scaler:
-        loss.add_scaler(TensorDim.GRID, torch.tensor([1.0, 2.0, 3.0, 4.0]), name="grid_test")
-
-    x = torch.arange(1 * 1 * 1 * 4 * 5, dtype=torch.float32).reshape(1, 1, 1, 4, 5)
-    with pytest.raises(TypeError, match="must be a tuple"):
-        loss.scale(x, subset_indices=[Ellipsis, [1, 3]])
 
 
 @pytest.fixture
@@ -230,13 +211,12 @@ def test_grid_invariance(
     loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> None:
     """Test for batch invariance."""
-    gdim = TensorDim.GRID
     pred_coarse, target_coarse, _ = loss_inputs
-    pred_fine = torch.cat([pred_coarse, pred_coarse], dim=gdim)
-    target_fine = torch.cat([target_coarse, target_coarse], dim=gdim)
+    pred_fine = torch.cat([pred_coarse, pred_coarse], dim=2)
+    target_fine = torch.cat([target_coarse, target_coarse], dim=2)
 
-    num_points_coarse = pred_coarse.shape[gdim]
-    num_points_fine = pred_fine.shape[gdim]
+    num_points_coarse = pred_coarse.shape[2]
+    num_points_fine = pred_fine.shape[2]
 
     functionalloss_with_scaler.update_scaler("test", torch.ones((num_points_coarse,)) / num_points_coarse)
     functionalloss_with_scaler_fine.update_scaler("test", torch.ones((num_points_fine,)) / num_points_fine)
@@ -378,220 +358,198 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
     assert "test" not in loss.scaler
 
 
-def test_logfft2dist_loss() -> None:
-    """Test that LogFFT2Distance can be instantiated and validates input shape."""
+def test_combined_loss() -> None:
+    """Test the combined loss function."""
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.spectral.LogFFT2Distance",
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {"_target_": "anemoi.training.losses.MSELoss"},
+                    {"_target_": "anemoi.training.losses.MAELoss"},
+                ],
+                "scalers": ["test"],
+                "loss_weights": [1.0, 0.5],
+            },
+        ),
+        scalers={"test": (-1, torch.ones(2))},
+    )
+    assert isinstance(loss.losses[0], MSELoss)
+    assert "test" in loss.losses[0].scaler
+
+    assert isinstance(loss.losses[1], MAELoss)
+    assert "test" in loss.losses[1].scaler
+
+
+def test_combined_loss_invalid_loss_weights() -> None:
+    """Test the combined loss function with invalid loss weights."""
+    with pytest.raises(InstantiationException):
+        get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                    "losses": [
+                        {"_target_": "anemoi.training.losses.MSELoss"},
+                        {"_target_": "anemoi.training.losses.MAELoss"},
+                    ],
+                    "scalers": ["test"],
+                    "loss_weights": [1.0, 0.5, 1],
+                },
+            ),
+            scalers={"test": (-1, torch.ones(2))},
+        )
+
+
+def test_combined_loss_equal_weighting() -> None:
+    """Test equal weighting when not given."""
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {"_target_": "anemoi.training.losses.MSELoss"},
+                    {"_target_": "anemoi.training.losses.MAELoss"},
+                ],
+            },
+        ),
+        scalers={},
+    )
+    assert all(weight == 1.0 for weight in loss.loss_weights)
+
+
+def test_combined_loss_seperate_scalers() -> None:
+    """Test that scalers are passed to the correct loss function."""
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
+                ],
+                "scalers": ["test", "test2"],
+                "loss_weights": [1.0, 0.5],
+            },
+        ),
+        scalers={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
+    )
+    assert isinstance(loss, CombinedLoss)
+
+    assert isinstance(loss.losses[0], MSELoss)
+    assert "test" in loss.losses[0].scaler
+    assert "test2" not in loss.losses[0].scaler
+
+    assert isinstance(loss.losses[1], MAELoss)
+    assert "test" not in loss.losses[1].scaler
+    assert "test2" in loss.losses[1].scaler
+
+
+def test_logfft2dist_loss() -> None:
+    """Test that loss function can be instantiated."""
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spatial.LogFFT2Distance",
                 "x_dim": 710,
                 "y_dim": 640,
                 "scalers": [],
             },
         ),
     )
-    assert isinstance(loss, BaseLoss)
-    assert hasattr(loss.transform, "x_dim")
-    assert hasattr(loss.transform, "y_dim")
+    assert isinstance(loss, FunctionalLoss)
+    assert hasattr(loss, "x_dim")
+    assert hasattr(loss, "y_dim")
 
-    # pred/target are (batch, steps, grid, vars)
-    right = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
-
-    # squash=False -> per-variable loss
-    loss_value = loss(*right, squash=False)
-    assert isinstance(loss_value, torch.Tensor)
-    assert loss_value.ndim == 1 and loss_value.shape[0] == 2, "Expected per-variable loss (n_vars,)"
-
-    # squash=True -> single aggregated loss
-    loss_total = loss(*right, squash=True)
-    assert isinstance(loss_total, torch.Tensor)
-    assert loss_total.numel() == 1, "Expected a single aggregated loss value"
-
-    # wrong grid size should fail (FFT2D reshape/assert)
-    wrong = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
-    with pytest.raises(einops.EinopsError):
-        _ = loss(*wrong, squash=True)
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
+    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
+    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    with pytest.raises(AssertionError):
+        loss.calculate_difference(*wrong_shaped_pred_output_pair)
 
 
 def test_fcl_loss() -> None:
-    """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
+    """Test that loss function can be instantiated and behaves as expected."""
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.spectral.FourierCorrelationLoss",
+                "_target_": "anemoi.training.losses.spatial.FourierCorrelationLoss",
                 "x_dim": 710,
                 "y_dim": 640,
                 "scalers": [],
             },
         ),
     )
-    assert isinstance(loss, BaseLoss)
-    assert hasattr(loss.transform, "x_dim")
-    assert hasattr(loss.transform, "y_dim")
+    assert isinstance(loss, FunctionalLoss)
+    assert hasattr(loss, "x_dim")
+    assert hasattr(loss, "y_dim")
 
-    right = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
-
-    loss_value = loss(*right, squash=False)
-    assert isinstance(loss_value, torch.Tensor)
-    assert loss_value.ndim == 1 and loss_value.shape[0] == 2, "Expected per-variable loss (n_vars,)"
-
-    loss_total = loss(*right, squash=True)
-    assert isinstance(loss_total, torch.Tensor)
-    assert loss_total.numel() == 1, "Expected a single aggregated loss value"
-
-    wrong = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
-    with pytest.raises(einops.EinopsError):
-        _ = loss(*wrong, squash=True)
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
+    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
+    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    with pytest.raises(AssertionError):
+        loss.calculate_difference(*wrong_shaped_pred_output_pair)
 
 
-def test_iter_leaf_losses_flat() -> None:
-    """Test that iter_leaf_losses on a simple loss yields itself."""
-    loss = MSELoss()
-    leaves = list(loss.iter_leaf_losses())
-    assert len(leaves) == 1
-    assert leaves[0] is loss
+def test_filtered_loss() -> None:
+    from anemoi.models.data_indices.collection import IndexCollection
 
-
-def test_octahedral_sht_loss() -> None:
-    def _octahedral_expected_points(nlat: int) -> int:
-        half = [4 * (i + 1) + 16 for i in range(nlat // 2)]
-        nlon = half + half[::-1]
-        return int(sum(nlon))
-
-    nlat = 8
-    nvars = 3
-    expected_points = _octahedral_expected_points(nlat)
-
+    """Test that loss function can be instantiated."""
+    data_config = {"data": {"forcing": [], "diagnostic": []}}
+    name_to_index = {"tp": 0, "other_var": 1}
+    data_indices = IndexCollection(DictConfig(data_config["data"]), name_to_index)
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.spectral.SpectralL2Loss",
-                "transform": "octahedral_sht",
-                "nlat": nlat,
-                "scalers": [],
-            },
-        ),
-    )
-    pred = torch.zeros((2, 1, 1, expected_points, nvars))
-    target = torch.zeros_like(pred)
-    out = loss(pred, target, squash=False)
-    assert out.shape == (nvars,), "squash=False should return per-variable loss"
-    out_total = loss(pred, target, squash=True)
-    assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
-    pred_wrong = torch.zeros((2, 1, 1, expected_points + 1, nvars))
-    target_wrong = torch.zeros_like(pred_wrong)
-    with pytest.raises(AssertionError):
-        _ = loss(pred_wrong, target_wrong, squash=True)
-
-
-def _expected_octahedral_points(truncation: int) -> int:
-    # full globe reduced-octahedral points for ecTrans definition
-    # NH lons: 20 + 4*i, i=0..T  => sum_NH = 2*(T+1)*(T+10)
-    # full globe doubles:        => 4*(T+1)*(T+10)
-    return 4 * (truncation + 1) * (truncation + 10)
-
-
-def test_spectral_crps_fft_and_dct() -> None:
-    bs, ens, nvars = 2, 5, 3
-    x_dim, y_dim = 8, 6
-    grid = x_dim * y_dim
-
-    pred = torch.randn(bs, 1, ens, grid, nvars)
-    target = torch.randn(bs, 1, 1, grid, nvars)
-
-    for transform in ["fft2d", "dct2d"]:
-        loss = get_loss_function(
-            DictConfig(
-                {
-                    "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
-                    "transform": transform,
-                    "x_dim": x_dim,
-                    "y_dim": y_dim,
+                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
+                "predicted_variables": ["tp"],
+                "target_variables": ["tp"],
+                "loss": {
+                    "_target_": "anemoi.training.losses.spatial.LogFFT2Distance",
+                    "x_dim": 710,
+                    "y_dim": 640,
                     "scalers": [],
                 },
-            ),
-        )
+            },
+        ),
+        data_indices=data_indices,
+    )
+    assert isinstance(loss, FilteringLossWrapper)
+    assert isinstance(loss.loss, FunctionalLoss)
+    assert hasattr(loss.loss, "y_dim")
+    assert hasattr(loss.loss, "x_dim")
 
-        out = loss(pred, target, squash=False)
-        assert out.shape == (nvars,), f"{transform}: per-variable CRPS expected"
-        out_total = loss(pred, target, squash=True)
-        assert out_total.numel() == 1, f"{transform}: scalar CRPS expected"
+    loss.set_data_indices(data_indices)
+    assert hasattr(loss, "predicted_indices")
 
+    assert loss.predicted_variables == ["tp"]
 
-def test_spectral_crps_with_target_without_ensemble_dim() -> None:
-    """CRPS should handle target tensors shaped [B,T,G,V] (no ensemble dim)."""
-    bs, ens, nvars = 2, 4, 2
-    x_dim, y_dim = 8, 6
-    grid = x_dim * y_dim
-
-    pred = torch.randn(bs, 1, ens, grid, nvars)
-    target = torch.randn(bs, 1, grid, nvars)
-    target[..., 0, 0] = torch.nan
-
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    loss_value = loss(*right_shaped_pred_output_pair, squash=False)
+    assert loss_value.shape[0] == len(
+        name_to_index.keys(),
+    ), "Loss output with squash=False should match length of all variables"
+    assert (
+        torch.nonzero(loss_value)[0].tolist() == loss.predicted_indices
+    ), "Filtered out variables should have zero loss"
+    loss_total = loss(*right_shaped_pred_output_pair, squash=True)
+    assert (
+        loss_total == loss_value[0]
+    ), "Loss output with squash=True should be the value of loss for predicted variables"
+    # test instantiation with a str loss
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
-                "transform": "fft2d",
-                "x_dim": x_dim,
-                "y_dim": y_dim,
-                "ignore_nans": True,
-                "scalers": [],
+                "_target_": "anemoi.training.losses.filtering.FilteringLossWrapper",
+                "predicted_variables": ["tp"],
+                "target_variables": ["tp"],
+                "loss": "anemoi.training.losses.MSELoss",
             },
         ),
+        data_indices=data_indices,
     )
+    loss.set_data_indices(data_indices)
 
-    out = loss(pred, target, squash=False)
-    assert out.shape == (nvars,), "squash=False should return per-variable CRPS"
-    assert torch.isfinite(out).all(), "Expected finite loss with ignore_nans=True"
-
-    out_total = loss(pred, target, squash=True)
-    assert out_total.numel() == 1, "squash=True should return scalar CRPS"
-    assert torch.isfinite(out_total).all(), "Expected finite scalar loss with ignore_nans=True"
-
-
-def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:
-    def _octahedral_expected_points(nlat: int) -> int:
-        half = [20 + 4 * i for i in range(nlat // 2)]
-        return int(sum(half + half[::-1]))
-
-    bs, ens, nvars = 2, 4, 2
-    nlat = 8
-    points = _octahedral_expected_points(nlat)
-
-    pred = torch.randn(bs, 1, ens, points, nvars)
-    target = torch.randn(bs, 1, 1, points, nvars)
-    target[..., 0, 0] = torch.nan
-
-    loss_no_ignore = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
-                "transform": "octahedral_sht",
-                "nlat": nlat,
-                "ignore_nans": False,
-                "scalers": [],
-            },
-        ),
-    )
-    out_no_ignore = loss_no_ignore(pred, target, squash=True)
-    assert torch.isnan(out_no_ignore).any(), "Expected NaN when ignore_nans=False and target contains NaNs"
-
-    loss_ignore = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
-                "transform": "octahedral_sht",
-                "nlat": nlat,
-                "ignore_nans": True,
-                "scalers": [],
-            },
-        ),
-    )
-    out = loss_ignore(pred, target, squash=False)
-    assert out.shape == (nvars,), "octahedral_sht: per-variable CRPS expected"
-    assert torch.isfinite(out).all(), "Expected finite loss when ignore_nans=True"
-
-    out_total = loss_ignore(pred, target, squash=True)
-    assert out_total.numel() == 1, "octahedral_sht: scalar CRPS expected"
-    assert torch.isfinite(out_total).all(), "Expected finite scalar loss when ignore_nans=True"
+    assert isinstance(loss, FilteringLossWrapper)
+    assert isinstance(loss.loss, FunctionalLoss)

@@ -1,0 +1,106 @@
+prefetch_factor: 2
+pin_memory: True
+
+# ============
+# read_group_size:
+#   Form subgroups of model comm groups that read data together.
+#   Each reader in the group only reads 1/read_group_size of the data
+#   which is then all-gathered between the group.
+#   This can reduce CPU memory usage as well as increase dataloader throughput.
+#   The number of GPUs per model must be divisible by read_group_size.
+#   To disable, set to 1.
+# ============
+read_group_size: ${hardware.num_gpus_per_model}
+
+num_workers:
+  training: 1
+  validation: 1
+  test: 1
+batch_size:
+  training: 1
+  validation: 1
+  test: 1
+
+# ============
+# Multi-dataset batch composition:
+# Each batch will contain a dictionary with samples from all datasets:
+# {"dataset_a": tensor_batch_a, "dataset_b": tensor_batch_b, ...}
+# All datasets must have the same number of valid samples for synchronization
+# ============
+
+# runs only N training batches [N = integer | null]
+# if null then we run through all the batches
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+
+# Default grid indices (used if no dataset-specific config provided)
+grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.data}
+
+# Optional: Dataset-specific grid indices configurations
+# If not specified, all datasets will use the default grid_indices above
+grid_indices_per_dataset:
+  era5:
+    _target_: anemoi.training.data.grid_indices.FullGrid
+    nodes_name: ${graph.data}
+  gfs:
+    _target_: anemoi.training.data.grid_indices.FullGrid  # Could be different
+    nodes_name: ${graph.data}
+
+# ============
+# Multi-Dataset Configuration
+# Define multiple datasets that will be synchronized during training
+# Each dataset must have the same number of valid time samples
+# ============
+
+training:
+  datasets:
+    era5:
+      dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      start: null
+      end: 2020
+      frequency: ${data.frequency}
+      drop: []
+    era5_copy:
+      dataset: ${hardware.paths.data}/${hardware.files.dataset_b}  # Using same dataset as duplicate for testing
+      start: null
+      end: 2020
+      frequency: ${data.frequency}
+      drop: []
+
+validation_rollout: 1 # number of rollouts to use for validation
+
+# Multi-dataset validation with same datasets, different time period
+validation:
+  datasets:
+    era5:
+      dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      start: 2021
+      end: 2021
+      frequency: ${data.frequency}
+      drop: []
+    era5_copy:
+      dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
+      start: 2021
+      end: 2021
+      frequency: ${data.frequency}
+      drop: []
+
+# Multi-dataset test with same datasets, different time period
+test:
+  datasets:
+    era5:
+      dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      start: 2022
+      end: null
+      frequency: ${data.frequency}
+      drop: []
+    era5_copy:
+      dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
+      start: 2022
+      end: null
+      frequency: ${data.frequency}
+      drop: []
