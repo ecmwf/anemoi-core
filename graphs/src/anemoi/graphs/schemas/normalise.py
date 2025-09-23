@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 from .ensdatamodule import AnemoiEnsDatasetsDataModule
-from .multidatamodule import AnemoiMultiDatasetsDataModule
 from .singledatamodule import AnemoiDatasetsDataModule
 
-__all__ = ["AnemoiDatasetsDataModule", "AnemoiEnsDatasetsDataModule", "AnemoiMultiDatasetsDataModule"]
+__all__ = ["AnemoiDatasetsDataModule", "AnemoiEnsDatasetsDataModule"]
