@@ -13,6 +13,7 @@ from functools import cached_property
 
 import torch
 from torch.utils.data import IterableDataset
+from einops import rearrange
 
 from anemoi.training.data.dataset.singledataset import NativeGridDataset
 
@@ -198,21 +199,18 @@ class MultiDataset(IterableDataset):
             primary_dataset.worker_id,
             shuffled_chunk_indices[:10],
         )
-
-        # Create iterators for all datasets using the same indices
+        # todo: improve this...
         dataset_iterators = {}
         for name, dataset in self.datasets.items():
-            # Override the dataset's shuffle behavior to use our synchronized indices
-            dataset_iterators[name] = self._create_synchronized_iterator(dataset, shuffled_chunk_indices)
+            dataset_iterators[name] = self._build_dataset_iterator(dataset, shuffled_chunk_indices)
 
-        # Yield synchronized samples
-        for _i, _index in enumerate(shuffled_chunk_indices):
+        for _ in shuffled_chunk_indices:
             sample_dict = {}
             for name in self.dataset_names:
                 sample_dict[name] = next(dataset_iterators[name])
             yield sample_dict
 
-    def _create_synchronized_iterator(self, dataset: NativeGridDataset, indices):  # type: ignore[no-untyped-def]
+    def _build_dataset_iterator(self, dataset: NativeGridDataset, indices):  # type: ignore[no-untyped-def]
         """Create an iterator for a dataset using the provided indices."""
         for i in indices:
             start = i + dataset.relative_date_indices[0]
@@ -225,8 +223,6 @@ class MultiDataset(IterableDataset):
             else:
                 x = dataset.data[start:end:timeincrement, :, :, :]
                 x = x[..., grid_shard_indices]
-
-            from einops import rearrange
 
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             yield torch.from_numpy(x)
