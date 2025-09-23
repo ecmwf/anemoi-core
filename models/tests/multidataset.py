@@ -12,8 +12,8 @@ import logging
 from functools import cached_property
 
 import torch
-from torch.utils.data import IterableDataset
 from einops import rearrange
+from torch.utils.data import IterableDataset
 
 from anemoi.training.data.dataset.singledataset import NativeGridDataset
 
@@ -199,7 +199,7 @@ class MultiDataset(IterableDataset):
             primary_dataset.worker_id,
             shuffled_chunk_indices[:10],
         )
-        # todo: improve this...
+        # TODO: improve this...
         dataset_iterators = {}
         for name, dataset in self.datasets.items():
             dataset_iterators[name] = self._build_dataset_iterator(dataset, shuffled_chunk_indices)
