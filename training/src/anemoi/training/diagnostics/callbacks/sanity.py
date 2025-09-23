@@ -33,11 +33,8 @@ class CheckVariableOrder(pl.callbacks.Callback):
 
     def _compare_variables(self, trainer: pl.Trainer, model_name_to_index, data_name_to_index) -> None:  # type: ignore[misc]
         """Compare variables between model and data indices."""
-        if isinstance(trainer.datamodule.data_indices, dict):
-            for dataset_name, data_indices in trainer.datamodule.data_indices.items():
-                data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
-        else:
-            trainer.datamodule.data_indices.compare_variables(model_name_to_index, data_name_to_index)
+        for dataset_name, data_indices in trainer.datamodule.data_indices.items():
+            data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
 
     def on_train_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the training data.

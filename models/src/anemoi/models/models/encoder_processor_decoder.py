@@ -73,15 +73,10 @@ class AnemoiModelEncProcDec(nn.Module):
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
-        if isinstance(self._graph_data, dict):
-            self.node_attributes = torch.nn.ModuleDict()
-            for dataset_name in self._graph_data.keys():
-                self.node_attributes[dataset_name] = NamedNodesAttributes(
-                    model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
-                )
-        else:
-            self.node_attributes = NamedNodesAttributes(
-                model_config.model.trainable_parameters.hidden, self._graph_data
+        self.node_attributes = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.node_attributes[dataset_name] = NamedNodesAttributes(
+                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
             )
 
         self._calculate_shapes_and_indices(data_indices)
@@ -102,41 +97,25 @@ class AnemoiModelEncProcDec(nn.Module):
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
 
         # Encoder data -> hidden
-        if isinstance(self._graph_data, dict):
-            self.encoder = torch.nn.ModuleDict()
-            for dataset_name in self._graph_data.keys():
-                self.encoder[dataset_name] = instantiate(
-                    model_config.model.encoder,
-                    _recursive_=False,  # Avoids instantiation of layer_kernels here
-                    in_channels_src=self.input_dim[dataset_name],
-                    in_channels_dst=self.input_dim_latent[dataset_name],
-                    hidden_dim=self.num_channels,
-                    sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
-                    src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                    dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                )
-        else:
-            self.encoder = instantiate(
+        self.encoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.input_dim,
-                in_channels_dst=self.input_dim_latent,
+                in_channels_src=self.input_dim[dataset_name],
+                in_channels_dst=self.input_dim_latent[dataset_name],
                 hidden_dim=self.num_channels,
-                sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
             )
 
         # Processor hidden -> hidden (shared across all datasets)
-        if isinstance(self._graph_data, dict):
-            first_dataset_name = next(iter(self._graph_data.keys()))
-            processor_graph = self._graph_data[first_dataset_name][
-                (self._graph_name_hidden, "to", self._graph_name_hidden)
-            ]
-            processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
-        else:
-            processor_graph = self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]
-            processor_grid_size = self.node_attributes.num_nodes[self._graph_name_hidden]
+        first_dataset_name = next(iter(self._graph_data.keys()))
+        processor_graph = self._graph_data[first_dataset_name][
+            (self._graph_name_hidden, "to", self._graph_name_hidden)
+        ]
+        processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
 
         self.processor = instantiate(
             model_config.model.processor,
@@ -148,44 +127,27 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # Decoder hidden -> data
-        if isinstance(self._graph_data, dict):
-            self.decoder = torch.nn.ModuleDict()
-            for dataset_name in self._graph_data.keys():
-                self.decoder[dataset_name] = instantiate(
-                    model_config.model.decoder,
-                    _recursive_=False,  # Avoids instantiation of layer_kernels here
-                    in_channels_src=self.num_channels,
-                    in_channels_dst=self.input_dim[dataset_name],
-                    hidden_dim=self.num_channels,
-                    out_channels_dst=self.num_output_channels[dataset_name],
-                    sub_graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
-                    src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                    dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                )
-        else:
-            self.decoder = instantiate(
+        self.decoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
-                in_channels_dst=self.input_dim,
+                in_channels_dst=self.input_dim[dataset_name],
                 hidden_dim=self.num_channels,
-                out_channels_dst=self.num_output_channels,
-                sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-                src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+                out_channels_dst=self.num_output_channels[dataset_name],
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
             )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
-        if isinstance(self.data_indices, dict):
-            # Multi-dataset: create ModuleDict with ModuleList per dataset
-            self.boundings = nn.ModuleDict()
-            for dataset_name, dataset_indices in self.data_indices.items():
-                self.boundings[dataset_name] = self._build_bounding_modules(
-                    model_config, dataset_indices, self.statistics[dataset_name]
-                )
-        else:
-            # Single dataset: original behavior (ModuleList)
-            self.boundings = self._build_bounding_modules(model_config, self.data_indices, self.statistics)
+        # Multi-dataset: create ModuleDict with ModuleList per dataset
+        self.boundings = nn.ModuleDict()
+        for dataset_name, dataset_indices in self.data_indices.items():
+            self.boundings[dataset_name] = self._build_bounding_modules(
+                model_config, dataset_indices, self.statistics[dataset_name]
+            )
 
     def _build_bounding_modules(self, model_config, data_indices, statistics) -> nn.ModuleList:
         """Build bounding modules for a dataset.
@@ -270,12 +232,9 @@ class AnemoiModelEncProcDec(nn.Module):
         x_skip = self._apply_truncation(x_skip, grid_shard_shapes, model_comm_group)
         x_skip = einops.rearrange(x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size)
 
-        if isinstance(self.node_attributes, torch.nn.ModuleDict):
-            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-            node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
-            grid_shard_shapes = grid_shard_shapes[dataset_name]
-        else:
-            node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        grid_shard_shapes = grid_shard_shapes[dataset_name]
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
@@ -306,17 +265,11 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # residual connection (just for the prognostic variables)
-        if isinstance(self._internal_output_idx, dict):
-            # Multi-dataset case
-            assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-            internal_output_idx = self._internal_output_idx[dataset_name]
-            internal_input_idx = self._internal_input_idx[dataset_name]
-            boundings = self.boundings[dataset_name]
-        else:
-            # Single dataset case
-            internal_output_idx = self._internal_output_idx
-            internal_input_idx = self._internal_input_idx
-            boundings = self.boundings
+        # Multi-dataset case
+        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+        internal_output_idx = self._internal_output_idx[dataset_name]
+        internal_input_idx = self._internal_input_idx[dataset_name]
+        boundings = self.boundings[dataset_name]
 
         x_out[..., internal_output_idx] += x_skip[..., internal_input_idx]
 
@@ -326,86 +279,53 @@ class AnemoiModelEncProcDec(nn.Module):
         return x_out
 
     def _calculate_input_dim(self, model_config):
-        # Check if we're in multi-dataset mode
-        if isinstance(self.num_input_channels, dict):
-            # Multi-dataset: create dictionary for input_dim
-            input_dim = {}
-            for dataset_name in self.num_input_channels.keys():
-                input_dim[dataset_name] = (
-                    self.multi_step * self.num_input_channels[dataset_name]
-                    + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-                )
-            return input_dim
-        else:
-            # Single dataset: original behavior
-            return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+        # Multi-dataset: create dictionary for input_dim
+        input_dim = {}
+        for dataset_name in self.num_input_channels.keys():
+            input_dim[dataset_name] = (
+                self.multi_step * self.num_input_channels[dataset_name]
+                + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+            )
+        return input_dim
 
     def _calculate_input_dim_latent(self, model_config):
-        # Check if we're in multi-dataset mode
-        if isinstance(self.node_attributes, torch.nn.ModuleDict):
-            # Multi-dataset: create dictionary for input_dim_latent
-            input_dim_latent = {}
-            for dataset_name in self.node_attributes.keys():
-                input_dim_latent[dataset_name] = self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
-            return input_dim_latent
-        else:
-            # Single dataset: original behavior
-            return self.node_attributes.attr_ndims[self._graph_name_hidden]
+        # Multi-dataset: create dictionary for input_dim_latent
+        input_dim_latent = {}
+        for dataset_name in self.node_attributes.keys():
+            input_dim_latent[dataset_name] = self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
+        return input_dim_latent
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        # Check if data_indices is a dictionary of datasets
-        if isinstance(data_indices, dict):
-            # Multi-dataset: create dictionaries for each property
-            self.num_input_channels = {}
-            self.num_output_channels = {}
-            self.num_input_channels_prognostic = {}
-            self._internal_input_idx = {}
-            self._internal_output_idx = {}
+        # Multi-dataset: create dictionaries for each property
+        self.num_input_channels = {}
+        self.num_output_channels = {}
+        self.num_input_channels_prognostic = {}
+        self._internal_input_idx = {}
+        self._internal_output_idx = {}
 
-            for dataset_name, dataset_indices in data_indices.items():
-                self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-                self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
-                self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-                self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
-                self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
-        else:
-            # Single dataset: original behavior
-            self.num_input_channels = len(data_indices.model.input)
-            self.num_output_channels = len(data_indices.model.output)
-            self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
-            self._internal_input_idx = data_indices.model.input.prognostic
-            self._internal_output_idx = data_indices.model.output.prognostic
+        for dataset_name, dataset_indices in data_indices.items():
+            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
+            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
+            self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
+            self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
-        # Check if we're in multi-dataset mode
-        if isinstance(self._internal_output_idx, dict):
-            # Multi-dataset: check assertions for each dataset
-            for dataset_name, dataset_indices in data_indices.items():
-                dataset_internal_output_idx = self._internal_output_idx[dataset_name]
-                dataset_internal_input_idx = self._internal_input_idx[dataset_name]
+        # Multi-dataset: check assertions for each dataset
+        for dataset_name, dataset_indices in data_indices.items():
+            dataset_internal_output_idx = self._internal_output_idx[dataset_name]
+            dataset_internal_input_idx = self._internal_input_idx[dataset_name]
 
-                assert len(dataset_internal_output_idx) == len(dataset_indices.model.output.full) - len(
-                    dataset_indices.model.output.diagnostic
-                ), (
-                    f"Dataset '{dataset_name}': Mismatch between the internal data indices ({len(dataset_internal_output_idx)}) and "
-                    f"the output indices excluding diagnostic variables "
-                    f"({len(dataset_indices.model.output.full) - len(dataset_indices.model.output.diagnostic)})",
-                )
-                assert len(dataset_internal_input_idx) == len(
-                    dataset_internal_output_idx,
-                ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
-        else:
-            # Single dataset: original behavior
-            assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
-                data_indices.model.output.diagnostic
+            assert len(dataset_internal_output_idx) == len(dataset_indices.model.output.full) - len(
+                dataset_indices.model.output.diagnostic
             ), (
-                f"Mismatch between the internal data indices ({len(self._internal_output_idx)}) and "
+                f"Dataset '{dataset_name}': Mismatch between the internal data indices ({len(dataset_internal_output_idx)}) and "
                 f"the output indices excluding diagnostic variables "
-                f"({len(data_indices.model.output.full) - len(data_indices.model.output.diagnostic)})",
+                f"({len(dataset_indices.model.output.full) - len(dataset_indices.model.output.diagnostic)})",
             )
-            assert len(self._internal_input_idx) == len(
-                self._internal_output_idx,
-            ), f"Model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
+            assert len(dataset_internal_input_idx) == len(
+                dataset_internal_output_idx,
+            ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
 
     def _assert_consistent_hidden_graphs(self) -> None:
         """Assert that all datasets have identical hidden-to-hidden graph structures.
@@ -543,92 +463,64 @@ class AnemoiModelEncProcDec(nn.Module):
         Tensor
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
-        if isinstance(x, dict):
-            # Multi-dataset case
-            dataset_names = list(x.keys())
+        # Multi-dataset case
+        dataset_names = list(x.keys())
 
-            # Extract and validate batch sizes across datasets
-            batch_sizes = [x[dataset_name].shape[0] for dataset_name in dataset_names]
-            ensemble_sizes = [x[dataset_name].shape[2] for dataset_name in dataset_names]
+        # Extract and validate batch sizes across datasets
+        batch_sizes = [x[dataset_name].shape[0] for dataset_name in dataset_names]
+        ensemble_sizes = [x[dataset_name].shape[2] for dataset_name in dataset_names]
 
-            # Assert all datasets have the same batch and ensemble sizes
-            assert all(
-                bs == batch_sizes[0] for bs in batch_sizes
-            ), f"Batch sizes must be the same across datasets: {batch_sizes}"
-            assert all(
-                es == ensemble_sizes[0] for es in ensemble_sizes
-            ), f"Ensemble sizes must be the same across datasets: {ensemble_sizes}"
+        # Assert all datasets have the same batch and ensemble sizes
+        assert all(
+            bs == batch_sizes[0] for bs in batch_sizes
+        ), f"Batch sizes must be the same across datasets: {batch_sizes}"
+        assert all(
+            es == ensemble_sizes[0] for es in ensemble_sizes
+        ), f"Ensemble sizes must be the same across datasets: {ensemble_sizes}"
 
-            batch_size = batch_sizes[0]
-            ensemble_size = ensemble_sizes[0]
-            in_out_sharded = grid_shard_shapes is not None
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
+        batch_size = batch_sizes[0]
+        ensemble_size = ensemble_sizes[0]
+        in_out_sharded = grid_shard_shapes is not None
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
-            # Process each dataset through its corresponding encoder
-            dataset_latents = {}
-            x_skip_dict = {}
-            x_data_latent_dict = {}
-            shard_shapes_data_dict = {}
-            shard_shapes_hidden_dict = {}
+        # Process each dataset through its corresponding encoder
+        dataset_latents = {}
+        x_skip_dict = {}
+        x_data_latent_dict = {}
+        shard_shapes_data_dict = {}
+        shard_shapes_hidden_dict = {}
 
-            for dataset_name in dataset_names:
-                x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                    x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
-                )
-                x_skip_dict[dataset_name] = x_skip
-                x_data_latent_dict[dataset_name] = x_data_latent
-                shard_shapes_data_dict[dataset_name] = shard_shapes_data
-
-                x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
-                shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
-
-                # Encoder for this dataset
-                x_data_latent, x_latent = self._run_mapper(
-                    self.encoder[dataset_name],
-                    (x_data_latent, x_hidden_latent),
-                    batch_size=batch_size,
-                    shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
-                    model_comm_group=model_comm_group,
-                    x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                    x_dst_is_sharded=False,  # x_latent does not come sharded
-                    keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                )
-                dataset_latents[dataset_name] = x_latent
-
-            # Combine all dataset latents
-            x_latent = sum(dataset_latents.values())
-        else:
-            batch_size = x.shape[0]
-            ensemble_size = x.shape[2]
-            in_out_sharded = grid_shard_shapes is not None
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
-
+        for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x, batch_size, grid_shard_shapes, model_comm_group
+                x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
             )
+            x_skip_dict[dataset_name] = x_skip
+            x_data_latent_dict[dataset_name] = x_data_latent
+            shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
-            x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-            shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+            x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
-            # Encoder
+            # Encoder for this dataset
             x_data_latent, x_latent = self._run_mapper(
-                self.encoder,
+                self.encoder[dataset_name],
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_size,
-                shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+                shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
+            dataset_latents[dataset_name] = x_latent
+
+        # Combine all dataset latents
+        x_latent = sum(dataset_latents.values())
 
         # Processor
-        if isinstance(x, dict):
-            # Multi-dataset case: use shard shapes from first dataset (all should be the same)
-            first_dataset_name = next(iter(shard_shapes_hidden_dict.keys()))
-            shard_shapes_for_processor = shard_shapes_hidden_dict[first_dataset_name]
-        else:
-            shard_shapes_for_processor = shard_shapes_hidden
+        # Multi-dataset case: use shard shapes from first dataset (all should be the same)
+        first_dataset_name = next(iter(shard_shapes_hidden_dict.keys()))
+        shard_shapes_for_processor = shard_shapes_hidden_dict[first_dataset_name]
 
         x_latent_proc = self.processor(
             x_latent,
@@ -642,41 +534,25 @@ class AnemoiModelEncProcDec(nn.Module):
             x_latent = x_latent_proc + x_latent
 
         # Decoder
-        if isinstance(x, dict):
-            # Multi-dataset case: decode for each dataset
-            x_out_dict = {}
-            for dataset_name in dataset_names:
-                x_out = self._run_mapper(
-                    self.decoder[dataset_name],
-                    (x_latent_proc, x_data_latent_dict[dataset_name]),
-                    batch_size=batch_size,
-                    shard_shapes=(shard_shapes_hidden_dict[dataset_name], shard_shapes_data_dict[dataset_name]),
-                    model_comm_group=model_comm_group,
-                    x_src_is_sharded=True,  # x_latent always comes sharded
-                    x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-                    keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
-                )
-
-                x_out_dict[dataset_name] = self._assemble_output(
-                    x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
-                )
-
-            return x_out_dict
-        else:
+        # Multi-dataset case: decode for each dataset
+        x_out_dict = {}
+        for dataset_name in dataset_names:
             x_out = self._run_mapper(
-                self.decoder,
-                (x_latent_proc, x_data_latent),
+                self.decoder[dataset_name],
+                (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
-                shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+                shard_shapes=(shard_shapes_hidden_dict[dataset_name], shard_shapes_data_dict[dataset_name]),
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,  # x_latent always comes sharded
                 x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                 keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
             )
 
-            x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
+            x_out_dict[dataset_name] = self._assemble_output(
+                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
+            )
 
-            return x_out
+        return x_out_dict
 
     def predict_step(
         self,

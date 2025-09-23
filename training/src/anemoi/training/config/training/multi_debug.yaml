@@ -130,11 +130,11 @@ scalers:
         weights:
           default: 1
           q: 0.8      # ERA5-specific weight
-          t: 8        # ERA5-specific weight
+          t: 6        # ERA5-specific weight
           u: 0.8
           v: 0.5
           w: 0.001
-          z: 15       # Higher weight for geopotential in ERA5
+          z: 12       # Higher weight for geopotential in ERA5
           sp: 10
           10u: 0.1    # ERA5 has 10m winds
           10v: 0.1
@@ -175,7 +175,7 @@ loss_and_metrics:
     validation_metrics:
       mse:
         _target_: anemoi.training.losses.MSELoss
-        scalers: []
+        scalers: ['node_weights']
         ignore_nans: true
 
     # Variable groupings for organizing different variable types
@@ -210,7 +210,7 @@ loss_and_metrics:
       variable_groups:
         default: sfc
         pl:
-          param: [q, t, u, v, w, z, vo, d]  # ERA5 has vorticity and divergence
+          param: [q, t, u, v, w, z]  # ERA5 has vorticity and divergence
         sfc:
           param: [tp, cp, 10u, 10v, 2d, sp]  # ERA5 surface variables
 
