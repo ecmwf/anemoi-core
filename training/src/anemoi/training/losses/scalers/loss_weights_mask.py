@@ -55,25 +55,17 @@ class NaNMaskScaler(BaseUpdatingScaler):
 
         # Handle pre_processors
         if hasattr(model, "pre_processors"):
-            if isinstance(model.pre_processors, torch.nn.ModuleDict):
-                assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-                # Multi-dataset case: get pre_processors for specific dataset
-                if dataset_name in model.pre_processors:
-                    processors.append(model.pre_processors[dataset_name])
-            else:
-                # Single dataset case: use pre_processors directly
-                processors.append(model.pre_processors)
+            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            # Multi-dataset case: get pre_processors for specific dataset
+            if dataset_name in model.pre_processors:
+                processors.append(model.pre_processors[dataset_name])
 
         # Handle pre_processors_tendencies
         if self.use_processors_tendencies and hasattr(model, "pre_processors_tendencies"):
-            if isinstance(model.pre_processors_tendencies, torch.nn.ModuleDict):
-                # Multi-dataset case: get pre_processors_tendencies for specific dataset
-                assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-                if dataset_name in model.pre_processors_tendencies:
-                    processors.append(model.pre_processors_tendencies[dataset_name])
-            else:
-                # Single dataset case: use pre_processors_tendencies directly
-                processors.append(model.pre_processors_tendencies)
+            # Multi-dataset case: get pre_processors_tendencies for specific dataset
+            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            if dataset_name in model.pre_processors_tendencies:
+                processors.append(model.pre_processors_tendencies[dataset_name])
 
         # iterate over all pre-processors and check if they have a loss_mask_training attribute
         for pre_processors in processors:

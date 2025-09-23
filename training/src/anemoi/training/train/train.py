@@ -110,21 +110,14 @@ class AnemoiTrainer:
             convert_to_omegaconf(self.config),
             self.graph_data,
         )
-        # Handle both single dataset and multi-dataset cases
-        if isinstance(datamodule.ds_train.data, dict):
-            # Multi-dataset case: store num_features per dataset
-            self.config.data.num_features = {
-                name: len(data.variables) for name, data in datamodule.ds_train.data.items()
-            }
-            # Log information for each dataset
-            for name, data in datamodule.ds_train.data.items():
-                LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
-                LOGGER.info("Dataset '%s' - Variables: %s", name, str(data.variables))
-        else:
-            # Single dataset case: store as single value
-            self.config.data.num_features = len(datamodule.ds_train.data.variables)
-            LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
-            LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
+        # Multi-dataset case: store num_features per dataset
+        self.config.data.num_features = {
+            name: len(data.variables) for name, data in datamodule.ds_train.data.items()
+        }
+        # Log information for each dataset
+        for name, data in datamodule.ds_train.data.items():
+            LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
+            LOGGER.info("Dataset '%s' - Variables: %s", name, str(data.variables))
         return datamodule
 
     @cached_property
@@ -167,6 +160,7 @@ class AnemoiTrainer:
                     graph_name = f"{base_name}_{dataset_name}.pt"
             else:
                 # Single dataset: use original name
+                assert 1 > 2, "dataset_name must be provided when using multiple datasets."
                 graph_name = self.config.hardware.files.graph
 
             graph_filename = Path(self.config.hardware.paths.graph, graph_name)
@@ -198,18 +192,14 @@ class AnemoiTrainer:
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
         # Check if multi-dataset
-        if hasattr(self.config.dataloader, "training") and hasattr(self.config.dataloader.training, "datasets"):
+        assert hasattr(self.config.dataloader, "training") and hasattr(self.config.dataloader.training, "datasets")
 
-            # Multi-dataset case: create graph for each dataset
-            graphs = {}
-            for dataset_name, dataset_config in self.config.dataloader.training.datasets.items():
-                LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-                graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-            return graphs
-
-        # Single dataset case: use dataloader.dataset
-        dataset_path = self.config.dataloader.dataset
-        return self._create_graph_for_dataset(dataset_path)
+        # Multi-dataset case: create graph for each dataset
+        graphs = {}
+        for dataset_name, dataset_config in self.config.dataloader.training.datasets.items():
+            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
+            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
+        return graphs
 
     @cached_property
     def truncation_data(self) -> dict:
@@ -456,24 +446,18 @@ class AnemoiTrainer:
 
     def _log_information(self) -> None:
         # Log number of variables (features)
-        if isinstance(self.datamodule.ds_train.data, dict):
-            # Multi-dataset case: log per dataset
-            from anemoi.training.utils.config_utils import get_dataset_data_config
+        # Multi-dataset case: log per dataset
+        from anemoi.training.utils.config_utils import get_dataset_data_config
 
-            for dataset_name, data in self.datamodule.ds_train.data.items():
-                dataset_data_config = get_dataset_data_config(self.config, dataset_name)
-                num_fc_features = len(data.variables) - len(dataset_data_config.forcing)
-                LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
-                LOGGER.info(
-                    "Dataset '%s' - Total number of auxiliary variables: %d",
-                    dataset_name,
-                    len(dataset_data_config.forcing),
-                )
-        else:
-            # Single dataset case
-            num_fc_features = len(self.datamodule.ds_train.data.variables) - len(self.config.data.forcing)
-            LOGGER.info("Total number of prognostic variables: %d", num_fc_features)
-            LOGGER.info("Total number of auxiliary variables: %d", len(self.config.data.forcing))
+        for dataset_name, data in self.datamodule.ds_train.data.items():
+            dataset_data_config = get_dataset_data_config(self.config, dataset_name)
+            num_fc_features = len(data.variables) - len(dataset_data_config.forcing)
+            LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
+            LOGGER.info(
+                "Dataset '%s' - Total number of auxiliary variables: %d",
+                dataset_name,
+                len(dataset_data_config.forcing),
+            )
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
         total_number_of_model_instances = (
