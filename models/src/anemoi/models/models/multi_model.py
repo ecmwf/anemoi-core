@@ -396,6 +396,41 @@ class AnemoiMultiModel(AnemoiModel):
         #        assert number_dim(graph[name].x) == (n, 2)
         return torch.cat([torch.sin(graph[name].x), torch.cos(graph[name].x)], dim=-1)
 
+    def prepare_input(self, x: Dict) -> Dict:
+
+        def merge(*leaves):
+            latitudes = None
+            longitudes = None
+            dimensions_order = None
+            for leaf in leaves:
+                if latitudes is None:
+                    latitudes = leaf["latitudes"]
+                    longitudes = leaf["longitudes"]
+                    dimensions_order = leaf["dimensions_order"]
+                assert leaf["latitudes"] == latitudes, f"latitudes do not match: {leaf['latitudes']} != {latitudes}"
+                assert (
+                    leaf["longitudes"] == longitudes
+                ), f"longitudes do not match: {leaf['longitudes']} != {longitudes}"
+                assert (
+                    leaf["dimensions_order"] == dimensions_order
+                ), f"dimensions_order do not match: {leaf['dimensions_order']} != {dimensions_order}"
+
+            return dict(
+                data=torch.stack([leaf["data"] for leaf in leaves], dim=-1),
+                latitudes=latitudes,
+                longitudes=longitudes,
+                dimensions_order=dimensions_order + ("offsets",),
+                _offsets=(leaf["_offset"] for leaf in leaves),
+            )
+
+        res = x.new_empty()
+        for k, v in self.input_static_info.get_level_minus_one_leaf_nodes():
+            for _ in v.values():
+                assert not isinstance(_, Dict), f"Only leaf nodes supported, got {type(_)}"
+            res[k] = merge(v.values())
+
+        return res
+
     def forward(
         self, x: dict[str, Tensor], graph: HeteroData, *, model_comm_group: Optional[ProcessGroup] = None, **kwargs
     ) -> dict[str, Tensor]:
@@ -406,6 +441,8 @@ class AnemoiMultiModel(AnemoiModel):
         from anemoi.training.data.refactor.structure import Dict
 
         assert isinstance(x, Dict), type(x)
+
+        x = self.prepare_input(x)
 
         x_data_latents = self._assemble_input(x, graph, batch_size=batch_size, model_comm_group=model_comm_group)
 
