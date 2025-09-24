@@ -45,7 +45,8 @@ dataloader:
     training: 2
     validation: 2
 training:
-  model_task: anemoi.training.train.tasks.refactor.RolloutForecastingPLModule
+  model_task: anemoi.training.train.tasks.refactor.ForecastingPLModule
+  #model_task: anemoi.training.train.tasks.refactor.RolloutForecastingPLModule
   max_epochs: 2
   rollout:
     start: 1
