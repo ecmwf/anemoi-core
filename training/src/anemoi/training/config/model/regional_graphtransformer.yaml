@@ -11,7 +11,7 @@ output_mask: null # moved this to config.training to have one mask per output
 
 
 model:
-  _target_: anemoi.models.models.mult_encoder_processor_decoder.AnemoiMultiModel
+  _target_: anemoi.models.models.multi_model.AnemoiMultiModel
   emb_data:
     _target_: anemoi.models.layers.mlp.MLP
     hidden_dim: 128

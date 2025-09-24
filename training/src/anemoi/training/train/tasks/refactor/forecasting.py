@@ -70,8 +70,8 @@ class ForecastingPLModule(BaseGraphPLModule):
         print(y_pred.to_str("⚠️y_pred before merging semantic info from target"))
 
         # y_pred = semantic + y_pred
-        #new_y = semantic.new_empty()
-        #for k, v in semantic.items():
+        # new_y = semantic.new_empty()
+        # for k, v in semantic.items():
         #    box = v.copy()
         #    if isinstance(y_pred[k], torch.Tensor):
         #        box["data"] = y_pred[k]

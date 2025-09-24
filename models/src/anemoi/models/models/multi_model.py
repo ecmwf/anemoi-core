@@ -377,8 +377,10 @@ class AnemoiMultiModel(AnemoiModel):
 
         return y
 
-    def _assemble_input(self, x_data_raw: dict[str, torch.Tensor], graph: HeteroData, batch_size: int, model_comm_group):
-        #assert batch_size == x_data_raw.first["data"].shape[0], (batch_size, x_data_raw.first["data"].shape)
+    def _assemble_input(
+        self, x_data_raw: dict[str, torch.Tensor], graph: HeteroData, batch_size: int, model_comm_group
+    ):
+        # assert batch_size == x_data_raw.first["data"].shape[0], (batch_size, x_data_raw.first["data"].shape)
 
         x_data_latents = self.node_embedder(x_data_raw, batch_size=batch_size)
 
@@ -406,7 +408,7 @@ class AnemoiMultiModel(AnemoiModel):
         assert isinstance(x, Dict), type(x)
 
         x_data_latents = self._assemble_input(x, graph, batch_size=batch_size, model_comm_group=model_comm_group)
-        
+
         x_hidden_raw = self.get_node_coords(graph, self.hidden_name)
 
         x_data_latents, x_hidden_latent, shard_shapes_hidden = self.encode(
@@ -436,7 +438,7 @@ class AnemoiMultiModel(AnemoiModel):
             model_comm_group=model_comm_group,
         )
 
-        #x_out = self.residual_connection(x_out, x_data_skip)
+        # x_out = self.residual_connection(x_out, x_data_skip)
         x_out = self.bound(x_out)
         return x_out.wrap("data")
 
