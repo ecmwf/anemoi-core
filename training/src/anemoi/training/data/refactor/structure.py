@@ -19,8 +19,9 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.data.refactor.formatting import anemoi_dict_to_str
 from anemoi.training.data.refactor.path_keys import SEPARATOR
-from anemoi.training.data.refactor.path_keys import _join_paths
 from anemoi.training.data.refactor.path_keys import encode_path_if_needed
+from anemoi.training.data.refactor.path_keys import join_paths
+from anemoi.training.data.refactor.path_keys import path_as_tuple
 
 # from typing import TYPE_CHECKING
 # if TYPE_CHECKING:
@@ -132,7 +133,7 @@ class Dict(dict):
         if isinstance(value, Dict):
             for p, v in value.items():
                 assert p, f"Empty sub-path is not allowed when setting '{path}' to a Dict"
-                new_path = _join_paths(path, p)
+                new_path = join_paths(path, p)
                 self[new_path] = v
             return
         super().__setitem__(path, value)
@@ -276,6 +277,17 @@ class Dict(dict):
     def first(self):
         """Return the first value in the Dict. Useful for accessing properties common to all boxes."""
         return next(iter(self.values()))
+
+    def get_level_minus_one_leaf_nodes(self):
+        """Return a Dict with the leaf nodes at level -1, i.e. the boxes without their content."""
+        paths = set()
+        for p in self.keys():
+            p_ = path_as_tuple(p)
+            if len(p_) < 2:
+                raise ValueError(f"Cannot get level -1 leaf nodes, found path with less than 2 elements: {p}")
+            paths.add(p_[:-1])
+
+        return self.__class__({p: self[p] for p in paths})
 
 
 class BaseAccessor:

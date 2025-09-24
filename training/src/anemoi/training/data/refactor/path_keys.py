@@ -217,17 +217,10 @@ def check_dictionary_key(k):
     return k
 
 
-def _join_paths(path1, path2):
+def join_paths(path1, path2):
     return SEPARATOR.join([path1, path2])
 
 
-def _path_as_tuple(path):
-    if isinstance(path, str):
-        return tuple(int(x) if x.isdigit() else x for x in path.split(SEPARATOR))
-    if isinstance(path, int):
-        return (path,)
-    if isinstance(path, tuple):
-        return path
-    if isinstance(path, list):
-        return tuple(path)
-    raise ValueError(f"Path must be str, int, list or tuple, got {type(path)}")
+def path_as_tuple(path):
+    path = decode_path_if_needed(path)
+    return path.split(".")
