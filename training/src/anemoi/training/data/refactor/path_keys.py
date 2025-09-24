@@ -195,6 +195,10 @@ def check_dictionary_key(k):
     if k.startswith("_"):
         raise ValueError(f"Keys in dictionary must not start with '_', got: {k}")
 
+    if k.endswith("_"):
+        # this is not needed and should be removed, when all this file has been refactored
+        raise ValueError(f"Keys in dictionary must not end with '_', got: {k}")
+
     for c in k:
         if not c.isalnum() and c not in _ALLOWED_CHARACTERS_IN_DICT_KEYS and c not in ["_", "X"]:
             raise ValueError(

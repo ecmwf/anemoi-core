@@ -66,6 +66,8 @@ class FrozenDict(dict):
 
 class Dict(dict):
 
+    _is_frozen = False
+
     def __init__(self, *args, **kwargs):
         # Nothing special in the __init__, this is an actual python dict
 
@@ -77,6 +79,8 @@ class Dict(dict):
 
     def copy(self):
         return self.__class__(self)
+        # not implemented on purpose to avoid confusion
+        raise NotImplementedError("use copy.copy or copy.deepcopy instead")
 
     def freeze(self):
         for k, v in self.items():
@@ -88,7 +92,18 @@ class Dict(dict):
                 raise ValueError(f"Unexpected leaf for key '{k}', got {type(v)} instead of dict")
             v = deep_freeze_dict(v)
             self[k] = v
-        # TODO: should also freeze the list of keys in self
+        self._is_frozen = True
+
+    def unfreeze(self):
+        for k, v in self.items():
+            if v is None:
+                continue
+            if not isinstance(v, dict):
+                raise ValueError(f"Unexpected leaf for key '{k}', got {type(v)} instead of dict")
+            if isinstance(v, FrozenDict):
+                v = dict(v)
+                self[k] = v
+        self._is_frozen = False
 
     def __copy__(self):
         return self.__class__(self)
@@ -109,6 +124,8 @@ class Dict(dict):
         return name + " " + self.__repr__()
 
     def __setitem__(self, path, value):
+        if self._is_frozen:
+            raise TypeError("Dict is frozen, cannot set item '{path}'")
         path = encode_path_if_needed(path)
         if not path:
             raise KeyError("Empty path is not allowed")
@@ -248,9 +265,11 @@ class Dict(dict):
 
     # TODO clean this up/rename
     def add_batch_first_in_dimensions_order(self):
-        new = self.copy()
+        new = self.__class__()
         for box in new.values():
+            box = box.copy()
             box["dimensions_order"] = ("batch",) + box["dimensions_order"]
+            new[box] = box
         return new
 
     @property
