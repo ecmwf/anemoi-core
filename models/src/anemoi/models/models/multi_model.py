@@ -116,7 +116,9 @@ class AnemoiMultiModel(AnemoiModel):
 
     def build(self):
         input_info = self.sample_static_info["input"]
+        self.input_static_info = input_info
         target_info = self.sample_static_info["target"]
+        self.target_static_info = target_info
 
         print(type(input_info), input_info)
         assert isinstance(input_info, Dict), type(input_info)
@@ -377,8 +379,10 @@ class AnemoiMultiModel(AnemoiModel):
 
         return y
 
-    def _assemble_input(self, x_data_raw: dict[str, torch.Tensor], graph: HeteroData, batch_size: int, model_comm_group):
-        #assert batch_size == x_data_raw.first["data"].shape[0], (batch_size, x_data_raw.first["data"].shape)
+    def _assemble_input(
+        self, x_data_raw: dict[str, torch.Tensor], graph: HeteroData, batch_size: int, model_comm_group
+    ):
+        # assert batch_size == x_data_raw.first["data"].shape[0], (batch_size, x_data_raw.first["data"].shape)
 
         x_data_latents = self.node_embedder(x_data_raw, batch_size=batch_size)
 
@@ -394,6 +398,76 @@ class AnemoiMultiModel(AnemoiModel):
         #        assert number_dim(graph[name].x) == (n, 2)
         return torch.cat([torch.sin(graph[name].x), torch.cos(graph[name].x)], dim=-1)
 
+    def prepare_input(self, x: Dict) -> Dict:
+
+        def merge(*leaves):
+            latitudes = None
+            longitudes = None
+            dimensions_order = None
+            for leaf in leaves:
+                if latitudes is None:
+                    latitudes = leaf["latitudes"]
+                    longitudes = leaf["longitudes"]
+                    dimensions_order = leaf["dimensions_order"]
+                assert leaf["latitudes"] == latitudes, f"latitudes do not match: {leaf['latitudes']} != {latitudes}"
+                assert (
+                    leaf["longitudes"] == longitudes
+                ), f"longitudes do not match: {leaf['longitudes']} != {longitudes}"
+                assert (
+                    leaf["dimensions_order"] == dimensions_order
+                ), f"dimensions_order do not match: {leaf['dimensions_order']} != {dimensions_order}"
+
+            return dict(
+                data=torch.stack([leaf["data"] for leaf in leaves], dim=-1),
+                latitudes=latitudes,
+                longitudes=longitudes,
+                dimensions_order=dimensions_order + ("offsets",),
+                _offsets=(leaf["_offset"] for leaf in leaves),
+            )
+
+        res = x.new_empty()
+        for k, v in self.input_static_info.get_level_minus_one_leaf_nodes():
+            for _ in v.values():
+                assert not isinstance(_, Dict), f"Only leaf nodes supported, got {type(_)}"
+            res[k] = merge(v.values())
+
+        return res
+
+    def prepare_input(self, x: Dict) -> Dict:
+
+        def merge(*leaves):
+            latitudes = None
+            longitudes = None
+            dimensions_order = None
+            for leaf in leaves:
+                if latitudes is None:
+                    latitudes = leaf["latitudes"]
+                    longitudes = leaf["longitudes"]
+                    dimensions_order = leaf["dimensions_order"]
+                assert leaf["latitudes"] == latitudes, f"latitudes do not match: {leaf['latitudes']} != {latitudes}"
+                assert (
+                    leaf["longitudes"] == longitudes
+                ), f"longitudes do not match: {leaf['longitudes']} != {longitudes}"
+                assert (
+                    leaf["dimensions_order"] == dimensions_order
+                ), f"dimensions_order do not match: {leaf['dimensions_order']} != {dimensions_order}"
+
+            return dict(
+                data=torch.stack([leaf["data"] for leaf in leaves], dim=-1),
+                latitudes=latitudes,
+                longitudes=longitudes,
+                dimensions_order=dimensions_order + ("offsets",),
+                _offsets=(leaf["_offset"] for leaf in leaves),
+            )
+
+        res = x.new_empty()
+        for k, v in self.input_static_info.get_level_minus_one_leaf_nodes():
+            for _ in v.values():
+                assert not isinstance(_, Dict), f"Only leaf nodes supported, got {type(_)}"
+            res[k] = merge(v.values())
+
+        return res
+
     def forward(
         self, x: dict[str, Tensor], graph: HeteroData, *, model_comm_group: Optional[ProcessGroup] = None, **kwargs
     ) -> dict[str, Tensor]:
@@ -405,8 +479,13 @@ class AnemoiMultiModel(AnemoiModel):
 
         assert isinstance(x, Dict), type(x)
 
+        print("x before prepare_input =", x.to_str("input x"))
+        x = self.prepare_input(x)
+        print("x after prepare_input =", x.to_str("input x"))
+        exit()
+
         x_data_latents = self._assemble_input(x, graph, batch_size=batch_size, model_comm_group=model_comm_group)
-        
+
         x_hidden_raw = self.get_node_coords(graph, self.hidden_name)
 
         x_data_latents, x_hidden_latent, shard_shapes_hidden = self.encode(
@@ -436,7 +515,7 @@ class AnemoiMultiModel(AnemoiModel):
             model_comm_group=model_comm_group,
         )
 
-        #x_out = self.residual_connection(x_out, x_data_skip)
+        # x_out = self.residual_connection(x_out, x_data_skip)
         x_out = self.bound(x_out)
         return x_out.wrap("data")
 

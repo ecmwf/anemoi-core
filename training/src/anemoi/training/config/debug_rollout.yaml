@@ -18,24 +18,6 @@ config_validation: False
 # hardware:
 #   num_gpus_per_node: 1
 
-data:
-  sources:
-    fields:
-      # dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
-      dataset: aifs-od-an-oper-0001-mars-o32-2020-2020-6h-v6-for-software-testing
-      # processors including imputers and normalizers are applied in order of definition
-      normaliser:
-        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-        config: ${data.normaliser}
-
-    other_fields:
-      # dataset: cerra-rr-an-oper-0001-mars-5p5km-1984-2020-6h-v2-hmsi
-      dataset: cerra-rr-an-oper-0001-mars-5p5km-2020-2020-6h-v2-hmsi-thinned-for-software-testing
-      # processors including imputers and normalizers are applied in order of definition
-      normaliser:
-        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-        config: ${data.normaliser}
-
 diagnostics:
   log:
     wandb:
@@ -64,31 +46,6 @@ model:
     input_steps: ["-12h", "-6h", "0h"]
     target_steps: ["+6h", "12h"]
 
-  sample:
-    rollout: ${model.rollout}
-    dictionary:
-      fields:
-        dictionary:
-          a:
-            rollout: prognostics
-            container:
-              dimensions: ["values", "variables"]
-              variables: ["2t", "10u", "10v"]
-              data_group: "fields"
-          b:
-            rollout: diagnostics
-            container:
-              dimensions: ["values", "variables"]
-              variables: [q_100, q_300, q_1000]
-              data_group: "fields"
-          c:
-            rollout: forcings
-            container:
-              dimensions: ["values", "variables"]
-              variables:
-                [cos_latitude, sin_latitude, cos_longitude, sin_longitude]
-              data_group: "fields"
-
 dataloader:
   limit_batches:
     training: 2
@@ -102,3 +59,28 @@ training:
       _target_: anemoi.training.losses.MSELoss
       scalers: []
       ignore_nans: False
+sample:
+  final: True
+  rollout: ${model.rollout}
+  dictionary:
+    fields:
+      dictionary:
+        a:
+          rollout: prognostics
+          container:
+            dimensions: ["values", "variables"]
+            variables: ["2t", "10u", "10v"]
+            data_group: "fields"
+        b:
+          rollout: diagnostics
+          container:
+            dimensions: ["values", "variables"]
+            variables: [q_100, q_300, q_1000]
+            data_group: "fields"
+        c:
+          rollout: forcings
+          container:
+            dimensions: ["values", "variables"]
+            variables:
+              [cos_latitude, sin_latitude, cos_longitude, sin_longitude]
+            data_group: "fields"

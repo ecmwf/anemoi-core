@@ -160,7 +160,10 @@ class SampleProvider:
         return self._get_item(None, item)
 
     def rollout_info(self):
-        return RolloutDict(self._get_rollout_info())
+        res = self._get_rollout_info()
+        if res is None:
+            return None
+        return RolloutDict(res)
 
     def _get_static(self, request):
         raise NotImplementedError(f"Not implemented for {self.__class__.__name__}.")
@@ -484,6 +487,14 @@ class Rearranger:
 
 
 class RolloutDict(Dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for v in self.values():
+            # if v is None:
+            #     continue
+            if not isinstance(v, Rearranger):
+                raise ValueError(f"Expected Rollout in each leaf of a RolloutDict, got {type(v)}")
+
     def next_input(self, step, database=None, previous_input=None, previous_output=None):
         role = "input"
         # fill with None

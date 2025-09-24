@@ -19,8 +19,9 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.data.refactor.formatting import anemoi_dict_to_str
 from anemoi.training.data.refactor.path_keys import SEPARATOR
-from anemoi.training.data.refactor.path_keys import _join_paths
 from anemoi.training.data.refactor.path_keys import encode_path_if_needed
+from anemoi.training.data.refactor.path_keys import join_paths
+from anemoi.training.data.refactor.path_keys import path_as_tuple
 
 # from typing import TYPE_CHECKING
 # if TYPE_CHECKING:
@@ -66,6 +67,8 @@ class FrozenDict(dict):
 
 class Dict(dict):
 
+    _is_frozen = False
+
     def __init__(self, *args, **kwargs):
         # Nothing special in the __init__, this is an actual python dict
 
@@ -77,6 +80,8 @@ class Dict(dict):
 
     def copy(self):
         return self.__class__(self)
+        # not implemented on purpose to avoid confusion
+        raise NotImplementedError("use copy.copy or copy.deepcopy instead")
 
     def freeze(self):
         for k, v in self.items():
@@ -88,7 +93,18 @@ class Dict(dict):
                 raise ValueError(f"Unexpected leaf for key '{k}', got {type(v)} instead of dict")
             v = deep_freeze_dict(v)
             self[k] = v
-        # TODO: should also freeze the list of keys in self
+        self._is_frozen = True
+
+    def unfreeze(self):
+        for k, v in self.items():
+            if v is None:
+                continue
+            if not isinstance(v, dict):
+                raise ValueError(f"Unexpected leaf for key '{k}', got {type(v)} instead of dict")
+            if isinstance(v, FrozenDict):
+                v = dict(v)
+                self[k] = v
+        self._is_frozen = False
 
     def __copy__(self):
         return self.__class__(self)
@@ -109,13 +125,15 @@ class Dict(dict):
         return name + " " + self.__repr__()
 
     def __setitem__(self, path, value):
+        if self._is_frozen:
+            raise TypeError("Dict is frozen, cannot set item '{path}'")
         path = encode_path_if_needed(path)
         if not path:
             raise KeyError("Empty path is not allowed")
         if isinstance(value, Dict):
             for p, v in value.items():
                 assert p, f"Empty sub-path is not allowed when setting '{path}' to a Dict"
-                new_path = _join_paths(path, p)
+                new_path = join_paths(path, p)
                 self[new_path] = v
             return
         super().__setitem__(path, value)
@@ -248,15 +266,28 @@ class Dict(dict):
 
     # TODO clean this up/rename
     def add_batch_first_in_dimensions_order(self):
-        new = self.copy()
+        new = self.__class__()
         for box in new.values():
+            box = box.copy()
             box["dimensions_order"] = ("batch",) + box["dimensions_order"]
+            new[box] = box
         return new
 
     @property
     def first(self):
         """Return the first value in the Dict. Useful for accessing properties common to all boxes."""
         return next(iter(self.values()))
+
+    def get_level_minus_one_leaf_nodes(self):
+        """Return a Dict with the leaf nodes at level -1, i.e. the boxes without their content."""
+        paths = set()
+        for p in self.keys():
+            p_ = path_as_tuple(p)
+            if len(p_) < 2:
+                raise ValueError(f"Cannot get level -1 leaf nodes, found path with less than 2 elements: {p}")
+            paths.add(p_[:-1])
+
+        return self.__class__({p: self[p] for p in paths})
 
 
 class BaseAccessor:

@@ -1,5 +1,4 @@
 from collections.abc import Generator
-from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -37,7 +36,7 @@ class ForecastingPLModule(BaseGraphPLModule):
         return semantic
 
     def _step(
-        self, batch, validation_mode: bool = False
+        self, batch, validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
         # ✅ here, batch = input + target
         # validation vs training, do we have validation batch or training batch?
@@ -66,12 +65,13 @@ class ForecastingPLModule(BaseGraphPLModule):
 
         # run model for one step
         y_pred = self(input, self.graph_data.clone().to("cuda"))
+
         # y_pred = target.select_content(["data"])  # for development, don't keep this line
         print(y_pred.to_str("⚠️y_pred before merging semantic info from target"))
 
         # y_pred = semantic + y_pred
-        #new_y = semantic.new_empty()
-        #for k, v in semantic.items():
+        # new_y = semantic.new_empty()
+        # for k, v in semantic.items():
         #    box = v.copy()
         #    if isinstance(y_pred[k], torch.Tensor):
         #        box["data"] = y_pred[k]
@@ -81,13 +81,13 @@ class ForecastingPLModule(BaseGraphPLModule):
         #                print("Warning: overwriting key", k_, "in semantic info")
         #            box[k_] = y_pred[k][k_]
         #    new_y[k] = box
-        #y_pred = new_y
+        # y_pred = new_y
 
         print(y_pred.to_str("⚠️y_pred after merging semantic info from target"))
         loss = 0.0
         for key, target_data in target.items():
             loss += checkpoint(self.loss[key], y_pred[key], target_data, use_reentrant=False)
-        # loss *= 1 / len(batch["target"]) # Do we want to average over the number of targets?? 
+        # loss *= 1 / len(batch["target"]) # Do we want to average over the number of targets??
         print("computed loss:", loss)
 
         metrics_next = {}

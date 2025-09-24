@@ -19,7 +19,7 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.models.mult_encoder_processor_decoder import AnemoiMultiModel
+from anemoi.models.models.multi_model import AnemoiMultiModel
 from anemoi.utils.config import DotDict
 
 

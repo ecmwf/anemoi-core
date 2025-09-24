@@ -11,13 +11,7 @@ keep_batch_sharded: True
 
 
 model:
-  _target_: anemoi.models.models.mult_encoder_processor_decoder.AnemoiMultiModel
-  emb_data:
-    _target_: anemoi.models.layers.mlp.MLP
-    hidden_dim: 128
-    n_extra_layers: 0
-    final_activation: GELU
-    layer_kernels: ${model.layer_kernels}
+  _target_: anemoi.models.models.multi_model.AnemoiMultiModel
   encoders:
   - name: enc
     mapper: ${model.mappers.encoder}
