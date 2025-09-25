@@ -68,6 +68,7 @@ class PointWiseMLPProcessorBlock(BaseBlock):
 
     def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
         super().__init__()
+        assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
         layers = [
             layer_kernels.Linear(num_channels, hidden_dim),
             layer_kernels.LayerNorm(hidden_dim),
