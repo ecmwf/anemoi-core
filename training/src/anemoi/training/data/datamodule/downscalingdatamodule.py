@@ -7,10 +7,13 @@
 
 import logging
 import os
+from hydra.utils import instantiate
 from functools import cached_property
 from anemoi.training.data.datamodule.singledatamodule import AnemoiDatasetsDataModule
 from anemoi.training.data.dataset.downscalingdataset import DownscalingDataset
 import numpy as np
+
+from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.datasets.data import open_dataset
 
 LOGGER = logging.getLogger(__name__)
@@ -63,7 +66,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         )  # to list as statistics is a tuple immutable
         statistics[2] = reduced_residual_statistics
         return tuple(statistics)
-        #return reduced_residual_statistics
+        # return reduced_residual_statistics
 
     def _get_dataset(
         self,
@@ -81,9 +84,32 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             relative_date_indices=np.array([0]),
             shuffle=shuffle,
             label=label,
-            grid_indices=self.grid_indices,
+            lres_grid_indices=self.lres_grid_indices,
+            hres_grid_indices=self.hres_grid_indices,
         )
         return data
+
+    @cached_property
+    def lres_grid_indices(self) -> type[BaseGridIndices]:
+        reader_group_size = self.config.dataloader.read_group_size
+
+        lres_grid_indices = instantiate(
+            self.config.dataloader.lres_grid_indices,
+            reader_group_size=reader_group_size,
+        )
+        lres_grid_indices.setup(self.graph_data)
+        return lres_grid_indices
+
+    @cached_property
+    def hres_grid_indices(self) -> type[BaseGridIndices]:
+        reader_group_size = self.config.dataloader.read_group_size
+
+        hres_grid_indices = instantiate(
+            self.config.dataloader.hres_grid_indices,
+            reader_group_size=reader_group_size,
+        )
+        hres_grid_indices.setup(self.graph_data)
+        return hres_grid_indices
 
     @cached_property
     def ds_valid(self) -> DownscalingDataset:
@@ -93,5 +119,3 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             shuffle=False,
             label="validation",
         )
-
-

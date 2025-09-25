@@ -73,6 +73,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
     def _interpolate_to_high_res(
         self, x, grid_shard_shapes=None, model_comm_group=None
     ):
+
         if grid_shard_shapes is not None:
             shard_shapes = self._get_shard_shapes(
                 x, 0, grid_shard_shapes, model_comm_group
@@ -85,6 +86,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
         # hence we check that they are on the correct device ; copy should only happen in the first forward run
         if self.A_down is not None:
+
             self.A_down = self.A_down.to(x.device)
             x = self._truncate_fields(x, self.A_down)  # back to high resolution
         else:
@@ -113,6 +115,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         """
         bs, ens, _, _ = x.shape
         x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
+
         x_trunc = self._interpolate_to_high_res(
             x_trunc, grid_shard_shapes, model_comm_group
         )
@@ -157,6 +160,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             )
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
+
         x_data_latent = torch.cat(
             (
                 einops.rearrange(

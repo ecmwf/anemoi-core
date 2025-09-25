@@ -152,7 +152,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         reader_group_size = self.config.dataloader.read_group_size
 
         grid_indices = instantiate(
-            self.config.dataloader.grid_indices,
+            self.config.dataloader.hres_grid_indices,
             reader_group_size=reader_group_size,
         )
         grid_indices.setup(self.graph_data)

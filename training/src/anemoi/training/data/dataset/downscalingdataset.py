@@ -32,6 +32,28 @@ LOGGER = logging.getLogger(__name__)
 class DownscalingDataset(NativeGridDataset):
     """Iterable dataset for Anemoi data on the arbitrary grids."""
 
+    def __init__(
+        self,
+        data_reader: Callable,
+        lres_grid_indices: type[BaseGridIndices],
+        hres_grid_indices: type[BaseGridIndices],
+        relative_date_indices: list,
+        timestep: str = "6h",
+        shuffle: bool = True,
+        label: str = "generic",
+    ) -> None:
+
+        super().__init__(
+            data_reader=data_reader,
+            grid_indices=hres_grid_indices,
+            relative_date_indices=relative_date_indices,
+            timestep=timestep,
+            shuffle=shuffle,
+            label=label,
+        )
+        self.lres_grid_indices = lres_grid_indices
+        self.hres_grid_indices = hres_grid_indices
+
     def __iter__(self):
         """Return an iterator over the dataset.
 
@@ -66,7 +88,20 @@ class DownscalingDataset(NativeGridDataset):
 
         for i in shuffled_chunk_indices:
 
+            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
+                self.reader_group_rank
+            )
+            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(
+                self.reader_group_rank
+            )
+
+            # Load full grid in CPU memory, select grid_shard after
+            # Note that anemoi-datasets currently doesn't support slicing + indexing
+            # in the same operation.
             x_in_lres, x_in_hres, y = self.data[i : i + 1]
+            x_in_lres = x_in_lres[..., lres_grid_shard_indices]
+            x_in_hres = x_in_hres[..., hres_grid_shard_indices]
+            y = y[..., hres_grid_shard_indices]
 
             # iterate input
             x_in_hres = rearrange(

@@ -20,6 +20,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.train.tasks.base import BaseGraphModule
+from hydra.utils import instantiate
 
 if TYPE_CHECKING:
 
@@ -73,6 +74,25 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 if v in self.data_indices.data.output.full
             },
         )
+        reader_group_size = self.config.dataloader.read_group_size
+        self.lres_grid_indices = instantiate(
+            self.config.model_dump(by_alias=True).dataloader.lres_grid_indices,
+            reader_group_size=reader_group_size,
+        )
+        self.lres_grid_indices.setup(graph_data)
+        self.grid_shard_shapes_in_lres = self.lres_grid_indices.shard_shapes
+
+        self.hres_grid_indices = instantiate(
+            self.config.model_dump(by_alias=True).dataloader.hres_grid_indices,
+            reader_group_size=reader_group_size,
+        )
+        self.hres_grid_indices.setup(graph_data)
+        self.grid_shard_shapes_in_hres = self.hres_grid_indices.shard_shapes
+
+        self.lres_grid_shard_shapes = None
+        self.lres_grid_shard_slice = None
+        self.hres_grid_shard_shapes = None
+        self.hres_grid_shard_slice = None
 
     def forward(
         self,
@@ -87,7 +107,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_shapes=self.hres_grid_shard_shapes,
         )
 
     def _compute_loss(
@@ -145,8 +165,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         x_in_interp_to_hres = self.model.model.apply_interpolate_to_high_res(
             x_in[:, 0, ...],
-            self.grid_shard_shapes,
-            self.model_comm_group,
+            grid_shard_shapes=self.lres_grid_shard_shapes,
+            model_comm_group=self.model_comm_group,
         )[:, None, ...]
 
         self.x_in_matching_channel_indices = self.x_in_matching_channel_indices.to(
@@ -186,6 +206,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         residuals_target_noised = self._noise_target(residuals_target, sigma)
 
         # prediction, fwd_with_preconditioning
+
         y_pred = self(
             x_in_interp_to_hres,
             x_in_hres,
@@ -196,8 +217,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         # Use checkpoint for compute_loss_metrics
         loss, metrics_next = checkpoint(
             self.compute_loss_metrics,
-            y_pred[:, 0, ...],
-            residuals_target[:, 0, ...],  # removing time dim for loss computation,
+            y_pred=y_pred[:, 0, ...],
+            y=residuals_target[:, 0, ...],  # removing time dim for loss computation,
             rollout_step=0,
             training_mode=training_mode,
             validation_mode=validation_mode,
@@ -276,7 +297,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(
-                batch, batch_idx, training_mode=False, validation_mode=True
+                batch, batch_idx, training_mode=True, validation_mode=True
             )
 
         self.log(
@@ -378,6 +399,39 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                 )
 
         return metrics
+
+    def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
+        """Assemble batch after transfer to GPU by gathering the batch shards if needed.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to transfer
+
+        Returns
+        -------
+        torch.Tensor
+            Batch after transfer
+        """
+
+        if self.keep_batch_sharded and self.model_comm_group_size > 1:
+            self.lres_grid_shard_shapes = self.lres_grid_indices.shard_shapes
+            self.hres_grid_shard_shapes = self.hres_grid_indices.shard_shapes
+            self.grid_shard_shapes = self.grid_indices.shard_shapes
+            self.lres_grid_shard_slice = self.lres_grid_indices.get_shard_slice(
+                self.reader_group_rank
+            )
+            self.hres_grid_shard_slice = self.hres_grid_indices.get_shard_slice(
+                self.reader_group_rank
+            )
+            self.grid_shard_slice = self.grid_indices.get_shard_slice(
+                self.reader_group_rank
+            )
+        else:
+            batch = self.allgather_batch(batch)
+            self.lres_grid_shard_shapes, self.lres_grid_shard_slice = None, None
+            self.hres_grid_shard_shapes, self.hres_grid_shard_slice = None, None
+        return batch
 
 
 def match_tensor_channels(input_name_to_index, output_name_to_index):
