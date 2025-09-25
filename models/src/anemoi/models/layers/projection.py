@@ -111,11 +111,13 @@ class NodeProjector(nn.Module):
         squashed_vars = [d for d in self.dimensions_order[key] if d != "variables"]
         return einops.rearrange(
             self.projectors[key](x),
-            f"({' '.join(squashed_vars)}) variables -> {' '.join(self.dimensions_order[key])}", 
+            f"({' '.join(squashed_vars)}) variables -> {' '.join(self.dimensions_order[key])}",
             batch=batch_size,
         )
 
-    def forward(self, x: dict[str, torch.Tensor] | torch.Tensor, batch_size: int, key: str | None = None) -> dict[str, torch.Tensor]:
+    def forward(
+        self, x: dict[str, torch.Tensor] | torch.Tensor, batch_size: int, key: str | None = None
+    ) -> dict[str, torch.Tensor]:
         """Projects the tensor into the different datasets/report types.
 
         Arguments
@@ -128,10 +130,12 @@ class NodeProjector(nn.Module):
         dict[str, torch.Tensor]
             It returns a dict of each dataset/report type with tensors of shape (1, num_source_nodes, dim_source_nodes)
         """
-        assert isinstance(x, dict) or (isinstance(key, str) and key in self.sources), "Either x should be a dict or key should be a valid source."
+        assert isinstance(x, dict) or (
+            isinstance(key, str) and key in self.sources
+        ), "Either x should be a dict or key should be a valid source."
         if key is not None:
             return self._forward_source(x, batch_size=batch_size, key=key)
-        
+
         out = x.new_empty()
         for name, data in x.items():
             out[name] = self._forward_source(data, key=name, batch_size=batch_size)

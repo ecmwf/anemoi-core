@@ -424,6 +424,7 @@ class AnemoiMultiModel(AnemoiModel):
         return res
 
     def prepare_input(self, x: TreeDict) -> TreeDict:
+        return x
 
         def merge(*leaves):
             latitudes = None
@@ -473,7 +474,6 @@ class AnemoiMultiModel(AnemoiModel):
         print("x before prepare_input =", x.to_str("input x"))
         x = self.prepare_input(x)
         print("x after prepare_input =", x.to_str("input x"))
-        exit()
 
         x_data_latents = self._assemble_input(x, graph, batch_size=batch_size, model_comm_group=model_comm_group)
 
