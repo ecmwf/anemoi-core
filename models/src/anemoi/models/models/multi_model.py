@@ -145,8 +145,8 @@ class AnemoiMultiModel(AnemoiModel):
 
         self.num_input_channels = {k: v["number_of_features"] for k, v in self.input_metadata.items()}
         self.num_target_channels = {k: v["number_of_features"] for k, v in self.output_metadata.items()}
-        input_dims_order = {k: ("batch",) + v["dimensions_order"] for k, v in self.input_metadata.items()}
-        target_dims_order = {k: ("batch",) + v["dimensions_order"] for k, v in self.output_metadata.items()}
+        input_dims_order = {k: v["dimensions_order"] for k, v in self.input_metadata.items()}
+        target_dims_order = {k: v["dimensions_order"] for k, v in self.output_metadata.items()}
 
         self.hidden_name: str = self.model_config.model.hidden_name
         encoders, self.encoder_sources, num_encoded_channels = extract_sources(self.model_config.model.encoders)

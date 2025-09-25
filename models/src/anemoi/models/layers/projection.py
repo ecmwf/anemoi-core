@@ -7,8 +7,8 @@
 # nor does it submit to any jurisdiction.
 #
 
-import torch
 import einops
+import torch
 from hydra.utils import instantiate
 from torch import nn
 
@@ -56,24 +56,29 @@ class NodeEmbedder(nn.Module):
     def forward(self, x: dict[str, torch.Tensor], batch_size: int, **kwargs) -> dict[str, torch.Tensor]:
         out = x.new_empty()
         for key, box in x.items():
+            # no duplicate in dimensions
+            assert len(self.dimensions_order[key]) == len(set(self.dimensions_order[key])), self.dimensions_order[key]
             # box["data"].shape: (1, num_channels, num_points)
             assert self.dimensions_order[key][0] == "batch", self.dimensions_order[key]
-            assert box["data"].shape[0] == box["latitudes"].shape[0] == box["longitudes"].shape[0] == 1, (box["data"].shape, box["latitudes"].shape, box["longitudes"].shape, key)
-            assert box["data"].shape[1] == self.num_input_channels[key], (box["data"].shape, box["latitudes"].shape, box["longitudes"].shape, key)
-            assert box["data"].shape[2] == box["latitudes"].shape[1] == box["longitudes"].shape[1], (box["data"].shape, box["latitudes"].shape, box["longitudes"].shape)
+            _log = (box["data"].shape, box["latitudes"].shape, box["longitudes"].shape, key)
+            assert box["data"].shape[0] == box["latitudes"].shape[0] == box["longitudes"].shape[0] == 1, ()
+            assert box["data"].shape[1] == self.num_input_channels[key], _log
+            assert box["data"].shape[2] == box["latitudes"].shape[1] == box["longitudes"].shape[1], _log
             assert len(box["data"].shape) == 3, box["data"].shape
 
             dims = tuple(str(d) if d in ["variables", "values"] else "1" for d in self.dimensions_order[key])
-            sincos_latlons = _get_coords(box["latitudes"], box["longitudes"]) # shape: (4, num_points)
+            sincos_latlons = _get_coords(box["latitudes"], box["longitudes"])  # shape: (4, num_points)
             sincos_latlons = einops.rearrange(sincos_latlons, f"variables values -> {' '.join(dims)}")
             sincos_latlons = sincos_latlons.expand(batch_size, -1, -1)
 
             data = torch.cat([box["data"], sincos_latlons], dim=self.dimensions_order[key].index("variables"))
 
             squash_vars = [d for d in self.dimensions_order[key] if d != "variables"]
-            data = einops.rearrange(data, f"{' '.join(self.dimensions_order[key])} -> ({' '.join(squash_vars)}) variables")
+            data = einops.rearrange(
+                data, f"{' '.join(self.dimensions_order[key])} -> ({' '.join(squash_vars)}) variables"
+            )
 
-            out[key] = self.embedders[key](data) # shape: (num_nodes, num_channels)
+            out[key] = self.embedders[key](data)  # shape: (num_nodes, num_channels)
         return out
 
 

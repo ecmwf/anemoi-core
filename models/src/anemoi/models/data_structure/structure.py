@@ -266,15 +266,6 @@ class TreeDict(dict):
     def each(self):
         return LeafAccessor(self)
 
-    # TODO clean this up/rename
-    def add_batch_first_in_dimensions_order(self):
-        new = self.__class__()
-        for box in new.values():
-            box = box.copy()
-            box["dimensions_order"] = ("batch",) + box["dimensions_order"]
-            new[box] = box
-        return new
-
     @property
     def first(self):
         """Return the first value in the TreeDict. Useful for accessing properties common to all boxes."""

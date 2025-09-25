@@ -48,9 +48,7 @@ def get_loss_function(
     res = target_metadata.new_empty()
     for path, box in target_metadata.items():
         box = box.copy()
-        # we add here the batch dimension
-        # because the loss knows it will always be there
-        dimensions_order = ("batch",) + box.pop("dimensions_order")
+        dimensions_order = box.pop("dimensions_order")
 
         res[path] = RMSELoss(
             config=generic_loss_config,
