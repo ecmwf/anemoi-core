@@ -565,7 +565,7 @@ class AnemoiTrainer:
             #
             strategy=self.strategy,
             logger=self.loggers,
-            accelerator=self.accelerator,
+            accelerator='cpu', #self.accelerator,
             callbacks=self.callbacks,
             # hardware specifics
             devices=self.config.hardware.num_gpus_per_node,

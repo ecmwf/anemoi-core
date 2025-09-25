@@ -23,7 +23,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.projection import NodeEmbedder
 from anemoi.models.layers.projection import NodeProjector
-from anemoi.training.data.refactor.structure import Dict
+from anemoi.training.data.refactor.structure import TreeDict
 
 # from anemoi.models.preprocessing.normalisers import build_normaliser
 from anemoi.utils.config import DotDict
@@ -121,7 +121,7 @@ class AnemoiMultiModel(AnemoiModel):
         self.target_static_info = target_info
 
         print(type(input_info), input_info)
-        assert isinstance(input_info, Dict), type(input_info)
+        assert isinstance(input_info, TreeDict), type(input_info)
 
         self.num_channels = self.model_config.num_channels
 
@@ -398,7 +398,7 @@ class AnemoiMultiModel(AnemoiModel):
         #        assert number_dim(graph[name].x) == (n, 2)
         return torch.cat([torch.sin(graph[name].x), torch.cos(graph[name].x)], dim=-1)
 
-    def prepare_input(self, x: Dict) -> Dict:
+    def prepare_input(self, x: TreeDict) -> TreeDict:
 
         def merge(*leaves):
             latitudes = None
@@ -428,12 +428,12 @@ class AnemoiMultiModel(AnemoiModel):
         res = x.new_empty()
         for k, v in self.input_static_info.get_level_minus_one_leaf_nodes():
             for _ in v.values():
-                assert not isinstance(_, Dict), f"Only leaf nodes supported, got {type(_)}"
+                assert not isinstance(_, TreeDict), f"Only leaf nodes supported, got {type(_)}"
             res[k] = merge(v.values())
 
         return res
 
-    def prepare_input(self, x: Dict) -> Dict:
+    def prepare_input(self, x: TreeDict) -> TreeDict:
 
         def merge(*leaves):
             latitudes = None
@@ -463,7 +463,7 @@ class AnemoiMultiModel(AnemoiModel):
         res = x.new_empty()
         for k, v in self.input_static_info.get_level_minus_one_leaf_nodes():
             for _ in v.values():
-                assert not isinstance(_, Dict), f"Only leaf nodes supported, got {type(_)}"
+                assert not isinstance(_, TreeDict), f"Only leaf nodes supported, got {type(_)}"
             res[k] = merge(v.values())
 
         return res
@@ -475,9 +475,9 @@ class AnemoiMultiModel(AnemoiModel):
         # if this is not wanted, don't normalise it in the task
         batch_size = 1
         ensemble_size = 1
-        from anemoi.training.data.refactor.structure import Dict
+        from anemoi.training.data.refactor.structure import TreeDict
 
-        assert isinstance(x, Dict), type(x)
+        assert isinstance(x, TreeDict), type(x)
 
         print("x before prepare_input =", x.to_str("input x"))
         x = self.prepare_input(x)

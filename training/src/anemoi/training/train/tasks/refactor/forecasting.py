@@ -64,7 +64,7 @@ class ForecastingPLModule(BaseGraphPLModule):
         # graph = self.graph_editor.update_graph(self.graph_data, input_latlons, target_latlons)
 
         # run model for one step
-        y_pred = self(input, self.graph_data.clone().to("cuda"))
+        y_pred = self(input, self.graph_data.clone().to("cpu"))
 
         # y_pred = target.select_content(["data"])  # for development, don't keep this line
         print(y_pred.to_str("⚠️y_pred before merging semantic info from target"))

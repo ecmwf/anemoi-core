@@ -13,6 +13,7 @@ import os
 import warnings
 from abc import abstractmethod
 from functools import cached_property
+from collections import defaultdict
 
 import einops
 import numpy as np
@@ -20,7 +21,7 @@ import torch
 import yaml
 from omegaconf import DictConfig
 from rich.console import Console
-from rich.tree import Tree
+from rich.tree import Tree as _RichTree
 
 from anemoi.training.data.refactor.data_handler import DataHandler
 from anemoi.training.data.refactor.offsets import normalise_offset
@@ -29,7 +30,7 @@ from anemoi.training.data.refactor.offsets import offset_to_timedelta
 from anemoi.training.data.refactor.offsets import substract_offsets
 from anemoi.training.data.refactor.offsets import sum_offsets
 from anemoi.training.data.refactor.path_keys import check_dictionary_key
-from anemoi.training.data.refactor.structure import Dict
+from anemoi.training.data.refactor.structure import TreeDict
 
 
 def resolve_reference(config):
@@ -135,6 +136,26 @@ class Context:
     def __repr__(self):
         return f"Context(start={self.start}, end={self.end}, offset={self.offset})"
 
+class SMetadata(dict):
+    # static metadata
+    ALLOWED_KEYS = ("latitudes", "longitudes", "timedeltas", "rollout")
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            # if not k in self.ALLOWED_KEYS:
+            #     raise ValueError(f"Unknown metadata key {k}, expected one of {self.ALLOWED_KEYS}")
+            if not isinstance(v, TreeDict):
+                raise TypeError(f"Expected TreeDict for metadata key {k}, got {type(v)}: {v}")
+        super().__init__(**kwargs)
+    def __getattr__(self, item):
+        if item in self:
+            return self[item]
+        raise AttributeError(f"No metadata key {item}, available keys: {list(self.keys())}")
+
+    def __repr__(self):
+        res = "Static Metadata for a sample:\n"
+        for k,v in self.items():
+            res += f"  {k}: {type(v)}\n"
+        return res
 
 class SampleProvider:
     min_offset = None
@@ -164,6 +185,9 @@ class SampleProvider:
         if res is None:
             return None
         return RolloutDict(res)
+
+    def static_metadata(self):
+        raise NotImplementedError(f"Not implemented for {self.__class__.__name__}.")
 
     def _get_static(self, request):
         raise NotImplementedError(f"Not implemented for {self.__class__.__name__}.")
@@ -291,13 +315,39 @@ class ShuffledSampleProvider(ForwardSampleProvider):
         return self._forward._get_item(request, self.idx[item])
 
     def tree(self, prefix=""):
-        tree = Tree(prefix + self.emoji + self.label + f" (seed={self.seed})")
+        tree = _RichTree(prefix + self.emoji + self.label + f" (seed={self.seed})")
         subtree = self._forward.tree()
         tree.add(subtree)
         return tree
 
+class _ForwardSampleProvider(SampleProvider):
+    @property
+    def shape(self):
+        return self._forward.shape
 
-class _LoopSampleProvider(SampleProvider):
+    def _get_item(self, request, item: int):
+        return self._forward._get_item(request, item)
+
+    def _get_static(self, request):
+        return self._forward._get_static(request)
+
+    def static_metadata(self):
+        return self._forward.static_metadata()
+
+    def _get_rollout_info(self):
+        return self._forward._get_rollout_info()
+
+    @property
+    def dataschema(self):
+        return self._forward.dataschema
+
+    def tree(self, prefix: str = ""):
+        return self._forward.tree()
+
+    def __len__(self):
+        return len(self._forward)
+
+class _LoopSampleProvider(_ForwardSampleProvider):
     def __init__(self, _context: Context, _parent, for_each: dict):
         super().__init__(_context, _parent)
 
@@ -315,14 +365,12 @@ class _LoopSampleProvider(SampleProvider):
             raise ValueError(f"Expected list/tuple to loop on values, got {type(values)}: {values} in {for_each}")
 
         new_config = self.new_config(key, values, template)
-        self._to_mutate = _sample_provider_factory(_context, _parent=_parent, **new_config)
+        self._forward = _sample_provider_factory(_context, _parent=_parent, **new_config)
+        self.values = values
 
     @abstractmethod
     def new_config(self, key, values, template):
         pass
-
-    def mutate(self):
-        return self._to_mutate
 
 
 class TupleLoopSampleProvider(_LoopSampleProvider):
@@ -340,16 +388,29 @@ class _DictSampleProvider(SampleProvider):
     emoji = "📖"
 
     def _get_item(self, request, item):
-        res = Dict()
+        res = TreeDict()
         for k, sample in self._samples.items():
             res[k] = sample._get_item(request, item)
         return res
 
     def _get_static(self, request):
-        res = Dict()
+        res = TreeDict()
         for k, sample in self._samples.items():
             res[k] = sample._get_static(request)
         return res
+
+    def static_metadata(self):
+        metadatas = {k: sample.static_metadata() for k, sample in self._samples.items()}
+        names = set()
+        for metadata in metadatas.values():
+            names.update(metadata.keys())
+
+        res = defaultdict(TreeDict)
+        for dict_key, metadata in metadatas.items():
+            for name in metadata.keys():
+                res[name][dict_key] = metadata[name]
+
+        return SMetadata(**res)
 
     def _get_rollout_info(self):
         raise NotImplementedError(f"Not implemented for {self.__class__.__name__}.")
@@ -364,8 +425,8 @@ class _DictSampleProvider(SampleProvider):
 
     def tree(self, prefix=""):
         if not hasattr(self, "_samples"):
-            return Tree(prefix + self.label + "<partially-initialised>")
-        tree = Tree(prefix + self.label)
+            return _RichTree(prefix + self.label + "<partially-initialised>")
+        tree = _RichTree(prefix + self.label)
         for k, v in self._samples.items():
             subtree = v.tree(prefix=f'"{k}" : ')
             tree.add(subtree)
@@ -401,7 +462,7 @@ class DictSampleProvider(_DictSampleProvider):
                 raise ValueError(f"Expected dictionary for sample provider, got {type(v)}: {v}. ")
 
     def _get_rollout_info(self):
-        res = Dict()
+        res = TreeDict()
         for k, sample in self._samples.items():
             res[k] = sample._get_rollout_info()
         return res
@@ -470,7 +531,7 @@ class Rearranger:
                 print(available)
             raise ValueError(f"No action found for role={role}, step={step}, key={key}")
 
-        res = Dict()
+        res = TreeDict()
         for (step_, role_, key_), action_ in found:
             resolved = self.run_action(action_, (step_, role_, key_), **kwargs)
             if resolved is not None:
@@ -486,22 +547,22 @@ class Rearranger:
 # rearranger.expand_actions(step='0h', role='target') -> create_target
 
 
-class RolloutDict(Dict):
+class RolloutDict(TreeDict):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for v in self.values():
-            # if v is None:
-            #     continue
+            if v is None:
+                 continue
             if not isinstance(v, Rearranger):
                 raise ValueError(f"Expected Rollout in each leaf of a RolloutDict, got {type(v)}")
 
     def next_input(self, step, database=None, previous_input=None, previous_output=None):
         role = "input"
         # fill with None
-        database = database.each.copy() if database else Dict()
-        previous_input = previous_input.each.copy() if previous_input else Dict()
-        previous_output = previous_output.each.copy() if previous_output else Dict()
-        res = Dict()
+        database = database.each.copy() if database else TreeDict()
+        previous_input = previous_input.each.copy() if previous_input else TreeDict()
+        previous_output = previous_output.each.copy() if previous_output else TreeDict()
+        res = TreeDict()
         for k, rollout in self.items():
             database_ = database.get(k)
             previous_input_ = previous_input.get(k)
@@ -520,10 +581,10 @@ class RolloutDict(Dict):
     def next_target(self, step, database=None, previous_input=None, previous_output=None):
         role = "target"
         # fill with None
-        database = database.each.copy() if database else Dict()
-        previous_input = previous_input.each.copy() if previous_input else Dict()
-        previous_output = previous_output.each.copy() if previous_output else Dict()
-        res = Dict()
+        database = database.each.copy() if database else TreeDict()
+        previous_input = previous_input.each.copy() if previous_input else TreeDict()
+        previous_output = previous_output.each.copy() if previous_output else TreeDict()
+        res = TreeDict()
         for k, rollout in self.items():
             database_ = database.get(k)
             previous_input_ = previous_input.get(k)
@@ -597,7 +658,7 @@ class Rollout(Rearranger):
         raise ValueError(f"Unknown action '{action}' for {element}")
 
     def next(self, role, step, database=None, previous_input=None, previous_output=None):
-        res = Dict()
+        res = TreeDict()
         for k, action in self.items():
             database_ = database.get(k) if database else None
             previous_input_ = previous_input.get(k) if previous_input else None
@@ -614,7 +675,7 @@ class Rollout(Rearranger):
         return capture.get()
 
     def tree(self, prefix=""):
-        tree = Tree(prefix + " ♻️  Rollout")
+        tree = _RichTree(prefix + " ♻️  Rollout")
         config_tree = tree.add("Configuration")
         config_tree.add(f"Rollout steps: {self.steps}")
         config_tree.add(f"Input steps: {self.input_steps}")
@@ -701,6 +762,22 @@ class RolloutSampleProvider(_DictSampleProvider):
     def _get_rollout_info(self):
         return self.rollout
 
+class MergeOffsetSampleProvider(_LoopSampleProvider):
+    emoji = "M"
+    label = "MergeOffset"
+
+    def __init__(self, _context: Context, _parent, merge_offset_as_first_dimension):
+        super().__init__(_context, _parent, for_each=merge_offset_as_first_dimension)
+
+    def new_config(self, key, values, template):
+        return dict(dictionary={str(value): {key: value, **template} for value in values})
+
+    def static_metadata(self):
+        res = super().static_metadata()
+        res['merge_me'] = self.values
+        return res
+    
+
 
 class OffsetSampleProvider(SampleProvider):
     emoji = "⏱️"
@@ -715,9 +792,9 @@ class OffsetSampleProvider(SampleProvider):
     def __init__(self, _context: Context, _parent, offset, **kwargs):
         super().__init__(_context, _parent)
 
-        self.values = offset_to_string(offset_to_timedelta(offset))
+        self.value = offset_to_string(offset_to_timedelta(offset))
 
-        new_context = Context(_parent=_context, offset=self.values)
+        new_context = Context(_parent=_context, offset=self.value)
         self._forward = _sample_provider_factory(new_context, **kwargs, _parent=_parent)
 
     @property
@@ -731,6 +808,9 @@ class OffsetSampleProvider(SampleProvider):
         warnings.warn("TODO: change the metadata for data after offset?")
         return self._forward._get_static(request)
 
+    def static_metadata(self):
+        return self._forward.static_metadata()
+
     def _get_rollout_info(self):
         warnings.warn("TODO: change the metadata for data after offset?")
         return self._forward._get_rollout_info()
@@ -741,7 +821,7 @@ class OffsetSampleProvider(SampleProvider):
 
     def tree(self, prefix: str = ""):
         tree = self._forward.tree()
-        tree.label = tree.label + f" ({self.emoji} {self.values})"
+        tree.label = tree.label + f" ({self.emoji} {self.value})"
         return tree
 
     def __len__(self):
@@ -803,6 +883,9 @@ class TensorReshapeSampleProvider(ForwardSampleProvider):
         box = self._forward._get_static(request)
         return self._update_box(box)
 
+    def static_metadata(self):
+        return self._forward.static_metadata()
+
     def _get_item(self, request, item):
         box = self._forward._get_item(request, item)
         return self._update_box(box)
@@ -818,9 +901,9 @@ class TensorReshapeSampleProvider(ForwardSampleProvider):
 
     def tree(self, prefix=""):
         if not hasattr(self, "new_order"):
-            return Tree(f"{prefix}{self.emoji} {self.label}")
+            return _RichTree(f"{prefix}{self.emoji} {self.label}")
 
-        tree = Tree(f"{prefix}{self.emoji} {self.label} ({self.new_order})")
+        tree = _RichTree(f"{prefix}{self.emoji} {self.label} ({self.new_order})")
         tree.add(self._forward.tree(prefix=" "))
 
         return tree
@@ -865,6 +948,10 @@ class BoxSampleProvider(SampleProvider):
             res["_offset"] = offset_to_string(self.offset)
         return res
 
+    def static_metadata(self):
+        metadata = TreeDict({'': self._get_static(None)})
+        return SMetadata(leaf=metadata)
+
     def _get_rollout_info(self):
         return None
 
@@ -899,7 +986,7 @@ class BoxSampleProvider(SampleProvider):
         txt += f"group={self.data_group} "
         txt += f"variables:{','.join(self.variables)}"
         txt += f" from {self.datahandler.dataset_name}"
-        tree = Tree(txt)
+        tree = _RichTree(txt)
 
         if os.environ.get("ANEMOI_CONFIG_VERBOSE_STRUCTURE"):
             if self.min_offset is not None:
@@ -1011,6 +1098,8 @@ def _sample_provider_factory(_context=None, **kwargs):
         obj = DictSampleProvider(_context, **kwargs)
     elif "for_each" in kwargs:
         obj = DictionaryLoopSampleProvider(_context, **kwargs)
+    elif "merge_offset_as_first_dimension" in kwargs:
+        obj = MergeOffsetSampleProvider(_context, **kwargs)
     elif "rollout" in kwargs:
         obj = RolloutSampleProvider(_context, **kwargs)
     # elif "for_each_as_tuple" in kwargs:
@@ -1100,15 +1189,15 @@ def test_one(training_context):
                     lowres:
                         container:
                           data_group: "era5"
-                          variables: ["2t", "10u", "10v"]
+                          variables: ["2t", "t_500", "tp"]
                           dimensions: ["values", "variables", "ensembles"]
 
                     highres:
-                      for_each:
+                      merge_offset_as_first_dimension:
                         - offset: ["-6h", "+0h", "+6h", "+12h", "+18h", "+24h"]
                         - container:
                             data_group: "era5"
-                            variables: ["2t", "10u", "10v"]
+                            variables: ["2t", "t_500", "tp"]
                             dimensions: ["variables", "values"]
             """
 
@@ -1132,20 +1221,9 @@ def test_one(training_context):
     data = sp.static_info + batch_data
     print("✅ Data full", data)
 
-    assert isinstance(data, Dict), type(data)
+    assert isinstance(data, TreeDict), type(data)
     assert "data" in data["lowres"], data["lowres"].keys()
     assert "name_to_index" in data["lowres"], data["lowres"].keys()
-
-    def to_tensor(box):
-        return {k: torch.Tensor(v) if k == "data" else v for k, v in box.items()}
-
-    def to_gpu(box):
-        return {k: v.to("cuda") if k == "data" else v for k, v in box.items()}
-
-    new_data = data.map(to_tensor)
-    new_data = new_data.map(to_gpu)
-    print("✅ Data on GPU", new_data)
-    print(type(new_data["lowres"]))
 
     extra = data.each.pop("extra")
     print("Extra after pop extra", extra)
@@ -1171,7 +1249,7 @@ def test_one(training_context):
     # for path, value in sp.static_info.items():
     #     normaliser[path] = build_normaliser(value)
 
-    # normaliser = Dict()
+    # normaliser = TreeDict()
     # normaliser = sp.static_info.new_empty()
     # for k, v in sp.static_info.items():
     #     normaliser[k] = build_normaliser(v)
@@ -1207,21 +1285,21 @@ def test_two(training_context):
                        rollout: prognostics
                        container:
                            dimensions: ["values", "variables"]
-                           variables: ["2t", "10u", "10v"]
+                           variables: ["2t", "t_500", "tp"]
                            data_group: "era5"
 
                      forcings:
                        rollout: forcings
                        container:
                            dimensions: ["values", "variables"]
-                           variables: ["2t", "10v"]
+                           variables: ["2t", "t_500", "tp"]
                            data_group: "era5"
 
                      diagnostics:
                        rollout: diagnostics
                        container:
                            dimensions: ["values", "variables"]
-                           variables: ["10v"]
+                           variables: ["2t", "t_500", "tp"]
                            data_group: "era5"
 
                   #observations:
@@ -1248,6 +1326,11 @@ def test_two(training_context):
     print("static_info", sp.static_info)
     data = sp[1]
     print(data)
+    print('✅')
+    print(sp.static_metadata())
+    exit()
+    print(sp.static_info)
+
     data = sp.static_info + data
     assert len(data) > 0, data
     print("Merged data", data)
@@ -1320,19 +1403,26 @@ def test_two(training_context):
 
 def test_three(training_context):
     cfg_3 = """dictionary:
-                  ams:
-                    for_each:
-                      - offset: ["-6h", "0h"]
-                      - container:
-                          variables: ["scatss_1", "scatss_2"]
-                          data_group: "metop_a"
+                  fields:
+                    merge_offset_as_first_dimension:
+                        - offset: ["-6h", "+0h"]
+                        - container:
+                            data_group: "era5"
+                            variables: ["2t", "t_500", "tp"]
+                            dimensions: ["variables", "values"]
+                    #for_each:
+                    #  - offset: ["-6h", "0h"]
+                    #  - container:
+                    #      data_group: "era5"
+                    #      variables: ["2t", "t_500", "tp"]
             """
     config = yaml.safe_load(cfg_3)
     sp = sample_provider_factory(**training_context, **config)
     print(sp)
-    s = sp.static_info
+    print(f'Static metadata has {len(sp.static_metadata())} items: {list(sp.static_metadata().keys())}:')
+    for k, v in sp.static_metadata().items():
+        print(f" ✅  {k}: {v}")
     print("--------------")
-    print(s["ams"])
 
 
 def test():
@@ -1346,7 +1436,8 @@ def test():
                          training:
                            era5:
                              dataset:
-                               dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8
+                               dataset: aifs-ea-an-oper-0001-mars-20p0-2016-2016-6h-v1
+                               # dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8
                                set_group: era5
                            snow:
                              dataset: observations-testing-2018-2018-6h-v0

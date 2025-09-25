@@ -12,7 +12,7 @@ import os
 import numpy as np
 import torch
 from rich.console import Console
-from rich.tree import Tree
+from rich.tree import Tree as _RichTree
 
 from anemoi.training.data.refactor.offsets import offset_to_string
 
@@ -160,9 +160,9 @@ class AnemoiTree:
     def __init__(self, obj):
         assert isinstance(obj, dict), type(obj)
 
-        from anemoi.training.data.refactor.structure import Dict
+        from anemoi.training.data.refactor.structure import TreeDict
 
-        assert isinstance(obj, Dict), type(obj)
+        assert isinstance(obj, TreeDict), type(obj)
 
         self.obj = obj
         self.name = obj.__class__.__name__
@@ -173,7 +173,7 @@ class AnemoiTree:
         if not self.obj:
             return f"{self.obj.__class__.__name__} (empty)"
 
-        tree = Tree(self.name)
+        tree = _RichTree(self.name)
 
         max_length = 0
         for k, v in self.obj.items():
@@ -223,7 +223,7 @@ class VerboseBox(Box):
         name = self.path
         if "_reference_date" in self.values:
             name += f" (Reference {self['_reference_date']})"
-        t = Tree(name)
+        t = _RichTree(name)
         for v in self.values.values():
             v.add_to_tree(t)
         tree.add(t)
@@ -292,7 +292,7 @@ class Value:
             return
 
         if self.key == "rollout_usage":
-            subtree = Tree(f"{self.icon} {self.key} : {self.value}")
+            subtree = _RichTree(f"{self.icon} {self.key} : {self.value}")
             tree.add(subtree)
             return
 
@@ -300,7 +300,7 @@ class Value:
             if DEBUG:
                 tree.add(self.value.tree(prefix=self.key))
             else:
-                tree.add(Tree(f"{self.icon} {self.key} : {self.value}"))
+                tree.add(_RichTree(f"{self.icon} {self.key} : {self.value}"))
             return
 
         if isinstance(self.value, dict):

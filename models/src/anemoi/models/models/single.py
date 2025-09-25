@@ -356,9 +356,9 @@ class AnemoiSingleModel(AnemoiMultiModel):
             except Exception as e:
                 e.add_note(f"when processing path {path} with data shape {data.shape}")
                 e.add_note("expected data shape (batch, time, ensemble, vars, grid)")
-                from anemoi.training.data.refactor.structure import Dict
+                from anemoi.training.data.refactor.structure import TreeDict
 
-                e.add_note(f"value: {Dict(value=value)}")
+                e.add_note(f"value: {TreeDict(value=value)}")
                 raise
             output[path] = linear(data)
         print(output.to_str("output after linear"))

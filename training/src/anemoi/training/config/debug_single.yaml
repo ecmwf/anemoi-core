@@ -29,7 +29,8 @@ diagnostics:
     callbacks: []
 hardware:
   files:
-    dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+    # dataset: aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6
+    dataset: aifs-od-an-oper-0001-mars-o32-2020-2020-6h-v6-for-software-testing
     graph: "debug.pt"
   paths:
     data: None
