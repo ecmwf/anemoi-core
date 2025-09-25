@@ -65,17 +65,6 @@ input:
 target:
   regional:
     variables:
-    - "cos_latitude"
-    - "cos_longitude"
-    - "sin_latitude"
-    - "sin_longitude"
-    - "cos_julian_day"
-    - "cos_local_time"
-    - "sin_julian_day"
-    - "sin_local_time"
-    - "orog"
-    - "lsm"
-    - "msl_0"
     - "10si_10"
     - "10wdir_10"
     - "2t_2"
