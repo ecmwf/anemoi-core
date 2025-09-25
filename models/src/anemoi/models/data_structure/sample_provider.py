@@ -875,10 +875,12 @@ class TensorReshapeSampleProvider(ForwardSampleProvider):
 
         initial_dims = [d if d in self.new_order else "1" for d in self.initial_order]
         to_dims = [_ for _ in self.new_order]
+
         assert initial_dims[0] == "batch", initial_dims
         assert to_dims[0] == "batch", to_dims
         initial_dims = initial_dims[1:]
         to_dims = to_dims[1:]
+
         self.einops_rearrange_str = f"{' '.join(initial_dims)} -> {' '.join(to_dims)}"
 
         super().__init__(_context, _parent, sample)

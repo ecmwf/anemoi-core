@@ -57,6 +57,12 @@ class NodeEmbedder(nn.Module):
         out = x.new_empty()
         for key, box in x.items():
             # box["data"].shape: (1, num_channels, num_points)
+            assert self.dimensions_order[key][0] == "batch", self.dimensions_order[key]
+            assert box["data"].shape[0] == box["latitudes"].shape[0] == box["longitudes"].shape[0] == 1, (box["data"].shape, box["latitudes"].shape, box["longitudes"].shape, key)
+            assert box["data"].shape[1] == self.num_input_channels[key], (box["data"].shape, box["latitudes"].shape, box["longitudes"].shape, key)
+            assert box["data"].shape[2] == box["latitudes"].shape[1] == box["longitudes"].shape[1], (box["data"].shape, box["latitudes"].shape, box["longitudes"].shape)
+            assert len(box["data"].shape) == 3, box["data"].shape
+
             dims = tuple(str(d) if d in ["variables", "values"] else "1" for d in self.dimensions_order[key])
             sincos_latlons = _get_coords(box["latitudes"], box["longitudes"]) # shape: (4, num_points)
             sincos_latlons = einops.rearrange(sincos_latlons, f"variables values -> {' '.join(dims)}")
