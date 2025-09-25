@@ -16,7 +16,6 @@ from torch import nn
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
-    from anemoi.training.data.refactor.structure import NestedTensor
 from anemoi.utils.config import DotDict
 
 
@@ -34,11 +33,11 @@ class AnemoiModel(nn.Module):
 
     def predict_step(
         self,
-        batch: "NestedTensor",
+        batch,
         model_comm_group: Optional["ProcessGroup"] = None,
         gather_out: bool = True,
         **kwargs,
-    ) -> "NestedTensor":
+    ):
         """Prediction step for the model.
 
         Parameters

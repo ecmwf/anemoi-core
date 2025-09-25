@@ -3,7 +3,7 @@ import datetime
 import numpy as np
 
 from anemoi.datasets import open_dataset
-from anemoi.training.data.refactor.structure import deep_freeze_dict
+from anemoi.models.data_structure.structure import deep_freeze_dict
 from anemoi.utils.dates import frequency_to_timedelta
 
 

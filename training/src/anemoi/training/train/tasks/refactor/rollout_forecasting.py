@@ -1,23 +1,9 @@
-from typing import TYPE_CHECKING
+from collections.abc import Generator
 
 import torch
-
-from anemoi.training.train.tasks.refactor.forecasting import ForecastingPLModule
-
-if TYPE_CHECKING:
-    from anemoi.training.data.refactor.structure import NestedTensor
-from collections.abc import Generator
-from typing import TYPE_CHECKING
-
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.refactor.base import BaseGraphPLModule
-from anemoi.training.data.refactor.read_config import convert_data_config
-from anemoi.training.data.refactor.read_config import convert_sample_config
-from anemoi.training.data.refactor.sample_provider import sample_provider_factory
-
-if TYPE_CHECKING:
-    from anemoi.training.data.refactor.structure import NestedTensor
 
 
 class BaseRolloutForecastingPLModule(BaseGraphPLModule):
@@ -26,10 +12,10 @@ class BaseRolloutForecastingPLModule(BaseGraphPLModule):
         self.rollout = self.sample_static_info.rollout_info()
 
     def get_input_from_batch(self, batch, **kwargs):
-        return self.rollout.next_input(step='0h', database=batch, previous_input=None, previous_output=None)
+        return self.rollout.next_input(step="0h", database=batch, previous_input=None, previous_output=None)
 
     def get_target_from_batch(self, batch, **kwargs):
-        return self.rollout.next_target(step='0h', database=batch, previous_input=None, previous_output=None)
+        return self.rollout.next_target(step="0h", database=batch, previous_input=None, previous_output=None)
 
     def get_semantic_from_static_info(self, static_info, target, **kwargs):
         # get semantic information from target (should use static info)
@@ -54,7 +40,9 @@ class BaseRolloutForecastingPLModule(BaseGraphPLModule):
         return semantic
 
     def _step(
-        self, batch, validation_mode: bool = False,
+        self,
+        batch,
+        validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
         print("️⚠️💬 Starting step on Rollout")
         static_info = self.model.sample_static_info
@@ -124,23 +112,23 @@ class BaseRolloutForecastingPLModule(BaseGraphPLModule):
 # class _RolloutForecastingPLModule(ForecastingPLModule):
 #     def select_rollout_target(self, batch: dict, rollout_step: int) -> dict:
 #         return batch["target"][rollout_step]
-# 
+#
 #     def advance_input(
 #         self,
-#         x: "NestedTensor",
-#         y_pred: "NestedTensor",
-#         batch: "NestedTensor",
+#         x,
+#         y_pred,
+#         batch,
 #         rollout_step: int,
 #     ) -> dict[str, torch.Tensor]:
 #         num_target_time = 1  # If f(x_t-1, x_t) = [x_t+1, x_t+2], we should rollout 2 steps instead of 1.
 #         x = x.roll(-num_target_time, dims=1)  # Roll accross TIME dim
-# 
+#
 #         # Get prognostic variables
 #         x[-num_target_time:, :, :, self.data_indices.internal_model.input.prognostic] = y_pred[
 #             ...,
 #             self.data_indices.internal_model.output.prognostic,
 #         ]
-# 
+#
 #         # get new "constants" needed for time-varying fields
 #         x[-num_target_time, :, :, self.data_indices.internal_model.input.forcing] = batch["input"][
 #             :,
@@ -150,29 +138,29 @@ class BaseRolloutForecastingPLModule(BaseGraphPLModule):
 #             self.data_indices.internal_data.input.forcing,
 #         ]
 #         return x
-# 
-#     def _step(self, batch: "NestedTensor", validation_mode: bool = False) -> "NestedTensor":
+#
+#     def _step(self, batch, validation_mode: bool = False):
 #         batch = self.process_batch(batch)
 #         x = {"input": batch["input"]}
-# 
+#
 #         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
 #         metrics = {}
 #         y_preds = []
 #         for rollout_step in range(self.rollout):
 #             x["target"] = self.select_rollout_target(batch, rollout_step)
-# 
+#
 #             loss_next, metrics_next, y_preds_next = super()._step(
 #                 x,
 #                 validation_mode=validation_mode,
 #                 apply_processors=False,
 #             )
-# 
+#
 #             loss += loss_next
 #             metrics.update(metrics_next)
 #             y_preds.append(y_preds_next)
-# 
+#
 #             x["input"] = self.advance_input(x["input"], batch, rollout_step)
-# 
+#
 #         loss *= 1.0 / self.rollout
 #         return loss, metrics, y_preds
 

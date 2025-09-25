@@ -17,11 +17,11 @@ import torch
 from rich import print
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.data.refactor.formatting import anemoi_dict_to_str
-from anemoi.training.data.refactor.path_keys import SEPARATOR
-from anemoi.training.data.refactor.path_keys import encode_path_if_needed
-from anemoi.training.data.refactor.path_keys import join_paths
-from anemoi.training.data.refactor.path_keys import path_as_tuple
+from anemoi.models.data_structure.formatting import anemoi_dict_to_str
+from anemoi.models.data_structure.path_keys import SEPARATOR
+from anemoi.models.data_structure.path_keys import encode_path_if_needed
+from anemoi.models.data_structure.path_keys import join_paths
+from anemoi.models.data_structure.path_keys import path_as_tuple
 
 # from typing import TYPE_CHECKING
 # if TYPE_CHECKING:

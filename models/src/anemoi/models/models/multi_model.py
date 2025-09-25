@@ -20,10 +20,10 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data_structure.structure import TreeDict
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.projection import NodeEmbedder
 from anemoi.models.layers.projection import NodeProjector
-from anemoi.training.data.refactor.structure import TreeDict
 
 # from anemoi.models.preprocessing.normalisers import build_normaliser
 from anemoi.utils.config import DotDict
@@ -475,7 +475,7 @@ class AnemoiMultiModel(AnemoiModel):
         # if this is not wanted, don't normalise it in the task
         batch_size = 1
         ensemble_size = 1
-        from anemoi.training.data.refactor.structure import TreeDict
+        from anemoi.models.data_structure.structure import TreeDict
 
         assert isinstance(x, TreeDict), type(x)
 

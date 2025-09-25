@@ -12,25 +12,24 @@ import itertools
 import os
 import warnings
 from abc import abstractmethod
-from functools import cached_property
 from collections import defaultdict
+from functools import cached_property
 
 import einops
 import numpy as np
-import torch
 import yaml
 from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree as _RichTree
 
-from anemoi.training.data.refactor.data_handler import DataHandler
-from anemoi.training.data.refactor.offsets import normalise_offset
-from anemoi.training.data.refactor.offsets import offset_to_string
-from anemoi.training.data.refactor.offsets import offset_to_timedelta
-from anemoi.training.data.refactor.offsets import substract_offsets
-from anemoi.training.data.refactor.offsets import sum_offsets
-from anemoi.training.data.refactor.path_keys import check_dictionary_key
-from anemoi.training.data.refactor.structure import TreeDict
+from anemoi.models.data_structure.data_handler import DataHandler
+from anemoi.models.data_structure.offsets import normalise_offset
+from anemoi.models.data_structure.offsets import offset_to_string
+from anemoi.models.data_structure.offsets import offset_to_timedelta
+from anemoi.models.data_structure.offsets import substract_offsets
+from anemoi.models.data_structure.offsets import sum_offsets
+from anemoi.models.data_structure.path_keys import check_dictionary_key
+from anemoi.models.data_structure.structure import TreeDict
 
 
 def resolve_reference(config):
@@ -136,9 +135,11 @@ class Context:
     def __repr__(self):
         return f"Context(start={self.start}, end={self.end}, offset={self.offset})"
 
+
 class SMetadata(dict):
     # static metadata
     ALLOWED_KEYS = ("latitudes", "longitudes", "timedeltas", "rollout")
+
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             # if not k in self.ALLOWED_KEYS:
@@ -146,6 +147,7 @@ class SMetadata(dict):
             if not isinstance(v, TreeDict):
                 raise TypeError(f"Expected TreeDict for metadata key {k}, got {type(v)}: {v}")
         super().__init__(**kwargs)
+
     def __getattr__(self, item):
         if item in self:
             return self[item]
@@ -153,9 +155,10 @@ class SMetadata(dict):
 
     def __repr__(self):
         res = "Static Metadata for a sample:\n"
-        for k,v in self.items():
+        for k, v in self.items():
             res += f"  {k}: {type(v)}\n"
         return res
+
 
 class SampleProvider:
     min_offset = None
@@ -320,6 +323,7 @@ class ShuffledSampleProvider(ForwardSampleProvider):
         tree.add(subtree)
         return tree
 
+
 class _ForwardSampleProvider(SampleProvider):
     @property
     def shape(self):
@@ -346,6 +350,7 @@ class _ForwardSampleProvider(SampleProvider):
 
     def __len__(self):
         return len(self._forward)
+
 
 class _LoopSampleProvider(_ForwardSampleProvider):
     def __init__(self, _context: Context, _parent, for_each: dict):
@@ -552,7 +557,7 @@ class RolloutDict(TreeDict):
         super().__init__(*args, **kwargs)
         for v in self.values():
             if v is None:
-                 continue
+                continue
             if not isinstance(v, Rearranger):
                 raise ValueError(f"Expected Rollout in each leaf of a RolloutDict, got {type(v)}")
 
@@ -762,6 +767,7 @@ class RolloutSampleProvider(_DictSampleProvider):
     def _get_rollout_info(self):
         return self.rollout
 
+
 class MergeOffsetSampleProvider(_LoopSampleProvider):
     emoji = "M"
     label = "MergeOffset"
@@ -774,9 +780,8 @@ class MergeOffsetSampleProvider(_LoopSampleProvider):
 
     def static_metadata(self):
         res = super().static_metadata()
-        res['merge_me'] = self.values
+        res["merge_me"] = self.values
         return res
-    
 
 
 class OffsetSampleProvider(SampleProvider):
@@ -949,7 +954,7 @@ class BoxSampleProvider(SampleProvider):
         return res
 
     def static_metadata(self):
-        metadata = TreeDict({'': self._get_static(None)})
+        metadata = TreeDict({"": self._get_static(None)})
         return SMetadata(leaf=metadata)
 
     def _get_rollout_info(self):
@@ -1326,7 +1331,7 @@ def test_two(training_context):
     print("static_info", sp.static_info)
     data = sp[1]
     print(data)
-    print('✅')
+    print("✅")
     print(sp.static_metadata())
     exit()
     print(sp.static_info)
@@ -1419,7 +1424,7 @@ def test_three(training_context):
     config = yaml.safe_load(cfg_3)
     sp = sample_provider_factory(**training_context, **config)
     print(sp)
-    print(f'Static metadata has {len(sp.static_metadata())} items: {list(sp.static_metadata().keys())}:')
+    print(f"Static metadata has {len(sp.static_metadata())} items: {list(sp.static_metadata().keys())}:")
     for k, v in sp.static_metadata().items():
         print(f" ✅  {k}: {v}")
     print("--------------")

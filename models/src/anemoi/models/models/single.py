@@ -10,11 +10,9 @@
 
 from anemoi.models.models import AnemoiMultiModel
 
-
 # from anemoi.models.preprocessing.normalisers import build_normaliser
 from anemoi.utils.config import DotDict
 
-from .base import AnemoiModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -106,7 +104,7 @@ class AnemoiSingleModel(AnemoiMultiModel):
         #  self.num_input_channels = self.sample_static_info.map(lambda x: len(x['name_to_index']))
         #  self.num_target_channels = self.sample_static_info.map(lambda x: len(x['name_to_index']))
 
-        # TODO: Remove. TOY MODEL. 
+        # TODO: Remove. TOY MODEL.
         # here we assume that the tree structure of the input and target match
         # if this is not the case, we need to do something more complicated
         # and define an actual downscaling/other model
@@ -356,7 +354,7 @@ class AnemoiSingleModel(AnemoiMultiModel):
             except Exception as e:
                 e.add_note(f"when processing path {path} with data shape {data.shape}")
                 e.add_note("expected data shape (batch, time, ensemble, vars, grid)")
-                from anemoi.training.data.refactor.structure import TreeDict
+                from anemoi.models.data_structure.structure import TreeDict
 
                 e.add_note(f"value: {TreeDict(value=value)}")
                 raise

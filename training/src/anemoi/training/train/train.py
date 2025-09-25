@@ -30,9 +30,9 @@ from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 
+from anemoi.models.data_structure.sample_provider import sample_provider_factory
 from anemoi.training.data.refactor.read_config import convert_data_config
 from anemoi.training.data.refactor.read_config import convert_sample_config
-from anemoi.training.data.refactor.sample_provider import sample_provider_factory
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger

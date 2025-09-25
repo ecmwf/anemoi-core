@@ -8,7 +8,7 @@ from torch.utils.data import IterableDataset
 
 # from typing import TYPE_CHECKING
 # if TYPE_CHECKING
-from anemoi.training.data.refactor.sample_provider import SampleProvider
+from anemoi.models.data_structure.sample_provider import SampleProvider
 from anemoi.training.data.utils import GroupName
 
 LOGGER = logging.getLogger(__name__)

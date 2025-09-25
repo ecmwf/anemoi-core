@@ -21,9 +21,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data_structure.sample_provider import SampleProvider
 from anemoi.models.preprocessing.normalisers import build_normaliser
-from anemoi.training.data.refactor.sample_provider import SampleProvider
-from anemoi.training.data.refactor.structure import NestedTensor
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.dict import DictLoss
@@ -239,7 +238,7 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
     ) -> torch.Tensor:
         del batch_idx  # unused
         loss, _, _ = self._step(batch)
-        self.log(f"train_loss", loss, on_epoch=True, on_step=True, prog_bar=True, sync_dist=True)
+        self.log("train_loss", loss, on_epoch=True, on_step=True, prog_bar=True, sync_dist=True)
         # self.log("rollout", float(self.rollout), on_step=True, rank_zero_only=True, sync_dist=False)
         return loss
 
@@ -272,7 +271,7 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
         with torch.no_grad():
             loss, metrics, y_preds = self._step(batch, validation_mode=True)
 
-        self.log(f"val_loss", loss, on_epoch=True, on_step=True, prog_bar=True, sync_dist=True)
+        self.log("val_loss", loss, on_epoch=True, on_step=True, prog_bar=True, sync_dist=True)
 
         for mname, mvalue in metrics.items():
             self.log(
@@ -378,5 +377,5 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
         batch: torch.Tensor,
         validation_mode: bool = False,
         apply_processors: bool = True,
-    ) -> NestedTensor:
+    ):
         pass

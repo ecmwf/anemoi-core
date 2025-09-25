@@ -2,8 +2,8 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.training.data.refactor.draft import Context
-from anemoi.training.data.refactor.draft import sample_provider_factory
+from anemoi.models.data_structure.draft import Context
+from anemoi.models.data_structure.sample_provider import sample_provider_factory
 from anemoi.training.data.refactor.multiple_datasets_datamodule import AnemoiMultipleDatasetsDataModule
 from anemoi.training.data.refactor.read_config import get_data_config_dict
 from anemoi.training.data.refactor.read_config import get_sample_config_dict

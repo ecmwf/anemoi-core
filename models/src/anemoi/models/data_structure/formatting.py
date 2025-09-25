@@ -14,7 +14,7 @@ import torch
 from rich.console import Console
 from rich.tree import Tree as _RichTree
 
-from anemoi.training.data.refactor.offsets import offset_to_string
+from anemoi.models.data_structure.offsets import offset_to_string
 
 # this file is quite long and has a lot of knowledge about the other types
 # it is not too bad because everything related to display is here
@@ -149,7 +149,7 @@ def format_key_value(k, v):
         txt = f'np.datetime64("{v!s}")'
     if isinstance(v, datetime.datetime):
         txt = f"datetime({v})"
-    from anemoi.training.data.refactor.sample_provider import Rollout
+    from anemoi.models.data_structure.sample_provider import Rollout
 
     if isinstance(v, Rollout):
         txt = str(v)
@@ -160,7 +160,7 @@ class AnemoiTree:
     def __init__(self, obj):
         assert isinstance(obj, dict), type(obj)
 
-        from anemoi.training.data.refactor.structure import TreeDict
+        from anemoi.models.data_structure.structure import TreeDict
 
         assert isinstance(obj, TreeDict), type(obj)
 
@@ -168,7 +168,7 @@ class AnemoiTree:
         self.name = obj.__class__.__name__
 
     def build_tree(self):
-        from anemoi.training.data.refactor.path_keys import decode_path_if_needed
+        from anemoi.models.data_structure.path_keys import decode_path_if_needed
 
         if not self.obj:
             return f"{self.obj.__class__.__name__} (empty)"
