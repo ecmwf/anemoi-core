@@ -21,6 +21,7 @@ configuration through ``training.model_task``. They are our
 #. Graph Neural Network (GNN)
 #. Graph Transformer Neural Network
 #. Transformer Neural Network
+#. Point-wise Multilayer Perceptron
 
 The model types specify the model architecture and can be chosen
 independently of the model task. Currently, all models have a
@@ -44,7 +45,7 @@ For detailed instructions on creating models, see the
 
 The processor is the part of the model that performs the computation on
 the latent space. The processor can be chosen to be a GNN,
-GraphTransformer or Transformer with Flash attention.
+GraphTransformer, Transformer with Flash attention or Point-wise MLP.
 
 GNN
 ===
@@ -98,6 +99,21 @@ coarser than the resolution of the base data.
    :align: center
 
    Attention windows (grid points highlighted in blue) for different grid points (red).
+
+.. note::
+
+   The Transformer does not require a subgraph.
+
+Point-wise MLP
+==============
+
+The Point-wise MLP applies the same multilayer perceptron independently
+to each node. Results for each node are not conditioned on other nodes,
+as there is no message passing or interaction between nodes.
+
+.. note::
+
+   The Point-wise MLP does not require a subgraph.
 
 *******************
  Encoders/Decoders
