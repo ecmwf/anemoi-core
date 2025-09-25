@@ -65,7 +65,7 @@ class FrozenDict(dict):
         return hash(frozenset(self.items()))
 
 
-class Dict(dict):
+class TreeDict(dict):
 
     _is_frozen = False
 
@@ -126,13 +126,13 @@ class Dict(dict):
 
     def __setitem__(self, path, value):
         if self._is_frozen:
-            raise TypeError("Dict is frozen, cannot set item '{path}'")
+            raise TypeError("TreeDict is frozen, cannot set item '{path}'")
         path = encode_path_if_needed(path)
-        if not path:
-            raise KeyError("Empty path is not allowed")
-        if isinstance(value, Dict):
+        # if not path:
+        #    raise KeyError("Empty path is not allowed")
+        if isinstance(value, TreeDict):
             for p, v in value.items():
-                assert p, f"Empty sub-path is not allowed when setting '{path}' to a Dict"
+                #                assert p, f"Empty sub-path is not allowed when setting '{path}' to a TreeDict"
                 new_path = join_paths(path, p)
                 self[new_path] = v
             return
@@ -145,7 +145,7 @@ class Dict(dict):
         prefix = path + SEPARATOR
         matching = {p[len(prefix) :]: v for p, v in self.items() if p.startswith(prefix)}
         if not matching:
-            raise KeyError(f"Key '{path}' not found in Dict with keys: {list(self.keys())}")
+            raise KeyError(f"Key '{path}' not found in TreeDict with keys: {list(self.keys())}")
         return self.__class__(matching)
 
     def get(self, key: str, default=None):
@@ -158,7 +158,7 @@ class Dict(dict):
     #     try:
     #         return self[name]
     #     except KeyError:
-    #         raise AttributeError(f"'Dict' object has no attribute '{name}'")
+    #         raise AttributeError(f"'TreeDict' object has no attribute '{name}'")
 
     def as_function(self):
         res = Function()
@@ -183,7 +183,7 @@ class Dict(dict):
         return res
 
     def as_dict(self):
-        return {k: v.as_dict() if isinstance(v, Dict) else v for k, v in self.items()}
+        return {k: v.as_dict() if isinstance(v, TreeDict) else v for k, v in self.items()}
 
     def wrap(self, key):
         return self.map(lambda v: {key: v})
@@ -193,8 +193,8 @@ class Dict(dict):
 
     def select_content(self, *keys):
         """Usage:
-        select_content(["latitudes", "longitudes"]) returns a Dict with boxes containing only the selected keys
-        select_content("data") returns a Dict with the content of the "data" key, no box
+        select_content(["latitudes", "longitudes"]) returns a TreeDict with boxes containing only the selected keys
+        select_content("data") returns a TreeDict with the content of the "data" key, no box
         select_content("latitudes", "longitudes") returns a tuple of Dicts, each containing the content of the corresponding key, no boxing
         select_content(["latitudes"], ["longitudes"]) returns a tuple of Dicts, each containing the content of the corresponding key, with boxing
         """
@@ -227,19 +227,19 @@ class Dict(dict):
         return self.map(select)
 
     def __add__(self, other):
-        if not isinstance(other, Dict):
+        if not isinstance(other, TreeDict):
             raise ValueError(f"Cannot add {type(self)} and {type(other)}")
         return self.each + other.each
 
     def merge_leaves(self, *args, **kwargs):
-        assert False, "This method has been renamed use + operator : Dict() + Dict()"
+        assert False, "This method has been renamed use + operator : TreeDict() + TreeDict()"
 
     def map(self, func, *args, **kwargs):
         res = self.__class__()
         for path, leaf in self.items():
             try:
-                args_ = [a[path] if isinstance(a, Dict) else a for a in args]
-                kwargs_ = {k: v[path] if isinstance(v, Dict) else v for k, v in kwargs.items()}
+                args_ = [a[path] if isinstance(a, TreeDict) else a for a in args]
+                kwargs_ = {k: v[path] if isinstance(v, TreeDict) else v for k, v in kwargs.items()}
                 new = func(leaf, *args_, **kwargs_)
                 res[path] = new
             except Exception as e:
@@ -251,8 +251,8 @@ class Dict(dict):
         res = self.__class__()
         for path, leaf in self.items():
             try:
-                args_ = [a[path] if isinstance(a, Dict) else a for a in args]
-                kwargs_ = {k: v[path] if isinstance(v, Dict) else v for k, v in kwargs.items()}
+                args_ = [a[path] if isinstance(a, TreeDict) else a for a in args]
+                kwargs_ = {k: v[path] if isinstance(v, TreeDict) else v for k, v in kwargs.items()}
                 new = func(*args_, **leaf, **kwargs_)
                 res[path] = new
             except Exception as e:
@@ -275,11 +275,11 @@ class Dict(dict):
 
     @property
     def first(self):
-        """Return the first value in the Dict. Useful for accessing properties common to all boxes."""
+        """Return the first value in the TreeDict. Useful for accessing properties common to all boxes."""
         return next(iter(self.values()))
 
     def get_level_minus_one_leaf_nodes(self):
-        """Return a Dict with the leaf nodes at level -1, i.e. the boxes without their content."""
+        """Return a TreeDict with the leaf nodes at level -1, i.e. the boxes without their content."""
         paths = set()
         for p in self.keys():
             p_ = path_as_tuple(p)
@@ -324,8 +324,8 @@ class BaseAccessor:
 
     def filter(self, *keys_or_lists, remove=False):
         """Usage:
-        select_content(["latitudes", "longitudes"]) returns a Dict with boxes containing only the selected keys
-        select_content("data") returns a Dict with the content of the "data" key, no box
+        select_content(["latitudes", "longitudes"]) returns a TreeDict with boxes containing only the selected keys
+        select_content("data") returns a TreeDict with the content of the "data" key, no box
         select_content("latitudes", "longitudes") returns a tuple of Dicts, each containing the content of the corresponding key, no boxing
         select_content(["latitudes"], ["longitudes"]) returns a tuple of Dicts, each containing the content of the corresponding key, with boxing
         """
@@ -348,11 +348,11 @@ class BaseAccessor:
         # this is to add adding two Dicts to merge their leaves
         #
         # only this is supported:
-        # a + b  where a and b are Dict , see Dict.__add__
+        # a + b  where a and b are TreeDict , see TreeDict.__add__
         #
         # we may want to support
-        # a.each + b where a and b are Dict
-        # a.each + c where a is Dict and b is regular (constant) dict
+        # a.each + b where a and b are TreeDict
+        # a.each + c where a is TreeDict and b is regular (constant) dict
 
         if not isinstance(other, BaseAccessor):
             raise ValueError(f"Cannot add {type(self)} and {type(other)}")
@@ -396,7 +396,7 @@ class BaseAccessor:
 
     def _parallel_apply_on_leaves(self, func_finder, *args, **kwargs):
         def resolve(x, path, log):
-            if not isinstance(x, Dict):
+            if not isinstance(x, TreeDict):
                 return x
             try:
                 return x[path]
@@ -406,7 +406,7 @@ class BaseAccessor:
 
         output = []
         for path, leaf in self.parent.items():
-            # when args or kwargs are Dict, extract the corresponding leaf
+            # when args or kwargs are TreeDict, extract the corresponding leaf
             args_ = [resolve(a, path, i) for i, a in enumerate(args)]
             kwargs_ = {k: resolve(v, path, k) for k, v in kwargs.items()}
             # find the function/method to apply and apply it
@@ -446,10 +446,10 @@ class LeafAccessor(BaseAccessor):
 class ModuleDictAccessor(BaseAccessor):
     @property
     def result_parent_class(self):
-        return Dict
+        return TreeDict
 
 
-class Batch(Dict):
+class Batch(TreeDict):
     pass
 
 
@@ -473,14 +473,14 @@ class AnemoiModuleDict(torch.nn.ModuleDict):
             first = next(iter(kwargs.values()))
             res = first.__class__()
         else:
-            res = Dict()
+            res = TreeDict()
 
         for path, module in self.items():
             print(f"applying module {module} at path {path}")
-            args_ = [a[path] if isinstance(a, Dict) else a for a in args]
+            args_ = [a[path] if isinstance(a, TreeDict) else a for a in args]
             kwargs_ = {}
             for k, v in kwargs.items():
-                if isinstance(v, Dict):
+                if isinstance(v, TreeDict):
                     try:
                         v = v[path]
                     except KeyError as e:
@@ -491,7 +491,7 @@ class AnemoiModuleDict(torch.nn.ModuleDict):
         return res
 
     def as_anemoi_dict(self):
-        res = Dict()
+        res = TreeDict()
         for path, v in self.items():
             res[path] = v
         return res
@@ -503,7 +503,7 @@ class AnemoiModuleDict(torch.nn.ModuleDict):
         return self.as_anemoi_dict().to_str(self.emoji + name)
 
 
-class Function(Dict):
+class Function(TreeDict):
     emoji = "()"
 
     def __call__(self, other, *args, _output_box=True, **kwargs):
