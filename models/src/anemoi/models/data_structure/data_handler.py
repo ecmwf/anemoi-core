@@ -41,7 +41,7 @@ class DataHandler:
 
         self.ds = open_dataset(dataset=self.config["dataset"], select=self.variables)
         # TODO: read from ds
-        self._dimensions_order = tuple(["variables", "ensembles", "values"])
+        self._dimensions_order = tuple(["batch", "variables", "ensembles", "values"])
 
         self.frequency = frequency_to_timedelta(self.ds.frequency)
         self.statistics = deep_freeze_dict(self.ds.statistics[group])
@@ -184,6 +184,10 @@ class DataHandler:
         if sharder is None:
             sharder = DummySharder()
 
+        dimensions_order = [_ for _ in self._dimensions_order]
+        assert dimensions_order[0] == "batch", f"Expected first dimension to be 'batch', got {dimensions_order}"
+        dimensions_order = dimensions_order[1:]  # remove batch dimension for sharding
+
         if "latitudes" in box:
             box["latitudes"] = sharder.shard_latitudes(box["latitudes"])
         if "longitudes" in box:
@@ -191,7 +195,7 @@ class DataHandler:
         if "latitudes_longitudes" in box:
             box["latitudes_longitudes"] = sharder.shard_latitudes_longitudes(box["latitudes_longitudes"])
         if "data" in box:
-            box["data"] = sharder.shard_data(box["data"], dimensions_order=self._dimensions_order)
+            box["data"] = sharder.shard_data(box["data"], dimensions_order=dimensions_order)
 
         return box
 

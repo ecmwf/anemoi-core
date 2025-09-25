@@ -218,6 +218,10 @@ def check_dictionary_key(k):
 
 
 def join_paths(path1, path2):
+    if not path1:
+        return path2
+    if not path2:
+        return path1
     return SEPARATOR.join([path1, path2])
 
 

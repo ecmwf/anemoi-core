@@ -35,7 +35,7 @@ LOGGER = logging.getLogger(__name__)
 def get_loss_function(
     config: DictConfig,
     scalers: dict[str, tuple[tuple[int] | np.ndarray]] | None = None,
-    static_info: dict | None = None,
+    target_metadata: dict | None = None,
     **kwargs,
 ) -> DictLoss:
 
@@ -45,8 +45,8 @@ def get_loss_function(
 
     # TODO: read from config
 
-    res = static_info.new_empty()
-    for path, box in static_info.items():
+    res = target_metadata.new_empty()
+    for path, box in target_metadata.items():
         box = box.copy()
         # we add here the batch dimension
         # because the loss knows it will always be there

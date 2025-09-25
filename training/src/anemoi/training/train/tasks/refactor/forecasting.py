@@ -13,11 +13,9 @@ class ForecastingPLModule(BaseGraphPLModule):
     def get_target_from_batch(self, batch, **kwargs):
         return batch["target"]
 
-    def get_semantic_from_static_info(self, static_info, target, **kwargs):
-        # get semantic information from target (should use static info)
-        target_static_info = static_info["target"]
-        semantic = target_static_info.new_empty()
-        for k, v in target_static_info.items():
+    def get_semantic_from_metadata(self, target_metadata, target, **kwargs):
+        semantic = target_metadata.new_empty()
+        for k, v in target_metadata.items():
             box = v.copy()
             if "data" in box:
                 box.pop("data")
@@ -36,16 +34,15 @@ class ForecastingPLModule(BaseGraphPLModule):
         return semantic
 
     def _step(
-        self, batch, validation_mode: bool = False,
+        self,
+        batch,
+        validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list], None, None]:
         # ✅ here, batch = input + target
         # validation vs training, do we have validation batch or training batch?
         #
         print("️⚠️💬 Starting _step")
-        static_info = self.sample_static_info
-
-        # merge batch with static data
-        batch = static_info + batch
+        batch = self.batch_metadata + batch
 
         batch = self.apply_normaliser_to_batch(batch)
 
@@ -58,7 +55,7 @@ class ForecastingPLModule(BaseGraphPLModule):
         print(input.to_str("⚠️input data"))
         print(target.to_str("⚠️target data"))
 
-        semantic = self.get_semantic_from_static_info(static_info, target)
+        semantic = self.get_semantic_from_metadata(self.target_metadata, target)
         print(semantic.to_str("⚠️semantic info from target"))
 
         # graph = self.graph_editor.update_graph(self.graph_data, input_latlons, target_latlons)

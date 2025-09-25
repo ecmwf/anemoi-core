@@ -94,6 +94,7 @@ class TreeDict(dict):
             v = deep_freeze_dict(v)
             self[k] = v
         self._is_frozen = True
+        return self
 
     def unfreeze(self):
         for k, v in self.items():
@@ -105,6 +106,7 @@ class TreeDict(dict):
                 v = dict(v)
                 self[k] = v
         self._is_frozen = False
+        return self
 
     def __copy__(self):
         return self.__class__(self)

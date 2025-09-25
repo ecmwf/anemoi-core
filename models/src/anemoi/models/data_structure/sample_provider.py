@@ -136,7 +136,7 @@ class Context:
         return f"Context(start={self.start}, end={self.end}, offset={self.offset})"
 
 
-class SMetadata(dict):
+class StaticMetadata(dict):
     # static metadata
     ALLOWED_KEYS = ("latitudes", "longitudes", "timedeltas", "rollout")
 
@@ -146,12 +146,20 @@ class SMetadata(dict):
             #     raise ValueError(f"Unknown metadata key {k}, expected one of {self.ALLOWED_KEYS}")
             if not isinstance(v, TreeDict):
                 raise TypeError(f"Expected TreeDict for metadata key {k}, got {type(v)}: {v}")
+            # if k is None:
+            #     raise ValueError("Metadata key cannot be None")
         super().__init__(**kwargs)
 
     def __getattr__(self, item):
         if item in self:
             return self[item]
         raise AttributeError(f"No metadata key {item}, available keys: {list(self.keys())}")
+
+    def __setattr__(self, name, value):
+        if not isinstance(value, TreeDict):
+            # if value is not None and not isinstance(value, TreeDict):
+            raise TypeError(f"Expected TreeDict for metadata key {name}, got {type(value)}: {value}")
+        self[name] = value
 
     def __repr__(self):
         res = "Static Metadata for a sample:\n"
@@ -174,10 +182,9 @@ class SampleProvider:
         self.sharder = _context.sharder
         self.offset = offset_to_timedelta(_context.offset)
 
-    # public
-    @property
-    def static_info(self):
-        return self._get_static(None)
+    # @property
+    # def static_info(self):
+    #     return self._get_static(None)
 
     # public
     def __getitem__(self, item):
@@ -189,6 +196,8 @@ class SampleProvider:
             return None
         return RolloutDict(res)
 
+    # public
+    @property
     def static_metadata(self):
         raise NotImplementedError(f"Not implemented for {self.__class__.__name__}.")
 
@@ -335,8 +344,9 @@ class _ForwardSampleProvider(SampleProvider):
     def _get_static(self, request):
         return self._forward._get_static(request)
 
+    @property
     def static_metadata(self):
-        return self._forward.static_metadata()
+        return self._forward.static_metadata
 
     def _get_rollout_info(self):
         return self._forward._get_rollout_info()
@@ -404,8 +414,9 @@ class _DictSampleProvider(SampleProvider):
             res[k] = sample._get_static(request)
         return res
 
+    @property
     def static_metadata(self):
-        metadatas = {k: sample.static_metadata() for k, sample in self._samples.items()}
+        metadatas = {k: sample.static_metadata for k, sample in self._samples.items()}
         names = set()
         for metadata in metadatas.values():
             names.update(metadata.keys())
@@ -415,7 +426,7 @@ class _DictSampleProvider(SampleProvider):
             for name in metadata.keys():
                 res[name][dict_key] = metadata[name]
 
-        return SMetadata(**res)
+        return StaticMetadata(**res)
 
     def _get_rollout_info(self):
         raise NotImplementedError(f"Not implemented for {self.__class__.__name__}.")
@@ -778,8 +789,9 @@ class MergeOffsetSampleProvider(_LoopSampleProvider):
     def new_config(self, key, values, template):
         return dict(dictionary={str(value): {key: value, **template} for value in values})
 
+    @property
     def static_metadata(self):
-        res = super().static_metadata()
+        res = super().static_metadata
         res["merge_me"] = self.values
         return res
 
@@ -813,8 +825,9 @@ class OffsetSampleProvider(SampleProvider):
         warnings.warn("TODO: change the metadata for data after offset?")
         return self._forward._get_static(request)
 
+    @property
     def static_metadata(self):
-        return self._forward.static_metadata()
+        return self._forward.static_metadata
 
     def _get_rollout_info(self):
         warnings.warn("TODO: change the metadata for data after offset?")
@@ -846,19 +859,27 @@ class TensorReshapeSampleProvider(ForwardSampleProvider):
             raise ValueError(f"Expected list/tuple of strings for dimensions, got {dimensions}")
         dimensions = tuple(dimensions)
 
+        if "batch" in dimensions:
+            raise ValueError("Cannot reshape on 'batch' dimension, it is implicit and always first.")
+
         sample = _sample_provider_factory(_context, _parent=self, **reshape)
 
-        self._static = sample.static_info.copy()
-        self.new_order = dimensions
-        self.initial_order = self._static["dimensions_order"]
+        assert len(sample.static_metadata.batch) == 1, "Expected only one leaf in the batch metadata"
+        self.initial_order = sample.static_metadata.batch.first["dimensions_order"]
+
+        self.new_order = ("batch", *dimensions)
 
         for d in self.new_order:
             if d not in self.initial_order:
                 raise ValueError(f"Dimension '{d}' not found in dataset for {sample}")
 
-        initial_dims = " ".join([d if d in self.new_order else "1" for d in self.initial_order])
-        to_dims = " ".join(self.new_order)
-        self.einops_rearrange_str = f"{initial_dims} -> {to_dims}"
+        initial_dims = [d if d in self.new_order else "1" for d in self.initial_order]
+        to_dims = [_ for _ in self.new_order]
+        assert initial_dims[0] == "batch", initial_dims
+        assert to_dims[0] == "batch", to_dims
+        initial_dims = initial_dims[1:]
+        to_dims = to_dims[1:]
+        self.einops_rearrange_str = f"{' '.join(initial_dims)} -> {' '.join(to_dims)}"
 
         super().__init__(_context, _parent, sample)
 
@@ -888,8 +909,19 @@ class TensorReshapeSampleProvider(ForwardSampleProvider):
         box = self._forward._get_static(request)
         return self._update_box(box)
 
+    @property
     def static_metadata(self):
-        return self._forward.static_metadata()
+        res = StaticMetadata()
+        for k, v in self._forward.static_metadata.items():
+            if k != "batch":
+                res[k] = v
+                continue
+            assert len(v) == 1, "Expected only one leaf in the batch metadata"
+            assert set(v.keys()) == {""}, f"Expected only one key '' in the batch metadata, got {v.keys()}"
+            box = v[""]
+            box = self._update_box(box)
+            res["batch"] = TreeDict({"": box})
+        return res
 
     def _get_item(self, request, item):
         box = self._forward._get_item(request, item)
@@ -953,9 +985,10 @@ class BoxSampleProvider(SampleProvider):
             res["_offset"] = offset_to_string(self.offset)
         return res
 
+    @property
     def static_metadata(self):
         metadata = TreeDict({"": self._get_static(None)})
-        return SMetadata(leaf=metadata)
+        return StaticMetadata(batch=metadata)
 
     def _get_rollout_info(self):
         return None
@@ -1216,14 +1249,16 @@ def test_one(training_context):
     # print(schema)
     # print(repr_schema(schema, "schema"))
 
-    print("✅ sp.static_info", sp.static_info)
+    print("✅ sp.static_metadata.batch", sp.static_metadata.batch)
 
     batch_data = sp[1]
+    batch_data = add_batch_dim_as_dataloder_would_do(batch_data)
+
     for k, v in batch_data.items():
         print(f" - {k}: {type(v)}")
     print("✅ Batch Data", batch_data)
 
-    data = sp.static_info + batch_data
+    data = sp.static_metadata.batch + batch_data
     print("✅ Data full", data)
 
     assert isinstance(data, TreeDict), type(data)
@@ -1249,17 +1284,7 @@ def test_one(training_context):
 
         return func
 
-    # mimic this:
-    # normaliser = {}
-    # for path, value in sp.static_info.items():
-    #     normaliser[path] = build_normaliser(value)
-
-    # normaliser = TreeDict()
-    # normaliser = sp.static_info.new_empty()
-    # for k, v in sp.static_info.items():
-    #     normaliser[k] = build_normaliser(v)
-
-    normaliser = sp.static_info.map_expanded(build_normaliser)
+    normaliser = sp.static_metadata.batch.map_expanded(build_normaliser)
 
     print("Normaliser function", normaliser)
     n_data = normaliser.each(data)
@@ -1280,6 +1305,15 @@ def print_columns(*args):
         table.add_column()
     table.add_row(*args)
     console.print(table)
+
+
+def add_batch_dim_as_dataloder_would_do(data):
+    res = TreeDict()
+    for k, v in data.items():
+        v = v.copy()
+        v["data"] = np.expand_dims(v["data"], axis=0)
+        res[k] = v
+    return res
 
 
 def test_two(training_context):
@@ -1328,15 +1362,16 @@ def test_two(training_context):
 
     config = yaml.safe_load(cfg_2)
     sp = sample_provider_factory(**training_context, **config, **rollout_config)
-    print("static_info", sp.static_info)
+    print("static_metadata", sp.static_metadata.batch)
+
     data = sp[1]
+    data = add_batch_dim_as_dataloder_would_do(data)
+
     print(data)
     print("✅")
-    print(sp.static_metadata())
-    exit()
-    print(sp.static_info)
+    print(sp.static_metadata.batch)
 
-    data = sp.static_info + data
+    data = sp.static_metadata.batch + data
     assert len(data) > 0, data
     print("Merged data", data)
     data = data.select_content(["_offset", "data", "_reference_date_str", "_offset"])
@@ -1424,8 +1459,8 @@ def test_three(training_context):
     config = yaml.safe_load(cfg_3)
     sp = sample_provider_factory(**training_context, **config)
     print(sp)
-    print(f"Static metadata has {len(sp.static_metadata())} items: {list(sp.static_metadata().keys())}:")
-    for k, v in sp.static_metadata().items():
+    print(f"Static metadata has {len(sp.static_metadata)} items: {list(sp.static_metadata.keys())}:")
+    for k, v in sp.static_metadata.items():
         print(f" ✅  {k}: {v}")
     print("--------------")
 

@@ -24,13 +24,10 @@ class ToyAnemoiDownscalingModel(BaseAnemoiDownscalingModel):
     name = "downscaling"
 
     def build(self):
-        input_info = self.sample_static_info["input"]
-        target_info = self.sample_static_info["target"]
+        assert len(self.target_metadata) == 1, "This toy model only supports one target key"
 
-        assert len(target_info) == 1, "This toy model only supports one target key"
-
-        self.num_input_channels = len(input_info["high_res"]["name_to_index"])
-        self.num_output_channels = len(target_info.first["name_to_index"])
+        self.num_input_channels = len(self.input_metadata["high_res"]["name_to_index"])
+        self.num_output_channels = len(self.target_metadata.first["name_to_index"])
 
         self.linear = torch.nn.Linear(self.num_input_channels, self.num_output_channels)
 
@@ -40,7 +37,8 @@ class ToyAnemoiDownscalingModel(BaseAnemoiDownscalingModel):
         print(f"Ignoring kwargs: {kwargs}")
         import einops
 
-        print(self.sample_static_info.to_str("sample_static_info"))
+        print(self.input_metadata.to_str("input metadata"))
+        print(self.output_metadata.to_str("output metadata"))
 
         print(x.to_str("input x"))
         data = x["high_res"]["data"]
@@ -49,12 +47,12 @@ class ToyAnemoiDownscalingModel(BaseAnemoiDownscalingModel):
         pred = self.linear(data)
         pred = einops.rearrange(pred, "b values variables -> b variables values")
 
-        n_variables = len(self.sample_static_info["target"].first["name_to_index"])
+        n_variables = len(self.target_metadata.first["name_to_index"])
         assert pred.shape[1] == n_variables, f"Expected output shape {n_variables}, got {pred.shape[1]}"
 
         print("❤️🆗----- End of Forward pass of ToyAnemoiDownscalingModel -----")
         res = x.new_empty()
-        box = self.sample_static_info["target"]["high_res"].copy()
+        box = self.target_metadata["high_res"].copy()
         box["data"] = pred
         res["high_res"] = box
         return res

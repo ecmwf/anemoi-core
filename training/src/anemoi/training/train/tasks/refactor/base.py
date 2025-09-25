@@ -22,6 +22,7 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_structure.sample_provider import SampleProvider
+from anemoi.models.data_structure.sample_provider import StaticMetadata
 from anemoi.models.preprocessing.normalisers import build_normaliser
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -37,31 +38,51 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphPLModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning."""
 
+    def finish_metadata(self, static_metadata: SampleProvider):
+        # this would change depending on the task
+        assert isinstance(static_metadata, StaticMetadata), type(static_metadata)
+        new = static_metadata.__class__(**static_metadata)
+        new.model_input = static_metadata.batch["input"]
+        new.model_output = static_metadata.batch["target"]
+        new.target = static_metadata.batch["target"]
+        return new
+
     def __init__(
         self,
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        sample_static_info: SampleProvider,
+        static_metadata: SampleProvider,
         metadata: dict,
     ) -> None:
         super().__init__()
-        self.sample_static_info = sample_static_info
 
-        self.normaliser = sample_static_info.map_expanded(build_normaliser).as_module_dict()
+        static_metadata = self.finish_metadata(static_metadata)
+
+        self.batch_metadata = static_metadata.batch
+        self.target_metadata = static_metadata.target
+        self.model_input_metadata = static_metadata.model_input
+        self.model_output_metadata = static_metadata.model_output
+
+        assert self.model_input_metadata is not None, "model_input_metadata cannot be None"
+        assert self.model_output_metadata is not None, "model_output_metadata cannot be None"
+
+        self.model = self.build_model(
+            model_config=convert_to_omegaconf(config).model,
+            input_metadata=self.model_input_metadata,
+            output_metadata=self.model_output_metadata,
+            metadata=metadata,
+            # truncation_data=self.truncation_data,
+        )
+
+        # normalisers for the whole batch
+        self.normaliser = self.batch_metadata.map_expanded(build_normaliser).as_module_dict()
 
         self.graph_data = graph_data  # .to(self.device) # at init this will be on cpu
 
         # TODO: oandle supporting arrays for multiple output masks (multiple outputs)
         # (It is handled in the loss function, but not the version here that is sent to model for supporting_arrays)
         # self.output_mask = instantiate(config.model_dump(by_alias=True).model.output_mask, graph_data=graph_data)
-
-        self.model = self.build_model(
-            model_config=convert_to_omegaconf(config).model,
-            sample_static_info=sample_static_info,
-            metadata=metadata,
-            # truncation_data=self.truncation_data,
-        )
 
         self.config = config
 
@@ -89,7 +110,7 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
 
         self.loss = get_loss_function(
             config.model_dump(by_alias=True).training.training_loss,
-            static_info=self.sample_static_info["target"],
+            target_metadata=self.target_metadata,
         )
         # print_variable_scaling(self.loss, data_indices)
 
@@ -150,11 +171,15 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
     def apply_normaliser_to_batch(self, batch):
         # apply in-place normalisation : the non-normalised data is lost
 
-        print(batch.to_str("⚠️batch before normalistation"))
+        print(batch.to_str("⚠️batch before normalisation"))
         for k, v in batch.items():
             normaliser = self.normaliser[k]
             assert isinstance(normaliser, torch.nn.Module), type(normaliser)
-            v["data"] = normaliser(v["data"])
+            try:
+                v["data"] = normaliser(v["data"])
+            except Exception as e:
+                e.add_note(f"Error when applying normaliser {normaliser} to data key {k} with shape {v['data'].shape}")
+                raise
         print(batch.to_str("⚠️batch after normalistation"))
         return batch
         # This could be done with but using .each is not recommended for now:

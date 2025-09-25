@@ -275,22 +275,21 @@ class AnemoiTrainer:
         # ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
         # "Please use a different activation function."
 
-        sample_static_info = self.training_sample_provider.static_info
-
-        kwargs = {
-            "config": self.config,
-            "sample_static_info": sample_static_info,
-            "graph_data": self.graph_data,
-            "metadata": self.metadata,
-        }
+        static_metadata = self.training_sample_provider.static_metadata
 
         model_task = get_class(self.my_config.model_task)
         print(f"✅ {model_task=}")
-        model_task = model_task(**kwargs)  # GraphForecasterPLModule -> pl.LightningModule
+        model_task = model_task(
+            config=self.config,
+            static_metadata=static_metadata,
+            graph_data=self.graph_data,
+            metadata=self.metadata,
+        )
         # assert isinstance(model_task, pytorch_lightning.LightningModule), type(model_task)
 
         # Load the model_task weights
         if self.load_weights_only:
+            assert False, "what is below is untested, should be checked"
             # Sanify the checkpoint for transfer learning
             if self.my_config.transfer_learning:
                 LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
@@ -299,7 +298,6 @@ class AnemoiTrainer:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
-                kwargs.pop("data_indices")
                 model_task = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
 
             model_task.data_indices = self.data_indices
@@ -565,7 +563,7 @@ class AnemoiTrainer:
             #
             strategy=self.strategy,
             logger=self.loggers,
-            accelerator='cpu', #self.accelerator,
+            accelerator="cpu",  # self.accelerator,
             callbacks=self.callbacks,
             # hardware specifics
             devices=self.config.hardware.num_gpus_per_node,

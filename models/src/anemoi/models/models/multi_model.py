@@ -93,7 +93,7 @@ class AnemoiMultiModel(AnemoiModel):
 
     name = None
 
-    def __init__(self, *, sample_static_info: "Structure", model_config: DotDict, metadata) -> None:
+    def __init__(self, *, model_config: DotDict, input_metadata, output_metadata, metadata) -> None:
         """Initializes the graph neural network.
 
         Parameters
@@ -103,25 +103,17 @@ class AnemoiMultiModel(AnemoiModel):
         graph_data : HeteroData
             Graph definition
         """
-        super().__init__(model_config=model_config, sample_static_info=sample_static_info, metadata=metadata)
+        super().__init__(
+            model_config=model_config, input_metadata=input_metadata, output_metadata=output_metadata, metadata=metadata
+        )
         print(f"✅ model : {self.__class__.__name__}")
-
-        from anemoi.models.preprocessing.normalisers import build_normaliser
-
-        self.normaliser = self.sample_static_info.map_expanded(build_normaliser).as_module_dict()
-        print("Normaliser for full batch", self.normaliser)
 
         self.supporting_arrays = {}
         self.build()
 
     def build(self):
-        input_info = self.sample_static_info["input"]
-        self.input_static_info = input_info
-        target_info = self.sample_static_info["target"]
-        self.target_static_info = target_info
-
-        print(type(input_info), input_info)
-        assert isinstance(input_info, TreeDict), type(input_info)
+        print(self.input_metadata.to_str("input metadata"))
+        print(self.output_metadata.to_str("output metadata"))
 
         self.num_channels = self.model_config.num_channels
 
@@ -146,17 +138,15 @@ class AnemoiMultiModel(AnemoiModel):
         #     return residual_connection_indices
 
         # self.residual_connection_indices = _define_residual_connection_indices(
-        #     self.sample_static_info["input"],
-        #     self.sample_static_info["target"],
+        #     self.OBSOLETEsample_static_info["input"],
+        #     self.OBSOLETEsample_static_info["target"],
         #     residual_connections=self.model_config.get("residual_connections", []),
         # )
 
-        self.num_input_channels = {k: v["number_of_features"] for k, v in self.sample_static_info["input"].items()}
-        self.num_target_channels = {k: v["number_of_features"] for k, v in self.sample_static_info["target"].items()}
-        input_dims_order = {k: ("batch",) + v["dimensions_order"] for k, v in self.sample_static_info["input"].items()}
-        target_dims_order = {
-            k: ("batch",) + v["dimensions_order"] for k, v in self.sample_static_info["target"].items()
-        }
+        self.num_input_channels = {k: v["number_of_features"] for k, v in self.input_metadata.items()}
+        self.num_target_channels = {k: v["number_of_features"] for k, v in self.output_metadata.items()}
+        input_dims_order = {k: ("batch",) + v["dimensions_order"] for k, v in self.input_metadata.items()}
+        target_dims_order = {k: ("batch",) + v["dimensions_order"] for k, v in self.output_metadata.items()}
 
         self.hidden_name: str = self.model_config.model.hidden_name
         encoders, self.encoder_sources, num_encoded_channels = extract_sources(self.model_config.model.encoders)
@@ -166,7 +156,7 @@ class AnemoiMultiModel(AnemoiModel):
         #         num_input_channels=number_of_features,
         #         # TODO
         #     )
-        # self.embeders = self.sample_static_info.create_function(build_embeder)
+        # self.embeders = self.OBSOLEREsample_static_info.create_function(build_embeder)
         # Embedding layers
 
         # def build_embeder(number_of_features, **kwargs):
@@ -174,7 +164,7 @@ class AnemoiMultiModel(AnemoiModel):
         #             num_input_channels=number_of_features,
         #             # TODO
         #         )
-        # self.embeders = self.sample_static_info.create_function(build_embeder)
+        # self.embeders = self.OBSOLEREsample_static_info.create_function(build_embeder)
 
         num_embedded_channels = {
             key: num_encoded_channels[self.encoder_sources[key]] for key in self.num_input_channels.keys()
@@ -235,9 +225,9 @@ class AnemoiMultiModel(AnemoiModel):
         #    [
         #        instantiate(
         #            cfg,
-        #            name_to_index=sample_static_info.target.name_to_index,
-        #            statistics=sample_static_info.input.statistics,
-        #            name_to_index_stats=sample_static_info.input.name_to_index,
+        #            name_to_index=OBSOLETEsample_static_info.target.name_to_index,
+        #            statistics=OBSOLETEsample_static_info.input.statistics,
+        #            name_to_index_stats=OBSOLETEsample_static_info.input.name_to_index,
         #        )
         #        for cfg in getattr(model_config.model, "bounding", [])
         #    ]
@@ -339,9 +329,9 @@ class AnemoiMultiModel(AnemoiModel):
         # sources = {v: k for k, v in self.decoder_sources.items()}
         # graph, node_slices = merge_graph_sources(graph, sources)
 
-        x_out = self.sample_static_info["target"].new_empty()
+        x_out = self.output_metadata.new_empty()
         for dec_source, x_data_latent in x_target_latents.items():
-            if dec_source not in self.sample_static_info["target"]:
+            if dec_source not in self.output_metadata:
                 continue
 
             dec_name = self.decoder_sources[dec_source]
@@ -426,7 +416,7 @@ class AnemoiMultiModel(AnemoiModel):
             )
 
         res = x.new_empty()
-        for k, v in self.input_static_info.get_level_minus_one_leaf_nodes():
+        for k, v in self.input_metadata.get_level_minus_one_leaf_nodes():
             for _ in v.values():
                 assert not isinstance(_, TreeDict), f"Only leaf nodes supported, got {type(_)}"
             res[k] = merge(v.values())
@@ -461,7 +451,8 @@ class AnemoiMultiModel(AnemoiModel):
             )
 
         res = x.new_empty()
-        for k, v in self.input_static_info.get_level_minus_one_leaf_nodes():
+        assert False
+        for k, v in self.sample_static_info.get_level_minus_one_leaf_nodes():
             for _ in v.values():
                 assert not isinstance(_, TreeDict), f"Only leaf nodes supported, got {type(_)}"
             res[k] = merge(v.values())
@@ -518,6 +509,3 @@ class AnemoiMultiModel(AnemoiModel):
         # x_out = self.residual_connection(x_out, x_data_skip)
         x_out = self.bound(x_out)
         return x_out.wrap("data")
-
-    def apply_normalisers(self, batch):
-        return self.normaliser(batch)

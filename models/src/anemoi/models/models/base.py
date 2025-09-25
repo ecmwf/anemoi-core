@@ -20,15 +20,17 @@ from anemoi.utils.config import DotDict
 
 
 class AnemoiModel(nn.Module):
-    def __init__(self, model_config, sample_static_info, metadata):
+    def __init__(self, model_config, input_metadata, output_metadata, metadata):
         super().__init__()
         self.id = str(uuid.uuid4())
 
         model_config = DotDict(model_config)
 
         self.model_config = model_config
-        self.sample_static_info = sample_static_info
-        self.sample_static_info.freeze()
+        self.input_metadata = input_metadata
+        self.output_metadata = output_metadata
+        self.input_metadata.freeze()
+        self.output_metadata.freeze()
         self.metadata = metadata
 
     def predict_step(

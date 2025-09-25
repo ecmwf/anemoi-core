@@ -59,19 +59,21 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DotDict,
-        sample_static_info,
+        interface_metadata,  # not implemented
         # graph_data: HeteroData,
         # data_indices: dict,
         metadata: dict,
     ) -> None:
 
-        assert False, "not used anymore. Anemoi models have a _predict_step method for inference"
+        assert (
+            False
+        ), "not used anymore. All anemoi inference needs is a _predict_step_ method. But this will be back because we need a class with input normaliser and output denormaliser."
 
         super().__init__()
         self.id = str(uuid.uuid4())
 
         self.config = config
-        self.sample_static_info = sample_static_info
+        self.model_input_output_metadata = interface_metadata
         # self.graph_data = graph_data
         self.metadata = metadata
         self.supporting_arrays = {}
@@ -84,7 +86,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.model = AnemoiMultiModel(
             # self.config.model.model,
             model_config=self.config,
-            sample_static_info=self.sample_static_info,
+            model_input_output_metadata=self.model_input_output_metadata,
             # graph_data=self.graph_data,
             # truncation_data=self.truncation_data,
             # _recursive_=False,  # Disables recursive instantiation by Hydra

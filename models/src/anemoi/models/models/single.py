@@ -13,7 +13,6 @@ from anemoi.models.models import AnemoiMultiModel
 # from anemoi.models.preprocessing.normalisers import build_normaliser
 from anemoi.utils.config import DotDict
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -26,7 +25,7 @@ class AnemoiSingleModel(AnemoiMultiModel):
 
     name = None
 
-    def __init__(self, *, sample_static_info: "Structure", model_config: DotDict, metadata) -> None:
+    def __init__(self, *, model_config: DotDict, **kwargs) -> None:
         """Initializes the graph neural network.
 
         Parameters
@@ -37,9 +36,8 @@ class AnemoiSingleModel(AnemoiMultiModel):
             Graph definition
         """
         print(f"✅ model : {self.__class__.__name__}")
-        super().__init__()
+        super().__init__(**kwargs)
         self.id = str(uuid.uuid4())
-        self.metadata = metadata
 
         self.supporting_arrays = {}
         model_config = DotDict(model_config)
