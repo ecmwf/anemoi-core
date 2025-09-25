@@ -1,5 +1,5 @@
 input:
-  data:
+  input_fields:
     variables:
     - "cos_latitude"
     - "cos_longitude"
@@ -46,7 +46,7 @@ input:
     offset: ["-6h", "0h"]
 
 target:
-  data:
+  output_fields:
     variables:
     - "10u"
     - "10v"

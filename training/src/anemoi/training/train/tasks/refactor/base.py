@@ -165,6 +165,9 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
             return getattr(module, class_name)
 
         cls = find_class_by_name(model_config.model._target_)
+        print(
+            f'✅ instantiating model class: "{cls.__name__}" because of config.model._target_="{model_config.model._target_}"',
+        )
 
         return cls(model_config=model_config, **kwargs)
 

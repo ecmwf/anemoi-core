@@ -40,6 +40,9 @@ hardware:
   num_nodes: 1
   num_gpus_per_model: 1
 model:
+  model:
+    _target_: anemoi.models.models.single.ToyAnemoiSingleModel
+    # _target_: anemoi.models.models.AnemoiSingleModel
   num_channels: 128
 dataloader:
   limit_batches:

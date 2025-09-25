@@ -106,14 +106,10 @@ class AnemoiMultiModel(AnemoiModel):
         super().__init__(
             model_config=model_config, input_metadata=input_metadata, output_metadata=output_metadata, metadata=metadata
         )
-        print(f"✅ model : {self.__class__.__name__}")
-
         self.supporting_arrays = {}
         self.build()
 
     def build(self):
-        print(self.input_metadata.to_str("input metadata"))
-        print(self.output_metadata.to_str("output metadata"))
 
         self.num_channels = self.model_config.num_channels
 
@@ -122,26 +118,6 @@ class AnemoiMultiModel(AnemoiModel):
 
         if self.model_config.get("residual_connections"):
             warnings.warn("Residual connections not supported")
-        # def _define_residual_connection_indices(
-        #     input,
-        #     target,
-        #     residual_connections: list[str],
-        # ):
-        #     residual_connection_indices = {}
-        #     for source in residual_connections:
-        #         input_vars = input_name_to_index[source]
-        #         target_vars = target_name_to_index[source]
-        #         common_vars = set(target_vars).intersection(input_vars)
-        #         target_idx = [input_vars[v] for v in common_vars]
-        #         input_idx = [target_vars[v] for v in common_vars]
-        #         residual_connection_indices[source] = target_idx, input_idx
-        #     return residual_connection_indices
-
-        # self.residual_connection_indices = _define_residual_connection_indices(
-        #     self.OBSOLETEsample_static_info["input"],
-        #     self.OBSOLETEsample_static_info["target"],
-        #     residual_connections=self.model_config.get("residual_connections", []),
-        # )
 
         self.num_input_channels = {k: v["number_of_features"] for k, v in self.input_metadata.items()}
         self.num_target_channels = {k: v["number_of_features"] for k, v in self.output_metadata.items()}
@@ -166,6 +142,7 @@ class AnemoiMultiModel(AnemoiModel):
         #         )
         # self.embeders = self.OBSOLEREsample_static_info.create_function(build_embeder)
 
+        print(self.encoder_sources)
         num_embedded_channels = {
             key: num_encoded_channels[self.encoder_sources[key]] for key in self.num_input_channels.keys()
         }
@@ -389,76 +366,7 @@ class AnemoiMultiModel(AnemoiModel):
         return torch.cat([torch.sin(graph[name].x), torch.cos(graph[name].x)], dim=-1)
 
     def prepare_input(self, x: TreeDict) -> TreeDict:
-
-        def merge(*leaves):
-            latitudes = None
-            longitudes = None
-            dimensions_order = None
-            for leaf in leaves:
-                if latitudes is None:
-                    latitudes = leaf["latitudes"]
-                    longitudes = leaf["longitudes"]
-                    dimensions_order = leaf["dimensions_order"]
-                assert leaf["latitudes"] == latitudes, f"latitudes do not match: {leaf['latitudes']} != {latitudes}"
-                assert (
-                    leaf["longitudes"] == longitudes
-                ), f"longitudes do not match: {leaf['longitudes']} != {longitudes}"
-                assert (
-                    leaf["dimensions_order"] == dimensions_order
-                ), f"dimensions_order do not match: {leaf['dimensions_order']} != {dimensions_order}"
-
-            return dict(
-                data=torch.stack([leaf["data"] for leaf in leaves], dim=-1),
-                latitudes=latitudes,
-                longitudes=longitudes,
-                dimensions_order=dimensions_order + ("offsets",),
-                _offsets=(leaf["_offset"] for leaf in leaves),
-            )
-
-        res = x.new_empty()
-        for k, v in self.input_metadata.get_level_minus_one_leaf_nodes():
-            for _ in v.values():
-                assert not isinstance(_, TreeDict), f"Only leaf nodes supported, got {type(_)}"
-            res[k] = merge(v.values())
-
-        return res
-
-    def prepare_input(self, x: TreeDict) -> TreeDict:
         return x
-
-        def merge(*leaves):
-            latitudes = None
-            longitudes = None
-            dimensions_order = None
-            for leaf in leaves:
-                if latitudes is None:
-                    latitudes = leaf["latitudes"]
-                    longitudes = leaf["longitudes"]
-                    dimensions_order = leaf["dimensions_order"]
-                assert leaf["latitudes"] == latitudes, f"latitudes do not match: {leaf['latitudes']} != {latitudes}"
-                assert (
-                    leaf["longitudes"] == longitudes
-                ), f"longitudes do not match: {leaf['longitudes']} != {longitudes}"
-                assert (
-                    leaf["dimensions_order"] == dimensions_order
-                ), f"dimensions_order do not match: {leaf['dimensions_order']} != {dimensions_order}"
-
-            return dict(
-                data=torch.stack([leaf["data"] for leaf in leaves], dim=-1),
-                latitudes=latitudes,
-                longitudes=longitudes,
-                dimensions_order=dimensions_order + ("offsets",),
-                _offsets=(leaf["_offset"] for leaf in leaves),
-            )
-
-        res = x.new_empty()
-        assert False
-        for k, v in self.sample_static_info.get_level_minus_one_leaf_nodes():
-            for _ in v.values():
-                assert not isinstance(_, TreeDict), f"Only leaf nodes supported, got {type(_)}"
-            res[k] = merge(v.values())
-
-        return res
 
     def forward(
         self, x: dict[str, Tensor], graph: HeteroData, *, model_comm_group: Optional[ProcessGroup] = None, **kwargs
