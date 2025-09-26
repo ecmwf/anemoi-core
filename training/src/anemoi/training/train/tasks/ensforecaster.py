@@ -521,7 +521,7 @@ class GraphEnsForecaster(BaseGraphModule):
         """
         del batch_idx
 
-        train_loss, _, _, _ = self._step(batch)
+        train_loss, _, _, _, _ = self._step(batch)
 
         self.log(
             "train_" + self.loss.name,
