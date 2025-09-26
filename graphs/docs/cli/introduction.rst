@@ -69,6 +69,17 @@ Create Command
     :prog: anemoi-graphs
     :path: create
 
+
+Validate Command
+--------------
+
+.. argparse::
+    :module: anemoi.graphs.__main__
+    :func: create_parser
+    :prog: anemoi-graphs
+    :path: validate
+
+
 Describe Command
 ----------------
 .. argparse::
