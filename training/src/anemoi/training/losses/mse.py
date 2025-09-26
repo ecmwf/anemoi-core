@@ -39,4 +39,8 @@ class MSELoss(FunctionalLoss):
         torch.Tensor
             MSE loss
         """
-        return torch.square(pred - target)
+        try:
+            return torch.square(pred - target)
+        except Exception as e:
+            e.add_note(f"pred shape: {pred.shape}, target shape: {target.shape}, dimensions: {self.dimensions_order}")
+            raise e

@@ -3,35 +3,35 @@ from collections.abc import Generator
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.data_structure.sample_provider import StaticMetadata
+from anemoi.models.data_structure.sample_provider import merge_offsets
+from anemoi.models.data_structure.structure import TreeDict
 from anemoi.training.train.tasks.refactor.base import BaseGraphPLModule
 
 
 class ForecastingPLModule(BaseGraphPLModule):
-    def get_input_from_batch(self, batch, **kwargs):
-        return batch["input"]
+    def get_input_from_batch(self, metadata: StaticMetadata, batch):
+        assert isinstance(metadata, StaticMetadata), type(metadata)
+        new = TreeDict()
+        for k, v in metadata.stack_offsets["input"].items():
+            new[k] = merge_offsets(batch["input"][k])
+        return new
 
-    def get_target_from_batch(self, batch, **kwargs):
-        return batch["target"]
+    def get_target_from_batch(self, metadata: StaticMetadata, batch):
+        assert isinstance(metadata, StaticMetadata), type(metadata)
+        new = TreeDict()
+        for k, v in metadata.stack_offsets["target"].items():
+            new[k] = merge_offsets(batch["target"][k])
+        return new
 
-    def get_semantic_from_metadata(self, target_metadata, target, **kwargs):
-        semantic = target_metadata.new_empty()
-        for k, v in target_metadata.items():
-            box = v.copy()
-            if "data" in box:
-                box.pop("data")
-            # allows to look for some information in the target
-            if "latitudes" not in box and "latitudes" in target[k]:
-                box["latitudes"] = target[k]["latitudes"]
-            if "longitudes" not in box and "longitudes" in target[k]:
-                box["longitudes"] = target[k]["longitudes"]
-            if "timedeltas" not in box and "timedeltas" in target[k]:
-                box["timedeltas"] = target[k]["timedeltas"]
-            if "reference_date" in target[k]:
-                box["reference_date"] = target[k]["reference_date"]
-            if "reference_date_str" in target[k]:
-                box["reference_date_str"] = target[k]["reference_date_str"]
-            semantic[k] = box
-        return semantic
+    def get_input_metadata_from_metadata(self, static_metadata: StaticMetadata) -> TreeDict:
+        return self.get_input_from_batch(static_metadata, static_metadata.batch)
+
+    def get_target_metadata_from_metadata(self, static_metadata: StaticMetadata) -> TreeDict:
+        return self.get_target_from_batch(static_metadata, static_metadata.batch)
+
+    def get_output_metadata_from_metadata(self, static_metadata: StaticMetadata) -> TreeDict:
+        return self.get_target_from_batch(static_metadata, static_metadata.batch)
 
     def _step(
         self,
@@ -42,43 +42,25 @@ class ForecastingPLModule(BaseGraphPLModule):
         # validation vs training, do we have validation batch or training batch?
         #
         print("️⚠️💬 Starting _step")
-        batch = self.batch_metadata + batch
+        batch = self.static_metadata.batch + batch
 
         batch = self.apply_normaliser_to_batch(batch)
 
-        loss = torch.zeros(1, dtype=batch.first["data"].dtype, device=self.device, requires_grad=True)
-        print(self.loss.to_str("⚠️loss function"))
-
         # get input and target
-        input = self.get_input_from_batch(batch)
-        target = self.get_target_from_batch(batch)
+        input = self.get_input_from_batch(self.static_metadata, batch)
+        target = self.get_target_from_batch(self.static_metadata, batch)
         print(input.to_str("⚠️input data"))
         print(target.to_str("⚠️target data"))
 
-        semantic = self.get_semantic_from_metadata(self.target_metadata, target)
-        print(semantic.to_str("⚠️semantic info from target"))
+        loss = torch.zeros(1, dtype=target.first["data"].dtype, device=self.device, requires_grad=True)
+        print(self.loss.to_str("⚠️loss function"))
 
         # graph = self.graph_editor.update_graph(self.graph_data, input_latlons, target_latlons)
 
         # run model for one step
         y_pred = self(input, self.graph_data.clone().to("cpu"))
 
-        # y_pred = target.select_content(["data"])  # for development, don't keep this line
-        print(y_pred.to_str("⚠️y_pred before merging semantic info from target"))
-
-        # y_pred = semantic + y_pred
-        # new_y = semantic.new_empty()
-        # for k, v in semantic.items():
-        #    box = v.copy()
-        #    if isinstance(y_pred[k], torch.Tensor):
-        #        box["data"] = y_pred[k]
-        #    else:
-        #        for k_ in y_pred[k]:
-        #            if k_ in box:
-        #                print("Warning: overwriting key", k_, "in semantic info")
-        #            box[k_] = y_pred[k][k_]
-        #    new_y[k] = box
-        # y_pred = new_y
+        assert target.matches_keys(y_pred), (target.keys(), y_pred.keys)
 
         print(y_pred.to_str("⚠️y_pred after merging semantic info from target"))
         loss = 0.0

@@ -21,7 +21,6 @@ from anemoi.models.data_structure.formatting import anemoi_dict_to_str
 from anemoi.models.data_structure.path_keys import SEPARATOR
 from anemoi.models.data_structure.path_keys import encode_path_if_needed
 from anemoi.models.data_structure.path_keys import join_paths
-from anemoi.models.data_structure.path_keys import path_as_tuple
 
 # from typing import TYPE_CHECKING
 # if TYPE_CHECKING:
@@ -271,16 +270,30 @@ class TreeDict(dict):
         """Return the first value in the TreeDict. Useful for accessing properties common to all boxes."""
         return next(iter(self.values()))
 
-    def get_level_minus_one_leaf_nodes(self):
-        """Return a TreeDict with the leaf nodes at level -1, i.e. the boxes without their content."""
-        paths = set()
-        for p in self.keys():
-            p_ = path_as_tuple(p)
-            if len(p_) < 2:
-                raise ValueError(f"Cannot get level -1 leaf nodes, found path with less than 2 elements: {p}")
-            paths.add(p_[:-1])
+    def matches_keys(self, other):
+        return set(self.keys()) == set(other.keys())
 
-        return self.__class__({p: self[p] for p in paths})
+    def contains_keys(self, other):
+        """Check that the keys of self contain the keys of other.
+
+        Parameters
+        ----------
+        other : TreeDict
+            The other TreeDict to compare with.
+
+        Returns
+        -------
+        bool
+            True if self contains all keys of other, False otherwise.
+        """
+        keys = set(self.keys())
+        for k in other.keys():
+            for k_ in keys:
+                if k == k_ or k.startswith(k_ + SEPARATOR):
+                    break
+            else:
+                return False
+        return True
 
 
 class BaseAccessor:

@@ -142,7 +142,11 @@ class AnemoiMultiModel(AnemoiModel):
         #         )
         # self.embeders = self.OBSOLEREsample_static_info.create_function(build_embeder)
 
-        print(self.encoder_sources)
+        assert TreeDict(self.num_input_channels).matches_keys(self.encoder_sources), (
+            self.encoder_sources,
+            self.num_input_channels,
+        )
+
         num_embedded_channels = {
             key: num_encoded_channels[self.encoder_sources[key]] for key in self.num_input_channels.keys()
         }

@@ -17,6 +17,7 @@ from functools import cached_property
 
 import einops
 import numpy as np
+import torch
 import yaml
 from omegaconf import DictConfig
 from rich.console import Console
@@ -30,6 +31,62 @@ from anemoi.models.data_structure.offsets import substract_offsets
 from anemoi.models.data_structure.offsets import sum_offsets
 from anemoi.models.data_structure.path_keys import check_dictionary_key
 from anemoi.models.data_structure.structure import TreeDict
+
+
+def merge_offsets(x):
+    # Merging offsets for TreeDict
+    # expects that x is a TreeDict of dicts with one level of nesting only
+    # x = {"+3h": {"data": ... }, "-3h": {"data": ... }
+
+    assert isinstance(x, TreeDict), f"Expected TreeDict, got {type(x)}"
+
+    for child in x.values():
+        assert isinstance(child, dict), f"Expected dict, got {type(child)}"
+        assert not isinstance(child, TreeDict), f"Expected dict, got {type(child)}"
+
+    new_box = dict()
+
+    def _merge_tensor(tensors, dim=1):
+        return torch.cat([t.unsqueeze(dim) for t in tensors], dim=dim)
+
+    if "data" in x.first:
+        new_box["data"] = _merge_tensor([_["data"] for _ in x.values()])
+
+    if "timedeltas" in x.first:
+        new_box["timedeltas"] = _merge_tensor([_["timedeltas"] for _ in x.values()])
+    if "latitudes" in x.first:
+        new_box["latitudes"] = _merge_tensor([_["latitudes"] for _ in x.values()])
+    if "longitudes" in x.first:
+        new_box["longitudes"] = _merge_tensor([_["longitudes"] for _ in x.values()])
+
+    if "dimensions_order" in x.first:
+        # assume all the same
+        order = x.first["dimensions_order"]
+        assert order[0] == "batch", order
+        new_box["dimensions_order"] = ("batch", "offsets") + order[1:]
+
+    KEYS_TO_MERGE = ["name_to_index", "normaliser", "extra", "number_of_features", "_initial_dimensions_order"]
+    for key in KEYS_TO_MERGE:
+        for child in x.values():
+            if key in child:
+                new_box[key] = child[key]
+        if key in new_box:
+            for child in x.values():
+                assert new_box[key] == child[key], (new_box[key], child[key], x.keys())
+
+    for k, v in x.first.items():
+        # for instance for _offset, reference_date, reference_date_str
+        if k in new_box:
+            continue
+        new_box[k] = tuple(_.get(k) for _ in x.values())
+
+    # possible to check things on offsets here.
+    # such as the order. But the dicts are ordered
+    # and automatically created
+
+    # check other metadata are the same for all offsets here if needed
+    # add mere in the new box if needed
+    return new_box
 
 
 def resolve_reference(config):
@@ -792,7 +849,7 @@ class MergeOffsetSampleProvider(_LoopSampleProvider):
     @property
     def static_metadata(self):
         res = super().static_metadata
-        res["merge_me"] = self.values
+        res["stack_offsets"] = self.values
         return res
 
 

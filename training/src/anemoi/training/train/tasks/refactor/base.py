@@ -38,13 +38,13 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphPLModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning."""
 
-    def finish_metadata(self, static_metadata: SampleProvider):
-        # this would change depending on the task
-        assert isinstance(static_metadata, StaticMetadata), type(static_metadata)
-        new = static_metadata.__class__(**static_metadata)
-        new.model_input = static_metadata.batch["input"]
-        new.model_output = static_metadata.batch["target"]
-        new.target = static_metadata.batch["target"]
+    def finalise_metadata(self, static_metadata):
+        new = StaticMetadata()
+        new.batch = static_metadata.batch
+        new.stack_offsets = static_metadata.stack_offsets
+        new.target = self.get_target_metadata_from_metadata(static_metadata)
+        new.model_input = self.get_input_metadata_from_metadata(static_metadata)
+        new.model_output = self.get_output_metadata_from_metadata(static_metadata)
         return new
 
     def __init__(
@@ -57,26 +57,22 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
     ) -> None:
         super().__init__()
 
-        static_metadata = self.finish_metadata(static_metadata)
-
-        self.batch_metadata = static_metadata.batch
-        self.target_metadata = static_metadata.target
-        self.model_input_metadata = static_metadata.model_input
-        self.model_output_metadata = static_metadata.model_output
-
-        assert self.model_input_metadata is not None, "model_input_metadata cannot be None"
-        assert self.model_output_metadata is not None, "model_output_metadata cannot be None"
+        self.static_metadata = self.finalise_metadata(static_metadata)
+        print("❌❌❌❌❌❌❌❌❌❌❌❌❌")
+        print(self.static_metadata)
+        for k, v in self.static_metadata.items():
+            print(f"❌ {v.to_str(k)}")
 
         self.model = self.build_model(
             model_config=convert_to_omegaconf(config).model,
-            input_metadata=self.model_input_metadata,
-            output_metadata=self.model_output_metadata,
+            input_metadata=self.static_metadata.model_input,
+            output_metadata=self.static_metadata.model_output,
             metadata=metadata,
             # truncation_data=self.truncation_data,
         )
 
         # normalisers for the whole batch
-        self.normaliser = self.batch_metadata.map_expanded(build_normaliser).as_module_dict()
+        self.normaliser = self.static_metadata.batch.map_expanded(build_normaliser).as_module_dict()
 
         self.graph_data = graph_data  # .to(self.device) # at init this will be on cpu
 
@@ -110,7 +106,7 @@ class BaseGraphPLModule(pl.LightningModule, ABC):
 
         self.loss = get_loss_function(
             config.model_dump(by_alias=True).training.training_loss,
-            target_metadata=self.target_metadata,
+            target_metadata=self.static_metadata.target,
         )
         # print_variable_scaling(self.loss, data_indices)
 

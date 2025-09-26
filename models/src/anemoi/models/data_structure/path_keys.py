@@ -227,4 +227,9 @@ def join_paths(path1, path2):
 
 def path_as_tuple(path):
     path = decode_path_if_needed(path)
-    return path.split(".")
+    return tuple(path.split("."))
+
+
+def tuple_to_path(t):
+    assert isinstance(t, (list, tuple)), t
+    return SEPARATOR.join(t)

@@ -2,8 +2,8 @@ import os
 from typing import Dict
 
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from omegaconf import ListConfig
+from omegaconf import OmegaConf
 
 from anemoi.utils.config import DotDict
 
@@ -86,7 +86,8 @@ def convert_source(config, name: str) -> Dict:
 
     if isinstance(offset, list) or isinstance(offset, ListConfig):  # TODO remove this 'if' and use classes
         return dict(
-            for_each=[
+            merge_offset_as_first_dimension=[
+                # for_each=[
                 dict(offset=offset),
                 dict(container=container),
             ],
