@@ -255,6 +255,7 @@ class GraphEnsForecaster(BaseGraphModule):
         )
 
         is_multi_scale_loss = any(x is not None for x in self.loss_trunc_matrices)
+        shard_shapes, shard_shapes_y = None, None
         if self.keep_batch_sharded and is_multi_scale_loss:
             # go to full sequence dimension for interpolation / smoothing
             y_pred_ens_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
