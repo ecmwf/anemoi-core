@@ -7,28 +7,23 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import os
 import random
+from collections.abc import Callable
 from functools import cached_property
-from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 from einops import rearrange
 from torch.utils.data import IterableDataset
 
+from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from anemoi.training.data.grid_indices import BaseGridIndices
 
 
 class NativeGridDataset(IterableDataset):

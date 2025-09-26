@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import ABC
@@ -23,6 +22,7 @@ from torch_geometric.typing import Size
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import NodesAxis
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import haversine_distance
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         super().__init__()
         self.norm = norm
         self.dtype = dtype
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = get_distributed_device()
         if self.node_attr_name is None:
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
@@ -104,7 +104,7 @@ class Azimuth(BasePositionalBuilder):
 
     Attributes
     ----------
-    norm : Optional[str]
+    norm : str | None
         Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
     invert : bool
         Whether to invert the edge lengths, i.e. 1 - edge_length. Defaults to False.

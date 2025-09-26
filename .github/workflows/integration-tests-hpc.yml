@@ -30,6 +30,7 @@ jobs:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
+            env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
             REPO_NAME=anemoi-core
@@ -41,7 +42,7 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --longtests
+            python3 -m pytest -v training/tests/integration --slow
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
@@ -51,6 +52,40 @@ jobs:
             #SBATCH --gpus=1
             #SBATCH --gres=gpu:1
             #SBATCH --mem=16G
+          troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
+  benchmark-tests:
+    runs-on: hpc
+    timeout-minutes: 360 #increase timeout, if slurm queues for ~1 hour then github actions can timeout
+    needs: check_date
+    if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    steps:
+      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+        with:
+          template: |
+            env | grep SLURM # helps with debugging
+            set -eux
+            module load python3/3.12.9-01
+            REPO_NAME=anemoi-core
+            REPO_BRANCH=${{ github.head_ref || github.ref_name }}
+            cd $TMPDIR
+            git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
+            cd $REPO_NAME
+            python3 -m venv .venv
+            source .venv/bin/activate
+            pip install --upgrade pip
+            pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            srun python -m pytest -v training/tests/integration --slow --multigpu -k "test_benchmark_training_cycle"
+            deactivate
+            rm -rf $REPO_NAME
+          sbatch_options: |
+            #SBATCH --job-name=anemoi_core_benchmark_pytest
+            #SBATCH --nodes=1
+            #SBATCH --ntasks-per-node=2
+            #SBATCH --cpus-per-task=32
+            #SBATCH --gpus-per-node=2
+            #SBATCH --time=1:00:00
+            #SBATCH --qos=ng
+            #SBATCH --mem=0
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
   notify-team:
@@ -64,6 +99,25 @@ jobs:
           issue-number: 294
           body: |
             ## 🚨 Nightly Job Failed
+
+            **Repository:** ${{ github.repository }}
+            **Workflow:** ${{ github.workflow }}
+            **Run URL:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Time:** ${{ github.event.schedule }}
+
+            cc: @ecmwf/anemoisecurity
+
+  notify-team-bm:
+    needs: benchmark-tests
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add failure comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: 294
+          body: |
+            ## 🚨 Nightly Benchmark Job Failed
 
             **Repository:** ${{ github.repository }}
             **Workflow:** ${{ github.workflow }}

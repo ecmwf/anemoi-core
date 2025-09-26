@@ -21,7 +21,7 @@ authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 
-requires-python = ">=3.9,<3.13" # Unable to use 3.13 until pyshtools updates
+requires-python = ">=3.10,<3.13" # Unable to use 3.13 until pyshtools updates
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -29,7 +29,6 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -42,9 +41,9 @@ dynamic = [ "version" ]
 dependencies = [
   "anemoi-datasets>=0.5.13",
   "anemoi-graphs>=0.5.2",
-  "anemoi-models>=0.8",
+  "anemoi-models[migrations]>=0.9.5",
   "anemoi-transform>=0.1.11",
-  "anemoi-utils[provenance,mlflow]>=0.4.28",
+  "anemoi-utils[provenance,mlflow]>=0.4.32",
   "datashader>=0.16.3,<0.17; python_version<'3.10'",
   "datashader>=0.17; python_version>='3.10'",
   "einops>=0.6.1",
@@ -52,8 +51,8 @@ dependencies = [
   "matplotlib>=3.7.1",
   "mlflow-skinny>=2.11.1",
   "numpy<2",                                         # Pinned until we can confirm it works with anemoi graphs
+  "nvidia-ml-py>=13.580.82",
   "pydantic>=2.9",
-  "pynvml>=11.5",
   "pyshtools>=4.13",
   "pytorch-lightning>=2.1",
   "timm>=0.9.2",
@@ -87,7 +86,14 @@ optional-dependencies.profile = [
   "rich>=13.6",
   "tabulate>=0.9",
 ]
-optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
+optional-dependencies.tests = [
+  "anemoi-graphs[tri]",      # required to load the gnn checkpoint as part of the tests
+  "hypothesis>=6.11",
+  "pytest>=8",
+  "pytest-mock>=3",
+  "pytest-skip-slow>=0.0.5",
+  "sshfs",
+]
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
@@ -111,7 +117,7 @@ version_file = "src/anemoi/training/_version.py"
 fallback_version = "0.0.0"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 120
 src = [ "src" ]
 exclude = [ "docs/" ]
@@ -193,6 +199,3 @@ lint.ignore = [
 ]
 lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
 lint.pydocstyle.convention = "numpy"
-# Preserve types, even if a file imports `from __future__ import annotations`.
-# Necessary for supporting PEP 604 and pydantic with python 3.9
-lint.pyupgrade.keep-runtime-typing = true

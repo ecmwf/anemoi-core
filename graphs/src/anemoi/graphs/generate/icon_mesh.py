@@ -12,7 +12,6 @@ import logging
 import uuid
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Optional
 
 import netCDF4
 import numpy as np
@@ -119,7 +118,7 @@ class BipartiteGraph:
         self,
         nodeset: tuple[NodeSet, NodeSet],
         edge_vertices: np.ndarray,
-        edge_id: Optional[EdgeID] = None,
+        edge_id: EdgeID | None = None,
     ):
         self.nodeset = nodeset
         self.edge_vertices = edge_vertices
@@ -157,7 +156,7 @@ class ICONMultiMesh(GeneralGraph):
     nodeset: NodeSet  # set of ICON grid vertices
     cell_vertices: np.ndarray
 
-    def __init__(self, icon_grid_filename: str, max_level: Optional[int] = None):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None):
 
         # open file, representing the finest level
         LOGGER.debug(f"{type(self).__name__}: read ICON grid file '{icon_grid_filename}'")
@@ -337,8 +336,8 @@ class ICONCellDataGrid(BipartiteGraph):
     def __init__(
         self,
         icon_grid_filename: str,
-        multi_mesh: Optional[ICONMultiMesh] = None,
-        max_level: Optional[int] = None,
+        multi_mesh: ICONMultiMesh | None = None,
+        max_level: int | None = None,
     ):
         # open file, representing the finest level
         LOGGER.debug(f"{type(self).__name__}: read ICON grid file '{icon_grid_filename}'")

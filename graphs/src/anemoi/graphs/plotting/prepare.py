@@ -7,14 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Optional
-
 import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
 
-def node_list(graph: HeteroData, nodes_name: str, mask: Optional[list[bool]] = None) -> tuple[list[float], list[float]]:
+def node_list(graph: HeteroData, nodes_name: str, mask: list[bool] | None = None) -> tuple[list[float], list[float]]:
     """Get the latitude and longitude of the nodes.
 
     Parameters
