@@ -58,7 +58,8 @@ class ForecastingPLModule(BaseGraphPLModule):
         # graph = self.graph_editor.update_graph(self.graph_data, input_latlons, target_latlons)
 
         # run model for one step
-        y_pred = self(input, self.graph_data.clone().to("cpu"))
+
+        y_pred = self(input, self.graph_data.clone().to("cuda" if torch.cuda.is_available() else "cpu"))
 
         assert target.matches_keys(y_pred), (target.keys(), y_pred.keys)
 
