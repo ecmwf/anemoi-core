@@ -26,6 +26,10 @@ NODE_COORDS_NDIMS = 4  # cos_lat, sin_lat, cos_lon, sin_lon
 EDGE_ATTR_NDIM = 3  # edge_length, edge_dir0, edge_dir1
 
 
+INPUT_FIELDS_NAME = "data"
+OUTPUT_FIELDS_NAME = "data"
+
+
 class BaseAnemoiSingleModel(AnemoiMultiModel):
     """Message passing graph neural network."""
 
@@ -121,7 +125,7 @@ class ToyAnemoiSingleModel(BaseAnemoiSingleModel):
 
     def prepare_input(self, x):
         assert len(x) == 1, f"This toy model only supports one input, got {x.keys()}"
-        box = x["input_fields"]
+        box = x[INPUT_FIELDS_NAME]
 
         data = [box["data"] for _, box in x.items()]  # multiple time steps
         data = torch.cat(data, dim=-1)
@@ -130,11 +134,11 @@ class ToyAnemoiSingleModel(BaseAnemoiSingleModel):
 
         new_box = dict(data=data, name_to_index=name_to_index)
 
-        return TreeDict({"input_fields": new_box})
+        return TreeDict({INPUT_FIELDS_NAME: new_box})
 
     def build(self):
-        self.num_input_channels = len(self.input_metadata["input_fields"].first["name_to_index"])
-        self.num_output_channels = len(self.output_metadata["output_fields"].first["name_to_index"])
+        self.num_input_channels = len(self.input_metadata[INPUT_FIELDS_NAME].first["name_to_index"])
+        self.num_output_channels = len(self.output_metadata[OUTPUT_FIELDS_NAME].first["name_to_index"])
 
         self.linear = torch.nn.Linear(self.num_input_channels, self.num_output_channels)
 
@@ -145,13 +149,13 @@ class ToyAnemoiSingleModel(BaseAnemoiSingleModel):
         assert len(x) == 1, (f"This toy model only supports one input, got {x.keys()}", x)
         print(x.to_str("x input to ToyAnemoiSingleModel in forward"))
 
-        data = x["input_fields"]["data"]
+        data = x[INPUT_FIELDS_NAME]["data"]
         data = einops.rearrange(data, "batch variables values -> batch values variables")
 
         pred = self.linear(data)
 
         output = self.output_metadata.new_empty()
-        output["output_fields"] = dict(data=pred)
+        output[OUTPUT_FIELDS_NAME] = dict(data=pred)
         print(output.to_str("output"))
         print("❤️🆗----- End of Forward pass -----")
         return output
