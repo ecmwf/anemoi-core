@@ -1,5 +1,5 @@
-data: ???
-output: ???
+data: null
+output: null
 truncation: null
 logs:
   base: ${hardware.paths.output}logs/

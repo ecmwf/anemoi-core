@@ -21,7 +21,6 @@ from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
-
 LOGGER = logging.getLogger(__name__)
 
 
