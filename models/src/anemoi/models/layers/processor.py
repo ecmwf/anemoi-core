@@ -199,10 +199,11 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         num_chunks: int,
         mlp_extra_layers: int,
         trainable_size: int,
-        src_grid_size: int,
-        dst_grid_size: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        src_grid_size: Optional[int] = None,
+        dst_grid_size: Optional[int] = None,
+        sub_graph: Optional[HeteroData] = None,
+        sub_graph_edge_attributes: Optional[list[str]] = None,
+        edge_dim: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -245,9 +246,15 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        # Initialize graph mode (static or dynamic)
+        self._init_graph_mode(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
 
-        self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        if self.graph_mode == "static":
+            self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        else:
+            assert edge_dim is not None, "Dynamic mode requires edge_dim parameter"
+            self.edge_dim = edge_dim
+            self.trainable = None
 
         kwargs = {
             "mlp_extra_layers": mlp_extra_layers,
@@ -268,12 +275,16 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        edge_index=None,
+        edge_attr=None,
         *args,
         **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-        edge_attr = self.trainable(self.edge_attr, batch_size)
-        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+
+        # Get raw edges (static or dynamic)
+        edge_attr, edge_index = self.get_edges(batch_size, edge_index, edge_attr)
+
         target_nodes = sum(x[0] for x in shape_nodes)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
             target_nodes,
@@ -303,10 +314,10 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         num_heads: int,
         mlp_hidden_ratio: int,
         trainable_size: int,
-        src_grid_size: int,
-        dst_grid_size: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
+        src_grid_size: Optional[int] = None,
+        dst_grid_size: Optional[int] = None,
+        sub_graph: Optional[HeteroData] = None,
+        sub_graph_edge_attributes: Optional[list[str]] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -354,9 +365,14 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        # Initialize graph mode (static or dynamic)
+        self._init_graph_mode(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
 
-        self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        if self.graph_mode == "static":
+            self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        else:
+            assert trainable_size == 0, "Dynamic mode does not support trainable edge parameters"
+            self.trainable = None
 
         self.build_layers(
             GraphTransformerProcessorChunk,
@@ -377,15 +393,17 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        edge_index=None,
+        edge_attr=None,
         *args,
         **kwargs,
     ) -> Tensor:
         size = sum(x[0] for x in shard_shapes)
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-        edge_attr = self.trainable(self.edge_attr, batch_size)
 
-        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+        # Get raw edges (static or dynamic)
+        edge_attr, edge_index = self.get_edges(batch_size, edge_index, edge_attr)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
