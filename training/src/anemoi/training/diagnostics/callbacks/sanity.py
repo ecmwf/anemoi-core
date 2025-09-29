@@ -32,10 +32,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
 
-        if hasattr(trainer.model, "module"):
-           continue
-        else:
-           LOGGER.warning("Dataset order is not being checked")
+        if not hasattr(trainer.model, "module"):
+            LOGGER.warning("Dataset order is not being checked")
+            return
 
         if hasattr(trainer.model.module, "_ckpt_model_name_to_index"):
             self._model_name_to_index = trainer.model.module._ckpt_model_name_to_index
@@ -56,10 +55,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
 
-        if hasattr(trainer.model, "module"): 
-           continue
-        else:
-           LOGGER.warning("Dataset order is not being checked")
+        if not hasattr(trainer.model, "module"):
+            LOGGER.warning("Dataset order is not being checked")
+            return
 
         if hasattr(trainer.model.module, "_ckpt_model_name_to_index"):
             self._model_name_to_index = trainer.model.module._ckpt_model_name_to_index
@@ -80,10 +78,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
 
-        if hasattr(trainer.model, "module"): 
-           continue
-        else:
-           LOGGER.warning("Dataset order is not being checked")
+        if not hasattr(trainer.model, "module"):
+            LOGGER.warning("Dataset order is not being checked")
+            return
 
         if hasattr(trainer.model.module, "_ckpt_model_name_to_index"):
             self._model_name_to_index = trainer.model.module._ckpt_model_name_to_index
