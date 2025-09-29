@@ -112,6 +112,12 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         return hres_grid_indices
 
     @cached_property
+    def supporting_arrays(self) -> dict:
+        return {
+            k: v[1] for k, v in self.ds_train.supporting_arrays.items()
+        }  # | {k: v[1] for k, v in self.grid_indices.supporting_arrays.items()}
+
+    @cached_property
     def ds_valid(self) -> DownscalingDataset:
 
         return self._get_dataset(

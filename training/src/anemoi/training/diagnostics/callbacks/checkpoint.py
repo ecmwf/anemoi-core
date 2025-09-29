@@ -51,8 +51,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
     @staticmethod
     def _torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
         # Get the model from the DataParallel wrapper, for single and multi-gpu cases
-        assert hasattr(trainer, "model"), "Trainer has no attribute 'model'! Is the Pytorch Lightning version correct?"
-        return trainer.model.module.model if hasattr(trainer.model, "module") else trainer.model.model
+        assert hasattr(
+            trainer, "model"
+        ), "Trainer has no attribute 'model'! Is the Pytorch Lightning version correct?"
+        return (
+            trainer.model.module.model
+            if hasattr(trainer.model, "module")
+            else trainer.model.model
+        )
 
     @rank_zero_only
     def model_metadata(self, model: torch.nn.Module) -> dict:
@@ -61,7 +67,9 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         self._model_metadata = {
             "model": model.__class__.__name__,
-            "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+            "trainable_parameters": sum(
+                p.numel() for p in model.parameters() if p.requires_grad
+            ),
             "total_parameters": sum(p.numel() for p in model.parameters()),
             "summary": repr(
                 torchinfo.summary(
@@ -81,10 +89,18 @@ class AnemoiCheckpoint(ModelCheckpoint):
         Since Pytorch Lightning advances one epoch at end of training (on_train-end),
         we need to correct the checkpoint epoch progress to avoid inconsistencies.
         """
-        trainer.fit_loop.epoch_progress.current.processed = trainer.fit_loop.epoch_progress.current.processed - 1
-        trainer.fit_loop.epoch_progress.current.completed = trainer.fit_loop.epoch_progress.current.completed - 1
-        trainer.fit_loop.epoch_progress.total.processed = trainer.fit_loop.epoch_progress.total.processed - 1
-        trainer.fit_loop.epoch_progress.total.completed = trainer.fit_loop.epoch_progress.total.completed - 1
+        trainer.fit_loop.epoch_progress.current.processed = (
+            trainer.fit_loop.epoch_progress.current.processed - 1
+        )
+        trainer.fit_loop.epoch_progress.current.completed = (
+            trainer.fit_loop.epoch_progress.current.completed - 1
+        )
+        trainer.fit_loop.epoch_progress.total.processed = (
+            trainer.fit_loop.epoch_progress.total.processed - 1
+        )
+        trainer.fit_loop.epoch_progress.total.completed = (
+            trainer.fit_loop.epoch_progress.total.completed - 1
+        )
 
     def on_train_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Save the last checkpoint at the end of training.
@@ -94,8 +110,13 @@ class AnemoiCheckpoint(ModelCheckpoint):
         since the monitor candidates won't show any changes with regard the the 'on_train_epoch_end' hook.
         """
         del pl_module
-        if not self._should_skip_saving_checkpoint(trainer) and not self._should_save_on_train_epoch_end(trainer):
-            if trainer.fit_loop.epoch_progress.current.completed == trainer.fit_loop.epoch_progress.current.ready:
+        if not self._should_skip_saving_checkpoint(
+            trainer
+        ) and not self._should_save_on_train_epoch_end(trainer):
+            if (
+                trainer.fit_loop.epoch_progress.current.completed
+                == trainer.fit_loop.epoch_progress.current.ready
+            ):
                 self._adjust_epoch_progress(trainer)
             monitor_candidates = self._monitor_candidates(trainer)
             self._save_topk_checkpoint(trainer, monitor_candidates)
@@ -124,7 +145,11 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
-            mlflow_logger = next(logger for logger in trainer.loggers if isinstance(logger, AnemoiMLflowLogger))
+            mlflow_logger = next(
+                logger
+                for logger in trainer.loggers
+                if isinstance(logger, AnemoiMLflowLogger)
+            )
             run_id = mlflow_logger.run_id
             run = mlflow_logger._mlflow_client.get_run(run_id)
 
@@ -142,13 +167,17 @@ class AnemoiCheckpoint(ModelCheckpoint):
     def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         """Calls the strategy to remove the checkpoint file."""
         super()._remove_checkpoint(trainer, filepath)
-        trainer.strategy.remove_checkpoint(self._get_inference_checkpoint_filepath(filepath))
+        trainer.strategy.remove_checkpoint(
+            self._get_inference_checkpoint_filepath(filepath)
+        )
 
     def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
         """Defines the filepath for the inference checkpoint."""
         return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
 
-    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_train_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
         """Check that model's metadata does not contain Pydantic schemas references."""
         del pl_module
 
@@ -156,7 +185,9 @@ class AnemoiCheckpoint(ModelCheckpoint):
             model = self._torch_drop_down(trainer)
             check_classes(model)
 
-    def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
+    def _save_checkpoint(
+        self, trainer: pl.Trainer, lightning_checkpoint_filepath: str
+    ) -> None:
         if trainer.is_global_zero:
             model = self._torch_drop_down(trainer)
 
@@ -165,8 +196,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
             checkpoint_uuid = str(uuid.uuid4())
             trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
 
-            trainer.lightning_module._hparams["metadata"]["model"] = self.model_metadata(model)
-            trainer.lightning_module._hparams["metadata"]["tracker"] = self.tracker_metadata(trainer)
+            trainer.lightning_module._hparams["metadata"]["model"] = (
+                self.model_metadata(model)
+            )
+            trainer.lightning_module._hparams["metadata"]["tracker"] = (
+                self.tracker_metadata(trainer)
+            )
 
             trainer.lightning_module._hparams["metadata"]["training"] = {
                 "current_epoch": trainer.current_epoch,
@@ -174,7 +209,9 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 "elapsed_time": time.time() - self.start,
             }
 
-            Path(lightning_checkpoint_filepath).parent.mkdir(parents=True, exist_ok=True)
+            Path(lightning_checkpoint_filepath).parent.mkdir(
+                parents=True, exist_ok=True
+            )
 
             save_config = model.config
             model.config = None
@@ -189,11 +226,19 @@ class AnemoiCheckpoint(ModelCheckpoint):
             metadata = tmp_metadata.copy()
             supporting_arrays = tmp_supporting_arrays.copy()
 
-            inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
+            inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(
+                lightning_checkpoint_filepath
+            )
 
             torch.save(model, inference_checkpoint_filepath)
+            from icecream import ic
 
-            save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
+            ic(supporting_arrays)
+            save_metadata(
+                inference_checkpoint_filepath,
+                metadata,
+                supporting_arrays=supporting_arrays,
+            )
 
             model.config = save_config
             model.metadata = tmp_metadata
@@ -225,7 +270,11 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 metadata = model.metadata.copy()
                 supporting_arrays = model.supporting_arrays.copy()
 
-                save_metadata(lightning_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
+                save_metadata(
+                    lightning_checkpoint_filepath,
+                    metadata,
+                    supporting_arrays=supporting_arrays,
+                )
 
             # notify loggers
             for logger in trainer.loggers:
