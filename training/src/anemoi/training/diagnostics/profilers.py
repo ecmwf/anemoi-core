@@ -691,7 +691,6 @@ class ProfilerProgressBar(TQDMProgressBar):
         batch_idx: int,
     ) -> None:
         """Appends the rate from the progress bar to the list of 'training_rates'."""
-        batch_idx + 1
         super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         if self.train_progress_bar.format_dict["n"] != 0:
             self.training_rates.append(self._extract_rate(self.train_progress_bar))
