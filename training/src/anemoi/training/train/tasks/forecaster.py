@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -99,36 +98,6 @@ class GraphForecaster(BaseGraphModule):
             LOGGER.debug("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)
 
-    def on_after_batch_transfer(self, batch: torch.Tensor, dataloader_idx: int) -> torch.Tensor:
-        """Assemble batch after transfer to GPU and apply preprocessing.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Batch to transfer
-        dataloader_idx : int
-            Dataloader index
-
-        Returns
-        -------
-        torch.Tensor
-            Batch after transfer and preprocessing
-        """
-        # First handle batch gathering/sharding from parent class
-        batch = super().on_after_batch_transfer(batch, dataloader_idx)
-
-        # Apply preprocessing (normalization) to the batch
-        batch = self.model.pre_processors(batch)  # normalized in-place
-
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
-
-        return batch
-
     def advance_input(
         self,
         x: torch.Tensor,
@@ -172,7 +141,7 @@ class GraphForecaster(BaseGraphModule):
         Parameters
         ----------
         batch : torch.Tensor
-            Batch to use for rollout (assumed to be already preprocessed)
+            Normalized batch to use for rollout (assumed to be already preprocessed)
         rollout : Optional[int], optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
