@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from hydra.utils import instantiate
 
 if TYPE_CHECKING:
     import torch
@@ -27,8 +28,12 @@ class TorchLoss(FunctionalLoss):
 
     def __init__(self, loss: Callable, ignore_nans: bool = False, **_kwargs) -> None:
         super().__init__(ignore_nans)
-        self.loss = loss
-        self.name = loss.__class__.__name__.lower().replace("loss", "")
+        self.loss = instantiate(loss, reduction="none")
+
+    @property
+    def name(self) -> str:
+        """Used for logging identification purposes."""
+        return self.loss.__class__.__name__.lower()
 
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate the loss.
