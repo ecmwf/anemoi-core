@@ -92,9 +92,9 @@ validation_metrics:
     # other kwargs
     ignore_nans: True
   mse_inside_lam_contribution:
-      _target_: anemoi.training.losses.TorchLoss
-      loss:
-        _target_: torch.nn.MSELoss
+    _target_: anemoi.training.losses.TorchLoss
+    loss:
+      _target_: torch.nn.MSELoss
     scalers: ['limited_area_mask', 'node_weights']
     ignore_nans: True
   mse_outside_lam_contribution:
