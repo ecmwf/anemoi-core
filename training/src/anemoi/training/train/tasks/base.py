@@ -358,8 +358,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        training_mode : bool
-            Whether in training mode
         validation_mode : bool
             Whether in validation mode
 
@@ -475,7 +473,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         Returns
         -------
         tuple[torch.Tensor | None, dict[str, torch.Tensor]]
-            Loss (if training_mode) and metrics dictionary (if validation_mode)
+            Loss and metrics dictionary (if validation_mode)
         """
         # Prepare tensors for loss/metrics computation
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(

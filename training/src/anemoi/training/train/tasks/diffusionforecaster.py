@@ -105,11 +105,40 @@ class GraphDiffusionForecaster(GraphForecaster):
             group=self.model_comm_group,
         )
 
+    def on_after_batch_transfer(self, batch: torch.Tensor, dataloader_idx: int) -> torch.Tensor:
+        """Assemble batch after transfer to GPU and apply preprocessing for ensemble batches.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to transfer (tuple for ensemble)
+        dataloader_idx : int
+            Dataloader index
+
+        Returns
+        -------
+        torch.Tensor
+            Batch after transfer and preprocessing
+        """
+        # First handle batch gathering/sharding from parent class
+        batch = super().on_after_batch_transfer(batch, dataloader_idx)
+
+        # Apply preprocessing (normalization) to the ensemble batch
+        batch = self.model.pre_processors(batch)  # normalized in-place
+
+        # Delayed scalers need to be initialized after the pre-processors once
+        if self.is_first_step:
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
+            self.is_first_step = False
+
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
+
+        return batch
+
     def rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
         """Rollout step for the forecaster.
@@ -123,9 +152,6 @@ class GraphDiffusionForecaster(GraphForecaster):
         rollout : Optional[int], optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -136,15 +162,6 @@ class GraphDiffusionForecaster(GraphForecaster):
             Loss value, metrics, and predictions (per step)
 
         """
-        batch = self.model.pre_processors(batch)  # normalized in-place
-
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
-
         # start rollout of preprocessed batch
         x = batch[
             :,
@@ -187,7 +204,6 @@ class GraphDiffusionForecaster(GraphForecaster):
                 y_pred,
                 y,
                 rollout_step,
-                training_mode,
                 validation_mode,
                 weights=noise_weights,
                 use_reentrant=False,
@@ -248,7 +264,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         rollout_step: int,
-        training_mode: bool = True,
         validation_mode: bool = False,
         y_pred_state: torch.Tensor = None,
         y_state: torch.Tensor = None,
@@ -264,8 +279,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             Target tendencies
         rollout_step : int
             Current rollout step
-        training_mode : bool
-            Whether to compute training loss
         validation_mode : bool
             Whether to compute validation metrics
         y_pred_state : torch.Tensor, optional
@@ -278,25 +291,22 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         Returns
         -------
         tuple[torch.Tensor | None, dict[str, torch.Tensor]]
-            Loss (if training_mode) and metrics dictionary (if validation_mode)
+            Loss and metrics dictionary (if validation_mode)
         """
         # Prepare tendencies for loss computation
         tendency_pred_full, tendency_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,
             y,
-            training_mode,
             validation_mode,
         )
 
-        # Compute loss on tendencies if in training mode
-        loss = None
-        if training_mode:
-            loss = self._compute_loss(
-                y_pred=tendency_pred_full,
-                y=tendency_full,
-                grid_shard_slice=grid_shard_slice,
-                **kwargs,
-            )
+        # Compute loss on tendencies
+        loss = self._compute_loss(
+            y_pred=tendency_pred_full,
+            y=tendency_full,
+            grid_shard_slice=grid_shard_slice,
+            **kwargs,
+        )
 
         # Compute metrics on states if in validation mode
         metrics_next = {}
@@ -321,7 +331,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
         """Rollout step for the tendency-based diffusion forecaster.
@@ -335,9 +344,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         rollout : Optional[int], optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -437,7 +443,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 tendency_pred,
                 tendency_target,
                 rollout_step,
-                training_mode,
                 validation_mode,
                 y_pred,
                 y,
