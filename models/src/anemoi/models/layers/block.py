@@ -71,6 +71,7 @@ class PointWiseMLPProcessorBlock(BaseBlock):
         assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
         layers = [
             layer_kernels.Linear(num_channels, hidden_dim),
+            # This pattern has been proven to produce good results in point-wise models 
             layer_kernels.LayerNorm(hidden_dim),
             layer_kernels.Activation(),
         ]
