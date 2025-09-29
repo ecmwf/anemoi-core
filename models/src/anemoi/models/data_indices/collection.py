@@ -34,20 +34,40 @@ class IndexCollection:
         self.diagnostic = (
             [] if config.data.diagnostic is None else OmegaConf.to_container(config.data.diagnostic, resolve=True)
         )
+        self.target = (
+            [] if config.data.get("target", None) is None else OmegaConf.to_container(config.data.target, resolve=True)
+        )
+        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
+        self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
             f"Diagnostic and forcing variables overlap: {set(self.diagnostic).intersection(self.forcing)}. ",
             "Please drop them at a dataset-level to exclude them from the training data.",
         )
+        assert set(self.diagnostic).isdisjoint(self.target), (
+            f"Diagnostic and target variables overlap: {set(self.diagnostic).intersection(self.target)}. ",
+            "Please drop them at a dataset-level to exclude them from the training data.",
+        )
         name_to_index_model_input = {
-            name: i for i, name in enumerate(key for key in self.name_to_index if key not in self.diagnostic)
+            name: i
+            for i, name in enumerate(key for key in self.name_to_index if key in self.forcing or key in self.prognostic)
         }
         name_to_index_model_output = {
-            name: i for i, name in enumerate(key for key in self.name_to_index if key not in self.forcing)
+            name: i
+            for i, name in enumerate(
+                key for key in self.name_to_index if key in self.prognostic or key in self.diagnostic
+            )
         }
-
-        self.data = DataIndex(self.diagnostic, self.forcing, self.name_to_index)
-        self.model = ModelIndex(self.diagnostic, self.forcing, name_to_index_model_input, name_to_index_model_output)
+        self.data = DataIndex(
+            diagnostic=self.diagnostic, forcing=self.forcing, target=self.target, name_to_index=self.name_to_index
+        )
+        self.model = ModelIndex(
+            diagnostic=self.diagnostic,
+            forcing=self.forcing,
+            target=self.target,
+            name_to_index_model_input=name_to_index_model_input,
+            name_to_index_model_output=name_to_index_model_output,
+        )
 
     def __repr__(self) -> str:
         return f"IndexCollection(config={self.config}, name_to_index={self.name_to_index})"

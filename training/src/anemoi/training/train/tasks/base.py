@@ -527,7 +527,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         pass
@@ -615,7 +614,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return metrics
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _ = self._step(batch, batch_idx)
+        del batch_idx
+
+        train_loss, _, _ = self._step(batch)
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
@@ -657,8 +658,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Batch inces
 
         """
+        del batch_idx
+
         with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
+            val_loss, metrics, y_preds = self._step(batch, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
