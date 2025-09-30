@@ -24,6 +24,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.transform.variables import Variable
 
 
 @pytest.fixture
@@ -107,9 +108,14 @@ def fake_data_no_param() -> tuple[DictConfig, IndexCollection, dict[str, list[fl
 
 
 @pytest.fixture
-def fake_data_variable_groups() -> (
-    tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, list[float]], torch.Tensor]
-):
+def fake_data_variable_groups() -> tuple[
+    DictConfig,
+    IndexCollection,
+    dict[str, list[float]],
+    dict[str, list[float]],
+    dict[str, dict[str, str | int]],
+    torch.Tensor,
+]:
     config = DictConfig(
         {
             "data": {
@@ -119,15 +125,12 @@ def fake_data_variable_groups() -> (
             "training": {
                 "training_loss": {
                     "_target_": "anemoi.training.losses.MSELoss",
-                    "scalers": ["general_variable", "additional_scaler"],
+                    "scalers": ["general_variable", "scaler_l50", "scaler_l"],
                 },
                 "variable_groups": {
                     "default": "sfc",
-                    "l_50": {
-                        "param": ["y"],
-                        "level": [50],
-                    },
-                    "l": ["y"],
+                    "l_50": {"param": ["y"], "level": [50]},
+                    "l": {"param": ["y"], "level": [500, 850]},
                 },
                 "scalers": {
                     "builders": {
@@ -140,7 +143,7 @@ def fake_data_variable_groups() -> (
                         "scaler_l": {
                             "_target_": "anemoi.training.losses.scalers.ReluVariableLevelScaler",
                             "group": "l",
-                            "y_intercept": 1.0,
+                            "y_intercept": 2.0,
                             "slope": 0.0,
                         },
                         "general_variable": {
@@ -164,16 +167,25 @@ def fake_data_variable_groups() -> (
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     expected_scaling = torch.Tensor(
         [
-            1 * 0.0,  # y_50
-            1 * 1.0,  # y_500
-            1 * 1.0,  # y_850
-            1 * 1,  # q
-            1 * 0.1,  # z
-            1 * 100,  # other
-            1 * 1,  # d
+            0 * 0.5,  # y_50
+            2 * 0.5,  # y_500
+            2 * 0.5,  # y_850
+            1,  # q
+            0.1,  # z
+            100,  # other
+            1,  # d
         ],
     )
-    return config, data_indices, statistics, statistics_tendencies, expected_scaling
+    metadata_variables = {
+        "y_50": {"param": "y", "level": 50},
+        "y_500": {"param": "y", "level": 500},
+        "y_850": {"param": "y", "level": 850},
+        "z": {"param": "z"},
+        "q": {"param": "q"},
+        "other": {"param": "other"},
+        "d": {"param": "d"},
+    }
+    return config, data_indices, statistics, statistics_tendencies, metadata_variables, expected_scaling
 
 
 linear_scaler = {
@@ -460,14 +472,18 @@ def test_variable_loss_scaling_val_complex_variable_groups(
         IndexCollection,
         dict[str, list[float]],
         dict[str, list[float]],
+        dict[str, dict | Variable],
         torch.Tensor,
     ],
     graph_with_nodes: HeteroData,
 ) -> None:
-    config, data_indices, statistics, statistics_tendencies, expected_scaling = fake_data_variable_groups
+    config, data_indices, statistics, statistics_tendencies, metadata_variables, expected_scaling = (
+        fake_data_variable_groups
+    )
 
     metadata_extractor = ExtractVariableGroupAndLevel(
         config.training.variable_groups,
+        metadata_variables,
     )
 
     scalers, _ = create_scalers(
