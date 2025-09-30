@@ -66,7 +66,6 @@ class ExtractVariableGroupAndLevel:
         variable_groups: dict[str, GROUP_SPEC | dict[str, GROUP_SPEC]],
         metadata_variables: dict[str, dict | Variable] | None = None,
     ) -> None:
-
         if isinstance(variable_groups, DictConfig):
             variable_groups = OmegaConf.to_container(variable_groups, resolve=True)
 

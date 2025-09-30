@@ -206,6 +206,12 @@ are available.
         is_model_level: True
         param: 'z'
 
+The list of available metadata attributes is:
+
+.. autoclass:: anemoi.transforms.variable.Variable
+   :members:
+   :no-undoc-members:
+
 If metadata is not available, complex variable groups cannot be defined,
 and an error will be raised.
 
