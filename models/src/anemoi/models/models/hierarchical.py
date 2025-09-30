@@ -63,14 +63,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self.multi_step = model_config.training.multistep_input
         num_channels = model_config.model.num_channels
 
-        # hidden_dims is the dimentionality of features at each depth
-        self.hidden_dims = self._calculate_input_dim_latent(num_channels)
-
         # Unpack config for hierarchical graph
         self.level_process = model_config.model.enable_hierarchical_level_processing
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
-        self._calculate_shapes_and_indices(data_indices)
+        self._calculate_shapes_and_indices(data_indices, num_channels)
         self._assert_matching_indices(data_indices)
 
         # build networks
@@ -84,6 +81,16 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
     def _calculate_input_dim_latent(self, num_channels):
         return {hidden: num_channels * (2**i) for i, hidden in enumerate(self._graph_hidden_names)}
+    
+    # Need to overwrite to pass num_channels to _calculate_input_dim_latent
+    def _calculate_shapes_and_indices(self, data_indices: dict, num_channels: int):
+        self.num_input_channels = len(data_indices.model.input)
+        self.num_output_channels = len(data_indices.model.output)
+        self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
+        self._internal_input_idx = data_indices.model.input.prognostic
+        self._internal_output_idx = data_indices.model.output.prognostic
+        self.input_dim = self._calculate_input_dim()
+        self.hidden_dims = self._calculate_input_dim_latent(num_channels)
 
     def _build_networks(self, model_config):
         """Builds the model components."""
