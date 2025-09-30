@@ -283,7 +283,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             y_pred_state_full, y_state_full, grid_shard_slice_metrics = self._prepare_tensors_for_loss(
                 y_pred_state,
                 y_state,
-                False,
                 validation_mode,
             )
             metrics_next = self._compute_metrics(
