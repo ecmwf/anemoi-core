@@ -46,7 +46,7 @@ from pytorch_lightning.loggers.mlflow import _convert_params
 
 from anemoi.training.diagnostics.mlflow import LOG_MODEL
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
-from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
+from anemoi.training.diagnostics.mlflow.logger import BaseAnemoiMLflowLogger
 from anemoi.utils.mlflow.auth import NoAuth
 
 LOGGER = logging.getLogger(__name__)
@@ -116,7 +116,7 @@ def get_azure_workspace(
     return ws
 
 
-class AnemoiAzureMLflowLogger(AnemoiMLflowLogger):
+class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
     """A custom MLflow logger that logs terminal output."""
 
     def __init__(
