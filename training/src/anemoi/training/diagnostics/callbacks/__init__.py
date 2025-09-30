@@ -25,6 +25,7 @@ from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAver
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.utils.checkpoint import RegisterMigrations
 
 LOGGER = logging.getLogger(__name__)
 
@@ -191,10 +192,12 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     # Parent UUID callback
     # Check variable order callback
+    # Register Migrations callback
     trainer_callbacks.extend(
         (
             ParentUUIDCallback(config),
             CheckVariableOrder(),
+            RegisterMigrations(),
         ),
     )
 

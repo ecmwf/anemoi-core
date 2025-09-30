@@ -118,6 +118,7 @@ class GraphForecaster(BaseGraphModule):
             x[:, -1],
             batch[:, self.multi_step + rollout_step],
             self.data_indices,
+            grid_shard_slice=self.grid_shard_slice,
         )
 
         # get new "constants" needed for time-varying fields
@@ -206,10 +207,8 @@ class GraphForecaster(BaseGraphModule):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        del batch_idx
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
