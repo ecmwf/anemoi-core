@@ -81,7 +81,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
     def _calculate_input_dim_latent(self, num_channels):
         return {hidden: num_channels * (2**i) for i, hidden in enumerate(self._graph_hidden_names)}
-    
+
     # Need to overwrite to pass num_channels to _calculate_input_dim_latent
     def _calculate_shapes_and_indices(self, data_indices: dict, num_channels: int):
         self.num_input_channels = len(data_indices.model.input)
