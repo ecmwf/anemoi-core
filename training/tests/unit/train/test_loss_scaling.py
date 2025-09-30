@@ -456,7 +456,7 @@ def test_variable_masking(
 
 def test_variable_loss_scaling_val_complex_variable_groups(
     fake_data_variable_groups: tuple[
-        DictConfig, IndexCollection, dict[str, list[float]], dict[str, list[float]], torch.Tensor
+        DictConfig, IndexCollection, dict[str, list[float]], dict[str, list[float]], torch.Tensor,
     ],
     graph_with_nodes: HeteroData,
 ) -> None:
