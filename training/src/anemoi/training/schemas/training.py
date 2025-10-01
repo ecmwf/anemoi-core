@@ -214,12 +214,8 @@ ScalerSchema = (
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
     kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
-    rmse = "anemoi.training.losses.RMSELoss"
-    mse = "anemoi.training.losses.MSELoss"
     weighted_mse = "anemoi.training.losses.WeightedMSELoss"
-    mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
-    huber = "anemoi.training.losses.HuberLoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -243,10 +239,21 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 
+class TorchLossesUsingBaseSchema(str, Enum):
+    mse = "torch.nn.MSELoss"
+    mae = "torch.nn.L1Loss"
+    huber = "torch.nn.HuberLoss"
+    smoothl1 = "torch.nn.SmoothL1Loss"
 
-class HuberLossSchema(BaseLossSchema):
-    delta: float = 1.0
-    "Threshold for Huber loss."
+
+class TorchLossSchema(BaseModel):
+    target_: TorchLossesUsingBaseSchema = Field(..., alias="_target_")
+
+
+class BaseTorchLossSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.TorchLoss"] = Field(..., alias="_target_")
+    loss: BaseTorchLossSchema
+    "Loss function from torch.nn, e.g. MSELoss, L1Loss, etc."
 
 
 class CombinedLossSchema(BaseLossSchema):
