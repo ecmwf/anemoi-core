@@ -24,14 +24,14 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import gather_shard_shapes
-from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
+class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     """Diffusion Model."""
 
     def __init__(
@@ -64,6 +64,44 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
+
+    def _build_networks(self, model_config: DotDict) -> None:
+        """Builds the model components."""
+
+        # Encoder data -> hidden
+        self.encoder = instantiate(
+            model_config.model.encoder,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            in_channels_src=self.input_dim,
+            in_channels_dst=self.input_dim_latent,
+            hidden_dim=self.num_channels,
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+        )
+
+        # Processor hidden -> hidden
+        self.processor = instantiate(
+            model_config.model.processor,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            num_channels=self.num_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+        )
+
+        # Decoder hidden -> data
+        self.decoder = instantiate(
+            model_config.model.decoder,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            in_channels_src=self.num_channels,
+            in_channels_dst=self.input_dim,
+            hidden_dim=self.num_channels,
+            out_channels_dst=self.num_output_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+        )
 
     def _calculate_input_dim(self):
         base_input_dim = super()._calculate_input_dim()
