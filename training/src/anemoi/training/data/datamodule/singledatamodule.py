@@ -18,7 +18,7 @@ from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 from torch_geometric.data import HeteroData
 
-from anemoi.datasets.data import open_dataset
+from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset.multidataset import MultiDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
