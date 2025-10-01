@@ -13,18 +13,35 @@ import logging
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.training.losses.mse import MSELoss
+from anemoi.training.losses.base import FunctionalLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class WeightedMSELoss(MSELoss):
+class WeightedMSELoss(FunctionalLoss):
     """Weighted MSE loss for use with diffusion models.
 
     This loss applies weights to the MSE difference
     """
 
     name: str = "weighted_mse"
+
+    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calculate the MSE loss.
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            Prediction tensor, shape (bs, ensemble, gridpoints, n_outputs)
+        target : torch.Tensor
+            Target tensor, shape (bs, ensemble, gridpoints, n_outputs)
+
+        Returns
+        -------
+        torch.Tensor
+            MSE loss
+        """
+        return torch.square(pred - target)
 
     def forward(
         self,
