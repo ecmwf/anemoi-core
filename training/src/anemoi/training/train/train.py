@@ -105,9 +105,7 @@ class AnemoiTrainer:
             self.graph_data,
         )
         # Multi-dataset case: store num_features per dataset
-        self.config.data.num_features = {
-            name: len(data.variables) for name, data in datamodule.ds_train.data.items()
-        }
+        self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
         for name, data in datamodule.ds_train.data.items():
             LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
@@ -261,7 +259,9 @@ class AnemoiTrainer:
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
-            self.data_indices.compare_variables(model._ckpt_model_name_to_index, self.data_indices.name_to_index) # todo for multi dataset
+            self.data_indices.compare_variables(
+                model._ckpt_model_name_to_index, self.data_indices.name_to_index,
+            )  # TODO for multi dataset
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
