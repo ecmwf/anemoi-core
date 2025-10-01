@@ -34,7 +34,7 @@ class TorchLoss(FunctionalLoss):
     @property
     def name(self) -> str:
         """Used for logging identification purposes."""
-        return self.loss.__class__.__name__.lower()
+        return self.loss.__class__.__name__.lower().replace("loss", "")
 
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate the loss.

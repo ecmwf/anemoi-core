@@ -8,12 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 from .combined import CombinedLoss
-from .huber import HuberLoss
 from .kcrps import AlmostFairKernelCRPS
 from .kcrps import KernelCRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
-from .mae import MAELoss
 from .mse import MSELoss
 from .rmse import RMSELoss
 from .torch import TorchLoss
@@ -22,10 +20,8 @@ from .weighted_mse import WeightedMSELoss
 __all__ = [
     "AlmostFairKernelCRPS",
     "CombinedLoss",
-    "HuberLoss",
     "KernelCRPS",
     "LogCoshLoss",
-    "MAELoss",
     "MSELoss",
     "RMSELoss",
     "TorchLoss",
