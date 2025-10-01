@@ -112,9 +112,7 @@ class AnemoiModelEncProcDec(nn.Module):
 
         # Processor hidden -> hidden (shared across all datasets)
         first_dataset_name = next(iter(self._graph_data.keys()))
-        processor_graph = self._graph_data[first_dataset_name][
-            (self._graph_name_hidden, "to", self._graph_name_hidden)
-        ]
+        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
         processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
 
         self.processor = instantiate(

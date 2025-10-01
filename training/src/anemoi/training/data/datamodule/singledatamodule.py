@@ -18,7 +18,7 @@ from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 from torch_geometric.data import HeteroData
 
-from anemoi.datasets.data import open_dataset
+from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset.multidataset import MultiDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
@@ -61,15 +61,21 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         # Set training end dates if not specified for each dataset
         for name, dataset_config in self.config.dataloader.training.datasets.items():
             if dataset_config.end is None:
-                LOGGER.info(
-                    "No end date specified for training dataset '%s', setting default before validation start date %s.",
-                    name,
-                    self.config.dataloader.validation.start - 1,
-                )
-                dataset_config.end = self.config.dataloader.validation.start - 1
+                msg = f"No end date specified for training dataset {name}."
+                raise ValueError(msg)
 
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
+
+        if self.config.training.get("rollout", {}).get("max") is not None:
+            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
+            mr_len = self.config.dataloader.model_run_info.length
+            if max_rollout_index >= mr_len:
+                msg = (
+                    f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}. "
+                    "Please adjust the training rollout max or model run length.",
+                )
+                raise ValueError(msg)
 
     @cached_property
     def statistics(self) -> dict:
