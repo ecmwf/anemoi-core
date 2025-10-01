@@ -165,6 +165,15 @@ def fake_data_variable_groups() -> tuple[
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
+    metadata_variables = {
+        "y_50": {"mars": {"param": "y", "levelist": 50}},
+        "y_500": {"mars": {"param": "y", "levelist": 500}},
+        "y_850": {"mars": {"param": "y", "levelist": 850}},
+        "z": {"mars": {"param": "z"}},
+        "q": {"mars": {"param": "q"}},
+        "other": {"mars": {"param": "other"}},
+        "d": {"mars": {"param": "d"}},
+    }
     expected_scaling = torch.Tensor(
         [
             0 * 0.5,  # y_50
@@ -176,15 +185,6 @@ def fake_data_variable_groups() -> tuple[
             1,  # d
         ],
     )
-    metadata_variables = {
-        "y_50": {"param": "y", "level": 50},
-        "y_500": {"param": "y", "level": 500},
-        "y_850": {"param": "y", "level": 850},
-        "z": {"param": "z"},
-        "q": {"param": "q"},
-        "other": {"param": "other"},
-        "d": {"param": "d"},
-    }
     return config, data_indices, statistics, statistics_tendencies, metadata_variables, expected_scaling
 
 
