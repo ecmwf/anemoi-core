@@ -208,37 +208,22 @@ are available.
 
 The list of available metadata attributes is:
 
--  ``is_pressure_level``: Check if the variable is a pressure level.
-
--  ``is_model_level``: Check if the variable is a pressure level.
-
--  ``is_surface_level``: Check if the variable is on the surface.
-
--  ``level``: Get the level of the variable.
-
--  ``is_constant_in_time``: Check if the variable is constant in time.
-
--  ``is_instantanous``: Check if the variable is instantaneous.
-
--  ``is_valid_over_a_period``: Check if the variable is valid over a
-   period.
-
--  ``time_processing``: Get the time processing type of the variable.
-
--  ``period``: Get the variable's period as a timedelta. For
-   instantaneous variables, returns a timedelta of 0. For
-   non-instantaneous variables, returns `None` if this information is
-   missing.
-
--  ``is_accumulation``: Check if the variable is an accumulation.
-
--  ``param``: Get the parameter name of the variable.
-
--  ``grib_keys``: Get the GRIB keys for the variable.
-
--  ``is_computed_forcing``: Check if the variable is a computed forcing.
-
--  ``is_from_input``: Check if the variable is from input.
+-  ``is_pressure_level``: whether the variable is a pressure level,
+-  ``is_model_level``: whether the variable is a model level,
+-  ``is_surface_level``: whether the variable is on the surface,
+-  ``level``: the level of the variable,
+-  ``is_constant_in_time``: whether the variable is constant in time,
+-  ``is_instantanous``: whether the variable is instantaneous,
+-  ``is_valid_over_a_period``: whether the variable is valid over a
+   period,
+-  ``time_processing``: the time processing type of the variable,
+-  ``period``: the variable's period as a timedelta,
+-  ``is_accumulation``: whether the variable is an accumulation,
+-  ``param``: the parameter name of the variable,
+-  ``grib_keys``: the GRIB keys for the variable,
+-  ``is_computed_forcing``: whether if the variable is a computed
+   forcing,
+-  ``is_from_input``: whether the variable is from input.
 
 If metadata is not available, complex variable groups cannot be defined,
 and an error will be raised.
