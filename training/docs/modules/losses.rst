@@ -225,6 +225,22 @@ The list of available metadata attributes is:
    forcing,
 -  ``is_from_input``: whether the variable is from input.
 
+For example, to set a different scaler coefficient for a particular
+level, several groups can be defined:
+
+.. code:: yaml
+
+   variable_groups:
+     default: sfc
+     pl:
+        is_pressure_level: True
+     l_50:
+        param: ["z"]
+        level: [50]
+     l:
+        param: ["z"]
+        level: [100, 150]
+
 If metadata is not available, complex variable groups cannot be defined,
 and an error will be raised.
 
