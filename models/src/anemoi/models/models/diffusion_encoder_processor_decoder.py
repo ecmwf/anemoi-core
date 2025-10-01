@@ -23,7 +23,9 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import gather_shard_shapes
+from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -117,7 +119,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = gather_shard_shapes(
+            shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
@@ -131,7 +133,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = gather_shard_shapes(
+        shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
@@ -203,8 +205,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         # prepare noise conditionings
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
-        shape_c_data = gather_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
-        shape_c_hidden = gather_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
+        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
+        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
 
         c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
         c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
@@ -217,7 +219,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             x, y_noised, bse, grid_shard_shapes, model_comm_group
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_shapes_hidden = gather_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
@@ -317,7 +319,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         grid_shard_shapes = None
         if model_comm_group is not None:
-            shard_shapes = gather_shard_shapes(x, -2, model_comm_group=model_comm_group)
+            shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
         x = pre_processors(x, in_place=False)
@@ -362,7 +364,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         if gather_out and model_comm_group is not None:
             out = gather_tensor(
-                out, -2, gather_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
+                out, -2, apply_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
             )
 
         return out
@@ -579,7 +581,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         # Shard node attributes if grid sharding is enabled
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = gather_shard_shapes(
+            shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
@@ -594,7 +596,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = gather_shard_shapes(
+        shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
@@ -748,10 +750,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         grid_shard_shapes = None
         if model_comm_group is not None:
-            shard_shapes = gather_shard_shapes(x, -2, model_comm_group=model_comm_group)
+            shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-            shard_shapes = gather_shard_shapes(x_t0, -2, model_comm_group=model_comm_group)
+            shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group=model_comm_group)
             x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
 
         x = pre_processors(x, in_place=False)
@@ -794,7 +796,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         # Gather if needed
         if gather_out and model_comm_group is not None:
             out = gather_tensor(
-                out, -2, gather_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
+                out, -2, apply_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
             )
 
         return out

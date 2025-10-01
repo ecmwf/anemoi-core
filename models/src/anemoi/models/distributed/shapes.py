@@ -40,7 +40,7 @@ def apply_shard_shapes(tensor: Tensor, dim: int, shard_shapes_dim: list) -> list
     return shard_shapes
 
 
-def gather_shard_shapes(x, dim=0, shard_shapes_dim: int = None, model_comm_group: Optional[ProcessGroup] = None):
+def get_or_apply_shard_shapes(x, dim=0, shard_shapes_dim: int = None, model_comm_group: Optional[ProcessGroup] = None):
     if shard_shapes_dim is None:
         return get_shard_shapes(x, dim, model_comm_group)
     else:

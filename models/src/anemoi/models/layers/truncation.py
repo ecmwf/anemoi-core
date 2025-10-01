@@ -14,7 +14,7 @@ import torch
 
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
-from anemoi.models.distributed.shapes import gather_shard_shapes
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -165,7 +165,7 @@ class BaseTruncation:
         """
         if self.A_down is not None or self.A_up is not None:
             if grid_shard_shapes is not None:
-                shard_shapes = gather_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
+                shard_shapes = get_or_apply_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
                 # grid-sharded input: reshard to channel-shards to apply truncation
                 x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
 

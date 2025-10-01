@@ -20,7 +20,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import gather_shard_shapes
+from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.truncation import BaseTruncation
@@ -214,7 +214,7 @@ class BaseGraphModel(nn.Module):
             # Handle distributed processing
             grid_shard_shapes = None
             if model_comm_group is not None:
-                shard_shapes = gather_shard_shapes(x, -2, model_comm_group=model_comm_group)
+                shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
                 grid_shard_shapes = [shape[-2] for shape in shard_shapes]
                 x = shard_tensor(x, -2, shard_shapes, model_comm_group)
 

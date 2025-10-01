@@ -18,7 +18,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import gather_shard_shapes
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
+from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -65,7 +66,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = gather_shard_shapes(
+            shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
@@ -83,7 +84,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             (x_data_latent, torch.ones(x_data_latent.shape[:-1], device=x_data_latent.device).unsqueeze(-1) * fcstep),
             dim=-1,
         )
-        shard_shapes_data = gather_shard_shapes(
+        shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
@@ -141,7 +142,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x, fcstep, bse, grid_shard_shapes, model_comm_group
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=bse)
-        shard_shapes_hidden = gather_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),

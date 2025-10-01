@@ -17,7 +17,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.shapes import gather_shard_shapes
+from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.truncation import BaseTruncation
@@ -233,7 +233,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Get data and hidden shapes for sharding
         shard_shapes_hiddens = {}
         for hidden, x_latent in x_hidden_latents.items():
-            shard_shapes_hiddens[hidden] = gather_shard_shapes(x_latent, 0, model_comm_group=model_comm_group)
+            shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group=model_comm_group)
 
         # Run encoder
         x_data_latent, curr_latent = self.encoder(
