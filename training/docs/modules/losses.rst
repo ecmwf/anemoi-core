@@ -234,12 +234,11 @@ level, several groups can be defined:
      default: sfc
      pl:
         is_pressure_level: True
-     l_50:
+     l_50:  # this needs to come first to take priority
         param: ["z"]
         level: [50]
      l:
         param: ["z"]
-        level: [100, 150]
 
 If metadata is not available, complex variable groups cannot be defined,
 and an error will be raised.
