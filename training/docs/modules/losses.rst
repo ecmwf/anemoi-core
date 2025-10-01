@@ -17,20 +17,28 @@ scaler multiplication, and graph node weighting.
  Deterministic Loss Functions
 ******************************
 
-By default anemoi-training trains the model using a latitude-weighted
-mean-squared-error, which is defined in the ``WeightedMSELoss`` class in
+By default anemoi-training trains the model using a mean-squared-error,
+which is defined in the ``MSELoss`` class in
 ``anemoi/training/losses/mse.py``. The loss function can be configured
 in the config file at ``config.training.training_loss``, and
 ``config.training.validation_metrics``.
 
 The following loss functions are available by default:
 
--  ``WeightedMSELoss``: Latitude-weighted mean-squared-error.
--  ``WeightedMAELoss``: Latitude-weighted mean-absolute-error.
--  ``WeightedHuberLoss``: Latitude-weighted Huber loss.
--  ``WeightedLogCoshLoss``: Latitude-weighted log-cosh loss.
--  ``WeightedRMSELoss``: Latitude-weighted root-mean-squared-error.
+-  ``MSELoss``: mean-squared-error.
+-  ``RMSELoss``: root mean-squared-error.
+-  ``MAELoss``: mean-absolute-error.
+-  ``HuberLoss``: Huber loss.
+-  ``LogCoshLoss``: log-cosh loss.
 -  ``CombinedLoss``: Combined component weighted loss.
+
+All the above losses by default are averaged across the grid nodes,
+ensemble dimension and batch size. Losses can also consider specific
+weighting either spatial, vertical or specific to the variables used.
+Those weights are defined via `scalers`. For example spatial scaling
+based on the area of the nodes needs is done using the ``node_weights``
+as a scaler. For more details on the loss function scaling please refer
+to :ref:`loss-function-scaling`.
 
 These are available in the ``anemoi.training.losses`` module, at
 ``anemoi.training.losses.{short_name}.{class_name}``.
@@ -55,6 +63,8 @@ The following probabilistic loss functions are available by default:
 -  ``KernelCRPSLoss``: Kernel CRPS loss.
 -  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
    et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+-  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
+   handle noise weights
 
 The config for these loss functions is the same as for the
 deterministic:

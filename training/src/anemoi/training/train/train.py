@@ -36,6 +36,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import mark_for_compilation
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -106,7 +107,7 @@ class AnemoiTrainer:
         )
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
-        LOGGER.debug("Variables: %s", str(datamodule.ds_train.data.variables))
+        LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
         return datamodule
 
     @cached_property
@@ -128,7 +129,7 @@ class AnemoiTrainer:
         rnd_seed = pl.seed_everything(initial_seed, workers=True)
         np_rng = np.random.default_rng(rnd_seed)
         (torch.rand(1), np_rng.random())
-        LOGGER.debug(
+        LOGGER.info(
             "Initial seed: Rank %d, initial seed %d, running with random seed: %d",
             self.strategy.global_rank,
             initial_seed,
@@ -149,10 +150,9 @@ class AnemoiTrainer:
             )
 
             if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
 
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+                return torch.load(graph_filename, map_location="cuda:0", weights_only=False)
 
         else:
             graph_filename = None
@@ -182,16 +182,6 @@ class AnemoiTrainer:
             )
 
         return truncation_data
-
-    def set_compile_flags(self, model, compile_class_paths):
-        from hydra.utils import get_class
-
-        # Convert class paths to actual classes
-        compile_classes = [get_class(path) for path in compile_class_paths]
-
-        for module in model.modules():
-            if type(module) in compile_classes:
-                module.compile = True
 
     @cached_property
     def model(self) -> pl.LightningModule:
@@ -249,9 +239,6 @@ class AnemoiTrainer:
             for submodule_name in self.config.training.submodules_to_freeze:
                 freeze_submodule_by_name(model, submodule_name)
                 LOGGER.info("%s frozen successfully.", submodule_name.upper())
-
-        if hasattr(self.config.model, "compile"):
-            self.set_compile_flags(model, self.config.model.compile)
 
         return model
 
@@ -422,8 +409,8 @@ class AnemoiTrainer:
     def _log_information(self) -> None:
         # Log number of variables (features)
         num_fc_features = len(self.datamodule.ds_train.data.variables) - len(self.config.data.forcing)
-        LOGGER.debug("Total number of prognostic variables: %d", num_fc_features)
-        LOGGER.debug("Total number of auxiliary variables: %d", len(self.config.data.forcing))
+        LOGGER.info("Total number of prognostic variables: %d", num_fc_features)
+        LOGGER.info("Total number of auxiliary variables: %d", len(self.config.data.forcing))
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
         total_number_of_model_instances = (
@@ -432,11 +419,11 @@ class AnemoiTrainer:
             / self.config.hardware.num_gpus_per_model
         )
 
-        LOGGER.debug(
+        LOGGER.info(
             "Total GPU count / model group size: %d - NB: the learning rate will be scaled by this factor!",
             total_number_of_model_instances,
         )
-        LOGGER.debug(
+        LOGGER.info(
             "Effective learning rate: %.3e",
             int(total_number_of_model_instances) * self.config.training.lr.rate,
         )
@@ -532,7 +519,11 @@ class AnemoiTrainer:
             use_distributed_sampler=False,
             profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
+            check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
+
+        if hasattr(self.config.model, "compile"):
+            self.model = mark_for_compilation(self.model, self.config.model.compile)
 
         LOGGER.debug("Starting training..")
 

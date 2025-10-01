@@ -21,7 +21,6 @@ from torch_geometric.typing import Size
 from torch_geometric.utils import scatter
 from torch_geometric.utils import softmax
 
-from anemoi.models.compile.decorators import torch_compile
 from anemoi.models.layers.mlp import MLP
 from anemoi.utils.config import DotDict
 
@@ -79,7 +78,6 @@ class GraphConv(MessagePassing):
         return out, edges_new
 
 
-@torch_compile()
 class GraphTransformerConv(MessagePassing):
     """Message passing part of graph transformer operator.
 

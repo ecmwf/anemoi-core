@@ -98,43 +98,14 @@ class ProfilerWrapper(nn.Module):
     def __init__(self, module: nn.Module, marker: str) -> None:
         super().__init__()
         self.module = module
-        #self.marker=module.__class__.__name__
         self.marker=marker
         self.enabled=True
-        
-        # Register backward hook for profiling backward pass
-        #self.register_full_backward_hook(self._backward_hook)
-        self.register_full_backward_pre_hook(self._backward_pre_hook)
 
     def forward(self, *args, **kwargs):
         #print(f"{args=}, {kwargs=}")
-        if(self.enabled):
-            cuda.nvtx.range_push(self.marker)
         #tracing_marker=marker.split('- ')[1].split(', input')[0]
         with torch.autograd.profiler.record_function("anemoi-"+self.marker):
             out = self.module(*args, **kwargs)
-        if(self.enabled):
-            cuda.nvtx.range_pop()
         return out
     
-    def _backward_pre_hook(self, module, grad_output):
-        """Hook function called before the backward pass"""
-
-        #pop any existing ranges
-        cuda.nvtx.range_pop()
-        cuda.nvtx.range_push(f"{self.marker}_backward")
-        
         return grad_output  # Return unchanged gradients
-
-@contextmanager
-def nvtx_wrapper(marker, enabled=True, blocking=True):
-    if(enabled):
-        cuda.nvtx.range_push(marker)
-       # if(blocking):
-           # torch.cuda.synchronize()
-        #if blocking and 'CUDA_LAUNCH_BLOCKING' not in os.environ:
-           # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
-    yield
-    if(enabled):
-        cuda.nvtx.range_pop()

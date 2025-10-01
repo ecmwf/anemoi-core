@@ -10,6 +10,7 @@ anemoi-training:
 #. Deterministic Forecasting (GraphForecaster)
 #. Ensemble Forecasting (GraphEnsForecaster)
 #. Time Interpolation (GraphInterpolator)
+#. Diffusion-based Forecasting (GraphDiffusionForecaster)
 
 The model tasks specify the training objective and are specified in the
 configuration through ``training.model_task``. They are our
@@ -35,7 +36,7 @@ For detailed instructions on creating models, see the
 .. note::
 
    Currently, the GNN model type is not supported with the Ensemble
-   Forecasting model task.
+   Forecasting model task and the Diffusion Forecasting model task.
 
 ************
  Processors
@@ -172,4 +173,49 @@ configuration:
       ensemble_size_per_device: 4
 
 This determines how many ensemble members are generated per device
-during training.
+during training. Effective ensemble size is then the number of ensemble
+members per device times the number of GPUs per ensemble.
+
+*************
+ Compilation
+*************
+
+PyTorch supports JIT-compiliation of code. This can speed up execution
+and reduce peak memory usage. For more information, consult `the
+introduction to torch.compile
+<https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>`__
+and `the official documentation
+<https://docs.pytorch.org/docs/stable/generated/torch.compile.html>`__.
+
+Compilation requires Triton. Normally Triton is pulled in as a
+dependancy when PyTorch is installed. Otherwise, Triton can be `built
+from source
+<https://github.com/triton-lang/triton?tab=readme-ov-file#install-from-source>`__
+. Compilation requires torch >= 2.6 and torch_geometric >= 2.6. If these
+versions are not met, or if Triton is not installed, then anemoi will
+run without compilation.
+
+Anemoi exposes 'torch.compile' at the module level through the model
+config. Below is an example:
+
+.. code:: yaml
+
+   #training/config/models/transformer_ens.yaml
+   compile:
+   - module: anemoi.models.layers.conv.GraphTransformerConv
+     options:
+       dynamic: false
+       mode: max-autotune
+   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+     options:
+       dynamic: false
+
+Under the 'compile' keyword, you provide a list of modules. These
+modules will be marked for compilation when the model is built. During
+their first forward pass, these modules will be compiled. No code
+modifications are required.
+
+You can optionally pass options to torch compile via the 'options'
+keyword. A full list of the possible options and their meanings can be
+found in the `torch.compile documentation
+<https://docs.pytorch.org/docs/stable/generated/torch.compile.html>`__.
