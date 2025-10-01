@@ -36,7 +36,10 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
             },
             "training": {
                 "training_loss": {
-                    "_target_": "anemoi.training.losses.MSELoss",
+                    "_target_": "anemoi.training.losses.TorchLoss",
+                    "loss": {
+                        "_target_": "torch.nn.MSELoss",
+                    },
                     "scalers": ["general_variable", "additional_scaler"],
                 },
                 "variable_groups": {
@@ -78,7 +81,10 @@ def fake_data_no_param() -> tuple[DictConfig, IndexCollection]:
             },
             "training": {
                 "training_loss": {
-                    "_target_": "anemoi.training.losses.MSELoss",
+                    "_target_": "anemoi.training.losses.TorchLoss",
+                    "loss": {
+                        "_target_": "torch.nn.MSELoss",
+                    },
                     "scalers": ["variable_masking"],
                 },
                 "variable_groups": {
