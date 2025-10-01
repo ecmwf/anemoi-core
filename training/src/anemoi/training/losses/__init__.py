@@ -13,7 +13,6 @@ from .kcrps import KernelCRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
 from .mse import MSELoss
-from .rmse import RMSELoss
 from .torch import TorchLoss
 from .weighted_mse import WeightedMSELoss
 
@@ -23,7 +22,6 @@ __all__ = [
     "KernelCRPS",
     "LogCoshLoss",
     "MSELoss",
-    "RMSELoss",
     "TorchLoss",
     "WeightedMSELoss",
     "get_loss_function",
