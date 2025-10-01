@@ -253,7 +253,7 @@ class TorchLossSchema(BaseModel):
 
 class BaseTorchLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.TorchLoss"] = Field(..., alias="_target_")
-    loss: BaseTorchLossSchema
+    loss: TorchLossSchema
     "Loss function from torch.nn, e.g. MSELoss, L1Loss, etc."
 
 
