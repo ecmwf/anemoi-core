@@ -10,6 +10,7 @@
 
 import datetime
 import logging
+import os
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,33 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
+
+if "TMP_ANEMOI_DEV_DEBUG" in os.environ:
+    from hydra.utils import instantiate as hydra_instantiate
+
+    def instanciate_wrapper(config: Any, *args, **kwargs) -> Any:
+        config_keys = "+".join(k for k in config if k != "_target_")
+        try:
+            target = config._target_
+        except Exception as e:  # noqa
+            target = "<no _target_>"
+        try:
+            return hydra_instantiate(config, *args, **kwargs)
+        except Exception as e:  # noqa
+            config_keys = str(target) + "+" + config_keys
+            def show_if_dict(v):
+                if hasattr(v, "keys"): # must be a dict
+                    return v.__class__.__name__ + f"({'+'.join(v.keys())})"
+                else:
+                    return v.__class__.__name__
+            _args = ",".join(show_if_dict(a) for a in args)
+            _kwargs = ",".join(f"{k}={show_if_dict(v)}" for k, v in kwargs.items())
+            e.add_note(f"This exception happend when doing instanciate for config: {config}")
+            e.add_note(f"🆕 instanciate({config_keys},{_args},{_kwargs})")
+            raise e
+
+    hydra.utils.instantiate = instanciate_wrapper
+    instantiate = hydra.utils.instantiate
 
 
 class AnemoiTrainer:
@@ -260,8 +288,9 @@ class AnemoiTrainer:
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
             self.data_indices.compare_variables(
-                model._ckpt_model_name_to_index, self.data_indices.name_to_index,
-            )  # TODO for multi dataset
+                model._ckpt_model_name_to_index,
+                self.data_indices.name_to_index,
+            )  # T_O_D_O_: for multi dataset
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
