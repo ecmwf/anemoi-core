@@ -54,13 +54,14 @@ if "TMP_ANEMOI_DEV_DEBUG" in os.environ:
             target = "<no _target_>"
         try:
             return hydra_instantiate(config, *args, **kwargs)
-        except Exception as e:  # noqa
+        except Exception as e:
             config_keys = str(target) + "+" + config_keys
+
             def show_if_dict(v):
-                if hasattr(v, "keys"): # must be a dict
+                if hasattr(v, "keys"):  # must be a dict
                     return v.__class__.__name__ + f"({'+'.join(v.keys())})"
-                else:
-                    return v.__class__.__name__
+                return v.__class__.__name__
+
             _args = ",".join(show_if_dict(a) for a in args)
             _kwargs = ",".join(f"{k}={show_if_dict(v)}" for k, v in kwargs.items())
             e.add_note(f"This exception happend when doing instanciate for config: {config}")
