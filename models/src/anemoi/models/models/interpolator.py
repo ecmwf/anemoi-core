@@ -148,7 +148,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         shard_shapes_hidden = gather_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
         # Run encoder
-        x_data_latent, x_latent = self.encoder._run_mapper(
+        x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -170,7 +170,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         # Run decoder
-        x_out = self.decoder._run_mapper(
+        x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),

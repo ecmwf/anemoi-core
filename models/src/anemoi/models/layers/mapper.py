@@ -108,57 +108,6 @@ class BaseMapper(nn.Module, ABC):
         """Post-processing for the mapper."""
         return x_dst
 
-    def _run_mapper(
-        self,
-        data: tuple[Tensor],
-        batch_size: int,
-        shard_shapes: tuple[tuple[int, int], tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
-        keep_x_dst_sharded: bool = False,
-        use_reentrant: bool = False,
-        **kwargs,
-    ) -> Tensor:
-        """Run mapper with activation checkpoint.
-
-        Parameters
-        ----------
-        data : tuple[Tensor]
-            tuple of data to pass in
-        batch_size: int,
-            Batch size
-        shard_shapes : tuple[tuple[int, int], tuple[int, int]]
-            Shard shapes for the data
-        model_comm_group : ProcessGroup
-            model communication group, specifies which GPUs work together
-            in one model instance
-        x_src_is_sharded : bool, optional
-            Source data is sharded, by default False
-        x_dst_is_sharded : bool, optional
-            Destination data is sharded, by default False
-        keep_x_dst_sharded : bool, optional
-            Keep destination data sharded, by default False
-        use_reentrant : bool, optional
-            Use reentrant, by default False
-
-        Returns
-        -------
-        Tensor
-            Mapped data
-        """
-        mapper_args = {
-            "batch_size": batch_size,
-            "shard_shapes": shard_shapes,
-            "model_comm_group": model_comm_group,
-            "x_src_is_sharded": x_src_is_sharded,
-            "x_dst_is_sharded": x_dst_is_sharded,
-            "keep_x_dst_sharded": keep_x_dst_sharded,
-            **kwargs,
-        }
-
-        return checkpoint(self, data, **mapper_args, use_reentrant=use_reentrant)
-
 
 class BackwardMapperPostProcessMixin:
     """Post-processing for Backward Mapper from hidden -> data."""
@@ -346,43 +295,6 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
             f"Supported strategies are 'heads' and 'edges'."
         )
 
-    def _run_mapper(
-        self,
-        data: tuple[Tensor],
-        batch_size: int,
-        shard_shapes: tuple[tuple[int, int], tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
-        keep_x_dst_sharded: bool = False,
-        use_reentrant: bool = False,
-        **kwargs,
-    ) -> Tensor:
-
-        mapper_args = {
-            "batch_size": batch_size,
-            "shard_shapes": shard_shapes,
-            "model_comm_group": model_comm_group,
-            "x_src_is_sharded": x_src_is_sharded,
-            "x_dst_is_sharded": x_dst_is_sharded,
-            "keep_x_dst_sharded": keep_x_dst_sharded,
-            **kwargs,
-        }
-
-        if self.shard_strategy == "edges":
-            return self(data, **mapper_args)
-
-        return super()._run_mapper(
-            data,
-            batch_size,
-            shard_shapes,
-            model_comm_group,
-            x_src_is_sharded,
-            x_dst_is_sharded,
-            keep_x_dst_sharded,
-            use_reentrant,
-        )
-
     def prepare_edges(
         self,
         size: tuple[int, int],
@@ -488,7 +400,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         return self.post_process(x_dst_out, shapes[1], model_comm_group, keep_x_dst_sharded=True)
 
-    def forward_with_edge_sharding(
+    def mapper_forward_with_edge_sharding(
         self,
         x: PairTensor,
         batch_size: int,
@@ -541,7 +453,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         return out_dst
 
-    def forward_with_heads_sharding(
+    def mapper_forward_with_heads_sharding(
         self,
         x: PairTensor,
         batch_size: int,
@@ -601,9 +513,9 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         }
 
         if self.shard_strategy == "edges":
-            return self.forward_with_edge_sharding(**kwargs_forward)
+            return self.mapper_forward_with_edge_sharding(**kwargs_forward)
         else:  # self.shard_strategy == "heads"
-            return self.forward_with_heads_sharding(**kwargs_forward)
+            return checkpoint(self.mapper_forward_with_heads_sharding, **kwargs_forward, use_reentrant=False)
 
 
 class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransformerBaseMapper):
@@ -906,7 +818,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         edge_attr = self.emb_edges(edge_attr)
         return edge_attr, edge_index
 
-    def forward(
+    def mapper_forward(
         self,
         x: PairTensor,
         batch_size: int,
@@ -939,6 +851,30 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded)
 
         return x_src, x_dst
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+        **kwargs,
+    ) -> PairTensor:
+        return checkpoint(
+            self.mapper_forward,
+            x=x,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes,
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+            **kwargs,
+            use_reentrant=False,
+        )
 
 
 class GNNForwardMapper(ForwardMapperPreProcessMixin, GNNBaseMapper):
@@ -1243,7 +1179,7 @@ class TransformerBaseMapper(BaseMapper):
 
         self.emb_nodes_dst = nn.Linear(self.in_channels_dst, self.hidden_dim)
 
-    def forward(
+    def mapper_forward(
         self,
         x: PairTensor,
         batch_size: int,
@@ -1268,6 +1204,30 @@ class TransformerBaseMapper(BaseMapper):
         x_dst = self.post_process(x_dst, shapes_dst, model_comm_group, keep_x_dst_sharded=keep_x_dst_sharded)
 
         return x_dst
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+        **kwargs,
+    ) -> PairTensor:
+        return checkpoint(
+            self.mapper_forward,
+            x=x,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes,
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+            **kwargs,
+            use_reentrant=False,
+        )
 
 
 class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapper):

@@ -236,7 +236,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             shard_shapes_hiddens[hidden] = gather_shard_shapes(x_latent, 0, model_comm_group=model_comm_group)
 
         # Run encoder
-        x_data_latent, curr_latent = self.encoder._run_mapper(
+        x_data_latent, curr_latent = self.encoder(
             (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]),
@@ -267,7 +267,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             skip_connections[src_hidden_name] = curr_latent
 
             # Encode to next hidden level
-            x_encoded_latents[src_hidden_name], curr_latent = self.downscale[src_hidden_name]._run_mapper(
+            x_encoded_latents[src_hidden_name], curr_latent = self.downscale[src_hidden_name](
                 (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -291,7 +291,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
             # Decode to next level
-            curr_latent = self.upscale[src_hidden_name]._run_mapper(
+            curr_latent = self.upscale[src_hidden_name](
                 (curr_latent, x_encoded_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -314,7 +314,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 )
 
         # Run decoder
-        x_out = self.decoder._run_mapper(
+        x_out = self.decoder(
             (curr_latent, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_data),

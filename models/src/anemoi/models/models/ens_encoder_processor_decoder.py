@@ -143,7 +143,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=bse)
         shard_shapes_hidden = gather_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
-        x_data_latent, x_latent = self.encoder._run_mapper(
+        x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -172,7 +172,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         x_latent_proc = x_latent_proc + x_latent
 
-        x_out = self.decoder._run_mapper(
+        x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
