@@ -55,3 +55,10 @@ data:
 diagnostics:
   plot:
     callbacks: []
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None
+    wandb:
+      enabled: False
+      entity: example
