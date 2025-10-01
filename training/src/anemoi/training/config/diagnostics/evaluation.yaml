@@ -50,6 +50,7 @@ log:
     experiment_name: 'anemoi-debug'
     project_name: 'Anemoi'
     system: False
+    system_metrics_sampling_interval: 100 # in seconds
     terminal: True
     run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True
