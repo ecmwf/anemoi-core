@@ -72,6 +72,8 @@ processors:
   # const_imputer:
   #   _target_: anemoi.models.preprocessing.imputer.ConstantImputer
   #   config: ${data.const_imputer}
+  # When using the imputer, consider including the nan_mask_weights scaler in the
+  # training loss to ensure imputed grid points are not considered in the loss computation
 
 # Values set in the code
 num_features: null # number of features in the forecast state
