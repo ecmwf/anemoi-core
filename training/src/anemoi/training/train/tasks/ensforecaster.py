@@ -16,7 +16,6 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
@@ -230,27 +229,46 @@ class GraphEnsForecaster(BaseGraphModule):
         ]
         return x
 
+    def _normalize_batch(self, batch: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
+        """Normalize batch for training and validation before every step.
+
+        For the GraphEnsForecaster, the batch is a tuple were we need to normalize
+        the batch for the ensemble members and the EDA initial conditions.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Batch to transfer (tuple for ensemble)
+
+        Returns
+        -------
+        tuple[torch.Tensor, ...]
+            Normalized batch
+        """
+        # Apply preprocessing (normalization) to the ensemble batch
+        batch[0] = self.model.pre_processors(batch[0])  # normalized in-place
+
+        # If we have EDA initial conditions, preprocess them too
+        if len(batch) == 2:
+            batch[1] = self.model.pre_processors(batch[1])
+
+        return batch
+
     def rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
         """Rollout step for the forecaster.
 
-        Will run pre_processors on batch, but not post_processors on predictions.
-
         Parameters
         ----------
         batch : torch.Tensor
-            Batch to use for rollout
+            Normalized batch to use for rollout (assumed to be already preprocessed)
         rollout : int, optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -265,20 +283,11 @@ class GraphEnsForecaster(BaseGraphModule):
         None
             None
         """
-        # for validation not normalized in-place because remappers cannot be applied in-place
-        batch[0] = self.model.pre_processors(batch[0], in_place=not validation_mode)
-
         x = self.ensemble_ic_generator(
             batch[0],
-            self.model.pre_processors(batch[1], in_place=not validation_mode) if len(batch) == 2 else None,
+            batch[1] if len(batch) == 2 else None,
         )
         LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(x.shape))
-
-        # Scalers which are delayed need to be initialized after the pre-processors
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -306,20 +315,16 @@ class GraphEnsForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, y_pred_ens_group = (
-                checkpoint(
-                    self.gather_and_compute_loss,
-                    y_pred,
-                    y,
-                    self.loss,
-                    self.ens_comm_subgroup_size,
-                    self.ens_comm_subgroup,
-                    self.model_comm_group,
-                    validation_mode,
-                    use_reentrant=False,
-                )
-                if training_mode
-                else None
+            loss, y_pred_ens_group = checkpoint(
+                self.gather_and_compute_loss,
+                y_pred,
+                y,
+                self.loss,
+                self.ens_comm_subgroup_size,
+                self.ens_comm_subgroup,
+                self.model_comm_group,
+                validation_mode,
+                use_reentrant=False,
             )
 
             x = self.advance_input(x, y_pred, batch[0], rollout_step)
@@ -336,13 +341,10 @@ class GraphEnsForecaster(BaseGraphModule):
 
     def _step(
         self,
-        batch: torch.Tensor,
-        batch_idx: int,
+        batch: tuple[torch.Tensor, ...],
         validation_mode: bool = False,
     ) -> tuple:
         """Training / validation step."""
-        del batch_idx
-
         LOGGER.debug(
             "SHAPES: batch[0].shape = %s, batch[1].shape == %s",
             list(batch[0].shape),
@@ -356,7 +358,6 @@ class GraphEnsForecaster(BaseGraphModule):
         for loss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
             batch,
             rollout=self.rollout,
-            training_mode=True,
             validation_mode=validation_mode,
         ):
             loss += loss_next
@@ -388,7 +389,9 @@ class GraphEnsForecaster(BaseGraphModule):
             train_loss:
                 Training loss
         """
-        train_loss, _, _, _ = self._step(batch, batch_idx)
+        del batch_idx
+
+        train_loss, _, _, _ = self._step(batch)
 
         self.log(
             "train_" + self.loss.name,
@@ -434,8 +437,10 @@ class GraphEnsForecaster(BaseGraphModule):
         tuple[torch.Tensor, torch.Tensor]
             Tuple containing the validation loss, the predictions, and the ensemble initial conditions
         """
+        del batch_idx
+
         with torch.no_grad():
-            val_loss, metrics, y_preds, ens_ic = self._step(batch, batch_idx, validation_mode=True)
+            val_loss, metrics, y_preds, ens_ic = self._step(batch, validation_mode=True)
         self.log(
             "val_" + self.loss.name,
             val_loss,
