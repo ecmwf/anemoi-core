@@ -239,6 +239,7 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 
+
 class TorchLossesUsingBaseSchema(str, Enum):
     mse = "torch.nn.MSELoss"
     mae = "torch.nn.L1Loss"
