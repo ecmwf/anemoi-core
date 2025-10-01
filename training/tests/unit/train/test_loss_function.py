@@ -15,12 +15,9 @@ from omegaconf import DictConfig
 
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import CombinedLoss
-from anemoi.training.losses import HuberLoss
 from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
-from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
-from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -29,13 +26,14 @@ from anemoi.training.losses.filtering import FilteringLossWrapper
 from anemoi.training.utils.enums import TensorDim
 
 
-@pytest.mark.parametrize(
-    "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
-)
-def test_manual_init(loss_cls: type[BaseLoss]) -> None:
-    loss = loss_cls()
-    assert isinstance(loss, BaseLoss)
+# Loss classes to test
+custom_anemoi_losses = [LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
+torch_losses = ["L1Loss", "MSELoss", "HuberLoss", "SmoothL1Loss"]
+
+anemoi_losses_cfg = [{"_target_": f"anemoi.training.losses.{cls.__name__}"} for cls in custom_anemoi_losses]
+torch_losses_cfg = [
+    {"_target_": "anemoi.training.losses.TorchLoss", "loss": {"_target_": f"torch.nn.{cls}"}} for cls in torch_losses
+]
 
 
 @pytest.fixture
@@ -230,26 +228,17 @@ def test_grid_invariance(
     assert torch.allclose(loss_coarse, loss_fine), "Losses should be equal between grid sizes"
 
 
-@pytest.mark.parametrize(
-    "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
-)
-def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
-    loss = get_loss_function(DictConfig({"_target_": f"anemoi.training.losses.{loss_cls.__name__}"}))
+@pytest.mark.parametrize("loss_config", anemoi_losses_cfg + torch_losses_cfg)
+def test_dynamic_init_include(loss_config: type[BaseLoss]) -> None:
+    loss = get_loss_function(DictConfig(loss_config))
     assert isinstance(loss, BaseLoss)
 
 
-@pytest.mark.parametrize(
-    "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
-)
-def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
+@pytest.mark.parametrize("loss_config", anemoi_losses_cfg + torch_losses_cfg)
+def test_dynamic_init_scaler(loss_config: type[BaseLoss]) -> None:
     loss = get_loss_function(
         DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["test"],
-            },
+            loss_config | {"scalers": ["test"]}
         ),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
@@ -259,17 +248,11 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     torch.testing.assert_close(loss.scaler.get_scaler(2), torch.ones((1, 2)))
 
 
-@pytest.mark.parametrize(
-    "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
-)
-def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
+@pytest.mark.parametrize("loss_config", anemoi_losses_cfg + torch_losses_cfg)
+def test_dynamic_init_add_all(loss_config: type[BaseLoss]) -> None:
     loss = get_loss_function(
         DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["*"],
-            },
+            loss_config | {"scalers": ["*"]}
         ),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
@@ -279,17 +262,11 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     torch.testing.assert_close(loss.scaler.get_scaler(2), torch.ones((1, 2)))
 
 
-@pytest.mark.parametrize(
-    "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
-)
-def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
+@pytest.mark.parametrize("loss_config", anemoi_losses_cfg + torch_losses_cfg)
+def test_dynamic_init_scaler_not_add(loss_config: type[BaseLoss]) -> None:
     loss = get_loss_function(
         DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": [],
-            },
+            loss_config | {"scalers": []}
         ),
         scalers={"test": (-1, torch.ones(2))},
     )
@@ -297,17 +274,11 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     assert "test" not in loss.scaler
 
 
-@pytest.mark.parametrize(
-    "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
-)
-def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
+@pytest.mark.parametrize("loss_config", anemoi_losses_cfg + torch_losses_cfg)
+def test_dynamic_init_scaler_exclude(loss_config: type[BaseLoss]) -> None:
     loss = get_loss_function(
         DictConfig(
-            {
-                "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-                "scalers": ["*", "!test"],
-            },
+            loss_config | {"scalers": ["*", "!test"]}
         ),
         scalers={"test": (-1, torch.ones(2))},
     )
@@ -322,8 +293,18 @@ def test_combined_loss() -> None:
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
+                    {
+                        "_target_": "anemoi.training.losses.TorchLoss",
+                        "loss": {
+                            "_target_": "torch.nn.MSELoss",
+                        },
+                    },
+                    {
+                        "_target_": "anemoi.training.losses.TorchLoss",
+                        "loss": {
+                            "_target_": "torch.nn.L1Loss",
+                        },
+                    },
                 ],
                 "scalers": ["test"],
                 "loss_weights": [1.0, 0.5],
@@ -331,10 +312,7 @@ def test_combined_loss() -> None:
         ),
         scalers={"test": (-1, torch.ones(2))},
     )
-    assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scaler
-
-    assert isinstance(loss.losses[1], MAELoss)
     assert "test" in loss.losses[1].scaler
 
 
@@ -346,8 +324,18 @@ def test_combined_loss_invalid_loss_weights() -> None:
                 {
                     "_target_": "anemoi.training.losses.combined.CombinedLoss",
                     "losses": [
-                        {"_target_": "anemoi.training.losses.MSELoss"},
-                        {"_target_": "anemoi.training.losses.MAELoss"},
+                        {
+                            "_target_": "anemoi.training.losses.TorchLoss",
+                            "loss": {
+                                "_target_": "torch.nn.MSELoss",
+                            },
+                        },
+                        {
+                            "_target_": "anemoi.training.losses.TorchLoss",
+                            "loss": {
+                                "_target_": "torch.nn.L1Loss",
+                            },
+                        },
                     ],
                     "scalers": ["test"],
                     "loss_weights": [1.0, 0.5, 1],
@@ -364,8 +352,18 @@ def test_combined_loss_equal_weighting() -> None:
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
+                    {
+                        "_target_": "anemoi.training.losses.TorchLoss",
+                        "loss": {
+                            "_target_": "torch.nn.MSELoss",
+                        },
+                    },
+                    {
+                        "_target_": "anemoi.training.losses.TorchLoss",
+                        "loss": {
+                            "_target_": "torch.nn.L1Loss",
+                        },
+                    },
                 ],
             },
         ),
@@ -381,8 +379,18 @@ def test_combined_loss_seperate_scalers() -> None:
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
-                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
+                    {
+                        "_target_": "anemoi.training.losses.TorchLoss",
+                        "loss": {
+                            "_target_": "torch.nn.MSELoss",
+                        },
+                        "scalers": ["test"]},
+                    {
+                        "_target_": "anemoi.training.losses.TorchLoss",
+                        "loss": {
+                            "_target_": "torch.nn.L1Loss",
+                        },
+                        "scalers": ["test2"]},
                 ],
                 "scalers": ["test", "test2"],
                 "loss_weights": [1.0, 0.5],
@@ -392,11 +400,9 @@ def test_combined_loss_seperate_scalers() -> None:
     )
     assert isinstance(loss, CombinedLoss)
 
-    assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scaler
     assert "test2" not in loss.losses[0].scaler
 
-    assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scaler
     assert "test2" in loss.losses[1].scaler
 
