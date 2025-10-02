@@ -20,7 +20,6 @@ LOGGER = logging.getLogger(__name__)
 
 class PlanarAreaWeightSchema(BaseModel):
     target_: Literal[
-        "anemoi.graphs.nodes.attributes.AreaWeights",
         "anemoi.graphs.nodes.attributes.PlanarAreaWeights",
         "anemoi.graphs.nodes.attributes.UniformWeights",
         "anemoi.graphs.nodes.attributes.CosineLatWeightedAttribute",
