@@ -67,15 +67,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
 
-        if self.config.training.get("rollout", {}).get("max") is not None:
-            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
-            mr_len = self.config.dataloader.model_run_info.length
-            if max_rollout_index >= mr_len:
-                msg = (
-                    f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}. "
-                    "Please adjust the training rollout max or model run length.",
-                )
-                raise ValueError(msg)
+        # if self.config.training.get("rollout", {}).get("max") is not None:
+        #     max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
+        #     mr_len = self.config.dataloader.model_run_info.length
+        #     if max_rollout_index >= mr_len:
+        #         msg = (
+        #             f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}. "
+        #             "Please adjust the training rollout max or model run length.",
+        #         )
+        #         raise ValueError(msg)
 
     @cached_property
     def statistics(self) -> dict:
