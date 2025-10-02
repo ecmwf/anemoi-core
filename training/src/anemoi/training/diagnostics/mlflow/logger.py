@@ -240,14 +240,7 @@ class LogsMonitor:
                 logfile.write(cleaned_line.decode())
 
             logfile.flush()
-
-        # This try/except is for AML logging
-        # typically terminal_output.txt gets updated by overwriting, but this is not allowed on AML
-        # since this happens tons of times, just silently pass if it fails
-        try:
-            self.experiment.log_artifact(self.run_id, str(self.file_save_path))
-        except:
-            pass
+        self.experiment.log_artifact(self.run_id, str(self.file_save_path))
 
 
 class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):

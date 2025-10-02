@@ -117,7 +117,7 @@ def get_azure_workspace(
 
 
 class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
-    """A custom MLflow logger that logs terminal output."""
+    """A custom MLflow logger that logs to AzureML."""
 
     def __init__(
         self,
@@ -138,7 +138,7 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
         offline: bool | None = False,
         authentication: bool | None = None,
         system: bool | None = True,
-        terminal: bool | None = True,
+        terminal: bool | None = False,
         log_hyperparams: bool | None = True,
         expand_hyperparams: dict | None = None,
         on_resume_create_child: bool | None = True,
@@ -162,6 +162,9 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
         """
         if offline:
             raise ValueError("Cannot run AnemoiAzureMLflowLogger offline")
+
+        if terminal:
+            LOGGER.warning("Cannot log terminal output with AzureML version of MLFlow logger, will set terminal=False")
 
         # Set azure logging to warning, since otherwise it's way too much
         azure_logger = logging.getLogger("azure")
@@ -201,9 +204,13 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             fork_run_id=fork_run_id,
             offline=False,
             authentication=False,
+            system=system,
+            terminal=False,
             log_hyperparams=log_hyperparams,
+            expand_hyperparams=expand_hyperparams,
             on_resume_create_child=on_resume_create_child,
             max_params_length=max_params_length,
+            http_max_retries=http_max_retries,
         )
 
     def _init_authentication(

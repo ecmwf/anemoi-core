@@ -303,8 +303,10 @@ class AzureMlflowSchema(MlflowSchema):
         alias="_target_",
     )
 
-    # This options is inherited, but doesn't make sense for Azure, so we enforce the required value
+    # These options are inherited, but either don't't make sense or don't work for Azure
+    # so we enforce the required value
     offline: Literal[False]
+    terminal: Literal[False]
     # These are specific to Azure
     identity: str | None = None
     "Type of identity to use for logging in with Azure ML."
