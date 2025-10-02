@@ -58,6 +58,7 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
     default_kernels = {
         "Linear": {"_target_": "torch.nn.Linear"},
         "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
+        "MapperLayerNorm": {"_target_": "torch.nn.LayerNorm"},
         "Activation": {"_target_": "torch.nn.GELU"},
         "QueryNorm": {
             "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",

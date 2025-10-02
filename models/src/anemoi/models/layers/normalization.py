@@ -31,6 +31,21 @@ class AutocastLayerNorm(nn.LayerNorm):
         return super().forward(x).type_as(x)
 
 
+class AutocastLayerNormCompile(nn.Module):
+    """Compiling nn.LayerNorm / AutocastLayerNorm as standalone module
+    using AMP usually means using the default eager execution.
+    Compiling this module keeps the autocat functionality of AutocastLayerNorm while
+    also allowing compilation - then fusing both AMP casts and the Triton LayerNorm.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__()
+        self.norm = nn.LayerNorm(*args, **kwargs)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.norm(x).type_as(x)
+
+
 class ConditionalLayerNorm(nn.Module):
     """Conditional Layer Normalization.
 
@@ -51,6 +66,7 @@ class ConditionalLayerNorm(nn.Module):
         self.bias = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.autocast = autocast
 
+        # shouldn't weight here be ones_ and not zeros_?
         if w_one_bias_zero_init:
             nn.init.zeros_(self.scale.weight)
             nn.init.zeros_(self.scale.bias)
