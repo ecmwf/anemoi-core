@@ -23,6 +23,18 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
+class ConcreteGNNBaseMapper(GNNBaseMapper):
+    """Concrete implementation of GNNBaseMapper for testing."""
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        shapes_src, shapes_dst = shard_shapes
+        x_src, x_dst = x
+        return x_src, x_dst, shapes_src, shapes_dst
+
+    def post_process(self, x_dst, **kwargs):
+        return x_dst
+
+
 @dataclass
 class MapperConfig:
     in_channels_src: int = 3
@@ -54,7 +66,7 @@ class TestGNNBaseMapper:
 
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
-        return GNNBaseMapper(
+        return ConcreteGNNBaseMapper(
             **asdict(mapper_init),
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
@@ -114,7 +126,7 @@ class TestGNNBaseMapper:
         x_dst = pair_tensor[1]
         shapes_dst = [list(x_dst.shape)]
 
-        result = mapper.post_process(x_dst, shapes_dst)
+        result = mapper.post_process(x_dst, shapes_dst=shapes_dst)
         assert torch.equal(result, x_dst)
 
 
@@ -209,7 +221,7 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
         x_dst = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim)
         shapes_dst = [list(x_dst.shape)]
 
-        result = mapper.post_process(x_dst, shapes_dst)
+        result = mapper.post_process(x_dst, shapes_dst=shapes_dst)
         assert (
             torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst]) == result.shape
         ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, mapper_init.out_channels_dst]}) != result.shape ({result.shape})"

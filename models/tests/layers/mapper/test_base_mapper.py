@@ -21,6 +21,23 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
+class ConcreteBaseMapper(BaseMapper):
+    """Concrete implementation of BaseMapper for testing."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Simple dummy processor
+        self.proc = torch.nn.Identity()
+
+    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
+        shapes_src, shapes_dst = shard_shapes
+        x_src, x_dst = x
+        return x_src, x_dst, shapes_src, shapes_dst
+
+    def post_process(self, x_dst, **kwargs):
+        return x_dst
+
+
 @dataclass
 class BaseMapperConfig:
     in_channels_src: int = 3
@@ -49,10 +66,8 @@ class TestBaseMapper:
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
 
-        return BaseMapper(
+        return ConcreteBaseMapper(
             **asdict(mapper_init),
-            sub_graph=fake_graph[("nodes", "to", "nodes")],
-            sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
         )
 
     @pytest.fixture
@@ -101,6 +116,6 @@ class TestBaseMapper:
 
         result = mapper.post_process(
             x_dst,
-            shapes_dst,
+            shapes_dst=shapes_dst,
         )
         assert torch.equal(result, x_dst)
