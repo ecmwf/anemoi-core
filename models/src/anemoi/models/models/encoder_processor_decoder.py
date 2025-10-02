@@ -28,8 +28,8 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.utils import ProfilerWrapper
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
+from anemoi.models.layers.utils import ProfilerWrapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)

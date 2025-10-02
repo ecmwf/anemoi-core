@@ -59,6 +59,7 @@ def _meets_library_versions_for_compile() -> bool:
     # Typically, this is to allow dynamic shapes. In a context of multiple different but static
     # shapes (e.g. different graphs sizes in different chunks) it is useful to increase this limit.
     import torch._dynamo as dynamo
+
     dynamo.config.recompile_limit = 32
 
     return version_req and has_triton
