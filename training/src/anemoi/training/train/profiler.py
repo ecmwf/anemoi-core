@@ -27,8 +27,8 @@ from rich.console import Console
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.profilers import BenchmarkProfiler
 from anemoi.training.diagnostics.profilers import ProfilerProgressBar
-from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.diagnostics.trace_analyser import analyse_trace
+from anemoi.training.train.train import AnemoiTrainer
 
 LOGGER = logging.getLogger(__name__)
 console = Console(record=True, width=200)
