@@ -330,7 +330,7 @@ class LoggingSchema(BaseModel):
     "W&B logging schema."
     tensorboard: TensorboardSchema
     "TensorBorad logging schema."
-    mlflow: MlflowSchema | AzureMlflowSchema = Field(discriminator="target_")
+    mlflow: Annotated[MlflowSchema | AzureMlflowSchema, Field(discriminator="target_")]
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."
