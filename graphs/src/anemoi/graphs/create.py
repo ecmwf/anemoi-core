@@ -11,7 +11,6 @@
 import logging
 from itertools import chain
 from pathlib import Path
-from warnings import warn
 
 import torch
 from hydra.utils import instantiate
