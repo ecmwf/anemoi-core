@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 
@@ -767,18 +768,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
-        # The two ifs should be separate, but are combined due to pre-commit hook
-        if stage == "fit" and self.trainer.is_global_zero:
-            # Log variable scaling on rank 0
-            max_variables_to_log = (
-                self.config.diagnostics.log.mlflow.max_num_variable_scalings
-                if hasattr(self.config.diagnostics.log.mlflow, "max_num_variable_scalings")
-                else 200
+        # The conditions should be separate, but are combined due to pre-commit hook
+        if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
+            # Log hyperparameters on rank 0
+            hyper_params = OmegaConf.to_container(convert_to_omegaconf(self.config), resolve=True)
+            hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
+            # Expand keys for better visibility
+            expand_keys = OmegaConf.select(
+                convert_to_omegaconf(self.config),
+                "diagnostics.log.mlflow.expand_hyperparams",
+                default=["config"],
             )
-            if len(self._scaling_values_log) < max_variables_to_log:
-                self.logger.log_hyperparams({"variable_loss_scaling": self._scaling_values_log})
-            else:
-                LOGGER.info(
-                    "Number of logged variables exceeds limit set in "
-                    "config.diagnostics.log.mlflow.max_variable_scalings.",
-                )
+            # Log hyperparameters
+            self.logger.log_hyperparams(
+                hyper_params,
+                expand_keys=expand_keys,
+            )
