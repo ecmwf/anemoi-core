@@ -4,6 +4,5 @@ data:
     0:
       - 2t
   processors:
-    const_imputer:
-      _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+    - _target_: anemoi.models.preprocessing.imputer.ConstantImputer
       config: ${data.const_imputer}

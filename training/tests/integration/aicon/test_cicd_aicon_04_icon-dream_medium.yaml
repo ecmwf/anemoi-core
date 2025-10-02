@@ -153,8 +153,7 @@ data:
   imputer:
     default: none
   processors:
-    normalizer:
-      _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+    - _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
       config: ${data.normalizer}
   num_features: null
   format: zarr
