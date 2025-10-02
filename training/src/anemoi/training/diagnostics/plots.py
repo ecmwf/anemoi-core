@@ -181,13 +181,13 @@ def plot_power_spectrum(
     parameters : dict[str, int]
         Dictionary of variable names and indices
     latlons : np.ndarray
-        lat/lon coordinates array, shape (lat*lon, 2)
+        lat/lon coordinates array, shape (gridpoints, 2)
     x : np.ndarray
-        Input data of shape (lat*lon, nvar*level)
+        Input data of shape (gridpoints, nvar*level)
     y_true : np.ndarray
-        Expected data of shape (lat*lon, nvar*level)
+        Expected data of shape (gridpoints, nvar*level)
     y_pred : np.ndarray
-        Predicted data of shape (lat*lon, nvar*level)
+        Predicted data of shape (gridpoints, nvar*level)
     min_delta: float, optional
         Minimum distance between lat/lon points, if None defaulted to 1km
 
@@ -319,11 +319,11 @@ def plot_histogram(
     parameters : dict[str, int]
         Dictionary of variable names and indices
     x : np.ndarray
-        Input data of shape (lat*lon, nvar*level)
+        Input data of shape (gridpoints, nvar*level)
     y_true : np.ndarray
-        Expected data of shape (lat*lon, nvar*level)
+        Expected data of shape (gridpoints, nvar*level)
     y_pred : np.ndarray
-        Predicted data of shape (lat*lon, nvar*level)
+        Predicted data of shape (gridpoints, nvar*level)
     precip_and_related_fields : list, optional
         List of precipitation-like variables, by default []
 
@@ -407,15 +407,15 @@ def plot_predicted_multilevel_flat_sample(
     n_plots_per_sample : int
         Number of plots per sample
     latlons : np.ndarray
-        lat/lon coordinates array, shape (lat*lon, 2)
+        lat/lon coordinates array, shape (gridpoints, 2)
     clevels : float
         Accumulation levels used for precipitation related plots
     x : np.ndarray
-        Input data of shape (lat*lon, nvar*level)
+        Input data of shape (gridpoints, nvar*level)
     y_true : np.ndarray
-        Expected data of shape (lat*lon, nvar*level)
+        Expected data of shape (gridpoints, nvar*level)
     y_pred : np.ndarray
-        Predicted data of shape (lat*lon, nvar*level)
+        Predicted data of shape (gridpoints, nvar*level)
     datashader: bool, optional
         Scatter plot, by default False
     precip_and_related_fields : list, optional
@@ -516,11 +516,11 @@ def plot_flat_sample(
     lat : np.ndarray
         latitude coordinates array, shape (lat,)
     input_ : np.ndarray
-        Input data of shape (lat*lon,)
+        Input data of shape (gridpoints,)
     truth : np.ndarray
-        Expected data of shape (lat*lon,)
+        Expected data of shape (gridpoints,)
     pred : np.ndarray
-        Predicted data of shape (lat*lon,)
+        Predicted data of shape (gridpoints,)
     vname : str
         Variable name
     clevels : float

@@ -86,7 +86,7 @@ class BaseLoss(nn.Module, ABC):
         Parameters
         ----------
         x : torch.Tensor
-            Tensor to be scaled, shape (bs, ensemble, lat*lon, n_outputs)
+            Tensor to be scaled, shape (bs, ensemble, gridpoints, n_outputs)
         subset_indices: tuple[int,...], optional
             Indices to subset the calculated scaler and `x` tensor with, by default None.
         without_scalers: list[str] | list[int] | None, optional
@@ -204,9 +204,9 @@ class BaseLoss(nn.Module, ABC):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, gridpoints, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, gridpoints, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional
@@ -261,9 +261,9 @@ class FunctionalLoss(BaseLoss):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, gridpoints, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, gridpoints, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional

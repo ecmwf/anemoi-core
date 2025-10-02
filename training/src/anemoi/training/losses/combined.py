@@ -149,9 +149,9 @@ class CombinedLoss(BaseLoss):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, gridpoints, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, gridpoints, n_outputs)
         kwargs: Any
             Additional arguments to pass to the loss functions
             Will be passed to all loss functions

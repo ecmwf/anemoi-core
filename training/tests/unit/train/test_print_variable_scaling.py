@@ -35,7 +35,10 @@ def fake_data() -> tuple[DictConfig, IndexCollection]:
             },
             "training": {
                 "training_loss": {
-                    "_target_": "anemoi.training.losses.MSELoss",
+                    "_target_": "anemoi.training.losses.TorchLoss",
+                    "loss": {
+                        "_target_": "torch.nn.MSELoss",
+                    },
                     "scalers": ["variable_masking"],
                 },
                 "variable_groups": {
@@ -71,7 +74,10 @@ def fake_data_single_variable() -> tuple[DictConfig, IndexCollection]:
             },
             "training": {
                 "training_loss": {
-                    "_target_": "anemoi.training.losses.MSELoss",
+                    "_target_": "anemoi.training.losses.TorchLoss",
+                    "loss": {
+                        "_target_": "torch.nn.MSELoss",
+                    },
                     "scalers": ["general_variable"],
                 },
                 "variable_groups": {
