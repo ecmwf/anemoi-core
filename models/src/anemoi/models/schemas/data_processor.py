@@ -14,10 +14,7 @@ from typing import Union
 
 from pydantic import Field
 from pydantic import RootModel
-from pydantic import TypeAdapter
-from pydantic import ValidationError
 from pydantic import field_validator
-from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
@@ -232,6 +229,42 @@ class RemapperSchema(BaseModel):
     "Variables not to be remapped."
 
 
+class ZeroOverwriterGroup(BaseModel):
+    vars: Union[list[str], None] = Field(default_factory=list)
+    time_index: Union[list[int], None] = Field(default_factory=list)
+
+    @field_validator("vars", mode="before")
+    @classmethod
+    def _validate_vars(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+            raise TypeError(f"'vars' must be a list[str], got {type(v).__name__}")
+        return v
+
+    @field_validator("time_index", mode="before")
+    @classmethod
+    def _validate_time_index(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list) or not all(isinstance(i, int) for i in v):
+            raise TypeError(f"'time_index' must be a list[int], got {type(v).__name__}")
+        return v
+
+
+class ZeroOverwriterSchema(BaseModel):
+    groups: Union[list[ZeroOverwriterGroup], None] = Field(default_factory=list)
+
+    @field_validator("groups", mode="before")
+    @classmethod
+    def _validate_groups(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            raise TypeError(f"'groups' must be a list, got {type(v).__name__}")
+        return v
+
+
 class PreprocessorTarget(str, Enum):
     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
@@ -241,6 +274,7 @@ class PreprocessorTarget(str, Enum):
     conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
     conditional_nan_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor"
     normalized_relu_postprocessor = "anemoi.models.preprocessing.postprocessor.NormalizedReluPostprocessor"
+    zero_overwriter = "anemoi.models.preprocessing.overwriter.ZeroOverwriter"
 
 
 target_to_schema = {
@@ -252,25 +286,12 @@ target_to_schema = {
     PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
     PreprocessorTarget.conditional_nan_postprocessor: ConditionalNaNPostprocessorSchema,
     PreprocessorTarget.normalized_relu_postprocessor: NormalizedReluPostprocessorSchema,
+    PreprocessorTarget.zero_overwriter: ZeroOverwriterSchema,
 }
 
 
 class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
-    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema]
+    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema, ZeroOverwriterSchema]
     "Target schema containing processor methods."
-
-    @model_validator(mode="after")
-    def schema_consistent_with_target(self) -> type["PreprocessorSchema"]:
-        schema_cls = target_to_schema.get(self.target_)
-        if schema_cls is None:
-            error_msg = f"Unknown target: {self.target_}"
-            raise ValidationError(error_msg)
-
-        validated = TypeAdapter(schema_cls).validate_python(self.config)
-        # If it's a RootModel (like ConstantImputerSchema), extract the root dict
-        if hasattr(validated, "root"):
-            self.config = validated.root
-
-        return self
