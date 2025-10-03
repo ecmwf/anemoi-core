@@ -1,0 +1,126 @@
+format: zarr
+# Accumulated inputs and related reduced timescale accumulatations (example: 6h inputs -> 1h outputs)
+# - Put accumulated inputs (e.g., tp_accum, cp_accum) in `forcing`.
+# - Put their related reduced timescale accumulatations (e.g., tp, cp) in `diagnostic` so they are predicted but NOT used as inputs.
+# - Ensure `normalizer.remap` maps the reduced timescale accumulatations to their accumulated counterparts for statistics
+#   (e.g., tp -> tp_accum, cp -> cp_accum) so the outputs use the correct scale.
+# - Use `normalizer.std` for the accumulated inputs (tp_accum, cp_accum) to preserve zero as zero.
+# - Add `processors.set_to_zero` for the accumulated inputs with `time_index: [0]` so the first time slice in each input window is zeroed.
+#   This is critical when preparing, for example, 6-hour accumulated inputs while training/interpolating at 1-hour resolution.
+
+# Time frequency requested from dataset
+frequency: 1h
+# Time step of model (must be multiple of frequency)
+timestep: 1h
+
+# features that are not part of the forecast state
+# but are used as forcing to generate the forecast state
+# NOTE: Place accumulated input features here (e.g., tp_accum, cp_accum) when
+#       the model consumes accumulations (e.g., 6h sums) and outputs higher-resolution
+#       instantaneous fields (e.g., 1h).
+forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  - "insolation"
+  - "lsm"
+  - "sdor"
+  - "slor"
+  - "z"
+  - "tp_accum"   # accumulated total precipitation (e.g., 6h sum)
+  - "cp_accum"   # accumulated convective precipitation (e.g., 6h sum)
+
+
+# NOTE: If doing mass-conserving accumulations, put the reduced time scale accumulation outputs related to the accumulated inputs here.
+#       For example, if training to predict hourly tp/cp using 6-hour accumulated inputs
+#       tp_accum/cp_accum, then keep `tp` and `cp` in `diagnostic`.
+diagnostic:
+  - tp
+  - cp
+
+
+normalizer:
+  default: "mean-std"
+
+  # Map reduced timescale accumulatation variables to the statistics of their accumulated inputs.
+  # Example: when using 6h tp_accum/cp_accum as inputs and predicting 1h tp/cp, use:
+  #   - tp -> tp_accum
+  #   - cp -> cp_accum
+  # This ensures the outputs use the appropriate scale from the accumulated features.
+  # The existing cp note applies if FractionBounding is enabled for cp (cp as a fraction of tp).
+  # NOTE: This remap should only be applied if FractionBounding is enabled for cp.
+  remap:
+    tp: tp_accum
+    cp: cp_accum
+
+  # Standardization applied to the accumulated variables used as inputs.
+  # Use "Std" (standard deviation only) for accumulations so that zero stays zero
+  # in normalized space. This is preferred over "mean-std" for non-negative,
+  # sparse accumulations like precipitation.
+  std:
+    - "tp_accum"
+    - "cp_accum"
+    # atmospheric variables
+    - "q_50"
+    - "q_100"
+    - "q_150"
+    - "q_200"
+    - "q_250"
+    - "q_300"
+    - "q_400"
+    - "q_500"
+    - "q_600"
+    - "q_700"
+    - "q_850"
+    - "q_925"
+    - "q_1000"
+
+  min-max:
+  max:
+  - "sdor"
+  - "slor"
+  - "z"
+  none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "insolation"
+    - "lsm"
+
+# const_imputer:
+#   default: "none"
+#   0: []
+
+# processors including imputers and normalizers are applied in order of definition
+processors:
+  normalizer:
+    _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+    config: ${data.normalizer}
+  # const_imputer:
+  #   _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+  #   config: ${data.const_imputer}
+
+  # Zero the first time index of each input window for accumulated inputs.
+  # This prevents carry-over when constructing temporal differences and is
+  # required when, for example, 6h accumulated inputs feed a 1h interpolator.
+  set_to_zero:
+    _target_: anemoi.models.preprocessing.overwriter.SetToZero
+    config:
+      groups:
+        - vars:
+            - "tp_accum"
+            - "cp_accum"
+          time_index: [0]
+
+# Values set in the code
+num_features: null # number of features in the forecast state
