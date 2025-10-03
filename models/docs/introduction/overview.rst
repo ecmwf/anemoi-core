@@ -87,8 +87,8 @@ to process the input data.
 The layers are designed as extensible classes to allow for easy
 experimentation and switching out of components.
 
-Mappers
-=======
+Graph Mappers
+=============
 
 The layers implement `Mappers`, which maps data between the input grid
 and the internal hidden grid. The `Mappers` are used as encoder and
