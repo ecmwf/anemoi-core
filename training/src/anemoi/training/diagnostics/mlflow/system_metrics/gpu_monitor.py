@@ -9,8 +9,8 @@
 
 import contextlib
 import sys
-import torch
 
+import torch
 from mlflow.system_metrics.metrics.base_metrics_monitor import BaseMetricsMonitor
 
 with contextlib.suppress(ImportError):
@@ -18,18 +18,19 @@ with contextlib.suppress(ImportError):
 with contextlib.suppress(ImportError):
     from pyrsmi import rocml
 
+
 def parse_memory_stats(device=0):
-    stats=torch.cuda.memory_stats(device=device)
-    #need to handle empty dict before memory has been allocated
+    stats = torch.cuda.memory_stats(device=device)
+    # need to handle empty dict before memory has been allocated
     try:
-        active_mem=stats['active_bytes.all.current']
+        active_mem = stats["active_bytes.all.current"]
     except KeyError:
-        active_mem=0
+        active_mem = 0
     try:
-        allocated_mem=stats['allocated_bytes.all.current']
+        allocated_mem = stats["allocated_bytes.all.current"]
     except KeyError:
-        allocated_mem=0
-    return active_mem,allocated_mem
+        allocated_mem = 0
+    return active_mem, allocated_mem
 
 
 class GreenGPUMonitor(BaseMetricsMonitor):

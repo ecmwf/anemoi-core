@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
-import logging
 import enum
+import logging
 import math
 from typing import Any
 from typing import Optional
@@ -430,7 +430,9 @@ class FlashAttentionWrapper(nn.Module):
                 causal=False,
                 window_size=(window_size, window_size) if window_size is not None else (-1, -1),
                 softcap=softcap if softcap is not None else 0.0,
-            )[0]  # v3/v4 returns '(out, softmax_lse)'. here we drop to 'out'
+            )[
+                0
+            ]  # v3/v4 returns '(out, softmax_lse)'. here we drop to 'out'
 
         else:
             out = self.attention(
@@ -471,7 +473,9 @@ class FlashAttentionV3Wrapper(nn.Module):
         try:
             from flash_attn_interface import flash_attn_func
         except ImportError:
-            raise ImportError("Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3")
+            raise ImportError(
+                "Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3"
+            )
 
         self.attention = flash_attn_func
 
@@ -491,12 +495,12 @@ class FlashAttentionV3Wrapper(nn.Module):
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
         out = self.attention(
-                query,
-                key,
-                value,
-                causal=False,
-                window_size=(window_size, window_size),
-            )[0]
+            query,
+            key,
+            value,
+            causal=False,
+            window_size=(window_size, window_size),
+        )[0]
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
 
