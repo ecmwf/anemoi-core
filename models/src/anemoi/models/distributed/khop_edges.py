@@ -8,10 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
+import os
 from typing import Optional
 from typing import Union
 
-import os
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -20,7 +20,6 @@ from torch_geometric.typing import Adj
 from torch_geometric.utils import bipartite_subgraph
 from torch_geometric.utils import k_hop_subgraph
 from torch_geometric.utils import mask_to_index
-
 
 # caching k-hop graphs / chunks can be beneficial for smaller-scale runs
 # while adding some memory overhead from keeping them around for longer
