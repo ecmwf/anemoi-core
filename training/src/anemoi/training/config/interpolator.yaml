@@ -30,7 +30,7 @@ model:
   #   should match the accumulated input at `training.explicit_times.input[-1]` e.g. the r.h.s of the accumulation input
   # Requirements:
   # - In config.data: targets must be listed under `diagnostic`; accumulation inputs under `forcing`.
-  # - Use the `set_to_zero` processor to zero the left boundary (time_index=0) of each accumulation input,
+  # - Use the `zero_overwriter` processor to zero the left boundary (time_index=0) of each accumulation input,
   mass_conserving_accumulations:
     tp : tp_accum
     cp : cp_accum

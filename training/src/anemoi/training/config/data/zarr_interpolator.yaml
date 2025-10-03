@@ -5,7 +5,7 @@ format: zarr
 # - Ensure `normalizer.remap` maps the reduced timescale accumulatations to their accumulated counterparts for statistics
 #   (e.g., tp -> tp_accum, cp -> cp_accum) so the outputs use the correct scale.
 # - Use `normalizer.std` for the accumulated inputs (tp_accum, cp_accum) to preserve zero as zero.
-# - Add `processors.set_to_zero` for the accumulated inputs with `time_index: [0]` so the first time slice in each input window is zeroed.
+# - Add `processors.zero_overwriter` for the accumulated inputs with `time_index: [0]` so the first time slice in each input window is zeroed.
 #   This is critical when preparing, for example, 6-hour accumulated inputs while training/interpolating at 1-hour resolution.
 
 # Time frequency requested from dataset
@@ -113,8 +113,8 @@ processors:
   # Zero the first time index of each input window for accumulated inputs.
   # This prevents carry-over when constructing temporal differences and is
   # required when, for example, 6h accumulated inputs feed a 1h interpolator.
-  set_to_zero:
-    _target_: anemoi.models.preprocessing.overwriter.SetToZero
+  zero_overwriter:
+    _target_: anemoi.models.preprocessing.overwriter.ZeroOverwriter
     config:
       groups:
         - vars:

@@ -19,7 +19,7 @@ from anemoi.models.preprocessing import BasePreprocessor
 LOGGER = logging.getLogger(__name__)
 
 
-class SetToZero(BasePreprocessor):
+class ZeroOverwriter(BasePreprocessor):
     def __init__(self, config=None, data_indices: Optional[IndexCollection] = None, statistics: Optional[dict] = None):
         super().__init__(config, data_indices, statistics)
         groups = [] if config is None else config.groups
@@ -36,24 +36,24 @@ class SetToZero(BasePreprocessor):
         # - list[{"vars": [...], "time_index": [int]}]
         if not isinstance(groups, list):
             LOGGER.warning(
-                "SetToZero config is not a list; got %r. No variables will be zeroed.", type(groups).__name__
+                "ZeroOverwriter config is not a list; got %r. No variables will be zeroed.", type(groups).__name__
             )
             groups = []
 
         for entry in groups:
             if not isinstance(entry, dict):
-                LOGGER.warning("SetToZero group must be a dict, got %r; skipping.", type(entry).__name__)
+                LOGGER.warning("ZeroOverwriter group must be a dict, got %r; skipping.", type(entry).__name__)
                 continue
 
             vars_list = entry["vars"]
             time_index = entry["time_index"]
 
             if not isinstance(vars_list, list) or not all(isinstance(v, str) for v in vars_list):
-                LOGGER.warning("SetToZero group 'vars' must be a list[str], got %r; skipping.", vars_list)
+                LOGGER.warning("ZeroOverwriter group 'vars' must be a list[str], got %r; skipping.", vars_list)
                 continue
 
             if not isinstance(time_index, list) or not all(isinstance(t, int) for t in time_index):
-                LOGGER.warning("SetToZero group 'time_index' must be a list[int], got %r; skipping.", time_index)
+                LOGGER.warning("ZeroOverwriter group 'time_index' must be a list[int], got %r; skipping.", time_index)
                 continue
 
             train_idxs = [train_map[v] for v in vars_list if v in train_map]
@@ -62,7 +62,7 @@ class SetToZero(BasePreprocessor):
             missing_train = [v for v in vars_list if v not in train_map]
             missing_infer = [v for v in vars_list if v not in infer_map]
             if missing_train or missing_infer:
-                LOGGER.debug("SetToZero: variables not found (train=%s, infer=%s)", missing_train, missing_infer)
+                LOGGER.debug("ZeroOverwriter: variables not found (train=%s, infer=%s)", missing_train, missing_infer)
 
             self._train_time_to_idxs.setdefault(time_index, [])
             self._infer_time_to_idxs.setdefault(time_index, [])

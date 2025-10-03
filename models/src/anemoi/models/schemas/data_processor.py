@@ -229,7 +229,7 @@ class RemapperSchema(BaseModel):
     "Variables not to be remapped."
 
 
-class SetToZeroGroup(BaseModel):
+class ZeroOverwriterGroup(BaseModel):
     vars: Union[list[str], None] = Field(default_factory=list)
     time_index: Union[list[int], None] = Field(default_factory=list)
 
@@ -252,8 +252,8 @@ class SetToZeroGroup(BaseModel):
         return v
 
 
-class SetToZeroSchema(BaseModel):
-    groups: Union[list[SetToZeroGroup], None] = Field(default_factory=list)
+class ZeroOverwriterSchema(BaseModel):
+    groups: Union[list[ZeroOverwriterGroup], None] = Field(default_factory=list)
 
     @field_validator("groups", mode="before")
     @classmethod
@@ -274,7 +274,7 @@ class PreprocessorTarget(str, Enum):
     conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
     conditional_nan_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor"
     normalized_relu_postprocessor = "anemoi.models.preprocessing.postprocessor.NormalizedReluPostprocessor"
-    set_to_zero = "anemoi.models.preprocessing.overwriter.SetToZero"
+    zero_overwriter = "anemoi.models.preprocessing.overwriter.ZeroOverwriter"
 
 
 target_to_schema = {
@@ -286,12 +286,12 @@ target_to_schema = {
     PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
     PreprocessorTarget.conditional_nan_postprocessor: ConditionalNaNPostprocessorSchema,
     PreprocessorTarget.normalized_relu_postprocessor: NormalizedReluPostprocessorSchema,
-    PreprocessorTarget.set_to_zero: SetToZeroSchema,
+    PreprocessorTarget.zero_overwriter: ZeroOverwriterSchema,
 }
 
 
 class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
     "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
-    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema, SetToZeroSchema]
+    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema, ZeroOverwriterSchema]
     "Target schema containing processor methods."
