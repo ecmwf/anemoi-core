@@ -228,7 +228,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
             assert (
                 len(batch.shape) == 5
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
+            ), f"The input tensor has an incorrect shape: expected a 5-dimensional tensor, got {batch.shape}!"
 
             x_boundaries = pre_processors(batch, in_place=False)  # batch should be the input variables only already
 
