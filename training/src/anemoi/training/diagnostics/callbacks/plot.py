@@ -35,6 +35,7 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.mapper import GraphEdgeMixin
+from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import get_scatter_frame
 from anemoi.training.diagnostics.plots import init_plot_settings
@@ -118,10 +119,9 @@ class BasePlotCallback(Callback, ABC):
                 try:
                     logger.experiment.log_artifact(run_id, str(save_path))
                 except Exception as e:
-                    if "Resource Conflict" in str(e):
-                        LOGGER.warning(f"Artifact: {save_path!s} already exists, will not log again.")
-                    else:
+                    if not ("Resource Conflict" in str(e) and isinstance(logger, AnemoiAzureMLflowLogger)):
                         LOGGER.error(str(e))
+                        raise
 
         plt.close(fig)  # cleanup
 
@@ -153,10 +153,9 @@ class BasePlotCallback(Callback, ABC):
                 try:
                     logger.experiment.log_artifact(run_id, str(save_path))
                 except Exception as e:
-                    if "Resource Conflict" in str(e):
-                        LOGGER.warning(f"Artifact: {save_path!s} already exists, will not log again.")
-                    else:
+                    if not ("Resource Conflict" in str(e) and isinstance(logger, AnemoiAzureMLflowLogger)):
                         LOGGER.error(str(e))
+                        raise
 
         plt.close(fig)  # cleanup
 
