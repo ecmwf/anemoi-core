@@ -233,9 +233,36 @@ class SetToZeroGroup(BaseModel):
     vars: Union[list[str], None] = Field(default_factory=list)
     time_index: Union[list[int], None] = Field(default_factory=list)
 
+    @field_validator("vars", mode="before")
+    @classmethod
+    def _validate_vars(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+            raise TypeError(f"'vars' must be a list[str], got {type(v).__name__}")
+        return v
+
+    @field_validator("time_index", mode="before")
+    @classmethod
+    def _validate_time_index(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list) or not all(isinstance(i, int) for i in v):
+            raise TypeError(f"'time_index' must be a list[int], got {type(v).__name__}")
+        return v
+
 
 class SetToZeroSchema(BaseModel):
     groups: Union[list[SetToZeroGroup], None] = Field(default_factory=list)
+
+    @field_validator("groups", mode="before")
+    @classmethod
+    def _validate_groups(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            raise TypeError(f"'groups' must be a list, got {type(v).__name__}")
+        return v
 
 
 class PreprocessorTarget(str, Enum):
