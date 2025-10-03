@@ -741,14 +741,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         if self.optimizer_settings.zero:
             optimizer = ZeroRedundancyOptimizer(
-                self.trainer.model.parameters(),
+                self.parameters(),
                 lr=self.lr,
                 optimizer_class=torch.optim.AdamW,
                 **self.optimizer_settings.kwargs,
             )
         else:
             optimizer = torch.optim.AdamW(
-                self.trainer.model.parameters(),
+                self.parameters(),
                 lr=self.lr,
                 **self.optimizer_settings.kwargs,
             )
