@@ -11,6 +11,7 @@
 from typing import Optional
 from typing import Union
 
+import os
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -21,9 +22,27 @@ from torch_geometric.utils import k_hop_subgraph
 from torch_geometric.utils import mask_to_index
 
 
+# caching k-hop graphs / chunks can be beneficial for smaller-scale runs
+# while adding some memory overhead from keeping them around for longer
+CACHE_GRAPHS = os.environ.get("ANEMOI_CACHE_GRAPHS", "0") == "1"
+
+class GraphCache:
+    _instance = None
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(GraphCache, cls).__new__(cls)
+            # hacky global cache to avoid recomputing the same edge partitions
+            cls._instance.edge_cache = {}
+            # hacky global cache to avoid recomputing the same node partitions
+            cls._instance.node_cache = {}
+            # hacky global cache to avoid recomputing the same subgraph
+            cls._instance.subgraph_cache = {}
+
+        return cls._instance
+
+
 def get_k_hop_edges(
     nodes: Tensor,
-    edge_attr: Tensor,
     edge_index: Adj,
     num_hops: int = 1,
     num_nodes: Optional[int] = None,
@@ -34,8 +53,6 @@ def get_k_hop_edges(
     ----------
     nodes : Tensor
         destination nodes
-    edge_attr : Tensor
-        edge attributes
     edge_index : Adj
         edge index
     num_hops: int, Optional, by default 1
@@ -54,7 +71,7 @@ def get_k_hop_edges(
         num_nodes=num_nodes,
     )
 
-    return edge_attr[mask_to_index(edge_mask_k)], edge_index_k
+    return edge_index_k, edge_mask_k
 
 
 def sort_edges_1hop_sharding(
@@ -127,32 +144,45 @@ def sort_edges_1hop_chunks(
     tuple[list[Tensor], list[Adj]]
         list of sorted edge attribute chunks, list of sorted edge_index chunks
     """
-    if isinstance(num_nodes, int):
-        node_chunks = torch.arange(num_nodes, device=edge_index.device).tensor_split(num_chunks)
-    else:
-        nodes_src = torch.arange(num_nodes[0], device=edge_index.device)
-        node_chunks = torch.arange(num_nodes[1], device=edge_index.device).tensor_split(num_chunks)
+
+    key = (num_nodes, edge_index.shape[1], num_chunks, relabel_dst_nodes)
 
     edge_index_list = []
-    edge_attr_list = []
-    for node_chunk in node_chunks:
+    edge_mask_list = []
+
+    if not CACHE_GRAPHS or (key not in GraphCache().edge_cache):
         if isinstance(num_nodes, int):
-            edge_attr_chunk, edge_index_chunk = get_k_hop_edges(node_chunk, edge_attr, edge_index, num_nodes=num_nodes)
+            node_chunks = torch.arange(num_nodes, device=edge_index.device).tensor_split(num_chunks)
         else:
-            edge_index_chunk, edge_attr_chunk = bipartite_subgraph(
-                (nodes_src, node_chunk),
-                edge_index,
-                edge_attr,
-                size=(num_nodes[0], num_nodes[1]),
-            )
+            nodes_src = torch.arange(num_nodes[0], device=edge_index.device)
+            node_chunks = torch.arange(num_nodes[1], device=edge_index.device).tensor_split(num_chunks)
 
-        if relabel_dst_nodes:  # relabel dst nodes to be contiguous
-            edge_index_chunk[1] -= node_chunk[0]  # shift dst nodes to start from 0
+        for node_chunk in node_chunks:
+            if isinstance(num_nodes, int):
+                edge_index_chunk, edge_mask = get_k_hop_edges(node_chunk, edge_index, num_nodes=num_nodes)
+            else:
+                edge_index_chunk, _, edge_mask = bipartite_subgraph(
+                    (nodes_src, node_chunk),
+                    edge_index,
+                    edge_attr=None,
+                    size=(num_nodes[0], num_nodes[1]),
+                    return_edge_mask=True,
+                )
 
-        edge_index_list.append(edge_index_chunk)
-        edge_attr_list.append(edge_attr_chunk)
+            if relabel_dst_nodes:  # relabel dst nodes to be contiguous
+                edge_index_chunk[1] -= node_chunk[0]  # shift dst nodes to start from 0
 
-    return edge_attr_list, edge_index_list
+            edge_index_list.append(edge_index_chunk)
+            edge_mask_list.append(mask_to_index(edge_mask))
+
+        if CACHE_GRAPHS:
+            GraphCache().edge_cache[key] = (edge_index_list, edge_mask_list)
+
+    if CACHE_GRAPHS:
+        edge_index_list, edge_mask_list = GraphCache().edge_cache[key]
+
+    # return edge_attr_list = [edge_attr[edge_mask] for edge_mask in edge_mask_list]
+    return edge_attr_list = [edge_attr.index_select(index=edge_mask, dim=0) for edge_mask in edge_mask_list]
 
 
 def drop_unconnected_src_nodes(
@@ -175,14 +205,60 @@ def drop_unconnected_src_nodes(
         reduced node features, relabeled edge index (contiguous, starting from 0),
         indices of connected source nodes
     """
-    connected_src_nodes = torch.unique(edge_index[0])
-    dst_nodes = torch.arange(num_nodes[1], device=x_src.device)
 
-    edge_index_new, _ = bipartite_subgraph(
-        (connected_src_nodes, dst_nodes),
-        edge_index,
-        size=num_nodes,
-        relabel_nodes=True,
-    )
+    key = (num_nodes, edge_index.shape[1], x_src.shape[0])
 
-    return x_src[connected_src_nodes], edge_index_new, connected_src_nodes
+    connected_src_nodes = None
+    edge_index_new = None
+
+    if not CACHE_GRAPHS or (key not in GraphCache().node_cache):
+        connected_src_nodes = torch.unique(edge_index[0])
+        dst_nodes = torch.arange(num_nodes[1], device=x_src.device)
+
+        edge_index_new, _ = bipartite_subgraph(
+            (connected_src_nodes, dst_nodes),
+            edge_index,
+            size=num_nodes,
+            relabel_nodes=True,
+        )
+
+        if CACHE_GRAPHS:
+            GraphCache().node_cache[key] = (connected_src_nodes, edge_index_new)
+
+    if CACHE_GRAPHS:
+        connected_src_nodes, edge_index_new = GraphCache().node_cache[key]
+
+    # return x_src[connected_src_nodes], edge_index_new, connected_src_nodes
+    return x_src.index_select(index=connected_src_nodes, dim=0), edge_index_new, connected_src_nodes
+
+
+def cached_bipartite_subgraph(
+    num_nodes: tuple[int, int],
+    edge_index: Adj,
+    edge_attr: Tensor,
+    size: Optional[tuple[int, int]],
+    relabel_nodes: bool = True,
+) -> tuple[Adj, Tensor]:
+    key = (num_nodes, edge_index.shape[1], size, relabel_nodes)
+
+    new_edge_index = None
+    edge_mask = None
+
+    if (not CACHE_GRAPHS) or (key not in GraphCache().subgraph_cache):
+        new_edge_index, _, edge_mask = bipartite_subgraph(
+            num_nodes,
+            edge_index,
+            edge_attr=None,
+            size=size,
+            relabel_nodes=relabel_nodes,
+            return_edge_mask=True,
+        )
+        edge_mask = mask_to_index(edge_mask)
+
+        if CACHE_GRAPHS:
+            GraphCache().subgraph_cache[key] = (new_edge_index, edge_mask)
+
+    if CACHE_GRAPHS:
+        new_edge_index, edge_mask = GraphCache().subgraph_cache[key]
+
+    return new_edge_index, edge_attr.index_select(index=edge_mask, dim=0) # edge_attr[edge_mask]
