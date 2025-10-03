@@ -90,7 +90,7 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
         super().__init__(resolution, name)
 
         self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
-        self.boundary_mask_builder = (None,)
+        self.boundary_mask_builder = None
         if boundary_radius_km:
             assert (
                 boundary_resolution is not None
