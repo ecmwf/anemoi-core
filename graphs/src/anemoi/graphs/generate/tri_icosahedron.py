@@ -61,6 +61,7 @@ def create_stretched_tri_nodes(
     base_resolution: int,
     lam_resolution: int,
     area_mask_builder: KNNAreaMaskBuilder | None = None,
+    boundary_mask_builder: KNNAreaMaskBuilder | None = None,
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
     """Creates a global mesh with 2 levels of resolution.
 
@@ -89,6 +90,9 @@ def create_stretched_tri_nodes(
     # Get the low resolution nodes outside the AOI
     base_coords_rad = get_latlon_coords_icosphere(base_resolution)
     base_area_mask = ~area_mask_builder.get_mask(base_coords_rad)
+    if boundary_mask_builder is not None:
+        boundary_mask = boundary_mask_builder.get_mask(base_coords_rad)
+        base_area_mask = np.logical_and(base_area_mask, boundary_mask)
 
     # Get the high resolution nodes inside the AOI
     lam_coords_rad = get_latlon_coords_icosphere(lam_resolution)

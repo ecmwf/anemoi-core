@@ -83,14 +83,28 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
         name: str,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        boundary_radius_km: float | None = None,
+        boundary_resolution: int | list[int] | None = None,
     ) -> None:
 
         super().__init__(resolution, name)
 
         self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
+        self.boundary_mask_builder = (None,)
+        if boundary_radius_km:
+            assert (
+                boundary_resolution is not None
+            ), "When providing a boundary zone you must specify 'boundary_resolution' as well."
+            self.boundary_resolution = boundary_resolution
+            self.boundary_mask_builder = KNNAreaMaskBuilder(
+                reference_node_name, margin_radius_km + boundary_radius_km, mask_attr_name
+            )
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
+        # is the below needed?
+        if self.boundary_mask_builder:
+            self.boundary_mask_builder.fit(graph)
         return super().register_nodes(graph)
 
 
@@ -136,9 +150,19 @@ class LimitedAreaTriNodes(LimitedAreaIcosahedralNodes):
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
-        from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
+        if self.boundary_mask_builder is None:
+            from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
 
-        return create_tri_nodes(resolution=max(self.resolutions), area_mask_builder=self.area_mask_builder)
+            return create_tri_nodes(resolution=max(self.resolutions), area_mask_builder=self.area_mask_builder)
+        else:
+            from anemoi.graphs.generate.tri_icosahedron import create_stretched_tri_nodes
+
+            return create_stretched_tri_nodes(
+                base_resolution=self.boundary_resolution,
+                lam_resolution=max(self.resolutions),
+                area_mask_builder=self.area_mask_builder,
+                boundary_mask_builder=self.boundary_mask_builder,
+            )
 
 
 class LimitedAreaHexNodes(LimitedAreaIcosahedralNodes):
