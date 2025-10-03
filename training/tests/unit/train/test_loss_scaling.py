@@ -24,10 +24,13 @@ from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.transform.variables import Variable
 
 
 @pytest.fixture
-def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
+def fake_data(
+    request: SubRequest,
+) -> tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, list[float]]]:
     config = DictConfig(
         {
             "data": {
@@ -69,7 +72,7 @@ def fake_data(request: SubRequest) -> tuple[DictConfig, IndexCollection]:
 
 
 @pytest.fixture
-def fake_data_no_param() -> tuple[DictConfig, IndexCollection]:
+def fake_data_no_param() -> tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, list[float]]]:
     config = DictConfig(
         {
             "data": {
@@ -102,6 +105,87 @@ def fake_data_no_param() -> tuple[DictConfig, IndexCollection]:
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     return config, data_indices, statistics, statistics_tendencies
+
+
+@pytest.fixture
+def fake_data_variable_groups() -> tuple[
+    DictConfig,
+    IndexCollection,
+    dict[str, list[float]],
+    dict[str, list[float]],
+    dict[str, dict[str, str | int]],
+    torch.Tensor,
+]:
+    config = DictConfig(
+        {
+            "data": {
+                "forcing": ["x"],
+                "diagnostic": ["z", "q"],
+            },
+            "training": {
+                "training_loss": {
+                    "_target_": "anemoi.training.losses.MSELoss",
+                    "scalers": ["general_variable", "scaler_l50", "scaler_l"],
+                },
+                "variable_groups": {
+                    "default": "sfc",
+                    "l_50": {"param": ["y"], "level": [50]},
+                    "l": {"param": ["y"], "level": [500, 850]},
+                },
+                "scalers": {
+                    "builders": {
+                        "scaler_l50": {
+                            "_target_": "anemoi.training.losses.scalers.ReluVariableLevelScaler",
+                            "group": "l_50",
+                            "y_intercept": 0.0,
+                            "slope": 0.0,
+                        },
+                        "scaler_l": {
+                            "_target_": "anemoi.training.losses.scalers.ReluVariableLevelScaler",
+                            "group": "l",
+                            "y_intercept": 2.0,
+                            "slope": 0.0,
+                        },
+                        "general_variable": {
+                            "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
+                            "weights": {
+                                "default": 1,
+                                "z": 0.1,
+                                "other": 100,
+                                "y": 0.5,
+                            },
+                        },
+                    },
+                },
+                "metrics": ["other", "y_850"],
+            },
+        },
+    )
+    name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
+    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
+    statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
+    metadata_variables = {
+        "y_50": {"mars": {"param": "y", "levelist": 50}},
+        "y_500": {"mars": {"param": "y", "levelist": 500}},
+        "y_850": {"mars": {"param": "y", "levelist": 850}},
+        "z": {"mars": {"param": "z"}},
+        "q": {"mars": {"param": "q"}},
+        "other": {"mars": {"param": "other"}},
+        "d": {"mars": {"param": "d"}},
+    }
+    expected_scaling = torch.Tensor(
+        [
+            0 * 0.5,  # y_50
+            2 * 0.5,  # y_500
+            2 * 0.5,  # y_850
+            1,  # q
+            0.1,  # z
+            100,  # other
+            1,  # d
+        ],
+    )
+    return config, data_indices, statistics, statistics_tendencies, metadata_variables, expected_scaling
 
 
 linear_scaler = {
@@ -380,3 +464,40 @@ def test_variable_masking(
     )
     assert scalers["variable_masking"][0][0] == len(vars_to_mask)
     assert scalers["variable_masking"][1][indices_to_mask].all(), "Expected scalers for unmasked variables to be one"
+
+
+def test_variable_loss_scaling_val_complex_variable_groups(
+    fake_data_variable_groups: tuple[
+        DictConfig,
+        IndexCollection,
+        dict[str, list[float]],
+        dict[str, list[float]],
+        dict[str, dict | Variable],
+        torch.Tensor,
+    ],
+    graph_with_nodes: HeteroData,
+) -> None:
+    config, data_indices, statistics, statistics_tendencies, metadata_variables, expected_scaling = (
+        fake_data_variable_groups
+    )
+
+    metadata_extractor = ExtractVariableGroupAndLevel(
+        config.training.variable_groups,
+        metadata_variables,
+    )
+
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        metadata_extractor=metadata_extractor,
+        output_mask=NoOutputMask(),
+    )
+
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+
+    final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
+
+    assert torch.allclose(final_variable_scaling, expected_scaling)
