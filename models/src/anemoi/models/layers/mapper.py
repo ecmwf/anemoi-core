@@ -27,7 +27,7 @@ from torch_geometric.typing import PairTensor
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
-from anemoi.models.distributed.khop_edges import bipartite_subgraph
+from anemoi.models.distributed.khop_edges import cached_bipartite_subgraph
 from anemoi.models.distributed.khop_edges import drop_unconnected_src_nodes
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
 from anemoi.models.distributed.shapes import change_channels_in_shape
@@ -364,7 +364,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
 
         # get subgraph of x_dst_chunk and incoming edges, drop unconnected src nodes
         nodes_src_full = torch.arange(size[0], device=edge_index.device)
-        edge_index, edge_attr = bipartite_subgraph(
+        edge_index, edge_attr = cached_bipartite_subgraph(
             (nodes_src_full, dst_chunk),
             edge_index,
             edge_attr,
