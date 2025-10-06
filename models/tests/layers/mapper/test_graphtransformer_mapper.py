@@ -184,8 +184,8 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         loss.backward()
 
         # Check gradients
-        assert mapper.trainable.trainable.grad is not None
-        assert mapper.trainable.trainable.grad.shape == mapper.trainable.trainable.shape
+        assert mapper.graph_provider.trainable.trainable.grad is not None
+        assert mapper.graph_provider.trainable.trainable.grad.shape == mapper.graph_provider.trainable.trainable.shape
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
@@ -287,8 +287,8 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         loss.backward()
 
         # Check gradients
-        assert mapper.trainable.trainable.grad is not None
-        assert mapper.trainable.trainable.grad.shape == mapper.trainable.trainable.shape
+        assert mapper.graph_provider.trainable.trainable.grad is not None
+        assert mapper.graph_provider.trainable.trainable.grad.shape == mapper.graph_provider.trainable.trainable.shape
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"

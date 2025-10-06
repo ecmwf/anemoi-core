@@ -68,7 +68,7 @@ class TestGNNProcessor:
         assert graphconv_processor.num_chunks == graphconv_init.num_chunks
         assert graphconv_processor.num_channels == graphconv_init.num_channels
         assert graphconv_processor.chunk_size == graphconv_init.num_layers // graphconv_init.num_chunks
-        assert isinstance(graphconv_processor.trainable, TrainableTensor)
+        assert isinstance(graphconv_processor.graph_provider.trainable, TrainableTensor)
 
     def test_forward(self, graphconv_processor, graphconv_init):
         batch_size = 1
@@ -91,7 +91,10 @@ class TestGNNProcessor:
         loss.backward()
 
         # Check gradients of trainable tensor
-        assert graphconv_processor.trainable.trainable.grad.shape == (self.NUM_EDGES, graphconv_init.trainable_size)
+        assert graphconv_processor.graph_provider.trainable.trainable.grad.shape == (
+            self.NUM_EDGES,
+            graphconv_init.trainable_size,
+        )
 
         # Check gradients of processor
         for param in graphconv_processor.parameters():

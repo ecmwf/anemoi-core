@@ -73,7 +73,7 @@ class TestGraphTransformerProcessor:
             graphtransformer_processor.chunk_size
             == graphtransformer_init.num_layers // graphtransformer_init.num_chunks
         )
-        assert isinstance(graphtransformer_processor.trainable, TrainableTensor)
+        assert isinstance(graphtransformer_processor.graph_provider.trainable, TrainableTensor)
 
     def test_forward(self, graphtransformer_processor, graphtransformer_init):
         batch_size = 1
@@ -97,7 +97,7 @@ class TestGraphTransformerProcessor:
         loss.backward()
 
         # Check gradients of trainable tensor
-        assert graphtransformer_processor.trainable.trainable.grad.shape == (
+        assert graphtransformer_processor.graph_provider.trainable.trainable.grad.shape == (
             self.NUM_EDGES,
             graphtransformer_init.trainable_size,
         )

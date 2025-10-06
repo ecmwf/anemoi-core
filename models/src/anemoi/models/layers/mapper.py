@@ -14,7 +14,6 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Optional
 
-import numpy as np
 import torch
 from torch import Tensor
 from torch import nn
@@ -36,7 +35,8 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
-from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.graph_providers import BaseGraphProvider
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -46,98 +46,6 @@ LOGGER = logging.getLogger(__name__)
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/406)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
-
-
-class GraphEdgeMixin:
-    def _init_graph_mode(
-        self,
-        sub_graph: Optional[HeteroData],
-        sub_graph_edge_attributes: Optional[list[str]],
-        src_grid_size: Optional[int],
-        dst_grid_size: Optional[int],
-        trainable_size: int,
-    ) -> None:
-        """Initialize graph mode (static or dynamic) based on provided parameters."""
-        if sub_graph is not None:
-            self.graph_mode = "static"
-            assert sub_graph_edge_attributes is not None, "sub_graph_edge_attributes required for static mode"
-            assert src_grid_size is not None, "src_grid_size required for static mode"
-            assert dst_grid_size is not None, "dst_grid_size required for static mode"
-            self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
-        else:
-            self.graph_mode = "dynamic"
-            assert (
-                trainable_size == 0
-            ), "Dynamic mode does not support trainable edge parameters (trainable_size must be 0)"
-
-    def _register_edges(
-        self, sub_graph: HeteroData, edge_attributes: list[str], src_size: int, dst_size: int, trainable_size: int
-    ) -> None:
-        """Register edge dim, attr, index_base, and increment.
-
-        Parameters
-        ----------
-        sub_graph : HeteroData
-            Sub graph of the full structure
-        edge_attributes : list[str]
-            Edge attributes to use.
-        src_size : int
-            Source size
-        dst_size : int
-            Target size
-        trainable_size : int
-            Trainable tensor size
-        """
-        assert sub_graph, f"{self.__class__.__name__} needs a valid sub_graph to register edges."
-        assert edge_attributes is not None, "Edge attributes must be provided"
-
-        edge_attr_tensor = torch.cat([sub_graph[attr] for attr in edge_attributes], axis=1)
-
-        self.edge_dim = edge_attr_tensor.shape[1] + trainable_size
-        self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
-        self.register_buffer("edge_index_base", sub_graph.edge_index, persistent=False)
-        self.register_buffer(
-            "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=True
-        )
-
-    def _expand_edges(self, edge_index: Adj, edge_inc: Tensor, batch_size: int) -> Adj:
-        """Expand edge index while incrementing to the edge index.
-
-        Parameters
-        ----------
-        edge_index : Adj
-            Edge index to start
-        edge_inc : Tensor
-            Edge increment to use
-        batch_size : int
-            Number of times to expand the edge index
-
-        Returns
-        -------
-        Tensor
-            Edge Index
-        """
-        edge_index = torch.cat(
-            [edge_index + i * edge_inc for i in range(batch_size)],
-            dim=1,
-        )
-        return edge_index
-
-    def get_edges(
-        self,
-        batch_size: int,
-        edge_index: Optional[Adj] = None,
-        edge_attr: Optional[Tensor] = None,
-    ) -> tuple[Tensor, Adj]:
-        """Get raw edges for processing - routes between static and dynamic modes."""
-        if self.graph_mode == "static":
-            edge_attr = self.trainable(self.edge_attr, batch_size)
-            edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
-            return edge_attr, edge_index
-        else:
-            assert edge_index is not None, "Dynamic mode requires edge_index parameter"
-            assert edge_attr is not None, "Dynamic mode requires edge_attr parameter"
-            return edge_attr, edge_index
 
 
 class BaseMapper(nn.Module, ABC):
@@ -185,7 +93,7 @@ class BaseMapper(nn.Module, ABC):
         pass
 
 
-class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
+class GraphTransformerBaseMapper(BaseMapper, ABC):
     """Graph Transformer Base Mapper from hidden -> data or data -> hidden."""
 
     def __init__(
@@ -195,14 +103,16 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        trainable_size: int,
+        trainable_size: int = 0,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
+        graph_provider: Optional[BaseGraphProvider] = None,
         sub_graph: Optional[HeteroData] = None,
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: Optional[int] = None,
         dst_grid_size: Optional[int] = None,
+        edge_dim: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -220,22 +130,26 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
-        trainable_size : int
-            Trainable tensor of edge
+        trainable_size : int, optional
+            Trainable tensor of edge (for static mode), by default 0
         num_chunks : int
             Number of chunks to split into
         num_heads: int
             Number of heads in transformer
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension
-        sub_graph : HeteroData
-            Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
-            Edge attributes to use
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
+        graph_provider : BaseGraphProvider, optional
+            Graph provider instance. If None, will be created from other parameters.
+        sub_graph : HeteroData, optional
+            Sub graph of the full structure (for static mode)
+        sub_graph_edge_attributes : list[str], optional
+            Edge attributes to use (for static mode)
+        src_grid_size : int, optional
+            Source grid size (for static mode)
+        dst_grid_size : int, optional
+            Destination grid size (for static mode)
+        edge_dim : int, optional
+            Edge dimension (for dynamic mode)
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
@@ -260,18 +174,24 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
 
         Linear = self.layer_factory.Linear
 
-        # Initialize graph mode (static or dynamic)
-        self._init_graph_mode(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        if graph_provider is None:
+            graph_provider = create_graph_provider(
+                sub_graph=sub_graph,
+                sub_graph_edge_attributes=sub_graph_edge_attributes,
+                src_grid_size=src_grid_size,
+                dst_grid_size=dst_grid_size,
+                trainable_size=trainable_size,
+                edge_dim=edge_dim,
+            )
 
-        if self.graph_mode == "static":
-            self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
+        self.graph_provider = graph_provider
 
         self.proc = GraphTransformerMapperBlock(
             in_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
             out_channels=hidden_dim,
             num_heads=num_heads,
-            edge_dim=self.edge_dim,
+            edge_dim=self.graph_provider.edge_dim,
             qk_norm=qk_norm,
             layer_kernels=self.layer_factory,
             shard_strategy=shard_strategy,
@@ -307,7 +227,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
         # gather/scatter if x_src is sharded, always reduce gradients in bwds
         x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
-        edge_attr, edge_index = self.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         # Sort and shard edges for the full graph
         size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
@@ -464,7 +384,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
     ) -> PairTensor:
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
 
-        edge_attr, edge_index = self.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
@@ -757,7 +677,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         return x_dst
 
 
-class GNNBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
+class GNNBaseMapper(BaseMapper, ABC):
     """Base for Graph Neural Network Mapper from hidden -> data or data -> hidden."""
 
     def __init__(
@@ -767,16 +687,17 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        trainable_size: int,
+        trainable_size: int = 0,
         num_chunks: int,
         mlp_extra_layers: int,
+        graph_provider: Optional[BaseGraphProvider] = None,
         sub_graph: Optional[HeteroData] = None,
         sub_graph_edge_attributes: Optional[list[str]] = None,
         src_grid_size: Optional[int] = None,
         dst_grid_size: Optional[int] = None,
         edge_dim: Optional[int] = None,
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: DotDict = None,
     ) -> None:
         """Initialize GNNBaseMapper.
 
@@ -788,24 +709,26 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        out_channels_dst : int
+        out_channels_dst : int, optional
             Output channels of the destination node
-        trainable_size : int
-            Trainable tensor of edge
+        trainable_size : int, optional
+            Trainable tensor of edge (for static mode), by default 0
         num_chunks : int
             Number of chunks to split into
-        num_heads: int
-            Number of heads in transformer
-        mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension
-        sub_graph : HeteroData
-            Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
-            Edge attributes to use
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
+        mlp_extra_layers : int
+            Number of extra layers in MLP
+        graph_provider : BaseGraphProvider, optional
+            Graph provider instance. If None, will be created from other parameters.
+        sub_graph : HeteroData, optional
+            Sub graph of the full structure (for static mode)
+        sub_graph_edge_attributes : list[str], optional
+            Edge attributes to use (for static mode)
+        src_grid_size : int, optional
+            Source grid size (for static mode)
+        dst_grid_size : int, optional
+            Destination grid size (for static mode)
+        edge_dim : int, optional
+            Edge dimension (for dynamic mode)
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -822,26 +745,25 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
             layer_kernels=layer_kernels,
         )
 
-        # Initialize graph mode (static or dynamic)
-        self._init_graph_mode(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        if graph_provider is None:
+            graph_provider = create_graph_provider(
+                sub_graph=sub_graph,
+                sub_graph_edge_attributes=sub_graph_edge_attributes,
+                src_grid_size=src_grid_size,
+                dst_grid_size=dst_grid_size,
+                trainable_size=trainable_size,
+                edge_dim=edge_dim,
+            )
+
+        self.graph_provider = graph_provider
 
         self.emb_edges = MLP(
-            in_features=self.edge_dim,
+            in_features=self.graph_provider.edge_dim,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers,
         )
-
-        # Set edge_dim based on mode
-        if self.graph_mode == "static":
-            # Static mode: edge_dim set by _register_edges
-            self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
-        else:
-            # Dynamic mode: use provided edge_dim
-            assert edge_dim is not None, "Dynamic mode requires edge_dim parameter"
-            self.edge_dim = edge_dim
-            self.trainable = None
 
     def forward(
         self,
@@ -859,10 +781,9 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper, ABC):
 
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
 
-        # Get raw edges (static or dynamic)
-        edge_attr, edge_index = self.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
-        # Apply sharding and embedding (same for both static and dynamic)
+        # Apply sharding and embedding
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
             size, edge_attr, edge_index, model_comm_group
         )

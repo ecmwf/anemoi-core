@@ -25,8 +25,8 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.chunk import GNNProcessorChunk
 from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
-from anemoi.models.layers.graph import TrainableTensor
-from anemoi.models.layers.mapper import GraphEdgeMixin
+from anemoi.models.layers.graph_providers import BaseGraphProvider
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -188,7 +188,7 @@ class TransformerProcessor(BaseProcessor):
         return x
 
 
-class GNNProcessor(GraphEdgeMixin, BaseProcessor):
+class GNNProcessor(BaseProcessor):
     """GNN Processor."""
 
     def __init__(
@@ -198,7 +198,8 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         num_layers: int,
         num_chunks: int,
         mlp_extra_layers: int,
-        trainable_size: int,
+        trainable_size: int = 0,
+        graph_provider: Optional[BaseGraphProvider] = None,
         src_grid_size: Optional[int] = None,
         dst_grid_size: Optional[int] = None,
         sub_graph: Optional[HeteroData] = None,
@@ -246,15 +247,18 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        # Initialize graph mode (static or dynamic)
-        self._init_graph_mode(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        # Create graph provider using factory if not provided
+        if graph_provider is None:
+            graph_provider = create_graph_provider(
+                sub_graph=sub_graph,
+                sub_graph_edge_attributes=sub_graph_edge_attributes,
+                src_grid_size=src_grid_size,
+                dst_grid_size=dst_grid_size,
+                trainable_size=trainable_size,
+                edge_dim=edge_dim,
+            )
 
-        if self.graph_mode == "static":
-            self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
-        else:
-            assert edge_dim is not None, "Dynamic mode requires edge_dim parameter"
-            self.edge_dim = edge_dim
-            self.trainable = None
+        self.graph_provider = graph_provider
 
         kwargs = {
             "mlp_extra_layers": mlp_extra_layers,
@@ -264,7 +268,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
 
         self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, **kwargs)
 
-        kwargs["edge_dim"] = self.edge_dim  # Edge dim for first layer
+        kwargs["edge_dim"] = self.graph_provider.edge_dim  # Edge dim for first layer
         self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, **kwargs)
 
         self.offload_layers(cpu_offload)
@@ -282,8 +286,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        # Get raw edges (static or dynamic)
-        edge_attr, edge_index = self.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         target_nodes = sum(x[0] for x in shape_nodes)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -302,7 +305,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         return x
 
 
-class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
+class GraphTransformerProcessor(BaseProcessor):
     """Processor."""
 
     def __init__(
@@ -313,11 +316,13 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        trainable_size: int,
+        trainable_size: int = 0,
+        graph_provider: Optional[BaseGraphProvider] = None,
         src_grid_size: Optional[int] = None,
         dst_grid_size: Optional[int] = None,
         sub_graph: Optional[HeteroData] = None,
         sub_graph_edge_attributes: Optional[list[str]] = None,
+        edge_dim: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -365,14 +370,18 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        # Initialize graph mode (static or dynamic)
-        self._init_graph_mode(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        # Create graph provider using factory if not provided
+        if graph_provider is None:
+            graph_provider = create_graph_provider(
+                sub_graph=sub_graph,
+                sub_graph_edge_attributes=sub_graph_edge_attributes,
+                src_grid_size=src_grid_size,
+                dst_grid_size=dst_grid_size,
+                trainable_size=trainable_size,
+                edge_dim=edge_dim,
+            )
 
-        if self.graph_mode == "static":
-            self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
-        else:
-            assert trainable_size == 0, "Dynamic mode does not support trainable edge parameters"
-            self.trainable = None
+        self.graph_provider = graph_provider
 
         self.build_layers(
             GraphTransformerProcessorChunk,
@@ -382,7 +391,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             qk_norm=qk_norm,
-            edge_dim=self.edge_dim,
+            edge_dim=self.graph_provider.edge_dim,
         )
 
         self.offload_layers(cpu_offload)
@@ -402,8 +411,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        # Get raw edges (static or dynamic)
-        edge_attr, edge_index = self.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
