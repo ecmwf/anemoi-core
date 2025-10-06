@@ -33,6 +33,7 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.optimizers.AdEMAMix import AdEMAMix
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
@@ -734,37 +735,58 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return val_loss, y_preds
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
-        """Configure the optimizers and learning rate scheduler.
+    def configure_optimizers(self):
+        """Create optimizer and LR scheduler based on Hydra config."""
+        optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
+        scheduler = self._create_scheduler(optimizer)
+        return [optimizer], [scheduler]
 
-        Returns
-        -------
-        tuple[list[torch.optim.Optimizer], list[dict]]
-            List of optimizers and list of dictionaries containing the
-            learning rate scheduler
+    def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
+        """Create optimizer from its class name in the config.
+
+        The config should include:
+            name: class name as string (e.g., 'AdamW')
+            zero: optional bool, wrap in ZeroRedundancyOptimizer
+            other kwargs: lr, weight_decay, betas, etc.
         """
-        if self.optimizer_settings.zero:
+        class_name = opt_cfg.name
+        kwargs = dict(opt_cfg)
+        kwargs.pop("name", None)
+        zero = kwargs.pop("zero", False)
+
+        # Look up optimizer class in torch.optim
+        try:
+            optimizer_cls = getattr(torch.optim, class_name)
+        except AttributeError:
+            raise ValueError(
+                f"Optimizer '{class_name}' not found in torch.optim. "
+                f"Available optimizers: {dir(torch.optim)}"
+            )
+
+        params = filter(lambda p: p.requires_grad, self.parameters())
+
+        # Create optimizer
+        if zero:
             optimizer = ZeroRedundancyOptimizer(
-                self.trainer.model.parameters(),
+                params,
                 lr=self.lr,
-                optimizer_class=torch.optim.AdamW,
-                **self.optimizer_settings.kwargs,
+                optimizer_class=optimizer_cls,
+                **kwargs,
             )
         else:
-            optimizer = torch.optim.AdamW(
-                self.trainer.model.parameters(),
-                lr=self.lr,
-                **self.optimizer_settings.kwargs,
-            )
+            optimizer = optimizer_cls(params,lr=self.lr, **kwargs)
 
+        return optimizer
+    
+    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict:
+        """Helper to create the cosine LR scheduler."""
         scheduler = CosineLRScheduler(
             optimizer,
             lr_min=self.lr_min,
             t_initial=self.lr_iterations,
             warmup_t=self.lr_warmup,
         )
-
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+        return {"scheduler": scheduler, "interval": "step"}
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
