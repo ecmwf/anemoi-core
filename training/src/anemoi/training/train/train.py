@@ -495,6 +495,16 @@ class AnemoiTrainer:
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
 
+        import os
+        if self.config.training.deterministic:
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+            torch.use_deterministic_algorithms(True)
+            seed=int(os.environ["ANEMOI_BASE_SEED"])
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+
         trainer = pl.Trainer(
             accelerator=self.accelerator,
             callbacks=self.callbacks,
