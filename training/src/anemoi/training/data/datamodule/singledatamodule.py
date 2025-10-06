@@ -21,6 +21,7 @@ from torch_geometric.data import HeteroData
 from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset.multidataset import MultiDataset
+from anemoi.training.data.dataset.multidataset2 import MultiDataset2
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
@@ -206,10 +207,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
+        return MultiDataset2(
+            sample_config=self.config.dataloader.training.sample,
+            sources_config=self.config.dataloader.training.sources,
+        )
+
         datasets_config = {}
         for name, dataset_config in self.config.dataloader.training.datasets.items():
             data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)
+            # trajectories id not supported
+            # data_reader = self.add_trajectory_ids(data_reader)
             datasets_config[name] = data_reader
 
         return MultiDataset(
