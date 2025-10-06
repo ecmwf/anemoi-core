@@ -704,7 +704,7 @@ class GraphTransformerBackwardMapper(BackwardMapperPostProcessMixin, GraphTransf
         )
 
         self.node_data_extractor = nn.Sequential(
-            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+            self.layer_factory.MapperLayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
         if initialise_data_extractor_zero:
             for module in self.node_data_extractor.modules():
@@ -1389,7 +1389,7 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         )
 
         self.node_data_extractor = nn.Sequential(
-            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+            self.layer_factory.MapperLayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
 
     def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):

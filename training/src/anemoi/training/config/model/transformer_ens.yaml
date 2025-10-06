@@ -124,6 +124,7 @@ attributes:
 #       non-compiled ("eager") execution for those lines.
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
+  - module: anemoi.models.layers.normalization.AutocastLayerNormCompile
   - module: anemoi.models.layers.conv.GraphTransformerConv
     #options:
       #dynamic: false
