@@ -1,21 +1,15 @@
 defaults:
-- data: zarr
+- data: zarr_interpolator
 - dataloader: native_grid
 - datamodule: single
 - diagnostics: evaluation
 - hardware: example
 - graph: multi_scale
-- model: graphtransformer
+- model: transformer
 - training: interpolator
 - _self_
 
 config_validation: True
-
-data:
-  frequency: 1h
-  resolution: o96
-
-  diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields
 
 #dataloader:
   # model_run_info: #Add for non-analysis training
@@ -25,11 +19,24 @@ data:
 model:
   model:
     _target_: anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator
-  latent_skip: False # True/False for skip connection on latent mesh
+  latent_skip: True # True/False for skip connection on latent mesh
   grid_skip: 0 # Which of the input indices to use as residual connection, null if none.
 
+
+
+  # Mass-conserving accumulations
+  # Ensure each predicted interpolated target sums to its accumulated forcing input.
+  # The sum of predicted targets at `training.explicit_times.target` (with step `data.frequency`)
+  #   should match the accumulated input at `training.explicit_times.input[-1]` e.g. the r.h.s of the accumulation input
+  # Requirements:
+  # - In config.data: targets must be listed under `diagnostic`; accumulation inputs under `forcing`.
+  # - Use the `zero_overwriter` processor to zero the left boundary (time_index=0) of each accumulation input,
+  mass_conserving_accumulations:
+    tp : tp_accum
+    cp : cp_accum
+
 training:
-  # Instead of inferred using multistep and timeincrement, specify time indices explicitly
+
   explicit_times:
     input: [0,6]
     target: [1,2,3,4,5]
@@ -38,3 +45,12 @@ training:
     data: #of which come from the dataset
       - "insolation"
     time_fraction: True
+
+diagnostics:
+  log:
+    mlflow:
+      max_params_length: 3000
+
+  plot: # Callbacks are currently not supported for interpolator
+    callbacks: []
+    colormaps: {}

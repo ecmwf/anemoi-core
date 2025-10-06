@@ -98,6 +98,20 @@ class ExplicitTimes(BaseModel):
     target: list[NonNegativeInt] = Field(examples=[2])
     "Target time indices."
 
+    @model_validator(mode="after")
+    def check_targets_bracketed_by_inputs(self) -> Self:
+        inp = self.input
+        tgt = self.target
+        if len(inp) == 0 or len(tgt) == 0:
+            return self
+        if min(inp) >= min(tgt) or max(inp) <= max(tgt):
+            error_msg = """training.explicit_times.target must be strictly within the bounds of
+            training.explicit_times.input (min(input) < min(target) and max(input) > max(target))"""
+            raise ValueError(
+                error_msg,
+            )
+        return self
+
 
 class TargetForcing(BaseModel):
     """Forcing parameters for target output times.
