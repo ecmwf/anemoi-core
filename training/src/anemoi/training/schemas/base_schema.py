@@ -108,6 +108,111 @@ class BaseSchema(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def check_mass_conserving_accumulations(self) -> Self:
+        """Validate mass-conserving accumulation configuration when enabled."""
+        mca = getattr(self.model, "mass_conserving_accumulations", None)
+        if not mca:
+            return self
+
+        # Ensure mapping is dict-like
+        try:
+            pairs = list(mca.items())
+        except Exception as e:  # noqa: BLE001
+            error_title = "mass_conserving_accumulations_invalid"
+            error_msg = "model.mass_conserving_accumulations must be a mapping of target->constraint. Error: "
+            raise PydanticCustomError(
+                error_title,
+                error_msg,
+                f"{e}",
+            ) from None
+
+        targets = [t for t, _ in pairs]
+        constraints = [c for _, c in pairs]
+
+        # 1) Targets must be in data.diagnostic
+        diagnostic = self.data.diagnostic or []
+        missing_diag = [t for t in targets if t not in diagnostic]
+        if missing_diag:
+            error_title = "mass_conserving_accumulations_target_not_diagnostic"
+            error_msg = "The following targets must be listed in data.diagnostic: "
+            raise PydanticCustomError(
+                error_title,
+                error_msg,
+                f"{missing_diag}",
+            )
+
+        # 2) Constraints must be in data.forcing
+        forcing = self.data.forcing or []
+        missing_forcing = [c for c in constraints if c not in forcing]
+        if missing_forcing:
+            error_title = "mass_conserving_accumulations_constraint_not_forcing"
+            error_msg = "The following constraint variables must be listed in data.forcing: "
+            raise PydanticCustomError(
+                error_title,
+                error_msg,
+                f"{missing_forcing}",
+            )
+
+        # 3) zero_overwriter processor must exist and include all constraint vars in at least one group's vars
+        processors = getattr(self.data, "processors", {}) or {}
+        zero_overwriter = processors.get("zero_overwriter")
+        if zero_overwriter is None:
+            error_title = "zero_overwriter_missing"
+            error_msg = (
+                "data.processors.zero_overwriter must be defined to zero the left boundary of accumulated inputs."
+            )
+            raise PydanticCustomError(
+                error_title,
+                error_msg,
+            )
+
+        zow_cfg = getattr(zero_overwriter, "config", None) or {}
+        groups = zow_cfg.get("groups") or []
+        zow_vars: set[str] = set()
+        for grp in groups:
+            # if isinstance(grp, dict):
+            v = grp.get("vars")
+            # if isinstance(v, list):
+            zow_vars.update(v)
+
+        missing_zow_vars = [c for c in constraints if c not in zow_vars]
+        if missing_zow_vars:
+            error_title = "zero_overwriter_missing_vars"
+            error_msg = "The following constraint variables must appear in at least one data."
+            "processors.zero_overwriter.config.groups[*].vars list: "
+            raise PydanticCustomError(
+                error_title,
+                error_msg,
+                f"{missing_zow_vars}",
+            )
+
+        # 4) normalizer remap must include each target -> constraint mapping
+        normalizer_proc = processors.get("normalizer", None) or {}
+        norm_cfg = getattr(normalizer_proc, "config", None) or {}
+        remap = norm_cfg.get("remap")
+        if not isinstance(remap, dict):
+            error_title = "normalizer_remap_missing"
+            error_msg = "data.processors.normalizer.config.remap must be a mapping that "
+            "includes all target->constraint pairs from model.mass_conserving_accumulations."
+            raise PydanticCustomError(
+                error_title,
+                error_msg,
+            )
+
+        remap_mismatch = [t for (t, c) in pairs if remap.get(t) != c]
+        if remap_mismatch:
+            error_title = "normalizer_remap_mismatch"
+            error_msg = "data.processors.normalizer.config.remap must map each target "
+            "to its corresponding constraint variable. "
+            raise PydanticCustomError(
+                error_title,
+                error_msg,
+                f"Mismatched or missing entries for: {remap_mismatch}",
+            )
+
+        return self
+
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
