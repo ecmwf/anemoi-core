@@ -368,10 +368,7 @@ class GraphEnsForecaster(BaseGraphModule):
     def _setup_batch_sharding(self, batch: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
         assert len(batch) == 1, "EDA perturbations not supported in allgather_batch atm."
 
-        if self.ens_comm_subgroup_rank == 0:
-            torch.distributed.broadcast(batch[0], src=self.ens_comm_subgroup_rank_0, group=self.ens_comm_subgroup)
-        else:
-            torch.distributed.broadcast(batch[0], src=self.ens_comm_subgroup_rank_0, group=self.ens_comm_subgroup)
+        torch.distributed.broadcast(batch[0], src=self.ens_comm_subgroup_rank_0, group=self.ens_comm_subgroup)
 
         return super()._setup_batch_sharding(batch)
 
