@@ -33,9 +33,11 @@ class PointWiseMLPProcessorConfig:
         self.layer_kernels = load_layer_kernels(instance=False)
 
 
-@pytest.fixture
-def pointwisemlp_processor_init():
-    return PointWiseMLPProcessorConfig()
+@pytest.fixture(params=[0.1, None])
+def pointwisemlp_processor_init(request):
+    cfg = PointWiseMLPProcessorConfig()
+    cfg.dropout_p = request.param
+    return cfg
 
 
 @pytest.fixture
@@ -51,6 +53,21 @@ def test_pointwisemlp_processor_init(pointwisemlp_processor, pointwisemlp_proces
         pointwisemlp_processor.chunk_size
         == pointwisemlp_processor_init.num_layers // pointwisemlp_processor_init.num_chunks
     )
+
+
+def test_pointwisemlp_processor_with_sharding_dropout_forward(pointwisemlp_processor, pointwisemlp_processor_init):
+    gridsize = 100
+    batch_size = 1
+    x = torch.rand(gridsize, pointwisemlp_processor_init.num_channels)
+    shard_shapes = [list(x.shape)]
+
+    with pytest.raises(ValueError, match="Dropout is not supported when model is sharded"):
+        pointwisemlp_processor.forward(
+            x,
+            batch_size,
+            shard_shapes,
+            model_comm_group=2,
+        )
 
 
 def test_pointwisemlp_processor_forward(pointwisemlp_processor, pointwisemlp_processor_init):
