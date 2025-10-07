@@ -207,10 +207,26 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return MultiDataset2(
-            sample_config=self.config.dataloader.training.sample,
-            sources_config=self.config.dataloader.training.sources,
-        )
+        from anemoi.models.data_structure import build_data_handler
+
+        data_handler_config = self.config.data.data_handler
+        data_handler = build_data_handler(data_handler_config, "training")
+        # data_handler = build_data_handler(data_handler_config, "validation")
+        print("Data_handler : ", data_handler)
+
+        from anemoi.models.data_structure import build_sample_provider
+
+        sample_provider_config = self.config.data.sample_provider
+        sample_provider = build_sample_provider(sample_provider_config, data_handler=data_handler)
+        print("Sample provider : ", sample_provider)
+
+        # these are the list of keys to iterate over, instead of peeking into the data config
+        self.sample_groups = sample_provider.static.keys()
+        print("Sample groups : ", self.sample_groups)
+
+        multi_dataset2 = MultiDataset2(sample_provider)
+        # don't return for now, build both MultiDataset and MultiDataset2 and compare their data and metadata
+        # return multi_dataset2
 
         datasets_config = {}
         for name, dataset_config in self.config.dataloader.training.datasets.items():
@@ -219,14 +235,40 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # data_reader = self.add_trajectory_ids(data_reader)
             datasets_config[name] = data_reader
 
-        return MultiDataset(
+        multi_dataset1 = MultiDataset(
             datasets_config=datasets_config,
             grid_indices_config=self.grid_indices,
             relative_date_indices=self.relative_date_indices(),
             timestep=self.config.data.timestep,
             shuffle=True,
-            label="train",
+            label="train",  # where do we use this label , is it specific to lightning?
         )
+
+        def compare(a, b):
+            if type(a) != type(b):
+                print(f"Type mismatch: {type(a)} vs {type(b)}")
+                return
+            if isinstance(a, dict):
+                if a.keys() != b.keys():
+                    print(f"Dict keys mismatch: {a.keys()} vs {b.keys()}")
+                    return
+                for key in a.keys():
+                    compare(a[key], b[key])
+            import torch
+
+            if isinstance(a, torch.Tensor):
+                if not torch.equal(a, b):
+                    print(f"Tensor mismatch: {a} vs {b}")
+                    return
+            assert False, f"Types not handled in compare function : {type(a)}, {type(b)}"
+
+        for i in range(2):
+            a = multi_dataset2[i]
+            b = multi_dataset1[i]
+            compare(a, b)
+
+        # return multi_dataset2
+        return multi_dataset1
 
     @cached_property
     def ds_valid(self) -> MultiDataset:

@@ -217,12 +217,14 @@ class MultiDataset(IterableDataset):
             end = i + dataset.relative_date_indices[-1] + 1
             timeincrement = dataset.relative_date_indices[1] - dataset.relative_date_indices[0]
 
+            # dataset.data is full
             grid_shard_indices = dataset.grid_indices.get_shard_indices(dataset.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
                 x = dataset.data[start:end:timeincrement, :, :, grid_shard_indices]
             else:
                 x = dataset.data[start:end:timeincrement, :, :, :]
                 x = x[..., grid_shard_indices]
+            # x is a chunk
 
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             yield torch.from_numpy(x)

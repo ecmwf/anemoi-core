@@ -79,3 +79,73 @@ datasets:
 
 # Values set in the code
 num_features: null # number of features in the forecast state
+
+data_handler:
+  training:
+      start: 1979-01-01
+      end: 2021
+  validation:
+      start: 2022
+      end: 2023-12-31
+
+  search_path: ${hardware.paths.data}
+
+  sources:
+
+    - dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8
+      data_group: era5_o96
+      extra:
+        # can also use an omegaconf reference with
+        # normalisation: ${data.default.normalizer}
+        normalisation:
+          default: "mean-std"
+          std:
+          - "tp"
+          min-max:
+          max:
+          - "sdor"
+          - "slor"
+          - "z"
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+          - "insolation"
+          - "lsm"
+        graph:
+          {default: 'mean-std', 'mean-std': [tp, 2t]}
+        other_config_specific_to_the_dataset: {todo: 42}
+
+    - dataset: aifs-ea-an-oper-0001-mars-o48-1979-2022-6h-v6
+      data_group: era5_o48
+      extra:
+        normalisation: ${data.default.normalizer}
+        graph: {todo: 42}
+        other_config_specific_to_the_dataset: {todo: 42}
+
+    # unused in this example: era5 n320 resolution
+    - dataset: aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8
+      data_group: era5_highres
+      extra:
+        normalisation: ${data.default.normalizer}
+        graph: {todo: 42}
+
+    # unused in this example
+    - dataset: cerra-rr-an-oper-0001-mars-5p0-2017-2017-6h-v1
+      data_group: cerra
+      extra:
+        normalisation: ${data.default.normalizer}
+        graph: {todo: 42}
+
+    # unused in this example
+    - dataset: observations-dataset-1
+      data_group: iasi
+
+    # unused in this example
+    - dataset: observations-dataset-1
+      data_group: metar

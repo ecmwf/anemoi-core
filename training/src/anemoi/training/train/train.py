@@ -106,6 +106,8 @@ class AnemoiTrainer:
             or bool(self.config.hardware.files.warm_start)
         )
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
+        # build here ?
+        # self.sample_provider = build_sample_provider(...) ?
 
         self.load_weights_only = self.config.training.load_weights_only
         self.parent_uuid = None
@@ -135,8 +137,11 @@ class AnemoiTrainer:
         )
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
+        # self.config.data.num_features = {name: data.num_of_features for name, data in datamodule.ds_train.static.items()}
+
         # Log information for each dataset
         for name, data in datamodule.ds_train.data.items():
+            # for name, data in datamodule.ds_train.static.items():
             LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
             LOGGER.info("Dataset '%s' - Variables: %s", name, str(data.variables))
         return datamodule
@@ -268,6 +273,7 @@ class AnemoiTrainer:
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
             "supporting_arrays": self.supporting_arrays,
+            # "sample_provider": self.sample_provider,
         }
 
         model_task = get_class(self.config.training.model_task)
@@ -471,6 +477,8 @@ class AnemoiTrainer:
         # Multi-dataset case: log per dataset
         from anemoi.training.utils.config_utils import get_dataset_data_config
 
+        # for group_key in self.datamodule.group_keys:
+        #     LOGGER.info("Group key: %s", group_key)
         for dataset_name, data in self.datamodule.ds_train.data.items():
             dataset_data_config = get_dataset_data_config(self.config, dataset_name)
             num_fc_features = len(data.variables) - len(dataset_data_config.forcing)
