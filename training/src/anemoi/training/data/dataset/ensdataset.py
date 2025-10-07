@@ -134,6 +134,7 @@ class EnsNativeGridDataset(NativeGridDataset):
         ens_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
+        ens_comm_subgroup_rank: int,
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -157,6 +158,8 @@ class EnsNativeGridDataset(NativeGridDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
+        ens_comm_subgroup_rank : int
+            Ensemble communication subgroup rank
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -170,6 +173,8 @@ class EnsNativeGridDataset(NativeGridDataset):
 
         self.sample_comm_group_id = ens_comm_group_id  # groups that work on the same sample / batch
         self.sample_comm_num_groups = ens_comm_num_groups
+
+        self.ens_sample_comm_group_rank = ens_comm_subgroup_rank # used to only read data once (rank0) per ensemble group
 
         assert self.reader_group_size >= 1, "reader_group_size must be positive"
 
@@ -265,6 +270,23 @@ class EnsNativeGridDataset(NativeGridDataset):
             self.sample_comm_group_id,
             shuffled_chunk_indices[:10],
         )
+
+        # load dummy data on non-rank-0 of the ensemble subgroup (will be broadcasted)
+        if self.ens_sample_comm_group_rank != 0:
+            dates = len(self.relative_date_indices)
+            variables, ens = self.data.shape[1:3]
+            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+            if isinstance(grid_shard_indices, slice):
+                grid = (grid_shard_indices.stop - grid_shard_indices.start)
+            else:
+                grid = len(grid_shard_indices)
+
+            shape = [dates, ens, grid, variables] # correct shape for easy broadcasting
+
+            for _ in range(len(shuffled_chunk_indices)):
+                yield (torch.empty(shape),)
+
+            return
 
         for i in shuffled_chunk_indices:
             # start and end time indices, for analysis and EDA

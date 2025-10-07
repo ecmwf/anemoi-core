@@ -436,6 +436,8 @@ class DDPEnsGroupStrategy(DDPStrategy):
         ens_comm_subgroup_id = ens_comm_group_id * self.model_comm_group_size + model_comm_group_rank
         ens_comm_subgroup_rank = ens_comm_group_rank // self.model_comm_group_size
         ens_comm_num_subgroups = self.world_size // ens_comm_subgroup_size
+        # global rank 0 in each ensemble subgroup for broadcasting
+        ens_comm_subgroup_rank_0 = ens_comm_subgroup_ranks[ens_comm_subgroup_id][0]
 
         ens_comm_subgroup = ens_comm_subgroups[ens_comm_subgroup_id]
         self.model.set_ens_comm_subgroup(
@@ -444,6 +446,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             ens_comm_subgroup_rank,
             ens_comm_num_subgroups,
             ens_comm_subgroup_size,
+            ens_comm_subgroup_rank_0,
         )
 
         LOGGER.info(
@@ -530,6 +533,8 @@ class DDPEnsGroupStrategy(DDPStrategy):
             self.world_size,
         )
 
+        ens_comm_subgroup_rank = ens_comm_group_rank // self.model_comm_group_size
+
         dataloader.dataset.set_comm_group_info(
             self.global_rank,
             model_comm_group_id,
@@ -540,6 +545,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             ens_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
+            ens_comm_subgroup_rank,
         )
 
         return dataloader
