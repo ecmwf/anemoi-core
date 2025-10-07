@@ -121,8 +121,7 @@ class PointWiseMLPProcessor(BaseProcessor):
 
         self.offload_layers(cpu_offload)
 
-    def _has_dropout(self, dropout_p) -> bool:
-        return dropout_p > 0 if dropout_p else False
+        self._has_dropout = dropout_p > 0 if dropout_p else False
 
     def forward(
         self,
@@ -140,7 +139,7 @@ class PointWiseMLPProcessor(BaseProcessor):
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
             assert (
-                model_comm_group.size() > 1 and not self._has_dropout()
+                model_comm_group.size() > 1 and not self._has_dropout
             ), "Dropout is not supported when model is sharded across GPUS"
 
         (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)

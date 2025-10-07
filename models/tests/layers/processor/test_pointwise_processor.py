@@ -10,6 +10,7 @@
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -33,11 +34,9 @@ class PointWiseMLPProcessorConfig:
         self.layer_kernels = load_layer_kernels(instance=False)
 
 
-@pytest.fixture(params=[0.1, None])
-def pointwisemlp_processor_init(request):
-    cfg = PointWiseMLPProcessorConfig()
-    cfg.dropout_p = request.param
-    return cfg
+@pytest.fixture
+def pointwisemlp_processor_init():
+    return PointWiseMLPProcessorConfig()
 
 
 @pytest.fixture
@@ -55,18 +54,23 @@ def test_pointwisemlp_processor_init(pointwisemlp_processor, pointwisemlp_proces
     )
 
 
+@pytest.fixture(params=[0.1, None])
 def test_pointwisemlp_processor_with_sharding_dropout_forward(pointwisemlp_processor, pointwisemlp_processor_init):
     gridsize = 100
     batch_size = 1
     x = torch.rand(gridsize, pointwisemlp_processor_init.num_channels)
     shard_shapes = [list(x.shape)]
 
+    # Mock distributed group
+    fake_model_comm_group = MagicMock()
+    fake_model_comm_group.size.return_value = 2
+
     with pytest.raises(ValueError, match="Dropout is not supported when model is sharded"):
         pointwisemlp_processor.forward(
             x,
             batch_size,
             shard_shapes,
-            model_comm_group=2,
+            model_comm_group=fake_model_comm_group,
         )
 
 
