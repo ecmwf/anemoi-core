@@ -92,6 +92,39 @@ class BaseMapper(nn.Module, ABC):
     def post_process(self, x_dst, shapes_dst=None, model_comm_group=None, keep_x_dst_sharded=False, **kwargs):
         pass
 
+    @abstractmethod
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], tuple[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+        **kwargs,
+    ):
+        """Forward pass of the mapper.
+
+        Parameters
+        ----------
+        x : PairTensor
+            Input tensor pair (source, destination)
+        batch_size : int
+            Batch size
+        shard_shapes : tuple[tuple[int], tuple[int]]
+            Shard shapes for source and destination
+        model_comm_group : ProcessGroup, optional
+            Model communication group
+        x_src_is_sharded : bool, optional
+            Whether source is already sharded, by default False
+        x_dst_is_sharded : bool, optional
+            Whether destination is already sharded, by default False
+        keep_x_dst_sharded : bool, optional
+            Whether to keep destination sharded, by default False
+        """
+        pass
+
 
 class GraphTransformerBaseMapper(BaseMapper, ABC):
     """Graph Transformer Base Mapper from hidden -> data or data -> hidden."""
