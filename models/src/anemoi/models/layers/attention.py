@@ -296,6 +296,8 @@ class FlashAttentionWrapper(nn.Module):
         super().__init__()
 
         flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
+        self.deterministic=torch.are_deterministic_algorithms_enabled()
+        LOGGER.info(f"attention.py deterministic mode = {self.deterministic}")
 
         flash_attn_version = version.parse(flash_attn.__version__)
         self._init_rotary_embeddings(use_rotary_embeddings, head_dim, flash_attn_version)
@@ -390,6 +392,7 @@ class FlashAttentionWrapper(nn.Module):
                 causal=False,
                 window_size=(window_size, window_size) if window_size is not None else (-1, -1),
                 softcap=softcap,
+                deterministic=self.deterministic,
             )[
                 0
             ]  # fav3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
@@ -403,6 +406,7 @@ class FlashAttentionWrapper(nn.Module):
                 dropout_p=dropout_p,
                 softcap=softcap,
                 alibi_slopes=alibi_slopes,
+                deterministic=self.deterministic,
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
@@ -435,6 +439,8 @@ class FlashAttentionV3Wrapper(nn.Module):
             raise ImportError("Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3")
 
         self.attention = flash_attn_func
+        self.deterministic=torch.are_deterministic_algorithms_enabled()
+        LOGGER.info(f"attention.py deterministic mode = {self.deterministic}")
 
     def forward(
         self,
@@ -457,6 +463,7 @@ class FlashAttentionV3Wrapper(nn.Module):
                 value,
                 causal=False,
                 window_size=(window_size, window_size),
+                deterministic=self.deterministic,
             )[0]
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
