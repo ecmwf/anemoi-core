@@ -73,32 +73,43 @@ if __name__ == "__main__":
                   other_config: {}
 
               # unused in this example
-              - dataset: observations-...
+              - dataset: observations-1979-2023-6h-v1-gamma
                 data_group: iasi
 
-              # unused in this example
-              - dataset: observations-...
-                data_group: metar
+              - dataset: observations-testing-2018-2018-6h-v1
+                data_group: amsr2_h180
 
            """
     )
     config_sample_provider = yaml.safe_load(
         """sample_provider:
-              land:
-                  data_group: "era5_o48"
+             # land:
+             #     data_group: "era5_o48"
+             #     variables:
+             #       forcings: ["2t"]
+             #       prognostics: ["10u", "10v"]
+             #       diagnostics: ["tp"]
+             #     dimensions: ["offsets", "ensembles", "values", "variables"]
+             #     offsets: ["-6h", "+0h", "+6h"]
+             # atmo:
+             #     data_group: "era5_o96"
+             #     variables:
+             #       forcings: ["z_500", "z_850"]
+             #       prognostics: ["q_500", "q_850", "q_925"]
+             #       diagnostics: ["u_100", "v_100"]
+             #     dimensions: [["offsets"], "ensembles", "values", "variables"]
+             #     offsets: ["-6h", "+0h", "+6h"]
+             #     extra:
+             #       normalisation: # override the one in data_handler
+             #         {default: 'mean-std', 'mean-std': [u_100, v_100]}
+             #       more_config: {}
+              metar:
+                  data_group: "amsr2_h180"
                   variables:
-                    forcings: ["2t"]
-                    prognostics: ["10u", "10v"]
-                    diagnostics: ["tp"]
-                  dimensions: ["offsets", "ensembles", "values", "variables"]
-                  offsets: ["-6h", "+0h", "+6h"]
-              atmo:
-                  data_group: "era5_o96"
-                  variables:
-                    forcings: ["z_500", "z_850"]
-                    prognostics: ["q_500", "q_850", "q_925"]
-                    diagnostics: ["u_100", "v_100"]
-                  dimensions: [["offsets"], "ensembles", "values", "variables"]
+                    forcings: ["rawbt_1", "rawbt_2"]
+                    prognostics: ["rawbt_3"]
+                    diagnostics: ["rawbt_4"]
+                  dimensions: [["offsets"], "values", "variables"]
                   offsets: ["-6h", "+0h", "+6h"]
                   extra:
                     normalisation: # override the one in data_handler

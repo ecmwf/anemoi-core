@@ -158,14 +158,23 @@ class OneDatasetDataHandler(DataHandler):
         self.end = end
 
         # dimensions should be read from dataset when it is implemented in anemoi-datasets
-        self.dimensions = ["variables", "ensembles", "values"]
+        if hasattr(self._ds, "dimensions"):
+            self.dimensions = self._ds.dimensions
+        else:
+            # hack for now, need to update anemoi-datasets to provide dimensions
+            if hasattr(self._ds, "latitudes"):
+                self.dimensions = ["variables", "ensembles", "values"]
+            else:
+                self.dimensions = ["variables", "values"]
 
     def __len__(self):
         return len(self._ds)
 
     def dates_block(self, data_group) -> DatesBlock:
         assert data_group in self.data_groups, f"Data_group {data_group} not in {self.data_groups}"
-        return DatesBlock(self._ds.start_date, self._ds.end_date, self._ds.frequency, self._ds.missing)
+        # hack for now, need to update anemoi-datasets to provide dimensions
+        missing = self._ds.missing if hasattr(self._ds, "missing") else []
+        return DatesBlock(self._ds.start_date, self._ds.end_date, self._ds.frequency, missing)
 
     @cached_property
     def _ds(self):
@@ -228,14 +237,31 @@ class MultiDatasetDataHandler(DataHandler):
     def get_static(self, data_group, variables: List[str]) -> StaticDict:
         """Prepare a subselection from a data_group"""
         data_handler = self._find_data_handler(data_group)
-        ds = open_dataset(data_handler._ds, select=variables)
+        try:
+            ds = open_dataset(data_handler._ds, select=variables)
+        except NotImplementedError:
+            # hack for now, need to update anemoi-datasets to provide what is needed
+            variables = [f"{data_group}.{v}" for v in variables]
+            ds = open_dataset(data_handler._dataset, select=variables)
+        try:
+            statistics_tendencies = ds.statistics_tendencies
+        except AttributeError:
+            statistics_tendencies = None
+        try:
+            supporting_arrays = ds.supporting_arrays()
+        except AttributeError:
+            supporting_arrays = None
+        try:
+            resolution = ds.resolution
+        except AttributeError:
+            resolution = None
         return StaticDict(
             name_to_index=ds.name_to_index,
             statistics=ds.statistics,
-            statistics_tendencies=ds.statistics_tendencies,
+            statistics_tendencies=statistics_tendencies,
             metadata=ds.metadata,
-            supporting_arrays=ds.supporting_arrays(),
-            resolution=ds.resolution,
+            supporting_arrays=supporting_arrays,
+            resolution=resolution,
             variables=ds.variables,
             num_features=len(ds.variables),
             dimensions=data_handler.dimensions,
@@ -273,7 +299,12 @@ class DynamicRequest:
         self.variables = variables
         self._add_to_i = add_to_i
         self._multiply_i = multiply_i
-        self._ds = open_dataset(data_handler._ds, select=variables)
+        try:
+            self._ds = open_dataset(data_handler._ds, select=variables)
+        except NotImplementedError:
+            # hack for now, need to update anemoi-datasets to provide what is needed
+            variables = [f"{self.data_group}.{v}" for v in variables]
+            self._ds = open_dataset(data_handler._dataset, select=variables)
 
     def __getitem__(self, i):
         j = i * self._multiply_i + self._add_to_i
@@ -282,24 +313,27 @@ class DynamicRequest:
 
         res = DynamicDict()
 
-        res.data = self._ds[j]
+        res.data = self._ds[j][self.data_group]
 
         try:
-            res.latitudes = self._ds.get_latitudes(i)
-        except Exception:
             res.latitudes = self._ds.latitudes
+        except AttributeError:
+            res.latitudes = self._ds[j].latitudes[self.data_group]
 
         try:
-            res.longitudes = self._ds.get_longitudes(i)
-        except Exception:
             res.longitudes = self._ds.longitudes
+        except AttributeError:
+            res.longitudes = self._ds[j].longitudes[self.data_group]
 
         try:
-            res.timedeltas = self._ds.get_timedeltas(i)
-        except Exception:
-            res.timedeltas = None
+            res.timedeltas = self._ds.timedeltas
+        except AttributeError:
+            res.timedeltas = self._ds[j].timedeltas[self.data_group]
 
-        res.date_str = self._ds.dates[i].astype(datetime.datetime).isoformat()
+        try:
+            res.date_str = self._ds.dates[j].astype(datetime.datetime).isoformat()
+        except AttributeError:
+            res.date_str = str(self._ds.dates[j])
 
         return res
 
