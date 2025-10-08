@@ -248,7 +248,7 @@ class ZeroOverwriterGroup(BaseModel):
     def _validate_time_index(cls, v):
         if v is None:
             return []
-        if not isinstance(v, list) or not all(isinstance(i, int) for i in v):
+        if not isinstance(v, MutableSequence) or not all(isinstance(i, int) for i in v):
             raise TypeError(f"'time_index' must be a list[int], got {type(v).__name__}")
         return v
 
