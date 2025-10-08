@@ -54,7 +54,12 @@ class MultiScaleEdges(BaseEdgeBuilder):
     """
 
     def __init__(
-        self, source_name: str, target_name: str, x_hops: int, scale_resolutions: int | list[int] | None = None, **kwargs
+        self,
+        source_name: str,
+        target_name: str,
+        x_hops: int,
+        scale_resolutions: int | list[int] | None = None,
+        **kwargs,
     ):
         super().__init__(source_name, target_name)
         assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
