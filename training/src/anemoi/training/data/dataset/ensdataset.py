@@ -174,7 +174,9 @@ class EnsNativeGridDataset(NativeGridDataset):
         self.sample_comm_group_id = ens_comm_group_id  # groups that work on the same sample / batch
         self.sample_comm_num_groups = ens_comm_num_groups
 
-        self.ens_sample_comm_group_rank = ens_comm_subgroup_rank # used to only read data once (rank0) per ensemble group
+        self.ens_sample_comm_group_rank = (
+            ens_comm_subgroup_rank  # used to only read data once (rank0) per ensemble group
+        )
 
         assert self.reader_group_size >= 1, "reader_group_size must be positive"
 
@@ -277,11 +279,11 @@ class EnsNativeGridDataset(NativeGridDataset):
             variables, ens = self.data.shape[1:3]
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
-                grid = (grid_shard_indices.stop - grid_shard_indices.start)
+                grid = grid_shard_indices.stop - grid_shard_indices.start
             else:
                 grid = len(grid_shard_indices)
 
-            shape = [dates, ens, grid, variables] # correct shape for easy broadcasting
+            shape = [dates, ens, grid, variables]  # correct shape for easy broadcasting
 
             for _ in range(len(shuffled_chunk_indices)):
                 yield (torch.empty(shape),)

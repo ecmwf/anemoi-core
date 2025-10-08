@@ -296,7 +296,7 @@ class FlashAttentionWrapper(nn.Module):
         super().__init__()
 
         flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
-        self.deterministic=torch.are_deterministic_algorithms_enabled()
+        self.deterministic = torch.are_deterministic_algorithms_enabled()
         LOGGER.info(f"attention.py deterministic mode = {self.deterministic}")
 
         flash_attn_version = version.parse(flash_attn.__version__)
@@ -436,10 +436,12 @@ class FlashAttentionV3Wrapper(nn.Module):
         try:
             from flash_attn_interface import flash_attn_func
         except ImportError:
-            raise ImportError("Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3")
+            raise ImportError(
+                "Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3"
+            )
 
         self.attention = flash_attn_func
-        self.deterministic=torch.are_deterministic_algorithms_enabled()
+        self.deterministic = torch.are_deterministic_algorithms_enabled()
         LOGGER.info(f"attention.py deterministic mode = {self.deterministic}")
 
     def forward(
@@ -458,13 +460,13 @@ class FlashAttentionV3Wrapper(nn.Module):
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
         out = self.attention(
-                query,
-                key,
-                value,
-                causal=False,
-                window_size=(window_size, window_size),
-                deterministic=self.deterministic,
-            )[0]
+            query,
+            key,
+            value,
+            causal=False,
+            window_size=(window_size, window_size),
+            deterministic=self.deterministic,
+        )[0]
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
 
