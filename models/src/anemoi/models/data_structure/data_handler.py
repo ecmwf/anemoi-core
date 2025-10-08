@@ -10,129 +10,111 @@
 import datetime
 import logging
 import warnings
+from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
+from typing import Any
 from typing import List
 
 import numpy as np
-import torch
+from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree as _RichTree
 
 from anemoi.datasets import open_dataset
-from anemoi.models.data_structure.offsets import DatesBlock
+from anemoi.models.data_structure.dicts import DynamicDataDict
+from anemoi.models.data_structure.dicts import StaticDataDict
+from anemoi.models.data_structure.dicts import _resolve_omega_conf_reference
+from anemoi.models.data_structure.offsets import _DatesBlock
 
 LOGGER = logging.getLogger(__name__)
 
 
-def format_array(k, v):
+def extended_open_dataset(dataset, start, end, search_path):
     try:
-        if isinstance(v, np.ndarray) and v.ndim > 1:
-            minimum = np.min(v, axis=tuple(range(1, v.ndim)))
-            maximum = np.max(v, axis=tuple(range(1, v.ndim)))
-            mean = np.nanmean(v, axis=tuple(range(1, v.ndim)))
-            stdev = np.nanstd(v, axis=tuple(range(1, v.ndim)))
-            return f"np.array{v.shape} {mean}±{stdev} [{minimum},{maximum}]"
-
-        if isinstance(v, np.ndarray):
-            minimum = np.min(v)
-            maximum = np.max(v)
-            mean = np.nanmean(v)
-            stdev = np.nanstd(v)
-            return f"np.array{v.shape} {mean}±{stdev} [{minimum},{maximum}]"
-
-        import torch
-
-        if isinstance(v, torch.Tensor):
-            shape = ", ".join(str(dim) for dim in v.size())
-            v = v[~torch.isnan(v)].flatten()
-            if v.numel() == 0:
-                minimum = float("nan")
-                maximum = float("nan")
-                mean = float("nan")
-                stdev = float("nan")
-            else:
-                minimum = torch.min(v).item()
-                maximum = torch.max(v).item()
-                mean = torch.mean(v.float()).item()
-                stdev = torch.std(v.float()).item()
-            return f"tensor({shape}) {v.device}, {mean:.5f}±{stdev:.1f}[{minimum:.1f}/{maximum:.1f}]"
-
-        return "no-min, no-max"
-
-    # except (ValueError, ImportError, RuntimeError):
-    #    return f"{k}: [no-min, no-max]"
-    except Exception as e:
-        return f"[error: {e!s}]"
+        # expected use case : dataset name or full path
+        return open_dataset(dataset, start=start, end=end)
+    except ValueError as e:
+        if search_path is None:
+            raise e
+        e.add_note(f"Also tried with search_path={search_path}")
+        try:
+            # also expected use case : a config with dataset name and search_path defined in config
+            try:
+                return open_dataset(f"{search_path}/{dataset}.zarr", start=start, end=end)
+            except ValueError:
+                return open_dataset(f"{search_path}/{dataset}.vz", start=start, end=end)
+        except ValueError:
+            # less expected a config with dataset name with .zarr extension and search_path defined in config
+            return open_dataset(f"{search_path}/{dataset}", start=start, end=end)
 
 
-def format_value(k, v):
-    if isinstance(v, dict):
-        return f"dict({len(v)} items) {'+'.join(v.keys())}"
-    if isinstance(v, np.ndarray) or isinstance(v, torch.Tensor):
-        return format_array(k, v)
-    return str(v)
+class ReadPattern:
+    def __init__(self, data_handler, container, group: str, variables, add_to_i, multiply_i):
+        self.container = container
+        self.group = group
+        self.variables = variables
+        self.add_to_i = add_to_i
+        self.multiply_i = multiply_i
+        self.data_handler = data_handler.find_data_handler(group)
+
+        self._ds = self.data_handler.select(group, variables)
+
+    def __call__(self, i) -> DynamicDataDict:
+        j = i * self.multiply_i + self.add_to_i
+        return dict(j=j, group=self.group, ds=self._ds)
 
 
-class BaseDict(dict):
-    def __repr__(self):
-        console = Console(record=True)
-        tree = self._tree()
-        with console.capture() as capture:
-            console.print(tree, overflow="ellipsis", no_wrap=True)
-        return capture.get()
+class DataHandler(ABC):
+    """Provides data from multiple datasets, groups.
+    The data handler is used by the sample provider.
 
-    def _tree(self, prefix=None):
-        name = prefix if prefix else ""
-        tree = _RichTree(name)
-        sorted_ = {k: self[k] for k in sorted(self.keys())}
-        for k, v in sorted_.items():
-            tree.add(f"{k}: {format_value(k, v)}")
-        return tree
+    The data handler keeps track of the data access patterns from the sample providers
+    and provide a unified view of the data. This allows optimising data access.
 
-    def __getattr__(self, name):
-        if name in self:
-            return self[name]
-        raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
-
-    def __setattr__(self, name, value):
-        self[name] = value
-
-    def copy(self):
-        return self.__class__(self)
-
-
-class StaticDict(BaseDict):
-    pass
-
-
-class DynamicDict(BaseDict):
-    pass
-
-
-class DataHandler:
-    """Provides data from multiple datasets"""
+    Data handlers should not be instantiated directly, but through the build function.
+    """
 
     def __init__(self, **kwargs):
-        self.requests = []
+        self._read_pattern: dict[Any, ReadPattern] = {}
+        self._loaded_data: dict = {}
 
-    def register_request(self, request):
-        self.requests.append(request)
+    @abstractmethod
+    def static(self, group: str) -> StaticDataDict:
+        pass
 
-    def static(self, data_group):
-        raise NotImplementedError(f"{self.__class__.__name__}.static is not implemented")
+    # @abstractmethod
+    def __getitem__(self, *args, group: str) -> DynamicDataDict:
+        pass
 
-    def __getitem__(self, i, data_group):
-        raise NotImplementedError(f"{self.__class__.__name__}.__getitem__ is not implemented")
+    @abstractmethod
+    def dates_block(self, group: str) -> _DatesBlock:
+        pass
 
-    def __len__(self):
-        raise NotImplementedError(f"{self.__class__.__name__}.__len__ is not implemented")
+    def register_read_pattern(self, container, group: str, /, variables, add_to_i, multiply_i):
+        self._read_pattern[container] = ReadPattern(
+            data_handler=self,
+            container=container,
+            group=group,
+            variables=variables,
+            add_to_i=add_to_i,
+            multiply_i=multiply_i,
+        )
 
-    def _tree(self, prefix=None):
-        name = prefix if prefix else ""
-        tree = _RichTree(name)
-        for k in sorted(self.data_groups):
-            tree.add(f"{k}: ")
-        return tree
+    def grouped_read(self, *index):
+        """Context manager to group read patterns in one call."""
+        data = {}
+        for c in self._read_pattern:
+            kwargs = self._read_pattern[c](*index)
+            data[c] = self.dynamic(**kwargs)
+        return data
+
+    def get_item(self, container, data) -> DynamicDataDict:
+        return data[container]
+
+    @abstractmethod
+    def _tree(self, prefix=""):
+        pass
 
     def __repr__(self):
         console = Console(record=True)
@@ -143,184 +125,223 @@ class DataHandler:
 
 
 class OneDatasetDataHandler(DataHandler):
-    """Provide access to data for one dataset"""
+    """Provide access to data for one dataset. A gridded dataset."""
 
-    def __init__(self, data_group: str, dataset: str, start, end, search_path=None, extra=None):
+    def __init__(
+        self,
+        data_group: str,
+        dataset: str,
+        start,
+        end,
+        search_path: str | None = None,
+        extra_configs: dict | None = None,
+    ):
         super().__init__()
-        if extra is None:
-            extra = {}
+        if extra_configs is None:
+            extra_configs = {}
 
         self._dataset = dataset
         self._search_path = search_path
-        self.data_groups = [data_group]  # note that self.data_groups is a list
-        self.extra = extra
+        self.groups = [data_group]  # note that self.groups is a list
+        self.extra_configs = extra_configs
         self.start = start
         self.end = end
 
+    @cached_property
+    def dimensions(self) -> List[str]:
         # dimensions should be read from dataset when it is implemented in anemoi-datasets
-        self.dimensions = ["variables", "ensembles", "values"]
+        if hasattr(self._ds, "dimensions"):
+            return self._ds.dimensions
+        else:
+            # hack for now, need to update anemoi-datasets to provide dimensions
+            if hasattr(self._ds, "latitudes"):
+                return ["variables", "ensembles", "values"]
+            else:
+                return ["variables", "values"]
 
-    def __len__(self):
-        return len(self._ds)
-
-    def dates_block(self, data_group) -> DatesBlock:
-        assert data_group in self.data_groups, f"Data_group {data_group} not in {self.data_groups}"
-        return DatesBlock(self._ds.start_date, self._ds.end_date, self._ds.frequency, self._ds.missing)
+    def dates_block(self, group: str) -> _DatesBlock:
+        assert group in self.groups, f"group {group} not in {self.groups}"
+        # hack for now, need to update anemoi-datasets to provide missing
+        missing = self._ds.missing if hasattr(self._ds, "missing") else []
+        return _DatesBlock(self._ds.start_date, self._ds.end_date, self._ds.frequency, missing)
 
     @cached_property
-    def _ds(self):
-        try:
-            # expected use case : dataset name or full path
-            return open_dataset(self._dataset)
-        except ValueError as e:
-            if self._search_path is not None:
-                e.add_note(f"Also tried with search_path={self._search_path}")
-                try:
-                    # also expected use case : a config with dataset name and search_path defined in config
-                    return open_dataset(f"{self._search_path}/{self._dataset}.zarr")
-                except ValueError:
-                    # less expected a config with dataset name with .zarr extension and search_path defined in config
-                    return open_dataset(f"{self._search_path}/{self._dataset}")
-            raise e
+    def _ds(self) -> object:  # returns a gridded anemoi-datasets object
+        return extended_open_dataset(self._dataset, start=self.start, end=self.end, search_path=self._search_path)
 
     def __repr__(self):
-        if isinstance(self.extra, dict):
-            extra = ", ".join(f"{k}={v}" for k, v in self.extra.items())
+        if isinstance(self.extra_configs, dict):
+            extra = ", ".join(f"{k}={v}" for k, v in self.extra_configs.items())
         else:
-            extra = extra.__class__.__name__ + " " + str(self.extra)[:10]
-        return f"{super().__repr__()}(dataset={self._dataset}, extra={extra})"
+            extra = extra.__class__.__name__ + " " + str(self.extra_configs)[:10]
+        return f"{super().__repr__()}(dataset={self._dataset}, extra_configs={self.extra_configs})"
+
+    def _tree(self, prefix=""):
+        tree = _RichTree(prefix if prefix else "")
+        tree.add(f"groups: {', '.join(self.groups)}")
+        tree.add(f"dataset: {self._dataset}")
+        if self.start:
+            tree.add(f"start: {self.start}")
+        if self.end:
+            tree.add(f"end: {self.end}")
+        if self.extra_configs:
+            tree.add(f"extra_configs: {', '.join(f'{k}={v}' for k, v in self.extra_configs.items())}")
+        return tree
 
 
-class MultiDatasetDataHandler(DataHandler):
-    """Uses several datahandles to provide access to multiple datasets"""
+class GriddedDatasetDataHandler(OneDatasetDataHandler):
 
-    def __init__(self, *data_handlers):
-        super().__init__()
+    def select(self, group: str, variables: List[str]):
+        assert group in self.groups, (group, self.groups)
+        return open_dataset(self._ds, select=variables)
 
-        self.data_groups = []
-        for dh in data_handlers:
-            self.data_groups.extend(dh.data_groups)
-
-        self._data_handlers = data_handlers
-
-    def static(self, data_group):
-        assert data_group in self.data_groups, f"Data_group {data_group} not in {self.data_groups}"
-        for dh in self._data_handlers:
-            if data_group in dh.data_groups:
-                return dh.static(data_group)
-        assert False
-
-    def __getitem__(self, i, data_group):
-        assert data_group in self.data_groups, f"Data_group {data_group} not in {self.data_groups}"
-        for dh in self._data_handlers:
-            if data_group in dh.data_groups:
-                return dh.__getitem__(i, data_group)
-        assert False
-
-    def __len__(self):
-        lengths = [len(dh) for dh in self._data_handlers]
-        if not lengths:
-            return 0
-        if not all(l_ == lengths[0] for l_ in lengths):
-            raise ValueError(f"All data_handlers must have the same length, got {lengths}")
-        return lengths[0]
-
-    def get_static(self, data_group, variables: List[str]) -> StaticDict:
-        """Prepare a subselection from a data_group"""
-        data_handler = self._find_data_handler(data_group)
-        ds = open_dataset(data_handler._ds, select=variables)
-        return StaticDict(
+    def static(self, group: str, variables: List[str]) -> StaticDataDict:
+        ds = self.select(group, variables)
+        return StaticDataDict(
             name_to_index=ds.name_to_index,
             statistics=ds.statistics,
             statistics_tendencies=ds.statistics_tendencies,
-            metadata=ds.metadata,
             supporting_arrays=ds.supporting_arrays(),
             resolution=ds.resolution,
+            metadata=ds.metadata,
             variables=ds.variables,
             num_features=len(ds.variables),
-            dimensions=data_handler.dimensions,
-            extra=data_handler.extra,
+            dimensions=self.dimensions,
+            extra_configs=self.extra_configs,
         )
 
-    def register_request(self, *, data_group, **kwargs):
-        dh = self._find_data_handler(data_group)
-        request = DynamicRequest(dh, data_group, **kwargs)
-        super().register_request(request)
-        return request
+    def dynamic(self, j, group, ds) -> DynamicDataDict:
+        date = ds.dates[j]
+        date = date.astype(datetime.datetime)  # remove this when anemoi-datasets returns consistent datetime objects
+        return DynamicDataDict(
+            data=ds[j],
+            latitudes=ds.latitudes,
+            longitudes=ds.longitudes,
+            timedeltas=None,
+            date_str=date.isoformat(),
+        )
 
-    def dates_block(self, data_group):
-        dh = self._find_data_handler(data_group)
-        return dh.dates_block(data_group)
 
-    def _find_data_handler(self, data_group):
+class RecordsDataHandler(OneDatasetDataHandler):
+    def select(self, group: str, variables: List[str]):
+        assert group in self.groups, (group, self.groups)
+        return open_dataset(self._dataset, select=[f"{group}.{v}" for v in variables])
+
+    def static(self, group: str, variables: List[str]) -> StaticDataDict:
+        ds = self.select(group, variables)
+        return StaticDataDict(
+            name_to_index=ds.name_to_index[group],
+            statistics=ds.statistics[group],
+            statistics_tendencies=None,
+            metadata=ds.metadata,
+            resolution=None,
+            supporting_arrays=None,
+            variables=ds.variables[group],
+            num_features=len(ds.variables[group]),
+            dimensions=self.dimensions,
+            extra_configs=self.extra_configs,
+        )
+
+    def dynamic(self, j, group, ds) -> DynamicDataDict:
+        timedeltas = ds[j].timedeltas[group]
+        timedeltas = timedeltas.astype("timedelta64[s]").astype(np.int64)
+
+        return DynamicDataDict(
+            data=ds[j][group],
+            latitudes=ds[j].latitudes[group],
+            longitudes=ds[j].longitudes[group],
+            timedeltas=timedeltas,
+            date_str=ds.dates[j].isoformat(),
+        )
+
+
+class MultiDatasetDataHandler(DataHandler):
+    """Uses several datahandles to provide access to multiple groups"""
+
+    def __init__(self, *data_handlers):
+        super().__init__()
+        self._data_handlers = data_handlers
+        self.groups = [g for dh in data_handlers for g in dh.groups]
+
+    def static(self, group, variables: List[str]) -> StaticDataDict:
+        return self.find_data_handler(group).static(group, variables)
+
+    def dynamic(self, /, group, **kwargs) -> DynamicDataDict:
+        return self.find_data_handler(group).dynamic(group=group, **kwargs)
+
+    def dates_block(self, group):
+        return self.find_data_handler(group).dates_block(group)
+
+    def find_data_handler(self, group):
         for dh in self._data_handlers:
-            if data_group in dh.data_groups:
+            if group in dh.groups:
                 return dh
-        raise KeyError(f"Data_group {data_group} not found in any data_handler")
+        raise KeyError(f"group {group} not found in any data_handler {self._data_handlers}")
 
-
-class DynamicRequest:
-    def __init__(
-        self,
-        data_handler: DataHandler,
-        data_group: str,
-        variables: List[str],
-        add_to_i: int,
-        multiply_i: int,
-    ):
-        self._data_handler = data_handler
-        self.data_group = data_group
-        self.variables = variables
-        self._add_to_i = add_to_i
-        self._multiply_i = multiply_i
-        self._ds = open_dataset(data_handler._ds, select=variables)
-
-    def __getitem__(self, i):
-        j = i * self._multiply_i + self._add_to_i
-        if j < 0:
-            warnings.warn(f"Index {j} is negative, this may lead to unexpected results")
-
-        res = DynamicDict()
-
-        res.data = self._ds[j]
-
-        try:
-            res.latitudes = self._ds.get_latitudes(i)
-        except Exception:
-            res.latitudes = self._ds.latitudes
-
-        try:
-            res.longitudes = self._ds.get_longitudes(i)
-        except Exception:
-            res.longitudes = self._ds.longitudes
-
-        try:
-            res.timedeltas = self._ds.get_timedeltas(i)
-        except Exception:
-            res.timedeltas = None
-
-        res.date_str = self._ds.dates[i].astype(datetime.datetime).isoformat()
-
-        return res
+    def _tree(self, prefix=""):
+        # for pretty printing of dicts
+        name = prefix if prefix else ""
+        tree = _RichTree(name)
+        for i, dh in enumerate(self._data_handlers):
+            tree.add(dh._tree(prefix=f"{i}"))
+        return tree
 
 
 def _data_handler_factory(sources: dict, start, end, search_path) -> DataHandler:
     data_handlers = []
+
     for cfg in sources:
+        # if not defined in cfg, use the provided global search_path, start, end
         cfg["search_path"] = cfg.get("search_path", search_path)
         cfg["start"] = cfg.get("start", start)
         cfg["end"] = cfg.get("end", end)
-        # this will need to be changed for observations datasets using another DataHandler class than OneDatasetDataHandler
-        data_handlers.append(OneDatasetDataHandler(**cfg))
+        if "dataset" not in cfg:
+            raise ValueError("Each source in data_handler config must contain a 'dataset' key")
+
+        def find_class(name: str):
+            # For now, just check for known dataset types
+            # but anemoi-datasets should provide a way to get the right class
+            # such as ds.is_gridded or ds.is_grouped
+            ds = extended_open_dataset(name, start=cfg["start"], end=cfg["end"], search_path=cfg["search_path"])
+            from anemoi.datasets.data.records import BaseRecordsDataset
+
+            if isinstance(ds, BaseRecordsDataset):
+                return RecordsDataHandler
+            return GriddedDatasetDataHandler
+
+        try:
+            cls = find_class(cfg["dataset"])
+            dh = cls(**cfg)
+            data_handlers.append(dh)
+        except Exception as e:
+            warnings.warn(f"Failed to create data handler for {cfg['dataset']}: {e}")
+
     return MultiDatasetDataHandler(*data_handlers)
 
 
-def build_data_handler(config_datagroups: dict, kind: str | None) -> DataHandler:
+def build_data_handler(config: dict, /, kind: str | None) -> DataHandler:
+    initial_config = config.copy()
+
     if kind not in ["training", "validation", "test", None]:
         raise ValueError(f"build_data_handler: kind={kind} must be one of ['training', 'validation', 'test', None]")
+    if "sources" not in config:
+        raise ValueError("build_data_handler: config must contain 'sources' key")
+    if kind and kind not in config:
+        raise ValueError(f"build_data_handler: config must contain '{kind}' key")
 
-    start = config_datagroups.get(kind, {}).get("start", None)
-    end = config_datagroups.get(kind, {}).get("end", None)
-    search_path = config_datagroups.get("search_path", None)
+    if isinstance(config, DictConfig):
+        # found an omegaconf DictConfig, resolve it first
+        config = _resolve_omega_conf_reference(config)
+    config = config.copy()
 
-    return _data_handler_factory(sources=config_datagroups["sources"], start=start, end=end, search_path=search_path)
+    if kind:
+        overwrite_config = config[kind]
+        for k, v in overwrite_config.items():
+            if k in config:
+                LOGGER.debug(f"Overriding config.{k} with config.{kind}.{k}")
+            config[k] = v
+
+    dh = _data_handler_factory(config["sources"], config.get("start"), config.get("end"), config.get("search_path"))
+
+    dh._initial_config = initial_config
+    return dh
