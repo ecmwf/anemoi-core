@@ -211,6 +211,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         data_handler_config = self.config.data.data_handler
         data_handler = build_data_handler(data_handler_config, "training")
+
         # data_handler = build_data_handler(data_handler_config, "validation")
         print("Data_handler : ", data_handler)
 
