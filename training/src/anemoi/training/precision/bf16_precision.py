@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
+import torch.distributed as dist
 from pytorch_lightning.plugins.precision import Precision
 
 if TYPE_CHECKING:
@@ -260,7 +261,7 @@ class BF16FP32OptPrecision(Precision):
     def optimizer_step(
         self,
         optimizer: Optimizer,
-        _model: pl.LightningModule,
+        model: pl.LightningModule,  # noqa: ARG002
         closure: Callable[[], Any],
         **kwargs: Any,
     ) -> Any:
@@ -285,7 +286,7 @@ class BF16FP32OptPrecision(Precision):
         ----------
         optimizer : Optimizer
             The optimizer to step
-        _model : pl.LightningModule
+        model : pl.LightningModule
             The model being trained (unused, required by interface)
         closure : Callable
             Closure that runs forward and backward pass
@@ -393,7 +394,7 @@ class BF16FP32OptPrecision(Precision):
                     "Reference weights will be reinitialized from model parameters.",
                 )
 
-    def prepare_optimizer(self, optimizer: Optimizer, _model: pl.LightningModule) -> None:
+    def prepare_optimizer(self, optimizer: Optimizer, model: pl.LightningModule) -> None:  # noqa: ARG002
         """Prepare optimizer with FP32 reference weights.
 
         This method must be called AFTER optimizer creation but BEFORE optimizer state
@@ -409,7 +410,7 @@ class BF16FP32OptPrecision(Precision):
         ----------
         optimizer : Optimizer
             The optimizer to prepare
-        _model : pl.LightningModule
+        model : pl.LightningModule
             The Lightning module (unused, required by interface)
         """
         # Create reference weights (replaces optimizer params with fp32 refs)
@@ -508,12 +509,8 @@ class BF16FP32OptPrecision(Precision):
         Callable
             DDP communication hook function
         """
-        import torch.distributed as dist
 
-        def fp32_gradient_reduction_hook(
-            state: Any,
-            bucket: dist.GradBucket,
-        ) -> torch.futures.Future[torch.Tensor]:
+        def fp32_gradient_reduction_hook(state, bucket):
             """DDP communication hook to reduce gradients in fp32 (async).
 
             Converts bf16 gradients to fp32, performs async all-reduce, then converts
@@ -524,12 +521,12 @@ class BF16FP32OptPrecision(Precision):
             ----------
             state : object
                 State object (process group)
-            bucket : GradBucket
+            bucket : dist.GradBucket
                 Bucket containing gradients to reduce
 
             Returns
             -------
-            torch.futures.Future
+            torch.futures.Future[torch.Tensor]
                 Future that resolves to reduced gradients in bf16
             """
             # Get bf16 gradients from bucket
@@ -545,7 +542,7 @@ class BF16FP32OptPrecision(Precision):
             fut = work.get_future()
 
             # Chain finalization: average and convert back to bf16
-            def finalize(fut: Any) -> torch.Tensor:
+            def finalize(fut):
                 # fut.value() returns a list with the result tensor
                 result = fut.value()[0] if isinstance(fut.value(), list) else fut.value()
 
