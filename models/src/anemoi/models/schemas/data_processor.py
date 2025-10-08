@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from collections.abc import Iterable
+from collections.abc import MutableSequence
 from enum import Enum
 from typing import Any
 from typing import Union
@@ -238,7 +239,7 @@ class ZeroOverwriterGroup(BaseModel):
     def _validate_vars(cls, v):
         if v is None:
             return []
-        if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+        if not isinstance(v, MutableSequence) or not all(isinstance(i, str) for i in v):
             raise TypeError(f"'vars' must be a list[str], got {type(v).__name__}")
         return v
 
@@ -260,7 +261,7 @@ class ZeroOverwriterSchema(BaseModel):
     def _validate_groups(cls, v):
         if v is None:
             return []
-        if not isinstance(v, list):
+        if not isinstance(v, MutableSequence):
             raise TypeError(f"'groups' must be a list, got {type(v).__name__}")
         return v
 
