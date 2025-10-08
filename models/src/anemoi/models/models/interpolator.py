@@ -293,107 +293,108 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
         return y_preds
 
+    def resolve_mass_conservations(self, y_preds, x_input, include_right_boundary=False) -> torch.Tensor:
+        """Enforce a "mass conservation" style constraint on a subset of output variables by
+        redistributing a known total (taken from the input constraints) across the time
+        dimension using softmax weights derived from the model's logits.
 
-def resolve_mass_conservations(self, y_preds, x_input, include_right_boundary=False) -> torch.Tensor:
-    """Enforce a "mass conservation" style constraint on a subset of output variables by
-    redistributing a known total (taken from the input constraints) across the time
-    dimension using softmax weights derived from the model's logits.
+        Args:
+            y_preds (torch.Tensor):
+                Model outputs with shape (B, T, E, G, V_out) where:
+                - B: batch
+                - T: time / interpolation steps
+                - E, G: extra dims (e.g., ensemble, grid) — passed through unchanged
+                - V_out: total number of output variables
+                The subset `target_indices` inside V_out are the "accumulated" variables whose
+                per-time-step values must sum to a constraint.
+            x_input (torch.Tensor):
+                Model inputs with shape compatible with y_preds selection. We read the
+                *right-boundary* (last time slice) constraint values from:
+                    x_input[:, -1:, ..., input_constraint_indxs]
+                yielding shape (B, 1, E, G, V_acc).
+            include_right_boundary (bool):
+                If False: distribute the constraint over the existing T steps.
+                If True:  append an extra (T+1)-th step representing the right boundary and
+                        distribute over T+1 steps; also copy non-target outputs at that
+                        boundary from inputs.
 
-    Args:
-        y_preds (torch.Tensor):
-            Model outputs with shape (B, T, E, G, V_out) where:
-              - B: batch
-              - T: time / interpolation steps
-              - E, G: extra dims (e.g., ensemble, grid) — passed through unchanged
-              - V_out: total number of output variables
-            The subset `target_indices` inside V_out are the "accumulated" variables whose
-            per-time-step values must sum to a constraint.
-        x_input (torch.Tensor):
-            Model inputs with shape compatible with y_preds selection. We read the
-            *right-boundary* (last time slice) constraint values from:
-                x_input[:, -1:, ..., input_constraint_indxs]
-            yielding shape (B, 1, E, G, V_acc).
-        include_right_boundary (bool):
-            If False: distribute the constraint over the existing T steps.
-            If True:  append an extra (T+1)-th step representing the right boundary and
-                      distribute over T+1 steps; also copy non-target outputs at that
-                      boundary from inputs.
+        Returns:
+            torch.Tensor: Updated y_preds with target outputs replaced by a constrained,
+                        softmax-weighted allocation that conserves the total "mass".
+        """
 
-    Returns:
-        torch.Tensor: Updated y_preds with target outputs replaced by a constrained,
-                      softmax-weighted allocation that conserves the total "mass".
-    """
+        # Indices mapping:
+        # - input_constraint_indxs: channels in x_input containing the total "mass" to conserve
+        # - target_indices: corresponding output channels in y_preds that must sum to that mass
+        input_constraint_indxs = self.map_accum_indices["constraint_idxs"]
+        target_indices = self.map_accum_indices["target_idxs"]
 
-    # Indices mapping:
-    # - input_constraint_indxs: channels in x_input containing the total "mass" to conserve
-    # - target_indices: corresponding output channels in y_preds that must sum to that mass
-    input_constraint_indxs = self.map_accum_indices["constraint_idxs"]
-    target_indices = self.map_accum_indices["target_idxs"]
+        # Extract logits for the "accumulated" target variables: (B, T, E, G, V_acc)
+        logits = y_preds[..., target_indices]
 
-    # Extract logits for the "accumulated" target variables: (B, T, E, G, V_acc)
-    logits = y_preds[..., target_indices]
+        # Create a zero "anchor" slice along the time axis (B, 1, E, G, V_acc).
+        # Appending this before softmax creates T+1 slots whose weights sum to 1.
+        # The last slot can represent the right-boundary share.
+        zeros = torch.zeros_like(logits[:, 0:1])
 
-    # Create a zero "anchor" slice along the time axis (B, 1, E, G, V_acc).
-    # Appending this before softmax creates T+1 slots whose weights sum to 1.
-    # The last slot can represent the right-boundary share.
-    zeros = torch.zeros_like(logits[:, 0:1])
+        # Compute normalized weights along time: (B, T+1, E, G, V_acc)
+        # Note: softmax dim=1 (time). Weights across time sum to 1 per (B, E, G, V_acc).
+        weights = F.softmax(torch.cat([logits, zeros], dim=1), dim=1)
 
-    # Compute normalized weights along time: (B, T+1, E, G, V_acc)
-    # Note: softmax dim=1 (time). Weights across time sum to 1 per (B, E, G, V_acc).
-    weights = F.softmax(torch.cat([logits, zeros], dim=1), dim=1)
+        if not include_right_boundary:
+            # We are *not* including the explicit right-boundary step in the output,
+            # so drop the last (boundary) slot and keep T weights: (B, T, E, G, V_acc)
+            weights = weights[:, :-1]
 
-    if not include_right_boundary:
-        # We are *not* including the explicit right-boundary step in the output,
-        # so drop the last (boundary) slot and keep T weights: (B, T, E, G, V_acc)
-        weights = weights[:, :-1]
+            # The constraint "total mass" comes from the *last* input time slice:
+            # shape (B, 1, E, G, V_acc). This broadcasts over time when multiplied by weights.
+            constraints = x_input[:, -1:, ..., input_constraint_indxs]
 
-        # The constraint "total mass" comes from the *last* input time slice:
-        # shape (B, 1, E, G, V_acc). This broadcasts over time when multiplied by weights.
-        constraints = x_input[:, -1:, ..., input_constraint_indxs]
+            # Replace target outputs with the softmax-weighted allocation of the constraint.
+            # For each (B, E, G, V_acc), the T values sum to <= the total constraint because
+            # we dropped the (T+1)-th boundary slot.
+            y_preds[..., target_indices] = weights * constraints
 
-        # Replace target outputs with the softmax-weighted allocation of the constraint.
-        # For each (B, E, G, V_acc), the T values sum to <= the total constraint because
-        # we dropped the (T+1)-th boundary slot.
-        y_preds[..., target_indices] = weights * constraints
+        else:
+            # --- Include the right boundary as an explicit (T+1)-th step ---
 
-    else:
-        # --- Include the right boundary as an explicit (T+1)-th step ---
+            # Identify output channels that are *not* in the target set,
+            # so we can copy their right-boundary values from inputs.
+            y_index_ex_target_indices = [
+                outp_idx
+                for vname, outp_idx in self.data_indices.model.output.name_to_index.items()
+                if outp_idx not in target_indices
+            ]
 
-        # Identify output channels that are *not* in the target set,
-        # so we can copy their right-boundary values from inputs.
-        y_index_ex_target_indices = [
-            outp_idx
-            for vname, outp_idx in self.data_indices.model.output.name_to_index.items()
-            if outp_idx not in target_indices
-        ]
+            # Map those same (non-target) outputs to their positions in the model *input*
+            # so we can source their boundary values from x_input.
+            data_indices_model_input_model_output = [
+                self.data_indices.model.input.name_to_index[vname]
+                for vname, outp_idx in self.data_indices.model.output.name_to_index.items()
+                if outp_idx not in target_indices
+            ]
 
-        # Map those same (non-target) outputs to their positions in the model *input*
-        # so we can source their boundary values from x_input.
-        data_indices_model_input_model_output = [
-            self.data_indices.model.input.name_to_index[vname]
-            for vname, outp_idx in self.data_indices.model.output.name_to_index.items()
-            if outp_idx not in target_indices
-        ]
+            # Append an all-zero frame along time so y_preds has T+1 steps,
+            # matching the weights shape (B, T+1, E, G, V_*).
+            y_preds = torch.cat([y_preds, torch.zeros_like(y_preds[:, 0:1])], dim=1)
 
-        # Append an all-zero frame along time so y_preds has T+1 steps,
-        # matching the weights shape (B, T+1, E, G, V_*).
-        y_preds = torch.cat([y_preds, torch.zeros_like(y_preds[:, 0:1])], dim=1)
+            # Right-boundary constraint totals (B, 1, E, G, V_acc)
+            constraints = x_input[:, -1:, ..., input_constraint_indxs]
 
-        # Right-boundary constraint totals (B, 1, E, G, V_acc)
-        constraints = x_input[:, -1:, ..., input_constraint_indxs]
+            # Allocate constraint across T+1 steps for the target variables.
+            # For each (B, E, G, V_acc), these (T+1) values sum to the total constraint.
+            y_preds_accum = weights * constraints  # (B, T+1, E, G, V_acc)
 
-        # Allocate constraint across T+1 steps for the target variables.
-        # For each (B, E, G, V_acc), these (T+1) values sum to the total constraint.
-        y_preds_accum = weights * constraints  # (B, T+1, E, G, V_acc)
+            # For *non-target* variables, set the (T+1)-th step to the right-boundary input values.
+            # This preserves/copies boundary conditions for outputs we are not re-allocating.
+            y_preds[:, -1:, ..., y_index_ex_target_indices] = x_input[
+                :, -1:, ..., data_indices_model_input_model_output
+            ]
 
-        # For *non-target* variables, set the (T+1)-th step to the right-boundary input values.
-        # This preserves/copies boundary conditions for outputs we are not re-allocating.
-        y_preds[:, -1:, ..., y_index_ex_target_indices] = x_input[:, -1:, ..., data_indices_model_input_model_output]
+            # Write the allocated values back into the target channels across all T+1 steps.
+            y_preds[..., target_indices] = y_preds_accum
 
-        # Write the allocated values back into the target channels across all T+1 steps.
-        y_preds[..., target_indices] = y_preds_accum
-
-    return y_preds
+        return y_preds
 
     def setup_mass_conserving_accumulations(self, data_indices: dict, config: dict):
 
