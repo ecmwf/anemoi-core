@@ -9,6 +9,8 @@
 
 import logging
 import warnings
+from abc import ABC
+from abc import abstractmethod
 from typing import Any
 
 import einops
@@ -17,12 +19,23 @@ from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree as _RichTree
 
-from anemoi.models.data_structure.data_handler import DynamicDict
-from anemoi.models.data_structure.data_handler import StaticDict
+from anemoi.models.data_structure.data_handler import DynamicDataDict
+from anemoi.models.data_structure.data_handler import StaticDataDict
 from anemoi.models.data_structure.offsets import OffsetManagerVisitor
+from anemoi.models.data_structure.offsets import find_required_steps_for_rollout
 from anemoi.models.data_structure.offsets import sum_offsets
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _merge_sublists(d):
+    # merge a dict of lists into a single list
+    res = []
+    for v in d.values():
+        if not isinstance(v, list):
+            raise ValueError(f"Expected list for offsets, got {type(v)}: {v}")
+        res += v
+    return res
 
 
 def _resolve_omega_conf_reference(config):
@@ -34,13 +47,16 @@ def _resolve_omega_conf_reference(config):
 
 
 class Context(dict):
-    """Avoid passing many parameters in the kwargs"""
+    # This internal class is used to manage context variables.
+    # Avoiding passing many parameters in the kwargs
 
     def __init__(self, parent_context=None, **kwargs):
         super().__init__()
         if parent_context is not None:
             self.update(parent_context)
 
+        # handle offset specially, to sum them if both parent and current context have it
+        # has no effect if offsets are not chained
         if "offset" in kwargs:
             offset_1 = self.get("offset", "0h")
             offset_2 = kwargs.pop("offset", "0h")
@@ -61,13 +77,51 @@ class Context(dict):
         return f"Context({super().__repr__()})"
 
 
-class SampleProvider:
+class SampleProvider(ABC):
+    # Base class for sample providers
+    # it defines the interface and some common methods
+    # sample_providers should not be instanciated directly, but through the build function
+
     _dates_block = None
     missing = None
 
+    @abstractmethod
+    def __init__(self, *args, **kwargs):
+        pass
+
     @classmethod
     def new(cls, _context: Context, *args, **kwargs):
+        # the default is to call the constructor
+        # but subclasses can override this to implement custom logic
+        # this allow a class to return a different class
         return cls(_context, *args, **kwargs)
+
+    @property
+    @abstractmethod
+    def static(self):
+        raise NotImplementedError(f"{self.__class__.__name__}.static is not implemented")
+
+    @abstractmethod
+    def __getitem__(self, i):
+        pass
+
+    def __len__(self):
+        if self._dates_block is None:
+            warnings.warn("Length requested before dates_block is set")
+            return None
+        return len(self._dates_block)
+
+    def visit(self, visitor):
+        # default implementation is to just call the visitor on the visited object
+        visitor(self)
+
+    def _dates_block_in_dataset(self):
+        return None
+
+    @abstractmethod
+    def _tree(self, prefix=None):
+        # for display purposes
+        pass
 
     def __repr__(self):
         console = Console(record=True)
@@ -76,26 +130,11 @@ class SampleProvider:
             console.print(tree, overflow="ellipsis")
         return capture.get()
 
-    @property
-    def static(self):
-        raise NotImplementedError(f"{self.__class__.__name__}.static is not implemented")
 
-    def __getitem__(self, i):
-        raise NotImplementedError(f"{self.__class__.__name__}.__getitem__ is not implemented")
+class SampleProviderDictionary(SampleProvider):
+    # A dictionary of sample providers
+    # forwards everything to the sub-sample providers and aggregate the results as dictionaries
 
-    _len = None
-
-    def __len__(self):
-        return self._len
-
-    def visit(self, visitor):
-        visitor(self)
-
-    def set_request(self, **kwargs):
-        pass
-
-
-class DictionarySampleProvider(SampleProvider):
     def __init__(self, _context: Context, providers: dict):
         self.context = _context
         self._providers = {k: _sample_provider_factory(_context, cfg) for k, cfg in providers.items()}
@@ -138,6 +177,9 @@ class Forward(SampleProvider):
     def __getitem__(self, i):
         return self._forward[i]
 
+    def __len__(self):
+        return len(self._forward)
+
     def _tree(self, prefix=None):
         return self._forward._tree(prefix=prefix)
 
@@ -171,24 +213,26 @@ class Rearrange(Forward):
     @property
     def static(self):
         res = self._forward.static.copy()
-        assert isinstance(res, StaticDict)
+        assert isinstance(res, StaticDataDict)
         res["dimensions"] = self.dimensions
         # add here something about the new dimensions shape
         return res
 
     def __getitem__(self, i):
-        res = DynamicDict()
+        res = DynamicDataDict()
         for k, v in self._forward[i].items():
-            assert k in ["data", "latitudes", "longitudes", "timedeltas", "date_str"], k
-            if k == "data":
-                try:
-                    res["data"] = einops.rearrange(v, self.einops_rearrange_str)
-                except Exception as e:
-                    e.add_note(f"{e} while rearranging {(v.shape)} with '{self.einops_rearrange_str}'")
-                    e.add_note(f"{self}")
-                    raise e
-                continue
-            res[k] = v
+            match k:
+                case "latitudes" | "longitudes" | "timedeltas" | "date_str":
+                    res[k] = v
+                case "data":
+                    try:
+                        res["data"] = einops.rearrange(v, self.einops_rearrange_str)
+                    except Exception as e:
+                        LOGGER.error(f"{e} while rearranging {(v.shape)} with '{self.einops_rearrange_str}'")
+                        LOGGER.error(f"{self}")
+                        raise e
+                case _:
+                    raise ValueError(f"Unexpected key '{k}' in sample provider")
         return res
 
     def _tree(self, prefix=None):
@@ -229,7 +273,7 @@ class Stack(Forward):
 
     def __getitem__(self, i):
         multi = {k: v[i] for k, v in self._providers.items()}
-        res = DynamicDict()
+        res = DynamicDataDict()
         first = next(iter(multi.values()))
         for k, v in first.items():
             assert k in ["data", "latitudes", "longitudes", "timedeltas", "date_str"], k
@@ -270,11 +314,11 @@ class StackAsLists(Forward):
 
     def __getitem__(self, i):
         multi = {k: v[i] for k, v in self._providers.items()}
-        res = DynamicDict()
+        res = DynamicDataDict()
         first = next(iter(multi.values()))
         for k, v in first.items():
             assert k in ["data", "latitudes", "longitudes", "timedeltas", "date_str"], k
-            res[k] = [[v[k] for v in multi.values()]]
+            res[k] = [v[k] for v in multi.values()]
         return res
 
 
@@ -286,7 +330,7 @@ class _InsertInside(Forward):
     @property
     def static(self):
         res = self._forward.static.copy()
-        assert isinstance(res, StaticDict)
+        assert isinstance(res, StaticDataDict)
         for k, v in self.add_to_static.items():
             if k in res:
                 raise ValueError(f"Cannot add '{k}' to static, already present in {list(res.keys())}")
@@ -300,7 +344,7 @@ class _InsertInside(Forward):
 
 
 class Container(SampleProvider):
-    _request = None
+    _promise = None
 
     def __init__(self, _context: Context, container: dict):
         self._context = _context
@@ -310,43 +354,62 @@ class Container(SampleProvider):
         self.extra = container.get("extra", {})
         self.dh = _context["data_handler"]
         self._offset = _context.get("offset", "0h")
-        self._dates_block = self.dh.dates_block(self.data_group)
+        self._static_request = dict(data_group=self.data_group, variables=self.variables)
 
-        self.static_request = self.dh.get_static(data_group=self.data_group, variables=self.variables)
+    def _dates_block_in_dataset(self):
+        return self.dh.dates_block(self.data_group)
 
-    def set_request(self, **kwargs):
-        self._request = self.dh.register_request(data_group=self.data_group, variables=self.variables, **kwargs)
+    def finalise(self, add_to_i, multiply_i, date_block):
+        self._dynamic_request = dict(**self._static_request, add_to_i=add_to_i, multiply_i=multiply_i)
+        self._dates_block = date_block
 
-    @property
-    def dynamic_selection(self):
-        if self._request is None:
-            warnings.warn("Dynamic selection not set yet")
-        return self._request
+    def register_request(self):
+        self._promise = self.dh.register_request(**self._dynamic_request)
 
     def visit(self, visitor):
         visitor(self)
 
     @classmethod
     def new(cls, _context: Context, container: dict):
-        assert "variables" in container, f"Must specify variables when using offsets, got {container}"
-        if "variables" in container and isinstance(container["variables"], dict):
-            container = container.copy()
-            categories = container.pop("variables")
-            variables = []
-            for k, v in categories.items():
-                if not isinstance(v, list):
-                    raise ValueError(f"Expected list for variables, got {type(v)}: {v}")
-                variables += v
-            container["variables"] = variables
-            forward = _sample_provider_factory(_context, container)
-            return _InsertInside.new(_context, forward=forward, static=dict(variables_categories=categories))
+        container = container.copy()
+        assert "variables" in container, f"Must specify variables, got {container}"
 
-        if "dimensions" in container:
-            if all(isinstance(d, str) for d in container["dimensions"]):
+        match container:
+            # order matters here
+
+            case {"variables": dict()}:
+                # if variables categories, pop them and insert them in static, no further processing
+                categories = container.pop("variables")
+                container["variables"] = _merge_sublists(categories)
+                ALLOWED = ["forcings", "prognostics", "diagnostics"]
+                if not all(k in ALLOWED for k in categories.keys()):
+                    raise ValueError(f"Expected keys in {ALLOWED} for variables, got {list(categories.keys())}")
+                forward = _sample_provider_factory(_context, container)
+                return _InsertInside.new(_context, forward=forward, static=dict(variables_categories=categories))
+
+            case {"offsets": dict()}:
+                # if key "offsets " is present and with a special format (categories of rollout)
+                # handle it here, expanding to a list of offsets and inserting the original dict in static
+                # no further processing
+                # note: offset as a list is handled below
+
+                categories = container.pop("offsets")
+                if len(categories) == 1 and "rollout" in categories:
+                    container["offsets"] = find_required_steps_for_rollout(**categories["rollout"])
+                else:
+                    container["offsets"] = _merge_sublists(categories)
+                forward = _sample_provider_factory(_context, container)
+                return _InsertInside.new(_context, forward=forward, static=dict(offsets_categories=categories))
+
+            case {"dimensions": list() as dims} if all(isinstance(d, str) for d in dims):
+                # found "dimensions" key with simple format (a list of string)
+                # rearrange the tensors accordingly to match these dimensions
                 dimensions = container.pop("dimensions")
                 forward = _sample_provider_factory(_context, container)
                 return Rearrange.new(_context, forward=forward, dimensions=dimensions)
-            else:
+
+            case {"dimensions": [["offsets"], *dimensions]}:
+                # Found "dimensions" key with complex format: [["offsets"], str, str, ...]
                 assert container["dimensions"][0] == ["offsets"]
                 assert "offsets" in container, f"Expected 'offsets' in container when using dimensions {container}"
                 _, *dimensions = container.pop("dimensions")
@@ -359,28 +422,34 @@ class Container(SampleProvider):
                     multi_offset[offset] = _sample_provider_factory(_context, cfg)
                 return StackAsLists.new(_context, "offsets", multi_offset)
 
-        if "offsets" in container:
-            offsets = container.pop("offsets")
-            multi_offset = {}
-            for offset in offsets:
-                cfg = container.copy()
-                cfg["offset"] = offset
-                multi_offset[offset] = _sample_provider_factory(_context, cfg)
-            return Stack.new(_context, "offsets", multi_offset)
+            case {"dimensions": list()}:
+                # Found "dimensions" key with unknown format: [["offsets"], str, str, ...]
+                raise ValueError(f"Unsupported 'dimensions' value in {container}")
+
+            case {"offsets": list()}:
+                # Found "offsets" key with simple format: [str, str, ...]
+                # create a Stack along "offsets" dimension
+                # note : offset as a dict is handled above
+                offsets = container.pop("offsets")
+                multi_offset = {}
+                for offset in offsets:
+                    cfg = container.copy()
+                    cfg["offset"] = offset
+                    multi_offset[offset] = _sample_provider_factory(_context, cfg)
+                return Stack.new(_context, "offsets", multi_offset)
 
         return cls(_context, container)
 
     @property
     def static(self):
-        res = self.static_request
-        extra = res.pop("extra", {})
-        extra.update(self.extra)
+        self._static = self.dh.get_static(**self._static_request).copy()
+        extra = {**self._static.pop("extra", {}), **self.extra}
         if extra:
-            res["extra"] = extra
-        return res
+            self._static["extra"] = extra
+        return self._static
 
     def __getitem__(self, i):
-        return self.dynamic_selection[i]
+        return self._promise[i]
 
     def _tree(self, prefix=None):
         name = ""  # self.__class__.__name__
@@ -394,36 +463,59 @@ class Container(SampleProvider):
 def _sample_provider_factory(_context: Context, cfg: Any) -> SampleProvider:
     LOGGER.debug(f"Building sample provider from config: {cfg}")
     cfg = cfg.copy()
-    if isinstance(cfg, SampleProvider):
-        return cfg
+    match cfg:
+        case DictConfig():
+            # found an omegaconf DictConfig, resolve it first
+            cfg = _resolve_omega_conf_reference(cfg)
+            return _sample_provider_factory(_context, cfg)
 
-    if isinstance(cfg, DictConfig):
-        cfg = _resolve_omega_conf_reference(cfg)
+        case {"dictionary": dict() as dictionary} if len(cfg) == 1:
+            # create a dictionary of sample providers
+            return SampleProviderDictionary.new(_context, dictionary)
 
-    def assert_empty(d):
-        if d:
-            LOGGER.warning(f"Unused config keys: {d}")
-            raise ValueError(f"Expected empty dict, got {d}")
+        case {"offset": offset, **config}:
+            # create a sample provider with an offset, updating the context
+            # note the singular "offset", not "offsets"
+            # this is used internally when expanding offsets in a list or dict
+            # and is not expected to be used by the user directly
+            # (although it would work, and set the offset for all downstream sample providers
+            # we may want to support this in the future and extend it to "dimensions" or other keys
+            # as well)
+            _context = Context(_context, offset=offset)
+            return _sample_provider_factory(_context, config)
 
-    if "dictionary" in cfg:
-        dictionary = cfg.pop("dictionary")
-        assert_empty(cfg)
-        return DictionarySampleProvider.new(_context, dictionary)
-
-    if "offset" in cfg:
-        offset = cfg.pop("offset")
-        _context = Context(_context, offset=offset)
-        return _sample_provider_factory(_context, cfg)
-
-    return Container.new(_context, cfg)
+        case _:
+            # finally, create a container
+            return Container.new(_context, cfg)
 
 
 def build_sample_provider(cfg: Any, data_handler) -> SampleProvider:
+    # the context will be available to all sample providers downstream
+    # and used to pass information such as data_handler, offset, etc.
     context = Context(data_handler=data_handler)
+
     sp = _sample_provider_factory(context, dict(dictionary=cfg))
+    # at this point the sample provider is not finished yet,
+    # in particular, the dates are not computed yet
+
+    # we use the visitor pattern to traverse the sample provider tree
+    # and allow each sample provider to communicate
     visitor = OffsetManagerVisitor()
+    # first, the visitor will read all the offsets and compute the overall date range
     sp.visit(visitor.read_date_offsets)
-    LOGGER.debug(f"SampleProvider date range: {visitor.dates_block}")
+    LOGGER.debug(f"Computed date range: {visitor.dates_block}")
+    # then, the visitor will write back the indices to each container
     sp.visit(visitor.write_index_offsets)
     sp.missing = visitor.dates_block.missing_indices()
+
+    # finally, we can register each container's request to the data handler
+    def register_requests(node):
+        if isinstance(node, Container):
+            node.register_request()
+            LOGGER.debug(f"Registered request for container {node.container}")
+            LOGGER.debug(f"  request: {node._dynamic_request}")
+        return True
+
+    sp.visit(register_requests)
+
     return sp
