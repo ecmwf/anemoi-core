@@ -55,7 +55,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.num_target_forcings = (
             len(model_config.training.target_forcing.data) + model_config.training.target_forcing.time_fraction
         )
-        self.input_times = len(model_config.training.explicit_times.input)
         self.num_input_times = len(model_config.training.explicit_times.input)
         super().__init__(
             model_config=model_config,
