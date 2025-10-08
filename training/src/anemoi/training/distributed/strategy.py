@@ -13,10 +13,7 @@ import logging
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from lightning_fabric.utilities.optimizer import _optimizers_to_device
-from pytorch_lightning.overrides.distributed import _sync_module_states
 from pytorch_lightning.strategies.ddp import DDPStrategy
-from pytorch_lightning.trainer.states import TrainerFn
 
 from anemoi.training.utils.seeding import get_base_seed
 
@@ -96,7 +93,11 @@ def get_my_model_comm_group(num_gpus_per_model: int, global_rank: int, world_siz
     return model_comm_group_id, model_comm_group_rank, model_comm_num_groups
 
 
-def get_my_reader_group(model_comm_group_rank: int, read_group_size: int, global_rank: int) -> tuple[int, int, int]:
+def get_my_reader_group(
+    model_comm_group_rank: int,
+    read_group_size: int,
+    global_rank: int,
+) -> tuple[int, int, int, int]:
     """Determine tasks that work together and from a reader group.
 
     Parameters
@@ -140,11 +141,50 @@ class DDPGroupStrategy(DDPStrategy):
         self.read_group_size = read_group_size
 
     def setup(self, trainer: pl.Trainer) -> None:
-        assert self.accelerator is not None, "Accelerator is not initialized for distributed strategy"
-        self.accelerator.setup(trainer)
+        # Create custom communication groups and set them on the model
+        # This must happen before parent's setup (specifically before model_to_device)
+        model_comm_group_id = self._setup_communication_groups()
 
+        # Let parent handle standard setup (includes convert_module, model_to_device, etc.)
+        super().setup(trainer)
+
+        # Prepare optimizer with reference weights (must be done AFTER optimizer creation
+        # but BEFORE optimizer state is loaded from checkpoint)
+        if hasattr(self.precision_plugin, "prepare_optimizer"):
+            LOGGER.info("Preparing optimizer with precision plugin")
+            for optimizer in trainer.optimizers:
+                self.precision_plugin.prepare_optimizer(optimizer, self.lightning_module)
+
+        # Set compute dtype from precision plugin if model was converted
+        # Use lightning_module to access the unwrapped LightningModule (not the DDP wrapper)
+        if hasattr(self.precision_plugin, "_model_converted") and self.precision_plugin._model_converted:
+            first_param = next(self.lightning_module.parameters())
+            self.lightning_module.set_compute_dtype(first_param.dtype)
+
+        # Custom seeding after setup completes
+        seed_rnd(model_comm_group_id, self.global_rank)
+
+    def configure_ddp(self) -> None:
+        # Register gradient hooks before DDP wrapping
+        self.register_parameter_hooks()
+        super().configure_ddp()
+
+        # Register fp32 gradient reduction hook if using bf16 precision
+        if hasattr(self.precision_plugin, "get_ddp_communication_hook"):
+            hook = self.precision_plugin.get_ddp_communication_hook()
+            # self.model is now the DDP-wrapped model after super().configure_ddp()
+            self.model.register_comm_hook(state=self.model.process_group, hook=hook)
+            LOGGER.info("Registered fp32 gradient reduction hook for DDP")
+
+    def _setup_communication_groups(self) -> int:
+        """Set up model and reader communication groups.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank
+        """
         # determine the model groups that work together:
-
         assert self.world_size % self.model_comm_group_size == 0, (
             f"Total number of GPUs ({self.world_size}) must be divisible by the number of GPUs "
             f"per model ({self.model_comm_group_size})."
@@ -163,6 +203,7 @@ class DDPGroupStrategy(DDPStrategy):
             self.global_rank,
             self.world_size,
         )
+        assert hasattr(self.model, "set_model_comm_group"), "Model must implement set_model_comm_group(...)"
         model_comm_group = model_comm_groups[model_comm_group_id]
         self.model.set_model_comm_group(
             model_comm_group,
@@ -173,7 +214,6 @@ class DDPGroupStrategy(DDPStrategy):
         )
 
         # set up reader groups by further splitting model_comm_group_ranks with read_group_size:
-
         assert self.model_comm_group_size % self.read_group_size == 0, (
             f"Number of GPUs per model ({self.model_comm_group_size}) must be divisible by read_group_size "
             f"({self.read_group_size})."
@@ -192,6 +232,7 @@ class DDPGroupStrategy(DDPStrategy):
             self.global_rank,
         )
         # get all reader groups of the current model group
+        assert hasattr(self.model, "set_reader_groups"), "Model must implement set_reader_groups(...)"
         model_reader_groups = reader_groups[model_comm_group_id]
         self.model.set_reader_groups(
             model_reader_groups,
@@ -213,40 +254,7 @@ class DDPGroupStrategy(DDPStrategy):
             reader_group_root,
         )
 
-        # register hooks for correct gradient reduction
-        self.register_parameter_hooks()
-
-        # move the model to the correct device
-        self.model_to_device()
-
-        # skip wrapping the model if we are not fitting as no gradients need to be exchanged
-        trainer_fn = trainer.state.fn
-
-        if trainer_fn == TrainerFn.FITTING and self._layer_sync:
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            self.model = self._layer_sync.apply(self.model)
-
-        self.setup_precision_plugin()
-
-        if trainer_fn == TrainerFn.FITTING:
-            # do not wrap with DDP if not fitting as there's no gradients to reduce
-            self.configure_ddp()
-
-            # set up optimizers after the wrapped module has been moved to the device
-            self.setup_optimizers(trainer)
-            _optimizers_to_device(self.optimizers, self.root_device)
-
-            import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
-
-            if isinstance(self._ddp_comm_state, post_localSGD.PostLocalSGDState):
-                self._enable_model_averaging()
-        else:
-            # we need to manually synchronize the module's states since we aren't using the DDP wrapper
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            _sync_module_states(self.model)
-
-        # seed ranks
-        seed_rnd(model_comm_group_id, self.global_rank)
+        return model_comm_group_id
 
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.
@@ -314,11 +322,50 @@ class DDPEnsGroupStrategy(DDPStrategy):
         self.ens_comm_group_size = num_gpus_per_ensemble
 
     def setup(self, trainer: pl.Trainer) -> None:
-        assert self.accelerator is not None, "Accelerator is not initialized for distributed strategy"
-        self.accelerator.setup(trainer)
+        # Create custom communication groups (model, reader, ensemble) and set them on the model
+        # This must happen before parent's setup (specifically before model_to_device)
+        model_comm_group_id = self._setup_communication_groups()
 
+        # Let parent handle standard setup (includes convert_module, model_to_device, etc.)
+        super().setup(trainer)
+
+        # Prepare optimizer with reference weights (must be done AFTER optimizer creation
+        # but BEFORE optimizer state is loaded from checkpoint)
+        if hasattr(self.precision_plugin, "prepare_optimizer"):
+            LOGGER.info("Preparing optimizer with precision plugin")
+            for optimizer in trainer.optimizers:
+                self.precision_plugin.prepare_optimizer(optimizer, self.lightning_module)
+
+        # Set compute dtype from precision plugin if model was converted
+        # Use lightning_module to access the unwrapped LightningModule (not the DDP wrapper)
+        if hasattr(self.precision_plugin, "_model_converted") and self.precision_plugin._model_converted:
+            first_param = next(self.lightning_module.parameters())
+            self.lightning_module.set_compute_dtype(first_param.dtype)
+
+        # Custom seeding after setup completes
+        seed_rnd(model_comm_group_id, self.global_rank)
+
+    def configure_ddp(self) -> None:
+        # Register gradient hooks before DDP wrapping
+        self.register_parameter_hooks()
+        super().configure_ddp()
+
+        # Register fp32 gradient reduction hook if using bf16 precision
+        if hasattr(self.precision_plugin, "get_ddp_communication_hook"):
+            hook = self.precision_plugin.get_ddp_communication_hook()
+            # self.model is now the DDP-wrapped model after super().configure_ddp()
+            self.model.register_comm_hook(state=self.model.process_group, hook=hook)
+            LOGGER.info("Registered fp32 gradient reduction hook for DDP")
+
+    def _setup_communication_groups(self) -> int:
+        """Set up model, reader, and ensemble communication groups.
+
+        Returns
+        -------
+        int
+            The model communication group ID for this rank
+        """
         # determine the model groups that work together:
-
         assert self.world_size % self.model_comm_group_size == 0, (
             f"Total number of GPUs ({self.world_size}) must be divisible by the number of GPUs "
             f"per model ({self.model_comm_group_size})."
@@ -347,7 +394,6 @@ class DDPEnsGroupStrategy(DDPStrategy):
         )
 
         # set up reader groups by further splitting model_comm_group_ranks with read_group_size:
-
         assert self.model_comm_group_size % self.read_group_size == 0, (
             f"Number of GPUs per model ({self.model_comm_group_size}) must be divisible by read_group_size "
             f"({self.read_group_size})."
@@ -366,6 +412,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             self.global_rank,
         )
         # get all reader groups of the current model group
+        assert hasattr(self.model, "set_reader_groups"), "Model must implement set_reader_groups(...)"
         model_reader_groups = reader_groups[model_comm_group_id]
         self.model.set_reader_groups(
             model_reader_groups,
@@ -415,6 +462,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             self.world_size,
         )
 
+        assert hasattr(self.model, "set_ens_comm_group"), "Model must implement set_ens_comm_group(...)"
         ens_comm_group = ens_comm_groups[ens_comm_group_id]
         self.model.set_ens_comm_group(
             ens_comm_group,
@@ -439,6 +487,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
         # global rank 0 in each ensemble subgroup for broadcasting
         ens_comm_subgroup_rank_0 = ens_comm_subgroup_ranks[ens_comm_subgroup_id][0]
 
+        assert hasattr(self.model, "set_ens_comm_subgroup"), "Model must implement set_ens_comm_subgroup(...)"
         ens_comm_subgroup = ens_comm_subgroups[ens_comm_subgroup_id]
         self.model.set_ens_comm_subgroup(
             ens_comm_subgroup,
@@ -465,40 +514,7 @@ class DDPEnsGroupStrategy(DDPStrategy):
             ens_comm_subgroup_size,
         )
 
-        # register hooks for correct gradient reduction
-        self.register_parameter_hooks()
-
-        # move the model to the correct device
-        self.model_to_device()
-
-        # skip wrapping the model if we are not fitting as no gradients need to be exchanged
-        trainer_fn = trainer.state.fn
-
-        if trainer_fn == TrainerFn.FITTING and self._layer_sync:
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            self.model = self._layer_sync.apply(self.model)
-
-        self.setup_precision_plugin()
-
-        if trainer_fn == TrainerFn.FITTING:
-            # do not wrap with DDP if not fitting as there's no gradients to reduce
-            self.configure_ddp()
-
-            # set up optimizers after the wrapped module has been moved to the device
-            self.setup_optimizers(trainer)
-            _optimizers_to_device(self.optimizers, self.root_device)
-
-            import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
-
-            if isinstance(self._ddp_comm_state, post_localSGD.PostLocalSGDState):
-                self._enable_model_averaging()
-        else:
-            # we need to manually synchronize the module's states since we aren't using the DDP wrapper
-            assert self.model is not None, "Model is not initialized for distributed strategy"
-            _sync_module_states(self.model)
-
-        # seed ranks
-        seed_rnd(model_comm_group_id, self.global_rank)
+        return model_comm_group_id
 
     def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
         """Pass communication group information to the dataloader for distributed training.

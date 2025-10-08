@@ -178,6 +178,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.config = config
         self.data_indices = data_indices
 
+        # Compute dtype for casting inputs before computation (set by strategy during setup)
+        # When set, inputs can be cast to this dtype in forward(), e.g. before being
+        # passed to the encoder etc.
+        self.compute_dtype: torch.dtype | None = None
+
         self.save_hyperparameters()
 
         self.latlons_data = graph_data[config.graph.data].x
@@ -299,6 +304,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             x,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
+            compute_dtype=self.compute_dtype,
         )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
@@ -343,6 +349,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.reader_group_id = reader_group_id
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
+
+    def set_compute_dtype(self, dtype: torch.dtype) -> None:
+        """Set the compute dtype for input casting.
+
+        This is called by the strategy during setup to communicate the precision
+        mode from the precision plugin to the model.
+
+        Parameters
+        ----------
+        dtype : torch.dtype
+            The dtype to use for computation (e.g., torch.bfloat16, torch.float32)
+
+        """
+        self.compute_dtype = dtype
+        LOGGER.info("BaseGraphModule: Setting compute dtype to %s", dtype)
 
     def _prepare_tensors_for_loss(
         self,

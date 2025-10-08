@@ -118,6 +118,7 @@ class GraphEnsForecaster(BaseGraphModule):
             fcstep=fcstep,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
+            compute_dtype=self.compute_dtype,
         )
 
     def set_ens_comm_group(
