@@ -508,8 +508,12 @@ class BF16FP32OptPrecision(Precision):
         Callable
             DDP communication hook function
         """
+        import torch.distributed as dist
 
-        def fp32_gradient_reduction_hook(state: Any, bucket: Any) -> Any:
+        def fp32_gradient_reduction_hook(
+            state: Any,
+            bucket: dist.GradBucket,
+        ) -> torch.futures.Future[torch.Tensor]:
             """DDP communication hook to reduce gradients in fp32 (async).
 
             Converts bf16 gradients to fp32, performs async all-reduce, then converts
@@ -528,8 +532,6 @@ class BF16FP32OptPrecision(Precision):
             torch.futures.Future
                 Future that resolves to reduced gradients in bf16
             """
-            import torch.distributed as dist
-
             # Get bf16 gradients from bucket
             bf16_grads = bucket.buffer()
 
