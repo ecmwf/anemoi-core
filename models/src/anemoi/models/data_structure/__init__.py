@@ -8,9 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 from .data_handler import DataHandler
-from .data_handler import DynamicDict
-from .data_handler import StaticDict
 from .data_handler import build_data_handler
+from .dicts import DynamicDataDict
+from .dicts import StaticDataDict
 from .sample_provider import SampleProvider
 from .sample_provider import build_sample_provider
 
@@ -18,7 +18,7 @@ __all__ = [
     "SampleProvider",
     "build_sample_provider",
     "build_data_handler",
-    "DynamicDict",
-    "StaticDict",
+    "DynamicDataDict",
+    "StaticDataDict",
     "DataHandler",
 ]
