@@ -56,6 +56,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             len(model_config.training.target_forcing.data) + model_config.training.target_forcing.time_fraction
         )
         self.input_times = len(model_config.training.explicit_times.input)
+        self.num_input_times = len(model_config.training.explicit_times.input)
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -71,7 +72,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
 
     def _calculate_input_dim(self, model_config):
         return (
-            self.input_times * self.num_input_channels
+            self.num_input_times * self.num_input_channels
             + self.node_attributes.attr_ndims[self._graph_name_data]
             + self.num_target_forcings
         )
