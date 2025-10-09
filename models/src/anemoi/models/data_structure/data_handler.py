@@ -15,6 +15,7 @@ from functools import cached_property
 from typing import List
 
 import numpy as np
+from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree as _RichTree
 
@@ -22,6 +23,14 @@ from anemoi.datasets import open_dataset
 from anemoi.models.data_structure.offsets import _DatesBlock
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _resolve_omega_conf_reference(config):
+    from omegaconf import OmegaConf
+
+    config = OmegaConf.create(config)
+    config = OmegaConf.to_container(config, resolve=True)
+    return config
 
 
 def format_value(k, v, level=0) -> str | _RichTree:
@@ -373,21 +382,37 @@ class Promise:
 
 def _data_handler_factory(sources: dict, start, end, search_path) -> DataHandler:
     data_handlers = []
+
     for cfg in sources:
+        # if not defined in cfg, use the provided global search_path, start, end
         cfg["search_path"] = cfg.get("search_path", search_path)
         cfg["start"] = cfg.get("start", start)
         cfg["end"] = cfg.get("end", end)
+
         # this will need to be changed for observations datasets using another DataHandler class than OneDatasetDataHandler
         data_handlers.append(OneDatasetDataHandler(**cfg))
+
     return MultiDatasetDataHandler(*data_handlers)
 
 
-def build_data_handler(config_datagroups: dict, kind: str | None) -> DataHandler:
+def build_data_handler(config: dict, /, kind: str | None) -> DataHandler:
     if kind not in ["training", "validation", "test", None]:
         raise ValueError(f"build_data_handler: kind={kind} must be one of ['training', 'validation', 'test', None]")
+    if "sources" not in config:
+        raise ValueError("build_data_handler: config must contain 'sources' key")
+    if kind and kind not in config:
+        raise ValueError(f"build_data_handler: config must contain '{kind}' key")
 
-    start = config_datagroups.get(kind, {}).get("start", None)
-    end = config_datagroups.get(kind, {}).get("end", None)
-    search_path = config_datagroups.get("search_path", None)
+    if isinstance(config, DictConfig):
+        # found an omegaconf DictConfig, resolve it first
+        config = _resolve_omega_conf_reference(config)
+    config = config.copy()
 
-    return _data_handler_factory(sources=config_datagroups["sources"], start=start, end=end, search_path=search_path)
+    if kind:
+        overwrite_config = config[kind]
+        for k, v in overwrite_config.items():
+            if k in config:
+                LOGGER.debug(f"Overriding config.{k} with config.{kind}.{k}")
+            config[k] = v
+
+    return _data_handler_factory(config["sources"], config.get("start"), config.get("end"), config.get("search_path"))

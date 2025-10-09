@@ -21,6 +21,7 @@ from rich.tree import Tree as _RichTree
 
 from anemoi.models.data_structure.data_handler import DynamicDataDict
 from anemoi.models.data_structure.data_handler import StaticDataDict
+from anemoi.models.data_structure.data_handler import _resolve_omega_conf_reference
 from anemoi.models.data_structure.offsets import OffsetManagerVisitor
 from anemoi.models.data_structure.offsets import find_required_steps_for_rollout
 from anemoi.models.data_structure.offsets import sum_offsets
@@ -36,14 +37,6 @@ def _merge_sublists(d):
             raise ValueError(f"Expected list for offsets, got {type(v)}: {v}")
         res += v
     return res
-
-
-def _resolve_omega_conf_reference(config):
-    from omegaconf import OmegaConf
-
-    config = OmegaConf.create(config)
-    config = OmegaConf.to_container(config, resolve=True)
-    return config
 
 
 class Context(dict):
