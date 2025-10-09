@@ -11,6 +11,7 @@ import datetime
 import logging
 import warnings
 from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
 from typing import List
 
@@ -45,7 +46,7 @@ class DataHandler(ABC):
     def register_request(self, request):
         self.requests.append(request)
 
-    # @abstractmethod
+    @abstractmethod
     def static(self, data_group: str) -> StaticDataDict:
         pass
 
@@ -53,11 +54,7 @@ class DataHandler(ABC):
     def __getitem__(self, i: int, data_group: str) -> DynamicDataDict:
         pass
 
-    # @abstractmethod
-    def __len__(self):
-        pass
-
-    # @abstractmethod
+    @abstractmethod
     def dates_block(self, data_group: str) -> _DatesBlock:
         pass
 
@@ -106,9 +103,6 @@ class OneDatasetDataHandler(DataHandler):
             else:
                 return ["variables", "values"]
 
-    def __len__(self) -> int:
-        return len(self._ds)
-
     def dates_block(self, data_group: str) -> _DatesBlock:
         assert data_group in self.data_groups, f"Data_group {data_group} not in {self.data_groups}"
         # hack for now, need to update anemoi-datasets to provide dimensions
@@ -131,12 +125,44 @@ class OneDatasetDataHandler(DataHandler):
                     return open_dataset(f"{self._search_path}/{self._dataset}")
             raise e
 
+    def static(self, data_group: str, variables: List[str]) -> StaticDataDict:
+        ds = open_dataset(self._ds, select=variables)
+        return StaticDataDict(
+            name_to_index=ds.name_to_index,
+            statistics=ds.statistics,
+            statistics_tendencies=ds.statistics_tendencies,
+            supporting_arrays=ds.supporting_arrays(),
+            resolution=ds.resolution,
+            metadata=ds.metadata,
+            variables=ds.variables,
+            num_features=len(ds.variables),
+            dimensions=self.dimensions,
+            extra=self.extra,
+        )
+
     def __repr__(self):
         if isinstance(self.extra, dict):
             extra = ", ".join(f"{k}={v}" for k, v in self.extra.items())
         else:
             extra = extra.__class__.__name__ + " " + str(self.extra)[:10]
         return f"{super().__repr__()}(dataset={self._dataset}, extra={extra})"
+
+
+class RecordsDataHandler(OneDatasetDataHandler):
+    def static(self, data_group: str, variables: List[str]) -> StaticDataDict:
+        ds = open_dataset(self._dataset, select=[f"{data_group}.{v}" for v in variables])
+        return StaticDataDict(
+            name_to_index=ds.name_to_index[data_group],
+            statistics=ds.statistics[data_group],
+            statistics_tendencies=None,
+            metadata=ds.metadata,
+            resolution=None,
+            supporting_arrays=None,
+            variables=ds.variables[data_group],
+            num_features=len(ds.variables[data_group]),
+            dimensions=self.dimensions,
+            extra=self.extra,
+        )
 
 
 class MultiDatasetDataHandler(DataHandler):
@@ -151,61 +177,9 @@ class MultiDatasetDataHandler(DataHandler):
 
         self._data_handlers = data_handlers
 
-    def static(self, data_group):
-        assert data_group in self.data_groups, f"Data_group {data_group} not in {self.data_groups}"
-        for dh in self._data_handlers:
-            if data_group in dh.data_groups:
-                return dh.static(data_group)
-        assert False
-
-    def __getitem__(self, i, data_group):
-        assert data_group in self.data_groups, f"Data_group {data_group} not in {self.data_groups}"
-        for dh in self._data_handlers:
-            if data_group in dh.data_groups:
-                return dh.__getitem__(i, data_group)
-        assert False
-
-    def __len__(self):
-        lengths = [len(dh) for dh in self._data_handlers]
-        if not lengths:
-            return 0
-        if not all(l_ == lengths[0] for l_ in lengths):
-            raise ValueError(f"All data_handlers must have the same length, got {lengths}")
-        return lengths[0]
-
-    def get_static(self, data_group, variables: List[str]) -> StaticDataDict:
-        """Prepare a subselection from a data_group"""
+    def static(self, data_group, variables: List[str]) -> StaticDataDict:
         data_handler = self._find_data_handler(data_group)
-        try:
-            ds = open_dataset(data_handler._ds, select=variables)
-        except NotImplementedError:
-            # hack for now, need to update anemoi-datasets to provide what is needed
-            variables = [f"{data_group}.{v}" for v in variables]
-            ds = open_dataset(data_handler._dataset, select=variables)
-        try:
-            statistics_tendencies = ds.statistics_tendencies
-        except AttributeError:
-            statistics_tendencies = None
-        try:
-            supporting_arrays = ds.supporting_arrays()
-        except AttributeError:
-            supporting_arrays = None
-        try:
-            resolution = ds.resolution
-        except AttributeError:
-            resolution = None
-        return StaticDataDict(
-            name_to_index=ds.name_to_index,
-            statistics=ds.statistics,
-            statistics_tendencies=statistics_tendencies,
-            metadata=ds.metadata,
-            supporting_arrays=supporting_arrays,
-            resolution=resolution,
-            variables=ds.variables,
-            num_features=len(ds.variables),
-            dimensions=data_handler.dimensions,
-            extra=data_handler.extra,
-        )
+        return data_handler.static(data_group, variables)
 
     def register_request(self, *, data_group, **kwargs):
         dh = self._find_data_handler(data_group)
@@ -289,9 +263,26 @@ def _data_handler_factory(sources: dict, start, end, search_path) -> DataHandler
         cfg["search_path"] = cfg.get("search_path", search_path)
         cfg["start"] = cfg.get("start", start)
         cfg["end"] = cfg.get("end", end)
+        if "dataset" not in cfg:
+            raise ValueError("Each source in data_handler config must contain a 'dataset' key")
 
-        # this will need to be changed for observations datasets using another DataHandler class than OneDatasetDataHandler
-        data_handlers.append(OneDatasetDataHandler(**cfg))
+        def find_class(name: str):
+            # For now, just check for known dataset types
+            # but anemoi-datasets should provide a way to get the right class
+            # such as ds.is_gridded or ds.is_grouped
+            ds = open_dataset(name)
+            from anemoi.datasets.data.records import RecordsDataset
+
+            if isinstance(ds, RecordsDataset):
+                return RecordsDataHandler
+            return OneDatasetDataHandler
+
+        try:
+            cls = find_class(cfg["dataset"])
+            dh = cls(**cfg)
+            data_handlers.append(dh)
+        except Exception as e:
+            warnings.warn(f"Failed to create data handler for {cfg['dataset']}: {e}")
 
     return MultiDatasetDataHandler(*data_handlers)
 
