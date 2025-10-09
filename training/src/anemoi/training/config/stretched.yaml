@@ -19,18 +19,22 @@ config_validation: True
 #   num_gpus_per_node: 1
 
 dataloader:
+  dataset_defaults:
+    dataset: ??
+    forcing_dataset: ??
+
   dataset:
     cutout:
-      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      - dataset: ${dataloader.dataset_defaults.dataset}
         thinning: ???
-      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+      - dataset: ${dataloader.dataset_defaults.dataset.forcing_dataset}
     adjust: all
     min_distance_km: 0
 training:
   scalers:
     node_weights:
       weight_frac_of_total: ???
-hardware:
-  files:
-    dataset: ???
-    forcing_dataset: ???
+# hardware:
+#   files:
+#     dataset: ???
+#     forcing_dataset: ???

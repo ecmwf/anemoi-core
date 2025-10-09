@@ -13,7 +13,7 @@ nodes:
   data:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.dataset}
+      dataset: ${dataloader.training.dataset}
     attributes: ${graph.attributes.nodes}
   hidden_1:
     node_builder:
