@@ -402,11 +402,13 @@ class AutoencoderSchema(BaseTrainingSchema):
 
 
 TrainingSchema = Annotated[
-    ForecasterSchema
-    | ForecasterEnsSchema
-    | InterpolationSchema
-    | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema,
-    AutoencoderSchema,
+    (
+        ForecasterSchema
+        | ForecasterEnsSchema
+        | InterpolationSchema
+        | DiffusionForecasterSchema
+        | DiffusionTendForecasterSchema
+        | AutoencoderSchema
+    ),
     Discriminator("model_task"),
 ]
