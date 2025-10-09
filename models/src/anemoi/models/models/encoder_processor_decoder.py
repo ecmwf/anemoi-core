@@ -28,6 +28,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.utils.config import DotDict
 
@@ -87,6 +88,16 @@ class AnemoiModelEncProcDec(nn.Module):
             self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
 
+        # Create graph providers
+        self.encoder_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            sub_graph_edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            edge_dim=model_config.model.encoder.get("edge_dim"),
+        )
+
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
@@ -94,22 +105,36 @@ class AnemoiModelEncProcDec(nn.Module):
             in_channels_src=self.input_dim,
             in_channels_dst=self.input_dim_latent,
             hidden_dim=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            edge_dim=self.encoder_graph_provider.edge_dim,
         )
 
         # Processor hidden -> hidden
+        self.processor_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            sub_graph_edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            edge_dim=model_config.model.processor.get("edge_dim"),
+        )
+
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Decoder hidden -> data
+        self.decoder_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            sub_graph_edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            edge_dim=model_config.model.decoder.get("edge_dim"),
+        )
+
         self.decoder = instantiate(
             model_config.model.decoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -117,9 +142,7 @@ class AnemoiModelEncProcDec(nn.Module):
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            edge_dim=self.decoder_graph_provider.edge_dim,
         )
 
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -277,6 +300,7 @@ class AnemoiModelEncProcDec(nn.Module):
         data: tuple[Tensor],
         batch_size: int,
         shard_shapes: tuple[tuple[int, int], tuple[int, int]],
+        graph_provider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -296,6 +320,8 @@ class AnemoiModelEncProcDec(nn.Module):
             Batch size
         shard_shapes : tuple[tuple[int, int], tuple[int, int]]
             Shard shapes for the data
+        graph_provider : BaseGraphProvider
+            Graph provider that supplies edge information
         model_comm_group : ProcessGroup
             model communication group, specifies which GPUs work together
             in one model instance
@@ -316,6 +342,7 @@ class AnemoiModelEncProcDec(nn.Module):
         mapper_args = {
             "batch_size": batch_size,
             "shard_shapes": shard_shapes,
+            "graph_provider": graph_provider,
             "model_comm_group": model_comm_group,
             "x_src_is_sharded": x_src_is_sharded,
             "x_dst_is_sharded": x_dst_is_sharded,
@@ -368,6 +395,7 @@ class AnemoiModelEncProcDec(nn.Module):
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+            graph_provider=self.encoder_graph_provider,
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
@@ -379,6 +407,7 @@ class AnemoiModelEncProcDec(nn.Module):
             x_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
+            graph_provider=self.processor_graph_provider,
             model_comm_group=model_comm_group,
         )
 
@@ -391,6 +420,7 @@ class AnemoiModelEncProcDec(nn.Module):
             (x_latent_proc, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            graph_provider=self.decoder_graph_provider,
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded

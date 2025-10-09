@@ -16,6 +16,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -28,12 +29,10 @@ class GraphTransformerProcessorConfig:
     num_chunks: int = 2
     num_heads: int = 16
     mlp_hidden_ratio: int = 4
-    trainable_size: int = 6
-    src_grid_size: int = 0
-    dst_grid_size: int = 0
     qk_norm: bool = (True,)
     cpu_offload: bool = (False,)
     layer_kernels: field(default_factory=DotDict) = None
+    edge_dim: int = None  # Will be set from graph_provider
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
@@ -59,35 +58,43 @@ class TestGraphTransformerProcessor:
         return GraphTransformerProcessorConfig()
 
     @pytest.fixture
-    def graphtransformer_processor(self, graphtransformer_init, fake_graph):
-        return GraphTransformerProcessor(
-            **asdict(graphtransformer_init),
+    def graph_provider(self, fake_graph):
+        return create_graph_provider(
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
+            src_grid_size=self.NUM_NODES,
+            dst_grid_size=self.NUM_NODES,
+            trainable_size=6,
         )
 
-    def test_graphtransformer_processor_init(self, graphtransformer_processor, graphtransformer_init):
+    @pytest.fixture
+    def graphtransformer_processor(self, graphtransformer_init, graph_provider):
+        config = asdict(graphtransformer_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        return GraphTransformerProcessor(**config)
+
+    def test_graphtransformer_processor_init(self, graphtransformer_processor, graphtransformer_init, graph_provider):
         assert graphtransformer_processor.num_chunks == graphtransformer_init.num_chunks
         assert graphtransformer_processor.num_channels == graphtransformer_init.num_channels
         assert (
             graphtransformer_processor.chunk_size
             == graphtransformer_init.num_layers // graphtransformer_init.num_chunks
         )
-        assert isinstance(graphtransformer_processor.graph_provider.trainable, TrainableTensor)
+        assert isinstance(graph_provider.trainable, TrainableTensor)
 
-    def test_forward(self, graphtransformer_processor, graphtransformer_init):
+    def test_forward(self, graphtransformer_processor, graphtransformer_init, graph_provider):
         batch_size = 1
 
-        x = torch.rand((self.NUM_EDGES, graphtransformer_init.num_channels))
+        x = torch.rand((self.NUM_NODES, graphtransformer_init.num_channels))
         shard_shapes = [list(x.shape)]
 
         # Run forward pass of processor
-        output = graphtransformer_processor.forward(x, batch_size, shard_shapes)
-        assert output.shape == (self.NUM_EDGES, graphtransformer_init.num_channels)
+        output = graphtransformer_processor.forward(x, batch_size, shard_shapes, graph_provider)
+        assert output.shape == (self.NUM_NODES, graphtransformer_init.num_channels)
 
         # Generate dummy target and loss function
         loss_fn = torch.nn.MSELoss()
-        target = torch.rand((self.NUM_EDGES, graphtransformer_init.num_channels))
+        target = torch.rand((self.NUM_NODES, graphtransformer_init.num_channels))
         loss = loss_fn(output, target)
 
         # Check loss
@@ -97,9 +104,9 @@ class TestGraphTransformerProcessor:
         loss.backward()
 
         # Check gradients of trainable tensor
-        assert graphtransformer_processor.graph_provider.trainable.trainable.grad.shape == (
+        assert graph_provider.trainable.trainable.grad.shape == (
             self.NUM_EDGES,
-            graphtransformer_init.trainable_size,
+            6,
         )
 
         # Check gradients of processor

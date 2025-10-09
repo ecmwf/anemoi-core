@@ -16,6 +16,7 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.mapper import GNNBackwardMapper
 from anemoi.models.layers.mapper import GNNBaseMapper
 from anemoi.models.layers.mapper import GNNForwardMapper
@@ -41,13 +42,11 @@ class MapperConfig:
     in_channels_dst: int = 4
     hidden_dim: int = 256
     out_channels_dst: int = 8
-    trainable_size: int = 6
     num_chunks: int = 2
     mlp_extra_layers: int = 2
-    src_grid_size: int = 0
-    dst_grid_size: int = 0
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
+    edge_dim: int = None  # Will be set from graph_provider
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)
@@ -65,12 +64,20 @@ class TestGNNBaseMapper:
         return MapperConfig()
 
     @pytest.fixture
-    def mapper(self, mapper_init, fake_graph):
-        return ConcreteGNNBaseMapper(
-            **asdict(mapper_init),
+    def graph_provider(self, fake_graph):
+        return create_graph_provider(
             sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
+            src_grid_size=self.NUM_SRC_NODES,
+            dst_grid_size=self.NUM_DST_NODES,
+            trainable_size=6,
         )
+
+    @pytest.fixture
+    def mapper(self, mapper_init, graph_provider):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        return ConcreteGNNBaseMapper(**config)
 
     @pytest.fixture
     def pair_tensor(self, mapper_init):
@@ -134,12 +141,19 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
     """Test the GNNForwardMapper class."""
 
     @pytest.fixture
-    def mapper(self, mapper_init, fake_graph):
-        return GNNForwardMapper(
-            **asdict(mapper_init),
-            sub_graph=fake_graph[("nodes", "to", "nodes")],
-            sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-        )
+    def mapper(self, mapper_init, graph_provider):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        del config["out_channels_dst"]  # Not needed for forward mapper
+        return GNNForwardMapper(**config)
+
+    def test_initialization(self, mapper, mapper_init):
+        assert isinstance(mapper, GNNBaseMapper)
+        assert mapper.in_channels_src == mapper_init.in_channels_src
+        assert mapper.in_channels_dst == mapper_init.in_channels_dst
+        assert mapper.hidden_dim == mapper_init.hidden_dim
+        # Forward mapper doesn't have out_channels_dst
+        assert isinstance(mapper.activation, nn.Module)
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         x = pair_tensor
@@ -157,13 +171,13 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
         assert shapes_src == [[self.NUM_SRC_NODES, mapper_init.hidden_dim]]
         assert shapes_dst == [[self.NUM_DST_NODES, mapper_init.hidden_dim]]
 
-    def test_forward_backward(self, mapper_init, mapper, pair_tensor):
+    def test_forward_backward(self, mapper_init, mapper, pair_tensor, graph_provider):
 
         x = pair_tensor
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
-        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes)
+        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes, graph_provider)
         assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])
         assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
@@ -179,8 +193,8 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
         loss.backward()
 
         # Check gradients
-        assert mapper.graph_provider.trainable.trainable.grad is not None
-        assert mapper.graph_provider.trainable.trainable.grad.shape == mapper.graph_provider.trainable.trainable.shape
+        assert graph_provider.trainable.trainable.grad is not None
+        assert graph_provider.trainable.trainable.grad.shape == graph_provider.trainable.trainable.shape
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
@@ -193,13 +207,10 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
     """Test the GNNBackwardMapper class."""
 
     @pytest.fixture
-    def mapper(self, mapper_init, fake_graph):
-
-        return GNNBackwardMapper(
-            **asdict(mapper_init),
-            sub_graph=fake_graph[("nodes", "to", "nodes")],
-            sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-        )
+    def mapper(self, mapper_init, graph_provider):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        return GNNBackwardMapper(**config)
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         x = pair_tensor
@@ -226,7 +237,7 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst]) == result.shape
         ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, mapper_init.out_channels_dst]}) != result.shape ({result.shape})"
 
-    def test_forward_backward(self, mapper_init, mapper, pair_tensor):
+    def test_forward_backward(self, mapper_init, mapper, pair_tensor, graph_provider):
         pair_tensor
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
         batch_size = 1
@@ -236,7 +247,7 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim),
         )
 
-        result = mapper.forward(x, batch_size, shard_shapes)
+        result = mapper.forward(x, batch_size, shard_shapes, graph_provider)
         assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst])
 
         # Dummy loss
@@ -251,8 +262,8 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
         loss.backward()
 
         # Check gradients
-        assert mapper.graph_provider.trainable.trainable.grad is not None
-        assert mapper.graph_provider.trainable.trainable.grad.shape == mapper.graph_provider.trainable.trainable.shape
+        assert graph_provider.trainable.trainable.grad is not None
+        assert graph_provider.trainable.trainable.grad.shape == graph_provider.trainable.trainable.shape
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"

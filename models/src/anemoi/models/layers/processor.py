@@ -16,7 +16,6 @@ from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
@@ -26,7 +25,6 @@ from anemoi.models.layers.chunk import GNNProcessorChunk
 from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
 from anemoi.models.layers.graph_providers import BaseGraphProvider
-from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -198,13 +196,7 @@ class GNNProcessor(BaseProcessor):
         num_layers: int,
         num_chunks: int,
         mlp_extra_layers: int,
-        trainable_size: int = 0,
-        graph_provider: Optional[BaseGraphProvider] = None,
-        src_grid_size: Optional[int] = None,
-        dst_grid_size: Optional[int] = None,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        edge_dim: Optional[int] = None,
+        edge_dim: int,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -219,18 +211,10 @@ class GNNProcessor(BaseProcessor):
             Number of channels
         num_chunks: int
             Number of chunks in processor
-        mlp_extra_layers : int, optional
+        mlp_extra_layers : int
             Number of extra layers in MLP
-        trainable_size : int
-            Size of trainable tensor
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
-        sub_graph : HeteroData
-            Graph for sub graph in GNN
-        sub_graph_edge_attributes : list[str]
-            Sub graph edge attributes
+        edge_dim : int
+            Edge feature dimension
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -247,29 +231,16 @@ class GNNProcessor(BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        # Create graph provider using factory if not provided
-        if graph_provider is None:
-            graph_provider = create_graph_provider(
-                sub_graph=sub_graph,
-                sub_graph_edge_attributes=sub_graph_edge_attributes,
-                src_grid_size=src_grid_size,
-                dst_grid_size=dst_grid_size,
-                trainable_size=trainable_size,
-                edge_dim=edge_dim,
-            )
-
-        self.graph_provider = graph_provider
-
-        kwargs = {
+        kwargs_build = {
             "mlp_extra_layers": mlp_extra_layers,
             "layer_kernels": self.layer_factory,
             "edge_dim": None,
         }
 
-        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, **kwargs)
+        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, **kwargs_build)
 
-        kwargs["edge_dim"] = self.graph_provider.edge_dim  # Edge dim for first layer
-        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, **kwargs)
+        kwargs_build["edge_dim"] = edge_dim  # Edge dim for first layer
+        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, **kwargs_build)
 
         self.offload_layers(cpu_offload)
 
@@ -278,6 +249,7 @@ class GNNProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         edge_index=None,
         edge_attr=None,
@@ -286,7 +258,7 @@ class GNNProcessor(BaseProcessor):
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         target_nodes = sum(x[0] for x in shape_nodes)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -316,13 +288,7 @@ class GraphTransformerProcessor(BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        trainable_size: int = 0,
-        graph_provider: Optional[BaseGraphProvider] = None,
-        src_grid_size: Optional[int] = None,
-        dst_grid_size: Optional[int] = None,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        edge_dim: Optional[int] = None,
+        edge_dim: int,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -342,16 +308,8 @@ class GraphTransformerProcessor(BaseProcessor):
             Number of heads in transformer
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
-        trainable_size : int
-            Size of trainable tensor
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
-        sub_graph : HeteroData
-            Graph for sub graph in GNN
-        sub_graph_edge_attributes : list[str]
-            Sub graph edge attributes
+        edge_dim : int
+            Edge feature dimension
         qk_norm: bool, optional
             Normalize query and key, by default False
         cpu_offload : bool, optional
@@ -370,19 +328,6 @@ class GraphTransformerProcessor(BaseProcessor):
             layer_kernels=layer_kernels,
         )
 
-        # Create graph provider using factory if not provided
-        if graph_provider is None:
-            graph_provider = create_graph_provider(
-                sub_graph=sub_graph,
-                sub_graph_edge_attributes=sub_graph_edge_attributes,
-                src_grid_size=src_grid_size,
-                dst_grid_size=dst_grid_size,
-                trainable_size=trainable_size,
-                edge_dim=edge_dim,
-            )
-
-        self.graph_provider = graph_provider
-
         self.build_layers(
             GraphTransformerProcessorChunk,
             num_channels=num_channels,
@@ -391,7 +336,7 @@ class GraphTransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             qk_norm=qk_norm,
-            edge_dim=self.graph_provider.edge_dim,
+            edge_dim=edge_dim,
         )
 
         self.offload_layers(cpu_offload)
@@ -401,6 +346,7 @@ class GraphTransformerProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         edge_index=None,
         edge_attr=None,
@@ -411,7 +357,7 @@ class GraphTransformerProcessor(BaseProcessor):
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)

@@ -20,7 +20,6 @@ from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
 
@@ -36,7 +35,6 @@ from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph_providers import BaseGraphProvider
-from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -136,20 +134,15 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        trainable_size: int = 0,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        graph_provider: Optional[BaseGraphProvider] = None,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: Optional[int] = None,
-        dst_grid_size: Optional[int] = None,
-        edge_dim: Optional[int] = None,
+        edge_dim: int,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
+        **kwargs,
     ) -> None:
         """Initialize GraphTransformerBaseMapper.
 
@@ -163,26 +156,14 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
-        trainable_size : int, optional
-            Trainable tensor of edge (for static mode), by default 0
         num_chunks : int
             Number of chunks to split into
         num_heads: int
             Number of heads in transformer
         mlp_hidden_ratio: int
             ratio of mlp hidden dimension to embedding dimension
-        graph_provider : BaseGraphProvider, optional
-            Graph provider instance. If None, will be created from other parameters.
-        sub_graph : HeteroData, optional
-            Sub graph of the full structure (for static mode)
-        sub_graph_edge_attributes : list[str], optional
-            Edge attributes to use (for static mode)
-        src_grid_size : int, optional
-            Source grid size (for static mode)
-        dst_grid_size : int, optional
-            Destination grid size (for static mode)
-        edge_dim : int, optional
-            Edge dimension (for dynamic mode)
+        edge_dim : int
+            Edge feature dimension
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
@@ -207,24 +188,12 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         Linear = self.layer_factory.Linear
 
-        if graph_provider is None:
-            graph_provider = create_graph_provider(
-                sub_graph=sub_graph,
-                sub_graph_edge_attributes=sub_graph_edge_attributes,
-                src_grid_size=src_grid_size,
-                dst_grid_size=dst_grid_size,
-                trainable_size=trainable_size,
-                edge_dim=edge_dim,
-            )
-
-        self.graph_provider = graph_provider
-
         self.proc = GraphTransformerMapperBlock(
             in_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
             out_channels=hidden_dim,
             num_heads=num_heads,
-            edge_dim=self.graph_provider.edge_dim,
+            edge_dim=edge_dim,
             qk_norm=qk_norm,
             layer_kernels=self.layer_factory,
             shard_strategy=shard_strategy,
@@ -246,6 +215,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x: PairTensor,
         shard_shapes: tuple[tuple[int], tuple[int]],
         batch_size: int,
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -260,7 +230,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         # gather/scatter if x_src is sharded, always reduce gradients in bwds
         x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
-        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         # Sort and shard edges for the full graph
         size_full_graph = (sum(shape[0] for shape in shard_shapes[0]), sum(shape[0] for shape in shard_shapes[1]))
@@ -350,6 +320,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -364,6 +335,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             x,
             shard_shapes,
             batch_size,
+            graph_provider,
             model_comm_group,
             x_src_is_sharded,
             x_dst_is_sharded,
@@ -407,6 +379,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -417,7 +390,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     ) -> PairTensor:
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
 
-        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
@@ -452,6 +425,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -465,6 +439,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             "x": x,
             "batch_size": batch_size,
             "shard_shapes": shard_shapes,
+            "graph_provider": graph_provider,
             "model_comm_group": model_comm_group,
             "x_src_is_sharded": x_src_is_sharded,
             "x_dst_is_sharded": x_dst_is_sharded,
@@ -489,18 +464,15 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        trainable_size: int,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
-        src_grid_size: int,
-        dst_grid_size: int,
+        edge_dim: int,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
+        **kwargs,
     ) -> None:
         """Initialize GraphTransformerForwardMapper.
 
@@ -512,22 +484,14 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
-        trainable_size : int
-            Trainable tensor of edge
         num_chunks : int
             Number of chunks to split into
         num_heads: int
             Number of heads in transformer
         mlp_hidden_ratio: int
-            ratio of mlp hidden dimension to embedding dimension, default 4
-        sub_graph : HeteroData
-            Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
-            Edge attributes to use
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
+            ratio of mlp hidden dimension to embedding dimension
+        edge_dim : int
+            Edge feature dimension
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool
@@ -542,16 +506,12 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
             out_channels_dst=None,
-            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
-            src_grid_size=src_grid_size,
-            dst_grid_size=dst_grid_size,
+            edge_dim=edge_dim,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
         )
@@ -579,6 +539,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -589,6 +550,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             x,
             batch_size,
             shard_shapes,
+            graph_provider,
             model_comm_group,
             x_src_is_sharded,
             x_dst_is_sharded,
@@ -608,19 +570,16 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        trainable_size: int,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
-        src_grid_size: int,
-        dst_grid_size: int,
+        edge_dim: int,
         qk_norm: bool = False,
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
+        **kwargs,
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
 
@@ -634,26 +593,18 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Hidden dimension
         out_channels_dst : int
             Output channels of the destination node
-        trainable_size : int
-            Trainable tensor of edge
         num_chunks : int
             Number of chunks to split into
         num_heads: int
             Number of heads in transformer
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
-        sub_graph : HeteroData
-            Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
-            Edge attributes to use
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
-        initialise_data_extractor_zero : bool, default False:
-            Whether to initialise the data extractor to zero
+        edge_dim : int
+            Edge feature dimension
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
+        initialise_data_extractor_zero : bool, default False:
+            Whether to initialise the data extractor to zero
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -667,16 +618,12 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
-            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             qk_norm=qk_norm,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
-            src_grid_size=src_grid_size,
-            dst_grid_size=dst_grid_size,
+            edge_dim=edge_dim,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
         )
@@ -720,17 +667,12 @@ class GNNBaseMapper(BaseMapper, ABC):
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        trainable_size: int = 0,
         num_chunks: int,
         mlp_extra_layers: int,
-        graph_provider: Optional[BaseGraphProvider] = None,
-        sub_graph: Optional[HeteroData] = None,
-        sub_graph_edge_attributes: Optional[list[str]] = None,
-        src_grid_size: Optional[int] = None,
-        dst_grid_size: Optional[int] = None,
-        edge_dim: Optional[int] = None,
+        edge_dim: int,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
+        **kwargs,
     ) -> None:
         """Initialize GNNBaseMapper.
 
@@ -744,24 +686,12 @@ class GNNBaseMapper(BaseMapper, ABC):
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node
-        trainable_size : int, optional
-            Trainable tensor of edge (for static mode), by default 0
         num_chunks : int
             Number of chunks to split into
         mlp_extra_layers : int
             Number of extra layers in MLP
-        graph_provider : BaseGraphProvider, optional
-            Graph provider instance. If None, will be created from other parameters.
-        sub_graph : HeteroData, optional
-            Sub graph of the full structure (for static mode)
-        sub_graph_edge_attributes : list[str], optional
-            Edge attributes to use (for static mode)
-        src_grid_size : int, optional
-            Source grid size (for static mode)
-        dst_grid_size : int, optional
-            Destination grid size (for static mode)
-        edge_dim : int, optional
-            Edge dimension (for dynamic mode)
+        edge_dim : int
+            Edge feature dimension
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict, optional
@@ -778,20 +708,8 @@ class GNNBaseMapper(BaseMapper, ABC):
             layer_kernels=layer_kernels,
         )
 
-        if graph_provider is None:
-            graph_provider = create_graph_provider(
-                sub_graph=sub_graph,
-                sub_graph_edge_attributes=sub_graph_edge_attributes,
-                src_grid_size=src_grid_size,
-                dst_grid_size=dst_grid_size,
-                trainable_size=trainable_size,
-                edge_dim=edge_dim,
-            )
-
-        self.graph_provider = graph_provider
-
         self.emb_edges = MLP(
-            in_features=self.graph_provider.edge_dim,
+            in_features=edge_dim,
             hidden_dim=hidden_dim,
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
@@ -803,6 +721,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -814,7 +733,7 @@ class GNNBaseMapper(BaseMapper, ABC):
 
         size = (sum(x[0] for x in shard_shapes[0]), sum(x[0] for x in shard_shapes[1]))
 
-        edge_attr, edge_index = self.graph_provider.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size, edge_index, edge_attr)
 
         # Apply sharding and embedding
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -859,15 +778,12 @@ class GNNForwardMapper(GNNBaseMapper):
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
-        src_grid_size: int,
-        dst_grid_size: int,
+        edge_dim: int,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        **kwargs,
     ) -> None:
         """Initialize GNNForwardMapper.
 
@@ -881,20 +797,12 @@ class GNNForwardMapper(GNNBaseMapper):
             Hidden dimension
         out_channels_dst : int
             Output channels of the destination node, by default None
-        trainable_size : int
-            Trainable tensor of edge
         num_chunks: int
             Number of chunks to split into
-        mlp_extra_layers : int, optional
-            Number of extra layers in MLP, by default 0
-        sub_graph : HeteroData
-            Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
-            Edge attributes to use
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
+        mlp_extra_layers : int
+            Number of extra layers in MLP
+        edge_dim : int
+            Edge feature dimension
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -906,14 +814,10 @@ class GNNForwardMapper(GNNBaseMapper):
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
             out_channels_dst=out_channels_dst,
-            trainable_size=trainable_size,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
-            src_grid_size=src_grid_size,
-            dst_grid_size=dst_grid_size,
+            edge_dim=edge_dim,
             layer_kernels=layer_kernels,
         )
 
@@ -971,15 +875,12 @@ class GNNBackwardMapper(GNNBaseMapper):
         in_channels_dst: int,
         hidden_dim: int,
         out_channels_dst: Optional[int] = None,
-        trainable_size: int,
         num_chunks: int,
         mlp_extra_layers: int,
-        sub_graph: HeteroData,
-        sub_graph_edge_attributes: list[str],
-        src_grid_size: int,
-        dst_grid_size: int,
+        edge_dim: int,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        **kwargs,
     ) -> None:
         """Initialize GNNBackwardMapper.
 
@@ -993,20 +894,12 @@ class GNNBackwardMapper(GNNBaseMapper):
             Hidden dimension
         out_channels_dst : int
             Output channels of the destination node
-        trainable_size : int
-            Trainable tensor of edge
         num_chunks: int
             Number of chunks to split into
         mlp_extra_layers : int
             Number of extra layers in MLP
-        sub_graph : HeteroData
-            Sub graph of the full structure
-        sub_graph_edge_attributes : list[str]
-            Edge attributes to use
-        src_grid_size : int
-            Source grid size
-        dst_grid_size : int
-            Destination grid size
+        edge_dim : int
+            Edge feature dimension
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -1017,15 +910,11 @@ class GNNBackwardMapper(GNNBaseMapper):
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
             hidden_dim=hidden_dim,
-            trainable_size=trainable_size,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
-            sub_graph=sub_graph,
-            sub_graph_edge_attributes=sub_graph_edge_attributes,
-            src_grid_size=src_grid_size,
-            dst_grid_size=dst_grid_size,
+            edge_dim=edge_dim,
             layer_kernels=layer_kernels,
         )
 
@@ -1070,6 +959,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_shapes: tuple[tuple[int], tuple[int]],
+        graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -1081,6 +971,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             x,
             batch_size,
             shard_shapes,
+            graph_provider,
             model_comm_group,
             x_src_is_sharded,
             x_dst_is_sharded,
