@@ -9,8 +9,8 @@
 
 
 import logging
-from abc.collections import MutableSequence
 from collections.abc import MutableMapping
+from collections.abc import MutableSequence
 from typing import Optional
 
 from torch import Tensor
