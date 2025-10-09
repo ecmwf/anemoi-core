@@ -183,6 +183,8 @@ def test_observations():
     print("Data_handler : ", data_handler)
     sp = build_sample_provider(config_sample_provider["sample_provider"], data_handler=data_handler)
 
+    print(len(sp))
+
     print(sp)
     print("************************")
     for key, value in sp.static.items():

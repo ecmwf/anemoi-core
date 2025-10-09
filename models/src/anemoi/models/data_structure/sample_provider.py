@@ -111,6 +111,9 @@ class SampleProvider(ABC):
     def _dates_block_in_dataset(self):
         return None
 
+    def set_dates_block(self, date_block):
+        self._dates_block = date_block
+
     @abstractmethod
     def _tree(self, prefix=None):
         # for display purposes
@@ -352,9 +355,8 @@ class Container(SampleProvider):
     def _dates_block_in_dataset(self):
         return self.dh.dates_block(self.data_group)
 
-    def finalise(self, add_to_i, multiply_i, date_block):
+    def finalise(self, add_to_i, multiply_i):
         self._dynamic_request = dict(**self._static_request, add_to_i=add_to_i, multiply_i=multiply_i)
-        self._dates_block = date_block
 
     def register_request(self):
         self._promise = self.dh.register_request(**self._dynamic_request)
@@ -510,5 +512,6 @@ def build_sample_provider(cfg: Any, data_handler) -> SampleProvider:
         return True
 
     sp.visit(register_requests)
+    sp.visit(visitor.write_dates_block)
 
     return sp
