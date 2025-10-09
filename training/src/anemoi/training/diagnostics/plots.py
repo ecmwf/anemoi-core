@@ -619,7 +619,11 @@ def plot_flat_sample(
 
 
 def lambert_conformal_from_latlon_points(latlon: np.ndarray):
-    import cartopy.crs as ccrs
+    try:
+        import cartopy.crs as ccrs
+
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
 
     lat_min, lon_min = latlon.min(axis=0)
     lat_max, lon_max = latlon.max(axis=0)
@@ -775,8 +779,12 @@ def plot_flat_recon(
     error_cmap : Colormap
         Colormap for error map
     """
-    import cartopy.crs as ccrs
+    try:
+        import cartopy.crs as ccrs
 
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
+        
     precip_and_related_fields = precip_and_related_fields or []
 
     if vname in precip_and_related_fields:
@@ -883,7 +891,12 @@ def single_plot(
         )
 
         # Add map features
-        import cartopy.feature as cfeature
+        try:
+            import cartopy.feature as cfeature
+
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
+            
 
         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
