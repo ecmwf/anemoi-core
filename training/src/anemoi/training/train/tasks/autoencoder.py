@@ -74,10 +74,8 @@ class GraphAutoEncoder(BaseGraphModule):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        del batch_idx
 
         batch = self.model.pre_processors(batch)  # normalized in-place
 

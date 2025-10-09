@@ -90,7 +90,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -101,7 +101,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = self.get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
 
         return x_data_latent, shard_shapes_data
 
@@ -126,7 +126,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
     def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_target = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_target, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = self.get_shard_shapes(node_attributes_target, 0, grid_shard_shapes, model_comm_group)
             node_attributes_target = shard_tensor(node_attributes_target, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -140,7 +140,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_target = self._get_shard_shapes(x_target_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_target = self.get_shard_shapes(x_target_latent, 0, grid_shard_shapes, model_comm_group)
         return x_target_latent, shard_shapes_target
 
     def forward(
@@ -181,8 +181,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         # Encoder
-        x_data_latent, x_latent = self._run_mapper(
-            self.encoder,
+        x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -200,8 +199,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         )
 
         # Decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (x_latent, x_target_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_target),
@@ -411,8 +409,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group)
 
         # Run encoder
-        x_data_latent, curr_latent = self._run_mapper(
-            self.encoder,
+        x_data_latent, curr_latent = self.encoder(
             (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]),
@@ -439,8 +436,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 )
 
             # Encode to next hidden level
-            x_encoded_latents[src_hidden_name], curr_latent = self._run_mapper(
-                self.downscale[src_hidden_name],
+            x_encoded_latents[src_hidden_name], curr_latent = self.downscale[src_hidden_name](
                 (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -456,8 +452,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
             # Decode to next level
-            curr_latent = self._run_mapper(
-                self.upscale[src_hidden_name],
+            curr_latent = self.upscale[src_hidden_name](
                 (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -484,8 +479,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         )
 
         # Run decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (curr_latent, x_target_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_target),
