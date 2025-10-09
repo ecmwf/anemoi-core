@@ -109,6 +109,7 @@ class SampleProvider(ABC):
         visitor(self)
 
     def _dates_block_in_dataset(self):
+        # used by visitor
         return None
 
     def set_dates_block(self, date_block):
@@ -172,9 +173,6 @@ class Forward(SampleProvider):
 
     def __getitem__(self, i):
         return self._forward[i]
-
-    def __len__(self):
-        return len(self._forward)
 
     def _tree(self, prefix=None):
         return self._forward._tree(prefix=prefix)
@@ -437,7 +435,7 @@ class Container(SampleProvider):
 
     @property
     def static(self):
-        self._static = self.dh.get_static(**self._static_request).copy()
+        self._static = self.dh.static(**self._static_request).copy()
         extra = {**self._static.pop("extra", {}), **self.extra}
         if extra:
             self._static["extra"] = extra
