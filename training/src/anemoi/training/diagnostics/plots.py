@@ -618,12 +618,13 @@ def plot_flat_sample(
             )
 
 
-def lambert_conformal_from_latlon_points(latlon: np.ndarray):
+def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
     try:
         import cartopy.crs as ccrs
 
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
+    except ModuleNotFoundError as e:
+        error_msg = "Module cartopy not found. Install with optional-dependencies.plotting."
+        raise ModuleNotFoundError(error_msg) from e
 
     lat_min, lon_min = latlon.min(axis=0)
     lat_max, lon_max = latlon.max(axis=0)
@@ -782,8 +783,9 @@ def plot_flat_recon(
     try:
         import cartopy.crs as ccrs
 
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
+    except ModuleNotFoundError as e:
+        error_msg = "Module cartopy not found. Install with optional-dependencies.plotting."
+        raise ModuleNotFoundError(error_msg) from e
 
     precip_and_related_fields = precip_and_related_fields or []
 
@@ -894,8 +896,9 @@ def single_plot(
         try:
             import cartopy.feature as cfeature
 
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
+        except ModuleNotFoundError as e:
+            error_msg = "Module cartopy not found. Install with optional-dependencies.plotting."
+            raise ModuleNotFoundError(error_msg) from e
 
         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
