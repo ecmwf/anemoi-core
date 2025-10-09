@@ -137,5 +137,5 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 @pytest.mark.slow
 @typechecked
 def test_aicon_training(trained_aicon: tuple) -> None:
-    trainer, initial_sum, final_sum = trained_aicon
+    _, initial_sum, final_sum = trained_aicon
     assert initial_sum != final_sum
