@@ -48,6 +48,7 @@ jobs:
       run: |
         # Install all packages from local
         uv pip install -e ./training[all,tests] -e ./graphs[all,tests] -e ./models[all,tests] pytest pytest-md pytest-emoji
+        uv pip install scripts/get-torch-cluster
 
     - name: Run pytest for training package
       uses: pavelzw/pytest-action@v2
