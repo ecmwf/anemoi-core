@@ -31,7 +31,7 @@ model:
   # Requirements:
   # - In config.data: targets must be listed under `diagnostic`; accumulation inputs under `forcing`.
   # - Use the `zero_overwriter` processor to zero the left boundary (time_index=0) of each accumulation input,
-  mass_conserving_accumulations:
+  mass_conserving_accumulations: # target : constraint
     tp : tp_accum
     cp : cp_accum
 

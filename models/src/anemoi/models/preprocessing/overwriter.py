@@ -9,6 +9,8 @@
 
 
 import logging
+from abc.collections import MutableSequence
+from collections.abc import MutableMapping
 from typing import Optional
 
 from torch import Tensor
@@ -34,25 +36,25 @@ class ZeroOverwriter(BasePreprocessor):
 
         # Accept config.groups as:
         # - list[{"vars": [...], "time_index": [int]}]
-        if not isinstance(groups, list):
+        if not isinstance(groups, MutableSequence):
             LOGGER.warning(
                 "ZeroOverwriter config is not a list; got %r. No variables will be zeroed.", type(groups).__name__
             )
             groups = []
 
         for entry in groups:
-            if not isinstance(entry, dict):
+            if not isinstance(entry, MutableMapping):
                 LOGGER.warning("ZeroOverwriter group must be a dict, got %r; skipping.", type(entry).__name__)
                 continue
 
             vars_list = entry["vars"]
             time_index = entry["time_index"]
 
-            if not isinstance(vars_list, list) or not all(isinstance(v, str) for v in vars_list):
+            if not isinstance(vars_list, MutableSequence) or not all(isinstance(v, str) for v in vars_list):
                 LOGGER.warning("ZeroOverwriter group 'vars' must be a list[str], got %r; skipping.", vars_list)
                 continue
 
-            if not isinstance(time_index, list) or not all(isinstance(t, int) for t in time_index):
+            if not isinstance(time_index, MutableSequence) or not all(isinstance(t, int) for t in time_index):
                 LOGGER.warning("ZeroOverwriter group 'time_index' must be a list[int], got %r; skipping.", time_index)
                 continue
 

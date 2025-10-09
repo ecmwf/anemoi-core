@@ -54,6 +54,8 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"
     )
     ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
+    ANEMOI_MODEL_INTERPOLATOR = "anemoi.models.models.interpolator.AnemoiModelEncProcDecInterpolator"
+    ANEMOI_MODEL_INTERPOLATOR_SHORT = "anemoi.models.models.AnemoiModelEncProcDecInterpolator"
 
 
 class Model(BaseModel):
@@ -261,6 +263,16 @@ class DiffusionModelSchema(BaseModelSchema):
         return self
 
 
+class InterpolatorModelSchema(BaseModelSchema):
+    mass_conserving_accumulations: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Mapping of reduced-timescale outputs to their accumulated input constraints "
+            "(e.g., {'tp': 'tp_accum', 'cp': 'cp_accum'})."
+        ),
+    )
+
+
 class HierarchicalModelSchema(BaseModelSchema):
     enable_hierarchical_level_processing: bool = Field(default=False)
     "Toggle to do message passing at every downscaling and upscaling step"
@@ -268,4 +280,6 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Number of message passing steps at each level"
 
 
-ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema]
+ModelSchema = Union[
+    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, InterpolatorModelSchema
+]
