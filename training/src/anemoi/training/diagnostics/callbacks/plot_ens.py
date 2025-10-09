@@ -25,6 +25,7 @@ from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum as _PlotSpec
 
 if TYPE_CHECKING:
     from typing import Any
+    from typing import Union
 
     import pytorch_lightning as pl
     from omegaconf import DictConfig
@@ -51,18 +52,41 @@ class EnsemblePlotMixin:
         # For ensemble models, batch is a tuple - allgather the full batch first
         batch = pl_module.allgather_batch(batch)
         # Extract ensemble predictions
-        loss, y_preds, ens_ic = output
+        loss, y_preds, _ = output
         y_preds = [pl_module.allgather_batch(pred) for pred in y_preds]
 
         # Return batch[0] (normalized data) and structured output like regular forecaster
         return batch[0] if isinstance(batch, list | tuple) else batch, [loss, y_preds]
 
-    def _extract_first_ensemble_member_from_predictions(self, outputs: list, sample_idx: int) -> list:
-        """Extract first ensemble member from prediction to use callbacks from single."""
+    def _get_ensemble_members_from_predictions(
+        self,
+        outputs: list,
+        sample_idx: int,
+        members: int | list[int] | None = None,
+    ) -> list:
+        """Extract first ensemble member from prediction to use callbacks from single.
+
+        Parameters
+        ----------
+        outputs : list
+            List of outputs from the model
+        sample_idx : int
+            Sample index
+        members : int, list[int], optional
+            Ensemble members to plot. If None, all members are returned. Default to None.
+
+        Returns
+        -------
+        list
+            Processed outputs (loss, ensemble predictions)
+        """
         if len(outputs) > 1 and isinstance(outputs[1], list):
             ensemble_outputs = []
             for pred in outputs[1]:
-                ensemble_outputs.append(pred[sample_idx : sample_idx + 1, 0, ...].cpu())
+                if members is None:
+                    ensemble_outputs.append(pred[sample_idx : sample_idx + 1, members, ...].cpu())
+                else:
+                    ensemble_outputs.append(pred[sample_idx : sample_idx + 1, members, ...].cpu())
             return [outputs[0], ensemble_outputs]
         return outputs
 
@@ -71,6 +95,7 @@ class EnsemblePlotMixin:
         pl_module: pl.LightningModule,
         outputs: list,
         batch: torch.Tensor,
+        members: Union[int, list[int]] = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process ensemble outputs for metrics plotting.
 
@@ -84,6 +109,8 @@ class EnsemblePlotMixin:
             List of outputs from the model
         batch : torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
+        members : int, list[int], optional
+            Ensemble members to plot. If None, all members are returned. Default to 0.
 
         Returns
         -------
@@ -109,7 +136,7 @@ class EnsemblePlotMixin:
         data = self.post_processors(input_tensor)
 
         # Use the mixin method to extract first ensemble member
-        processed_outputs = self._extract_first_ensemble_member_from_predictions(outputs, self.sample_idx)
+        processed_outputs = self._get_ensemble_members_from_predictions(outputs, self.sample_idx, members=members)
 
         output_tensor = self.post_processors(
             torch.cat(tuple(processed_outputs[1])),
@@ -184,28 +211,6 @@ class BaseEnsemblePlotCallback(EnsemblePerBatchPlotMixin):
             )
 
 
-class PlotEnsLoss(_PlotLoss):
-    """Plots the unsqueezed loss over rollouts for ensemble models."""
-
-    def on_validation_batch_end(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        outputs: Any,
-        batch: torch.Tensor,
-        batch_idx: int,
-    ) -> None:
-        if batch_idx % self.every_n_batches == 0 and pl_module.ens_comm_group_rank == 0:
-            self._plot(
-                trainer,
-                pl_module,
-                outputs,
-                batch[0][:, :, 0, :, :],
-                batch_idx=None,
-                epoch=trainer.current_epoch,
-            )
-
-
 class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
     """Plots a post-processed ensemble sample: input, target and prediction."""
 
@@ -249,9 +254,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
         logger = trainer.logger
 
-        # Extract y_preds from structured output [loss, y_preds]
-        loss, y_preds = outputs
-
         # Build dictionary of indices and parameters to be plotted
         diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
         plot_parameters_dict = {
@@ -259,57 +261,53 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             for name in self.config.diagnostics.plot.parameters
         }
 
-        # When running in Async mode, it might happen that in the last epoch these tensors
-        # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
-        # but internal ones would be on the cpu), The lines below allow to address this problem
-        if self.post_processors is None:
-            # Copy to be used across all the training cycle
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+        data, output_tensor = self.process(pl_module, outputs, batch, members=None)
+
         local_rank = pl_module.local_rank
-
-        target_data = pl_module.model.post_processors(
-            batch[
-                self.sample_idx,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ],
-            in_place=False,
-        ).cpu()
-        target_data = pl_module.output_mask.apply(target_data, dim=2, fill_value=np.nan).numpy()
-
-        # Predictions
-        pred = self.post_processors(
-            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].cpu() for x in y_preds)),
-            in_place=False,
-        )
-        pred = pl_module.output_mask.apply(pred, dim=1, fill_value=np.nan).numpy()
-
         for rollout_step in range(pl_module.rollout):
             fig = plot_predicted_ensemble(
-                plot_parameters_dict,
-                4,
-                self.latlons,
-                self.accumulation_levels_plot,
-                target_data[rollout_step + 1, ...].squeeze(),
-                pred[rollout_step, ...],
+                parameters=plot_parameters_dict,
+                n_plots_per_sample=4,
+                latlons=self.latlons,
+                clevels=self.accumulation_levels_plot,
+                y_true=data[rollout_step + 1, ...],
+                y_pred=output_tensor[rollout_step, ...],
                 datashader=self.datashader_plotting,
-                initial_condition=False,
+                precip_and_related_fields=self.precip_and_related_fields,
+                colormaps=self.colormaps,
             )
 
             self._output_figure(
                 logger,
                 fig,
                 epoch=epoch,
-                tag=f"pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
+                tag=f"pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
                 exp_log_tag=f"pred_val_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
             )
 
 
 # Overload callbacks from single forecaster by using them with the first ensemble member
 # ================================
+class PlotLoss(_PlotLoss):
+    """Plots the unsqueezed loss over rollouts for ensemble models."""
+
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: Any,
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
+        super().on_validation_batch_end(
+            trainer,
+            pl_module,
+            outputs,
+            batch[0][:, :, 0, :, :],
+            batch_idx,
+        )
+
+
 class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
     """Plots Spectrum of first ensemble member using regular PlotSpectrum logic."""
 

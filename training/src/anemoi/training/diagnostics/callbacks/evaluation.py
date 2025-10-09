@@ -144,7 +144,6 @@ class RolloutEvalEns(RolloutEval):
             for loss_next, metrics_next, _, _ in pl_module.rollout_step(
                 batch=batch,
                 rollout=self.rollout,
-                training_mode=True,
                 validation_mode=True,
             ):
                 loss += loss_next
