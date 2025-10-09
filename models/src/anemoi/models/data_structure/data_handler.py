@@ -20,112 +20,12 @@ from rich.console import Console
 from rich.tree import Tree as _RichTree
 
 from anemoi.datasets import open_dataset
+from anemoi.models.data_structure.dicts import DynamicDataDict
+from anemoi.models.data_structure.dicts import StaticDataDict
+from anemoi.models.data_structure.dicts import _resolve_omega_conf_reference
 from anemoi.models.data_structure.offsets import _DatesBlock
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _resolve_omega_conf_reference(config):
-    from omegaconf import OmegaConf
-
-    config = OmegaConf.create(config)
-    config = OmegaConf.to_container(config, resolve=True)
-    return config
-
-
-def format_value(k, v, level=0) -> str | _RichTree:
-    # for pretty printing of dicts
-    match v:
-        case np.ndarray():
-            if v.ndim > 1:
-                minimum = np.min(v, axis=tuple(range(1, v.ndim)))
-                maximum = np.max(v, axis=tuple(range(1, v.ndim)))
-                mean = np.nanmean(v, axis=tuple(range(1, v.ndim)))
-                return _RichTree(f"{k} : np.array{v.shape} {mean} [{minimum},{maximum}]")
-            else:
-                minimum = np.min(v)
-                maximum = np.max(v)
-                mean = np.nanmean(v)
-                return _RichTree(f"{k} : np.array{v.shape} {mean} [{minimum},{maximum}]")
-
-    import torch
-
-    match v:
-        case torch.Tensor():
-            shape = ", ".join(str(dim) for dim in v.size())
-            v = v[~torch.isnan(v)].flatten()
-            if v.numel() == 0:
-                minimum = float("nan")
-                maximum = float("nan")
-                mean = float("nan")
-            else:
-                minimum = torch.min(v).item()
-                maximum = torch.max(v).item()
-                mean = torch.mean(v.float()).item()
-            return _RichTree(f"{k} : tensor({shape}) {v.device}, {mean} [{minimum},{maximum}]")
-
-    if level >= 1:
-        return f"{k}: {str(v)}"
-
-    if len(str(v)) < 50:
-        return f"{k}: {str(v)}"
-
-    match v:
-        case dict():
-            tree = _RichTree(f"{k}: dict({len(v)} keys)")
-            for k1, v1 in v.items():
-                tree.add(format_value(k1, v1, level + 1))
-            return tree
-        case list() | tuple() | set():
-            tree = _RichTree(f"{k}: list({len(v)} items)")
-            for i, item in enumerate(v):
-                tree.add(format_value(f"[{i}]", item, level + 1))
-            return tree
-        case _:
-            return f"{k}: {str(v)}"
-
-
-class BaseDict(dict):
-
-    # allow accessing keys as attributes
-    def __getattr__(self, name):
-        if name in self:
-            return self[name]
-        raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
-
-    # allow setting keys as attributes
-    def __setattr__(self, name, value):
-        self[name] = value
-
-    # add copy here to get a copy of the same class
-    def copy(self):
-        return self.__class__(self)
-
-    # pretty print
-    def __repr__(self):
-        console = Console(record=True)
-        tree = self._tree()
-        with console.capture() as capture:
-            console.print(tree, overflow="ellipsis", no_wrap=True)
-        return capture.get()
-
-    # pretty print as a tree using rich
-    def _tree(self, prefix=None):
-        name = prefix if prefix else ""
-        tree = _RichTree(name)
-        sorted_ = {k: self[k] for k in sorted(self.keys())}
-        for k, v in sorted_.items():
-            tree.add(format_value(k, v))
-        return tree
-
-
-# Define classes to allow type checking
-class StaticDataDict(BaseDict):
-    pass
-
-
-class DynamicDataDict(BaseDict):
-    pass
 
 
 class DataHandler(ABC):
@@ -336,8 +236,8 @@ class Promise:
         self._data_handler = data_handler
         self.data_group = data_group
         self.variables = variables
-        self._add_to_i = add_to_i
-        self._multiply_i = multiply_i
+        self.add_to_i = add_to_i
+        self.multiply_i = multiply_i
         try:
             self._ds = open_dataset(data_handler._ds, select=variables)
         except NotImplementedError:
@@ -346,7 +246,7 @@ class Promise:
             self._ds = open_dataset(data_handler._dataset, select=variables)
 
     def __getitem__(self, i):
-        j = i * self._multiply_i + self._add_to_i
+        j = i * self.multiply_i + self.add_to_i
         if j < 0:
             warnings.warn(f"Index {j} is negative, this may lead to unexpected results")
 
