@@ -80,22 +80,13 @@ class BaseGraphProvider(nn.Module, ABC):
     """
 
     @abstractmethod
-    def get_edges(
-        self,
-        batch_size: int,
-        edge_index: Optional[Adj] = None,
-        edge_attr: Optional[Tensor] = None,
-    ) -> tuple[Tensor, Adj]:
+    def get_edges(self, batch_size: Optional[int] = None) -> tuple[Tensor, Adj]:
         """Get edge information.
 
         Parameters
         ----------
         batch_size : int
             Number of times to expand the edge index (static mode only)
-        edge_index : Adj, optional
-            Edge index (required for dynamic providers)
-        edge_attr : Tensor, optional
-            Edge attributes (required for dynamic providers)
 
         Returns
         -------
@@ -189,8 +180,6 @@ class StaticGraphProvider(BaseGraphProvider):
     def get_edges(
         self,
         batch_size: int,
-        edge_index: Optional[Adj] = None,
-        edge_attr: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj]:
         """Get edge attributes and expanded edge index for static graph.
 
@@ -216,8 +205,11 @@ class StaticGraphProvider(BaseGraphProvider):
 class DynamicGraphProvider(BaseGraphProvider):
     """Provider for dynamic graphs where edges are supplied at runtime.
 
-    This provider requires edge indices and attributes to be passed in during
-    forward pass. It does not support trainable edge parameters.
+    Current implementation requires edge indices and attributes to be passed in during
+    forward pass via get_edges(). Does not support trainable edge parameters.
+
+    Future implementation will support on-the-fly graph construction via build_graph()
+    (e.g., k-NN graphs, radius graphs, adaptive connectivity).
     """
 
     def __init__(self, edge_dim: int) -> None:
@@ -236,22 +228,20 @@ class DynamicGraphProvider(BaseGraphProvider):
         """Return the edge dimension."""
         return self._edge_dim
 
-    def get_edges(
-        self,
-        batch_size: int,
-        edge_index: Optional[Adj] = None,
-        edge_attr: Optional[Tensor] = None,
-    ) -> tuple[Tensor, Adj]:
-        """Get dynamic edges from runtime parameters.
+    def build_graph(self, src_nodes: Tensor, dst_nodes: Tensor, **kwargs) -> tuple[Tensor, Adj]:
+        """Build graph dynamically from source and destination nodes.
+
+        This method will be implemented in the future to support on-the-fly
+        graph construction (e.g., k-NN graphs, radius graphs, etc.).
 
         Parameters
         ----------
-        batch_size : int
-            Ignored for dynamic provider
-        edge_index : Adj
-            Edge index (required)
-        edge_attr : Tensor
-            Edge attributes (required)
+        src_nodes : Tensor
+            Source node features/positions
+        dst_nodes : Tensor
+            Destination node features/positions
+        **kwargs
+            Additional parameters for graph construction algorithm
 
         Returns
         -------
@@ -260,9 +250,27 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         Raises
         ------
-        AssertionError
-            If edge_index or edge_attr are not provided
+        NotImplementedError
+            This functionality is not yet implemented
         """
-        assert edge_index is not None, "Dynamic mode requires edge_index parameter"
-        assert edge_attr is not None, "Dynamic mode requires edge_attr parameter"
-        return edge_attr, edge_index
+        raise NotImplementedError("Dynamic graph construction is not yet implemented. ")
+
+    def get_edges(
+        self,
+    ) -> tuple[Tensor, Adj]:
+        """Get dynamic edges.
+
+        This method will be implemented in the future to return edges
+        constructed on-the-fly via build_graph().
+
+        Returns
+        -------
+        tuple[Tensor, Adj]
+            Edge attributes and edge index
+
+        Raises
+        ------
+        NotImplementedError
+            This functionality is not yet implemented
+        """
+        raise NotImplementedError("Dynamic graph edge retrieval is not yet implemented. ")
