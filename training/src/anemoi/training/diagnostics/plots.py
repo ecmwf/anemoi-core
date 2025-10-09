@@ -11,8 +11,6 @@
 import logging
 from dataclasses import dataclass
 
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 import datashader as dsh
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -620,7 +618,9 @@ def plot_flat_sample(
             )
 
 
-def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> ccrs.LambertConformal:
+def lambert_conformal_from_latlon_points(latlon: np.ndarray):
+    import cartopy.crs as ccrs
+
     lat_min, lon_min = latlon.min(axis=0)
     lat_max, lon_max = latlon.max(axis=0)
 
@@ -775,6 +775,8 @@ def plot_flat_recon(
     error_cmap : Colormap
         Colormap for error map
     """
+    import cartopy.crs as ccrs
+
     precip_and_related_fields = precip_and_related_fields or []
 
     if vname in precip_and_related_fields:
@@ -831,7 +833,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
-    transform: ccrs.Projection = None,
+    transform: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -858,8 +860,8 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
-    transform: ccrs.Projection, optional
-        Cartopy projection for the plot, by default None
+    transform:
+        Projection for the plot, by default None
 
     Returns
     -------
@@ -881,6 +883,8 @@ def single_plot(
         )
 
         # Add map features
+        import cartopy.feature as cfeature
+
         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
     else:
