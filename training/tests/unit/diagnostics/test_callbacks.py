@@ -139,6 +139,29 @@ def test_ensemble_plot_mixin_get_ensemble_members():
     assert result[1][0].shape == (1, 10, 5)
 
 
+def test_ensemble_plot_mixin_get_ensemble_members_all():
+    """Test EnsemblePlotMixin._get_ensemble_members_from_predictions with members=None."""
+    mixin = EnsemblePlotMixin()
+
+    # Mock outputs
+    loss = torch.tensor(0.5)
+    pred1 = torch.randn(4, 8, 10, 5)  # batch_size=4, ensemble_size=8
+    pred2 = torch.randn(4, 8, 10, 5)
+    outputs = [loss, [pred1, pred2]]
+
+    sample_idx = 1
+    members = None  # All members
+
+    result = mixin._get_ensemble_members_from_predictions(outputs, sample_idx, members)
+
+    # Check output dimensions - should return all 8 ensemble members
+    assert len(result) == 2
+    assert torch.equal(result[0], loss)
+    assert len(result[1]) == 2
+    assert result[1][0].shape == (1, 8, 10, 5)  # All 8 ensemble members
+    assert result[1][1].shape == (1, 8, 10, 5)
+
+
 def test_ensemble_plot_mixin_process():
     """Test EnsemblePlotMixin.process method."""
     mixin = EnsemblePlotMixin()

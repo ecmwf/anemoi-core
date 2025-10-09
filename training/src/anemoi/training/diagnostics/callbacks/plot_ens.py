@@ -84,7 +84,7 @@ class EnsemblePlotMixin:
             ensemble_outputs = []
             for pred in outputs[1]:
                 if members is None:
-                    ensemble_outputs.append(pred[sample_idx : sample_idx + 1, members, ...].cpu())
+                    ensemble_outputs.append(pred[sample_idx : sample_idx + 1, :, ...].cpu())
                 else:
                     ensemble_outputs.append(pred[sample_idx : sample_idx + 1, members, ...].cpu())
             return [outputs[0], ensemble_outputs]
