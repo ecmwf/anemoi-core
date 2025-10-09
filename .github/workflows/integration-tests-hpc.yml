@@ -33,6 +33,7 @@ jobs:
             env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
+            module load uv
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR
@@ -40,8 +41,8 @@ jobs:
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
-            pip install --upgrade pip
-            pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
+            uv pip install --upgrade pip
+            uv pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
             python3 -m pytest -v training/tests/integration --slow
             deactivate
             rm -rf $REPO_NAME
@@ -65,6 +66,7 @@ jobs:
             env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
+            module load uv
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR
@@ -72,8 +74,8 @@ jobs:
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
-            pip install --upgrade pip
-            pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            uv pip install --upgrade pip
+            uv pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
             git clone https://github.com/cathalobrien/get-flash-attn.git
             ./get-flash-attn/get-flash-attn
             rm -rf ./get-flash-attn
