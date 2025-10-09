@@ -11,13 +11,11 @@
 import logging
 from typing import Optional
 
+import torch
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
-import torch
 from torch import nn
-from torch import cuda
 from torch.utils.checkpoint import checkpoint
-from contextlib import contextmanager
 
 from anemoi.utils.config import DotDict
 
@@ -92,20 +90,21 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
             layer_kernels[name] = kernel_entry
     return layer_kernels
 
+
 class ProfilerWrapper(nn.Module):
     """Wrapper for checkpointing a module."""
 
     def __init__(self, module: nn.Module, marker: str) -> None:
         super().__init__()
         self.module = module
-        self.marker=marker
-        self.enabled=True
+        self.marker = marker
+        self.enabled = True
 
     def forward(self, *args, **kwargs):
-        #print(f"{args=}, {kwargs=}")
-        #tracing_marker=marker.split('- ')[1].split(', input')[0]
-        with torch.autograd.profiler.record_function("anemoi-"+self.marker):
+        # print(f"{args=}, {kwargs=}")
+        # tracing_marker=marker.split('- ')[1].split(', input')[0]
+        with torch.autograd.profiler.record_function("anemoi-" + self.marker):
             out = self.module(*args, **kwargs)
         return out
-    
+
         return grad_output  # Return unchanged gradients
