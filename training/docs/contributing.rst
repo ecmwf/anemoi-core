@@ -246,6 +246,15 @@ available, then from the top-level directory of anemoi-core run:
 
    pytest training/tests/integration --slow
 
+If you want to cache datasets between test runs, add the `--cache` flag.
+
+.. code:: bash
+
+   pytest training/tests/integration --slow --cache
+
+The data is cached in $ANEMOI_TEST_CACHE or will default to
+$home/.anemoi_test_cache.
+
 *********************************************
  Configuration handling in integration tests
 *********************************************
