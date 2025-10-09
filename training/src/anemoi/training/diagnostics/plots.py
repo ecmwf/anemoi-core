@@ -784,7 +784,7 @@ def plot_flat_recon(
 
     except ModuleNotFoundError:
         raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
-        
+
     precip_and_related_fields = precip_and_related_fields or []
 
     if vname in precip_and_related_fields:
@@ -896,7 +896,6 @@ def single_plot(
 
         except ModuleNotFoundError:
             raise ModuleNotFoundError("Module cartopy not found. Install with optional-dependencies.plotting.")
-            
 
         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), zorder=1, alpha=0.8)
         ax.add_feature(cfeature.BORDERS.with_scale("50m"), linestyle=":", zorder=1)
