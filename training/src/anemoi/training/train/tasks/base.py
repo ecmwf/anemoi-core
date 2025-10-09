@@ -135,12 +135,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
+        truncation_data: dict | None = None,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
         metadata: dict,
         supporting_arrays: dict,
-        truncation_data: dict | None = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
