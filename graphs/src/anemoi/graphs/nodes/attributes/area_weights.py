@@ -81,35 +81,6 @@ class UniformWeights(BaseAreaWeights):
         return np.ones(latlons.shape[0])
 
 
-class AreaWeights(BaseNodeAttribute):
-    """Implements the area of the nodes as the weights.
-
-    Attributes
-    ----------
-    flat: bool
-        If True, the area is computed in 2D, otherwise in 3D.
-    **other: Any
-        Additional keyword arguments, see PlanarAreaWeights and SphericalAreaWeights
-        for details.
-
-    Methods
-    -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
-    """
-
-    def __new__(cls, flat: bool = False, **kwargs):
-        logging.warning(
-            "Creating %s with flat=%s and kwargs=%s. In a future release, AreaWeights will be deprecated: please use directly PlanarAreaWeights or SphericalAreaWeights.",
-            cls.__name__,
-            flat,
-            kwargs,
-        )
-        if flat:
-            return PlanarAreaWeights(**kwargs)
-        return SphericalAreaWeights(**kwargs)
-
-
 class PlanarAreaWeights(BaseAreaWeights):
     """Planar area weights
 
