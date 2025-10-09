@@ -368,6 +368,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
     def forward(
         self,
         x: Tensor,
+        *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
         **kwargs,
