@@ -227,7 +227,10 @@ class OffsetManagerVisitor:
 
         # update the dataset dates_block to the overall one
         # and provide the index offset and multiplier factor
-        obj.finalise(add_to_i=add_to_i, multiply_i=multiply_i, date_block=self.dates_block)
+        obj.finalise(add_to_i=add_to_i, multiply_i=multiply_i)
+
+    def write_dates_block(self, obj: "SampleProvider"):
+        obj.set_dates_block(self.dates_block)
 
 
 def find_required_steps_for_rollout(steps: list | int, input: list, target: list, frequency: str = None) -> list[str]:
