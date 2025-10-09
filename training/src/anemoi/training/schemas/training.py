@@ -15,7 +15,6 @@ from typing import Literal
 
 from pydantic import AfterValidator
 from pydantic import Discriminator
-from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -311,7 +310,7 @@ class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
     "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
-    run_id: Union[str, None] = Field(example=None)
+    run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
     fork_run_id: str | None = Field(example=None)
     "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."

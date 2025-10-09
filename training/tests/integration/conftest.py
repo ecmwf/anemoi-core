@@ -227,27 +227,6 @@ def autoencoder_config(
         template = compose(config_name="autoencoder")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    assert isinstance(cfg, DictConfig)
-    return cfg, dataset_urls
-
-
-@pytest.fixture
-def autoencoder_config(
-    testing_modifications_with_temp_dir: OmegaConf,
-    get_tmp_paths: callable,
-) -> tuple[OmegaConf, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_autoencoder"):
-        template = compose(config_name="autoencoder")
-
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.hardware.paths.data = tmp_dir
     use_case_modifications.hardware.files.dataset = rel_paths[0]

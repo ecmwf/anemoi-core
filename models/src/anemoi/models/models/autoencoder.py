@@ -403,7 +403,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             ]
         )
 
-
     def forward(
         self,
         x: Tensor,

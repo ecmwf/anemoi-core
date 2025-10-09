@@ -46,17 +46,7 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_recon
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
-
-if TYPE_CHECKING:
-    from typing import Any
-    from typing import Optional
-
-    import pytorch_lightning as pl
-    from matplotlib.colors import Colormap
-    from omegaconf import OmegaConf
-
-    from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -953,7 +943,7 @@ class PlotSample(BasePerBatchPlotCallback):
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
-        focus_area: Optional[dict] = None,
+        focus_area: dict | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -1102,7 +1092,7 @@ class PlotReconstruction(BasePerBatchPlotCallback):
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 3,
         every_n_batches: int | None = None,
-        focus_area: Optional[dict] = None,
+        focus_area: dict | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
