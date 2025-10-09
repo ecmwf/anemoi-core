@@ -21,8 +21,9 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
+
+from .base import BaseGraphModel
 
 LOGGER = logging.getLogger(__name__)
 

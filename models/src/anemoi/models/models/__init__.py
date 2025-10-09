@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .base import BaseGraphModel
 from .autoencoder import AnemoiModelAutoEncoder
 from .autoencoder import AnemoiModelHierarchicalAutoEncoder
+from .base import BaseGraphModel
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
 from .encoder_processor_decoder import AnemoiModelEncProcDec
