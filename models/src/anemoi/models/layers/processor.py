@@ -251,14 +251,12 @@ class GNNProcessor(BaseProcessor):
         shard_shapes: tuple[tuple[int], tuple[int]],
         graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
-        edge_index=None,
-        edge_attr=None,
         *args,
         **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        edge_attr, edge_index = graph_provider.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size)
 
         target_nodes = sum(x[0] for x in shape_nodes)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -348,8 +346,6 @@ class GraphTransformerProcessor(BaseProcessor):
         shard_shapes: tuple[tuple[int], tuple[int]],
         graph_provider: BaseGraphProvider,
         model_comm_group: Optional[ProcessGroup] = None,
-        edge_index=None,
-        edge_attr=None,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -357,7 +353,7 @@ class GraphTransformerProcessor(BaseProcessor):
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
 
-        edge_attr, edge_index = graph_provider.get_edges(batch_size, edge_index, edge_attr)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
