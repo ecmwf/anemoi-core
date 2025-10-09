@@ -74,6 +74,10 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            git clone https://github.com/cathalobrien/get-flash-attn.git
+            ./get-flash-attn/get-flash-attn
+            rm -rf ./get-flash-attn
+            ./scripts/get-torch-cluster
             srun python -m pytest -v training/tests/integration --slow --multigpu -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME

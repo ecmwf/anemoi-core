@@ -1,0 +1,9 @@
+#!/bin/bash
+# Get the currently installed PyTorch version
+TORCH_VERSION=$(python -c "import torch; print(torch.__version__.split('+')[0])")
+
+# Print the detected version
+echo "Detected PyTorch version: $TORCH_VERSION"
+
+# Install torch-cluster matching the PyTorch version
+pip install torch-cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
