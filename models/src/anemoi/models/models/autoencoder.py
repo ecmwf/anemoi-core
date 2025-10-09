@@ -20,14 +20,12 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
-
-from anemoi.utils.config import DotDict
-
+from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.truncation import BaseTruncation
+from anemoi.utils.config import DotDict
 
 from .base import BaseGraphModel
 
@@ -128,7 +126,9 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
     def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_target = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = get_or_apply_shard_shapes(node_attributes_target, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_target, 0, grid_shard_shapes, model_comm_group
+            )
             node_attributes_target = shard_tensor(node_attributes_target, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -270,7 +270,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
-    
+
     def _calculate_input_dim_latent(self):
         return self.node_attributes.attr_ndims[self._graph_hidden_names[0]]
 
