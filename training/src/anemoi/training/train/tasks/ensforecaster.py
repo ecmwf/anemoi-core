@@ -141,12 +141,14 @@ class GraphEnsForecaster(BaseGraphModule):
         ens_comm_subgroup_rank: int,
         ens_comm_subgroup_num_groups: int,
         ens_comm_subgroup_size: int,
+        ens_comm_subgroup_rank_0: int,
     ) -> None:
         self.ens_comm_subgroup = ens_comm_subgroup
         self.ens_comm_subgroup_id = ens_comm_subgroup_id
         self.ens_comm_subgroup_rank = ens_comm_subgroup_rank
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
+        self.ens_comm_subgroup_rank_0 = ens_comm_subgroup_rank_0
 
     def gather_and_compute_loss(
         self,
@@ -362,6 +364,13 @@ class GraphEnsForecaster(BaseGraphModule):
 
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic
+
+    def _setup_batch_sharding(self, batch: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
+        assert len(batch) == 1, "EDA perturbations not supported in allgather_batch atm."
+
+        torch.distributed.broadcast(batch[0], src=self.ens_comm_subgroup_rank_0, group=self.ens_comm_subgroup)
+
+        return super()._setup_batch_sharding(batch)
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         batch[0] = super().allgather_batch(batch[0])
