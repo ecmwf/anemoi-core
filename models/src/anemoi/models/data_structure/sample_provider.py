@@ -19,9 +19,9 @@ from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree as _RichTree
 
-from anemoi.models.data_structure.data_handler import DynamicDataDict
-from anemoi.models.data_structure.data_handler import StaticDataDict
-from anemoi.models.data_structure.data_handler import _resolve_omega_conf_reference
+from anemoi.models.data_structure.dicts import DynamicDataDict
+from anemoi.models.data_structure.dicts import StaticDataDict
+from anemoi.models.data_structure.dicts import _resolve_omega_conf_reference
 from anemoi.models.data_structure.offsets import OffsetManagerVisitor
 from anemoi.models.data_structure.offsets import find_required_steps_for_rollout
 from anemoi.models.data_structure.offsets import sum_offsets
