@@ -368,7 +368,8 @@ class Promise:
             res.longitudes = self._ds[j].longitudes[self.data_group]
 
         try:
-            res.timedeltas = self._ds[j].timedeltas[self.data_group]
+            timedeltas = self._ds[j].timedeltas[self.data_group]
+            res.timedeltas = timedeltas.astype("timedelta64[s]").astype(np.int64)
         except AttributeError:
             res.timedeltas = None
 
