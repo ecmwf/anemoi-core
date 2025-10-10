@@ -233,10 +233,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.is_first_step = True
         self.multi_step = config.training.multistep_input
         self.lr = (
-            config.hardware.num_nodes
-            * config.hardware.num_gpus_per_node
+            config.system.hardware.num_nodes
+            * config.system.hardware.num_gpus_per_node
             * config.training.lr.rate
-            / config.hardware.num_gpus_per_model
+            / config.system.hardware.num_gpus_per_model
         )
         self.lr_iterations = config.training.lr.iterations
         self.lr_warmup = config.training.lr.warmup
@@ -256,10 +256,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
-        read_group_supports_sharding = reader_group_size == self.config.hardware.num_gpus_per_model
+        read_group_supports_sharding = reader_group_size == self.config.system.hardware.num_gpus_per_model
         assert read_group_supports_sharding or not self.keep_batch_sharded, (
             f"Reader group size {reader_group_size} does not match the number of GPUs per model "
-            f"{self.config.hardware.num_gpus_per_model}, but `model.keep_batch_sharded=True` was set. ",
+            f"{self.config.system.hardware.num_gpus_per_model}, but `model.keep_batch_sharded=True` was set. ",
             "Please set `model.keep_batch_sharded=False` or set `dataloader.read_group_size` ="
             "`hardware.num_gpus_per_model`.",
         )

@@ -43,8 +43,8 @@ def aicon_config_with_tmp_dir() -> Iterator[DictConfig]:
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
     with tempfile.TemporaryDirectory() as output_dir:
-        config.hardware.paths.output = output_dir
-        config.hardware.paths.graph = output_dir
+        config.system.paths.output = output_dir
+        config.system.paths.graph = output_dir
         yield config
 
 

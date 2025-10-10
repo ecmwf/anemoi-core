@@ -502,8 +502,8 @@ finished training. It's also possible to restart the model training from
 a specific checkpoint. This can either be a checkpoint from the same run
 or a checkpoint from a different run that you have run in the past or
 that you using for transfer learning. To do this, set
-``config.hardware.files.warm_start`` to be the checkpoint filename they
-want to restart from and ``config.hardware.paths.warm_start`` to be the
+``config.system.files.warm_start`` to be the checkpoint filename they
+want to restart from and ``config.system.paths.warm_start`` to be the
 path to the checkpoint. See the example below.
 
 .. code:: yaml
@@ -540,7 +540,7 @@ flag to True in the configuration file.
       transfer_learning: True
 
 When this flag is active and a checkpoint path is specified in
-config.hardware.files.warm_start or self.last_checkpoint, the system
+config.system.files.warm_start or self.last_checkpoint, the system
 loads the pre-trained weights using the `transfer_learning_loading`
 function. This approach ensures only compatible weights are loaded and
 mismatched layers are handled appropriately.
