@@ -278,12 +278,16 @@ training:
     default: sfc
     ml: [P, T, U, V]
   training_loss:
-    _target_: anemoi.training.losses.MSELoss
+    _target_: anemoi.training.losses.TorchLoss
+    loss:
+      _target_: torch.nn.MSELoss
     scalers: ['pressure_level', 'general_variable', 'node_weights']
     ignore_nans: False
   validation_metrics:
     raw_mse:
-      _target_: anemoi.training.losses.MSELoss
+      _target_: anemoi.training.losses.TorchLoss
+      loss:
+        _target_: torch.nn.MSELoss
       scalers: []
       ignore_nans: False
 
