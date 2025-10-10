@@ -69,3 +69,41 @@ The module contains the following classes:
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+****************
+ ZeroOverwriter
+****************
+
+Overwrite selected timesteps of specified input variables with zero.
+
+This preprocessor operates on inputs before the model and is
+model-independent. It is useful whenever a variable should be reset to
+zero at certain timesteps within each input window (for example, for
+accumulated or windowed variables).
+
+Example to include in data config (Hydra/YAML) to set var_a and var_b to zero at timesteps 0 and 3, and var_c and var_d to zero at timesteps 0 and 4.
+=====================================================================================================================================================
+
+.. code:: yaml
+
+   processors:
+     zero_overwriter:
+       _target_: anemoi.models.preprocessing.overwriter.ZeroOverwriter
+       config:
+         groups:
+           - vars:
+               - "var_a"
+               - "var_b"
+             time_index: [0, 3]
+           - vars:
+               - "var_c"
+               - "var_d"
+             time_index: [0, 4]
+
+API
+===
+
+.. autoclass:: anemoi.models.preprocessing.overwriter.ZeroOverwriter
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
