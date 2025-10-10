@@ -142,7 +142,6 @@ class AnemoiTrainer:
 
         Creates the graph in all workers.
         """
-        __import__("pdb").set_trace()  # TODO delme
         if self.config.system.files.graph is not None:
             graph_filename = Path(
                 self.config.system.paths.graph,
