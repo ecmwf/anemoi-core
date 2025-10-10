@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import enum
 import logging
 import math
 from typing import Any
@@ -282,6 +283,12 @@ class SDPAAttentionWrapper(nn.Module):
         return out
 
 
+class FlashAttentionBackend(enum.Enum):
+    V2 = "flash_attention_v2"
+    V3 = "flash_attention_v3"
+    V4 = "flash_attention_v4"
+
+
 class FlashAttentionWrapper(nn.Module):
     """Wrapper for Flash attention.
 
@@ -295,7 +302,7 @@ class FlashAttentionWrapper(nn.Module):
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
 
-        flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
+        flash_attn, self.flash_attn_backend = self._import_flash_attn()
         self.deterministic=torch.are_deterministic_algorithms_enabled()
         LOGGER.info(f"attention.py deterministic mode = {self.deterministic}")
 
@@ -307,10 +314,13 @@ class FlashAttentionWrapper(nn.Module):
     def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
         """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
         self.use_rotary_embeddings = False
+        # rotary technically is available in the "base" package of flash_attn. It could be possible to have
+        # both FAv2, FAv3, and FAv4 intalled and only distinguish the available backends for attn_func while
+        # allowing rotary embeddings in all cases with FAv2 installed.
         if use_rotary_embeddings:
-            if flash_attn_version >= version.parse("3"):
-                raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
-            elif flash_attn_version <= version.parse("2.6"):
+            if self.flash_attn_backend in (FlashAttentionBackend.V3, FlashAttentionBackend.V4):
+                raise RuntimeError("Rotary Embeddings not supported with flash attention v3 or v4.")
+            elif self.flash_attn_backend == FlashAttentionBackend.V2 and flash_attn_version <= version.parse("2.6"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
 
             from flash_attn.layers.rotary import RotaryEmbedding
@@ -325,31 +335,61 @@ class FlashAttentionWrapper(nn.Module):
             flash attention module
             use_flash_attention_v3 (bool)
         """
-        use_flash_attn_v3 = False
+        available_backends = {}
+        errors = {}
 
         # to detect which flash-attn interface we're using we try import them
         # Since each import is semantically different we use this to
-        # distringuish flash attention versions
+        # distringuish flash attention versions. Given that one might want to
+        # distinguish, all available backends are logged.
+
         try:
-            # first try import flash attn v2
             import flash_attn
-
-        except ImportError as e_v2:
-
-            # failed importing flash attn v2,
-            # try import flash attn v3
-            try:
-                import flash_attn_interface as flash_attn
-
-            except ImportError as e_v3:
-                # print both errors if both fail
-                raise ImportError(f"Error importing flash-attn v2: {e_v2}\nError importing flash-attn v2: {e_v3}")
-            else:
-                LOGGER.info("Using flash attention v3")
-                use_flash_attn_v3 = True
+        except ImportError as e:
+            errors[FlashAttentionBackend.V2] = e
         else:
-            LOGGER.info("Using flash attention v2")
-        return flash_attn, use_flash_attn_v3
+            available_backends[FlashAttentionBackend.V2] = flash_attn
+
+        try:
+            import flash_attn_interface as flash_attn
+        except ImportError as e:
+            errors[FlashAttentionBackend.V3] = e
+        else:
+            available_backends[FlashAttentionBackend.V3] = flash_attn
+
+        try:
+            # V4 is available as cute-based backend
+            # FWD-performance is good across Ampere, Hopper, and Blackwell GPUs.
+            # BWD-performance is work-in-progress and worse than FAv2 right now.
+            import flash_attn.cute as flash_attn
+        except ImportError as e:
+            errors[FlashAttentionBackend.V4] = e
+        else:
+            available_backends[FlashAttentionBackend.V4] = flash_attn
+
+        if not available_backends:
+            msg = "No flash attention backend available. Errors:\n"
+            for backend, error in errors.items():
+                msg += f"{backend.value}: {error}\n"
+            raise ImportError(msg)
+
+        msg_available = "Available flash attention backends:\n"
+        for backend in available_backends.keys():
+            msg_available += f"- {backend.value}\n"
+        LOGGER.info(msg_available)
+
+        # prefer backends in this order
+        # TODO: maybe expose config-option to choose backend
+        backends_priority = [
+            FlashAttentionBackend.V3,
+            FlashAttentionBackend.V4,
+            FlashAttentionBackend.V2,
+        ]
+
+        for backend in backends_priority:
+            if backend in available_backends:
+                LOGGER.info(f"Using flash attention backend: {backend.value}")
+                return available_backends[backend], backend
 
     def forward(
         self,
@@ -367,9 +407,9 @@ class FlashAttentionWrapper(nn.Module):
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
 
-        if alibi_slopes is not None and self.use_flash_attn_v3:
+        if alibi_slopes is not None and (self.flash_attn_backend != FlashAttentionBackend.V2):
             NotImplementedError(
-                "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
+                "Alibi slopes is currently not supported by flash attention v3 or v4. please switch to flash attention v2 or disable alibi slopes."
             )
 
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
@@ -384,18 +424,19 @@ class FlashAttentionWrapper(nn.Module):
             key = keyvalue[:, :, 0, ...]
             value = keyvalue[:, :, 1, ...]
 
-        if self.use_flash_attn_v3:
+        if self.flash_attn_backend != FlashAttentionBackend.V2:
             out = self.attention(
                 query,
                 key,
                 value,
                 causal=False,
                 window_size=(window_size, window_size) if window_size is not None else (-1, -1),
-                softcap=softcap,
+                softcap=softcap if softcap is not None else 0.0,
                 deterministic=self.deterministic,
             )[
                 0
-            ]  # fav3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
+            ]  # v3/v4 returns '(out, softmax_lse)'. here we drop to 'out'
+
         else:
             out = self.attention(
                 query,
@@ -404,7 +445,7 @@ class FlashAttentionWrapper(nn.Module):
                 causal=False,
                 window_size=(window_size, window_size) if window_size is not None else (-1, -1),
                 dropout_p=dropout_p,
-                softcap=softcap,
+                softcap=softcap if softcap is not None else 0.0,
                 alibi_slopes=alibi_slopes,
                 deterministic=self.deterministic,
             )
@@ -436,7 +477,9 @@ class FlashAttentionV3Wrapper(nn.Module):
         try:
             from flash_attn_interface import flash_attn_func
         except ImportError:
-            raise ImportError("Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3")
+            raise ImportError(
+                "Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3"
+            )
 
         self.attention = flash_attn_func
         self.deterministic=torch.are_deterministic_algorithms_enabled()
