@@ -27,7 +27,7 @@ from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.utils.config import DotDict
 
-from .base import BaseGraphModel
+from anemoi.models.models import BaseGraphModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,7 +52,8 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             truncation_data=truncation_data,
         )
 
-    def _build_networks(self, model_config):
+    def _build_networks(self, model_config: DotDict) -> None:
+        """Builds the model components."""
 
         # Encoder data -> hidden
         self.encoder = instantiate(
@@ -87,10 +88,11 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         self.target_dim = self.num_input_channels_forcings + self.node_attributes.attr_ndims[self._graph_name_data]
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = get_or_apply_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -101,7 +103,9 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = get_or_apply_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
 
         return x_data_latent, shard_shapes_data
 
@@ -120,7 +124,6 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
-
         return x_out
 
     def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
@@ -180,7 +183,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         x_data_latent, shard_shapes_data = self._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
 
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
         # Encoder
         x_data_latent, x_latent = self.encoder(
@@ -192,6 +195,9 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
+
+        print("Model, x_data_lantent: ", x_data_latent[0])
+        print("Model, curr_latent: ", x_latent[0])
 
         # Do not pass x_data_latent to the decoder
         # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
@@ -280,7 +286,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.input_dim,
-            in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[0]],
+            in_channels_dst=self.input_dim_latent,
             hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_hidden_names[0])],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -420,6 +426,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
+
+        print("Model, x_data_lantent: ", x_data_latent[0])
+        print("Model, curr_latent: ", curr_latent[0])
+        exit()
+
 
         x_encoded_latents = {}
 

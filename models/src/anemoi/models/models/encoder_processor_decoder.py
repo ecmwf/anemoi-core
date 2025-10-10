@@ -23,7 +23,7 @@ from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.utils.config import DotDict
 
-from .base import BaseGraphModel
+from anemoi.models.models import BaseGraphModel
 
 LOGGER = logging.getLogger(__name__)
 

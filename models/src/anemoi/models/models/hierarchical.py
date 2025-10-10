@@ -22,7 +22,7 @@ from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.utils.config import DotDict
 
-from .encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
 
