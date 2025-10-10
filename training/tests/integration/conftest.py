@@ -79,6 +79,7 @@ def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestDa
     params=[
         ["model=gnn"],
         ["model=graphtransformer"],
+        ["model=transformer"],
     ],
 )
 def architecture_config(
