@@ -233,6 +233,4 @@ Putting it together:
 
    See training/src/anemoi/training/config/data/zarr_interpolator.yaml
    for a compact reference of the mass-conserving normalization and
-   preprocessing setup, and
-   training/src/anemoi/training/config/dataloader/native_grid_interpolator_v24hr_6hr.yaml
-   for a practical dataloader rename pattern.
+   preprocessing setup
