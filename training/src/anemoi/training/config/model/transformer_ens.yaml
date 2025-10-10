@@ -20,16 +20,20 @@ noise_injector:
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
+    #_target_: anemoi.models.layers.normalization.CompiledLayerNorm
     _target_: torch.nn.LayerNorm
   Linear:
+    #_target_: anemoi.models.layers.normalization.CompiledLinear
     _target_: torch.nn.Linear
   Activation:
     _target_: torch.nn.GELU
   QueryNorm:
-    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    #_target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    _target_: anemoi.models.layers.normalization.CompiledAutocastLayerNorm
     bias: False
   KeyNorm:
-    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+     #_target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    _target_: anemoi.models.layers.normalization.CompiledAutocastLayerNorm
     bias: False
 
 processor:
@@ -125,12 +129,12 @@ attributes:
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
-    #options:
-      #dynamic: false
-      #mode: max-autotune # an example of setting the compilation mode
+    options:
+      dynamic: false
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
     options:
       dynamic: false
+recompile_limit: 32
 
 # Bounding configuration
 bounding: #These are applied in order

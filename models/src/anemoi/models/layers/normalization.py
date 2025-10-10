@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Union
 
+from torch import compile as torch_compile
 from torch import Size
 from torch import Tensor
 from torch import nn
@@ -29,6 +30,29 @@ class AutocastLayerNorm(nn.LayerNorm):
         precision.
         """
         return super().forward(x).type_as(x)
+
+class CompiledAutocastLayerNorm(AutocastLayerNorm):
+    """ Compiled version of the AutoCastLayerNorm """
+
+    def forward(self, x: Tensor) -> Tensor:
+        fn = torch_compile(super().forward) #dynamic=False)
+        return fn(x)
+
+class CompiledLayerNorm(nn.LayerNorm):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x: Tensor) -> Tensor:
+        fn = torch_compile(super().forward) #dynamic=False)
+        return fn(x)
+
+class CompiledLinear(nn.Linear):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x: Tensor) -> Tensor:
+        fn = torch_compile(super().forward) #dynamic=False)
+        return fn(x)
 
 
 class ConditionalLayerNorm(nn.Module):
