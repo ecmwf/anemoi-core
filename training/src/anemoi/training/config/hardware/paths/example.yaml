@@ -1,13 +1,14 @@
 data: ???
 output: ???
+
 truncation: null
 logs:
-  base: ${hardware.paths.output}logs/
-  wandb: ${hardware.paths.logs.base}
-  mlflow: ${hardware.paths.logs.base}mlflow/
-  tensorboard: ${hardware.paths.logs.base}tensorboard/
-checkpoints: ${hardware.paths.output}checkpoint/
-plots: ${hardware.paths.output}plots/
-profiler: ${hardware.paths.output}profiler/
-graph: ${hardware.paths.output}graphs/
+  base: ${system.paths.output}logs/
+  wandb: ${system.paths.logs.base}wandb/
+  mlflow: ${system.paths.logs.base}mlflow/
+  tensorboard: ${system.paths.logs.base}tensorboard/
+checkpoints: ${system.paths.output}checkpoint/
+plots: ${system.paths.output}plots/
+profiler: ${system.paths.output}profiler/
+graph: ${system.paths.output}graphs/
 warm_start: null

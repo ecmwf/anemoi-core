@@ -308,7 +308,7 @@ class BenchmarkProfiler(Profiler):
 
     @rank_zero_only
     def create_output_path(self) -> None:
-        self.dirpath = Path(self.config.hardware.paths.profiler)
+        self.dirpath = Path(self.config.system.paths.profiler)
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def broadcast_profiler_path(self, string_var: str, src_rank: int) -> str:

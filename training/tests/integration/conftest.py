@@ -54,8 +54,8 @@ class GetTmpPaths:
         archive_urls = []
 
         for dataset in list_datasets:
-            url_archive = config.hardware.files[dataset] + ".tgz"
-            name_dataset = Path(config.hardware.files[dataset]).name
+            url_archive = config.system.files[dataset] + ".tgz"
+            name_dataset = Path(config.system.files[dataset]).name
             tmp_path_dataset = self.temporary_directory_for_test_data(url_archive, archive=True)
 
             tmp_paths.append(tmp_path_dataset)

@@ -1,13 +1,13 @@
 defaults:
-- data: zarr
-- dataloader: native_grid
-- datamodule: single
-- diagnostics: evaluation
-- hardware: example
-- graph: limited_area
-- model: graphtransformer
-- training: lam
-- _self_
+  - data: zarr
+  - dataloader: native_grid
+  - datamodule: single
+  - diagnostics: evaluation
+  - system: example
+  - graph: limited_area
+  - model: graphtransformer
+  - training: lam
+  - _self_
 
 config_validation: True
 
@@ -21,9 +21,9 @@ config_validation: True
 dataloader:
   dataset:
     cutout:
-      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      - dataset: ${system.paths.data}/${system.files.dataset}
         thinning: ???
-      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+      - dataset: ${system.paths.data}/${system.files.forcing_dataset}
     adjust: all
     min_distance_km: 0
   grid_indices:
@@ -35,7 +35,7 @@ model:
     _target_: anemoi.training.utils.masks.Boolean1DMask
     nodes_name: ${graph.data}
     attribute_name: cutout_mask
-hardware:
+system:
   files:
     dataset: ???
     forcing_dataset: ???

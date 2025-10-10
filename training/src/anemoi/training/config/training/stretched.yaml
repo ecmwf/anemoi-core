@@ -49,7 +49,7 @@ model_task: anemoi.training.train.tasks.GraphForecaster
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -67,7 +67,8 @@ training_loss:
   # A selection of available scalers are listed in training/scalers/scalers.yaml
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+  scalers:
+    ["pressure_level", "general_variable", "nan_mask_weights", "node_weights"]
   ignore_nans: False
 
 # Validation metrics calculation,
@@ -84,20 +85,20 @@ validation_metrics:
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: ['node_weights']
+    scalers: ["node_weights"]
     # other kwargs
     ignore_nans: True
   mse_inside_lam_contribution:
     _target_: anemoi.training.losses.MSELoss
-    scalers: ['limited_area_mask', 'node_weights']
+    scalers: ["limited_area_mask", "node_weights"]
     ignore_nans: True
   mse_outside_lam_contribution:
     _target_: anemoi.training.losses.MSELoss
-    scalers: ['outside_lam_mask', 'node_weights']
+    scalers: ["outside_lam_mask", "node_weights"]
     ignore_nans: True
   mse_inside_lam:
     _target_: anemoi.training.losses.MSELoss
-    scalers: ['lam_node_weights']
+    scalers: ["lam_node_weights"]
     ignore_nans: True
 
 # Variable groups definition for scaling
@@ -125,13 +126,13 @@ validation_metrics:
 variable_groups:
   default: sfc
   pl:
-     param: [q, t, u, v, w, z]
+    param: [q, t, u, v, w, z]
 
 metrics:
-- z_500
-- t_850
-- u_850
-- v_850
+  - z_500
+  - t_850
+  - u_850
+  - v_850
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
