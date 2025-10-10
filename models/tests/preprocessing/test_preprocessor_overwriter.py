@@ -79,7 +79,10 @@ def test_zero_overwriter_not_inplace_training(zero_overwriter, training_input_da
     x = training_input_data.clone()
     x_old = x.clone()
     _ = zero_overwriter(x, in_place=False)
-    assert torch.allclose(x, x_old, equal_nan=True)
+    max_diff = torch.nan_to_num(x - x_old).abs().max().item()
+    assert torch.allclose(
+        x, x_old, equal_nan=True
+    ), f"ZeroOverwriter: in_place=False should not modify input; max_abs_diff={max_diff}, shape={tuple(x.shape)}"
 
 
 def test_zero_overwriter_inplace_training(zero_overwriter, training_input_data) -> None:
@@ -87,8 +90,14 @@ def test_zero_overwriter_inplace_training(zero_overwriter, training_input_data) 
     x = training_input_data.clone()
     x_old = x.clone()
     out = zero_overwriter(x, in_place=True)
-    assert not torch.allclose(x, x_old, equal_nan=True)
-    assert torch.allclose(x, out, equal_nan=True)
+    max_diff_changed = torch.nan_to_num(x - x_old).abs().max().item()
+    assert not torch.allclose(
+        x, x_old, equal_nan=True
+    ), f"in_place=True should modify input; tensors are still equal (max_abs_diff={max_diff_changed})"
+    max_diff_out = torch.nan_to_num(x - out).abs().max().item()
+    assert torch.allclose(
+        x, out, equal_nan=True
+    ), f"ZeroOverwriter: Output should alias modified input when in_place=True; max_abs_diff={max_diff_out}, shape={tuple(x.shape)}"
 
 
 def test_zero_overwriter_transform_training(zero_overwriter, training_input_data) -> None:
@@ -102,7 +111,10 @@ def test_zero_overwriter_transform_training(zero_overwriter, training_input_data
     expected[:, [0], ..., idxs] = 0
 
     transformed = zero_overwriter.transform(x, in_place=False)
-    assert torch.allclose(transformed, expected, equal_nan=True)
+    max_diff = torch.nan_to_num(transformed - expected).abs().max().item()
+    assert torch.allclose(
+        transformed, expected, equal_nan=True
+    ), f"ZeroOverwriter: Training transform mismatch; expected zeros at t=0 for ['tp_accum','cp_accum']; max_abs_diff={max_diff}"
 
 
 def test_zero_overwriter_transform_inference(zero_overwriter, inference_input_data) -> None:
@@ -116,4 +128,7 @@ def test_zero_overwriter_transform_inference(zero_overwriter, inference_input_da
     expected[:, [0], ..., idxs] = 0
 
     transformed = zero_overwriter.transform(x, in_place=False)
-    assert torch.allclose(transformed, expected, equal_nan=True)
+    max_diff = torch.nan_to_num(transformed - expected).abs().max().item()
+    assert torch.allclose(
+        transformed, expected, equal_nan=True
+    ), f"ZeroOverwriter: Inference transform mismatch; expected zeros at t=0 for ['tp_accum','cp_accum']; max_abs_diff={max_diff}"
