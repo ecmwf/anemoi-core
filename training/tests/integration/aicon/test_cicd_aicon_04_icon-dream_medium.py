@@ -29,6 +29,7 @@ from typeguard import typechecked
 import anemoi.training
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.utils.testing import GetTestData
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
 os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
@@ -50,19 +51,14 @@ def aicon_config_with_tmp_dir() -> Iterator[DictConfig]:
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig) -> Iterator[DictConfig]:
+def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data: GetTestData) -> Iterator[DictConfig]:
     """Temporarily download the ICON grid specified in the config.
 
     Downloading the grid is required as the AICON grid is currently required as a netCDF file.
     """
-    with tempfile.NamedTemporaryFile(suffix=".nc") as grid_fp:
-        grid_filename = aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename
-        if grid_filename.startswith(("http://", "https://")):
-            import urllib.request
-
-            urllib.request.urlretrieve(grid_filename, grid_fp.name)  # noqa: S310
-            aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = grid_fp.name
-        yield aicon_config_with_tmp_dir
+    grid = get_test_data(aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename)
+    aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = grid
+    return aicon_config_with_tmp_dir
 
 
 @pytest.fixture
