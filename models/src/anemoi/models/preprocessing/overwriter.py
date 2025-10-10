@@ -22,6 +22,23 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ZeroOverwriter(BasePreprocessor):
+    """Overwrite selected timesteps of specified input variables with zero.
+
+    Config
+    -------
+    groups: list[dict]
+        - vars: list[str]
+            Variable names to overwrite with zero.
+        - time_index: list[int]
+            Timesteps (relative to the input window) to set to zero, e.g., [0].
+
+    Notes
+    -----
+    - Operates on inputs; indices are built for both training and inference inputs.
+    - If `groups` is missing or malformed, no variables are overwritten.
+    - See `training/config/data/zarr_interpolator.yaml` for an example configuration.
+    """
+
     def __init__(self, config=None, data_indices: Optional[IndexCollection] = None, statistics: Optional[dict] = None):
         super().__init__(config, data_indices, statistics)
         groups = [] if config is None else config.groups
