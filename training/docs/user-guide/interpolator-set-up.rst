@@ -52,11 +52,13 @@ in ``explicit_times`` are expressed in units of ``data.timestep``: -
        input: [0, 6]
        target: [1, 2, 3, 4, 5]
 
-Examples: - 6h → 1h with 1h data
+Examples:
 
-   -  ``data.frequency: 1h``, ``data.timestep: 1h``
-   -  ``training.explicit_times: input: [0, 6], target: [1, 2, 3, 4,
-      5]``
+-  6h → 1h with 1h data
+
+      -  ``data.frequency: 1h``, ``data.timestep: 1h``
+      -  ``training.explicit_times: input: [0, 6], target: [1, 2, 3, 4,
+         5]``
 
 -  24h → 6h with 6h data
 
