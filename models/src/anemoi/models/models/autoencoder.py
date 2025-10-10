@@ -25,9 +25,8 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.truncation import BaseTruncation
-from anemoi.utils.config import DotDict
-
 from anemoi.models.models import BaseGraphModel
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -423,7 +422,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         print("Model, x_data_lantent: ", x_data_latent[0])
         print("Model, curr_latent: ", curr_latent[0])
         exit()
-
 
         x_encoded_latents = {}
 

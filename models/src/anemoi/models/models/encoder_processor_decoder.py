@@ -21,9 +21,8 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.utils.config import DotDict
-
 from anemoi.models.models import BaseGraphModel
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -182,7 +181,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
-        print("autocast enabled:", torch.is_autocast_enabled(),"dtype:", torch.get_autocast_gpu_dtype())
+        print("autocast enabled:", torch.is_autocast_enabled(), "dtype:", torch.get_autocast_gpu_dtype())
 
         print("x_data_latent std:", float(x_data_latent.std()), "mean:", float(x_data_latent.mean()))
 
