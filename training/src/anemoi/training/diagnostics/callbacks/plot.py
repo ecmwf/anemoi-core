@@ -603,7 +603,7 @@ class LongRolloutPlots(BasePlotCallback):
             for frame_data in data_over_time:
                 ax, scatter_frame = get_scatter_frame(
                     ax,
-                    frame_data[:,idx],
+                    frame_data[:, idx],
                     self.latlons,
                     cmap=cmap,
                     vmin=vmin[idx],
