@@ -176,14 +176,16 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         ensemble_size = x.shape[2]
         in_out_sharded = grid_shard_shapes is not None
 
-        assert not (
-            in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
-        ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         x_data_latent, shard_shapes_data = self._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
 
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+
+        # grid_shard_shapes is a list[int] for the grid-split
+        if grid_shard_shapes is not None:
+            assert sum(grid_shard_shapes) == x.shape[-2], f"Shard split {grid_shard_shapes} != grid {x.shape[-2]}"
 
         # Encoder
         x_data_latent, x_latent = self.encoder(
