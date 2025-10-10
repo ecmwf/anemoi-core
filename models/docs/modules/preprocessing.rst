@@ -81,8 +81,11 @@ model-independent. It is useful whenever a variable should be reset to
 zero at certain timesteps within each input window (for example, for
 accumulated or windowed variables).
 
-Example to include in data config (Hydra/YAML) to set var_a and var_b to zero at timesteps 0 and 3, and var_c and var_d to zero at timesteps 0 and 4.
-=====================================================================================================================================================
+Example
+=======
+
+To include in data config (Hydra/YAML) to set var_a and var_b to zero at
+timesteps 0 and 3, and var_c and var_d to zero at timesteps 0 and 4.
 
 .. code:: yaml
 
