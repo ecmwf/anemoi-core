@@ -117,56 +117,10 @@ def test_ensemble_plot_mixin_handle_batch_and_output():
     assert len(processed_output[1]) == 2
 
 
-def test_ensemble_plot_mixin_get_ensemble_members():
-    """Test EnsemblePlotMixin._get_ensemble_members_from_predictions method."""
-    mixin = EnsemblePlotMixin()
-
-    # Mock outputs
-    loss = torch.tensor(0.5)
-    pred1 = torch.randn(4, 8, 10, 5)  # batch_size=4, ensemble_size=8
-    pred2 = torch.randn(4, 8, 10, 5)
-    outputs = [loss, [pred1, pred2]]
-
-    sample_idx = 1
-    members = 0  # First member only
-
-    result = mixin._get_ensemble_members_from_predictions(outputs, sample_idx, members)
-
-    # Check output dimensions
-    assert len(result) == 2
-    assert torch.equal(result[0], loss)
-    assert len(result[1]) == 2
-    assert result[1][0].shape == (1, 10, 5)
-
-
-def test_ensemble_plot_mixin_get_ensemble_members_all():
-    """Test EnsemblePlotMixin._get_ensemble_members_from_predictions with members=None."""
-    mixin = EnsemblePlotMixin()
-
-    # Mock outputs
-    loss = torch.tensor(0.5)
-    pred1 = torch.randn(4, 8, 10, 5)  # batch_size=4, ensemble_size=8
-    pred2 = torch.randn(4, 8, 10, 5)
-    outputs = [loss, [pred1, pred2]]
-
-    sample_idx = 1
-    members = None  # All members
-
-    result = mixin._get_ensemble_members_from_predictions(outputs, sample_idx, members)
-
-    # Check output dimensions - should return all 8 ensemble members
-    assert len(result) == 2
-    assert torch.equal(result[0], loss)
-    assert len(result[1]) == 2
-    assert result[1][0].shape == (1, 8, 10, 5)  # All 8 ensemble members
-    assert result[1][1].shape == (1, 8, 10, 5)
-
-
 def test_ensemble_plot_mixin_process():
     """Test EnsemblePlotMixin.process method."""
     mixin = EnsemblePlotMixin()
     mixin.sample_idx = 0
-    mixin.post_processors = None
     mixin.latlons = None
 
     # Mock lightning module
@@ -177,31 +131,45 @@ def test_ensemble_plot_mixin_process():
     pl_module.latlons_data = torch.randn(100, 2)
 
     # Create test tensors
-    data_tensor = torch.randn(4, 100, 5)
-    output_tensor = torch.randn(3, 100, 5)
+    # batch: bs, input_steps + forecast_steps, latlon, nvar
+    batch = torch.randn(2, 6, 100, 5)
+    # input_tensor: bs, rollout + 1, latlon, nvar
+    data_tensor = torch.randn(2, 4, 100, 5)
+    # loss: 1, y_preds: bs, latlon, nvar
+    outputs = [torch.tensor(0.5), [torch.randn(2, 100, 5), torch.randn(2, 100, 5), torch.randn(2, 100, 5)]]
 
     # Mock post_processors
     mock_post_processors = MagicMock()
     mock_post_processors.return_value = data_tensor
+    # tensor after post_processors: bs, ensemble, latlon, nvar
+    mock_post_processors.side_effect = [
+        data_tensor,
+        torch.randn(2, 1, 100, 5),
+        torch.randn(2, 1, 100, 5),
+        torch.randn(2, 1, 100, 5),
+    ]
     mock_post_processors.cpu.return_value = mock_post_processors
     pl_module.model.post_processors = mock_post_processors
 
-    # Mock output_mask.apply
-    pl_module.output_mask.apply.return_value = output_tensor
+    # Mock output_mask.apply as identity
+    pl_module.output_mask.apply.side_effect = lambda x, **_kwargs: x
 
-    # Mock batch and outputs
-    batch = torch.randn(2, 6, 100, 5)
-    outputs = [torch.tensor(0.5), [torch.randn(2, 4, 3, 100, 5)]]
+    # Set post_processors on the mixin instance
+    mixin.post_processors = mock_post_processors
 
-    with patch.object(mixin, "_get_ensemble_members_from_predictions") as mock_get_members:
-        mock_get_members.return_value = [torch.tensor(0.5), [torch.randn(3, 100, 5)]]
+    data, result_output_tensor = mixin.process(pl_module, outputs, batch, members=0)
 
-        data, result_output_tensor = mixin.process(pl_module, outputs, batch, members=0)
+    # Check instantiation
+    assert data is not None
+    assert result_output_tensor is not None
 
-        # Check instantiation and output
-        assert data is not None
-        assert result_output_tensor is not None
-        mock_get_members.assert_called_once_with(outputs, 0, members=0)
+    # Check dimensions
+    assert data.shape == (4, 100, 5), f"Expected data shape (4, 100, 5), got {data.shape}"
+    assert result_output_tensor.shape == (
+        3,
+        100,
+        5,
+    ), f"Expected output_tensor shape (3, 100, 5), got {result_output_tensor.shape}"
 
 
 def test_rollout_eval_ens_eval():
