@@ -419,10 +419,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
 
-        print("Model, x_data_lantent: ", x_data_latent[0])
-        print("Model, curr_latent: ", curr_latent[0])
-        exit()
-
         x_encoded_latents = {}
 
         ## Downscale
