@@ -25,6 +25,7 @@ def zero_overwriter():
                 "zero_overwriter": {
                     "groups": [
                         {
+                            # zero accumulative precipitation variables at t=0
                             "vars": ["tp_accum", "cp_accum"],
                             "time_index": [0],
                         }
@@ -32,24 +33,26 @@ def zero_overwriter():
                 },
                 # training data categories
                 "forcing": ["z", "tp_accum", "cp_accum", "q"],
-                "diagnostic": ["other"],
+                "diagnostic": ["tp", "cp"],
             },
         },
     )
-    # Dataset variable order (dataset space)
-    name_to_index = {"z": 0, "tp_accum": 1, "cp_accum": 2, "q": 3, "other": 4}
+    # Dataset variable order (dataset space):
+    name_to_index = {"tp": 0, "cp": 1, "z": 2, "tp_accum": 3, "cp_accum": 4, "q": 5}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
     return ZeroOverwriter(config=config.data.zero_overwriter, data_indices=data_indices, statistics=None)
 
 
 @pytest.fixture()
 def training_input_data():
-    # one sample, two time steps, two grid points, 5 dataset variables (includes diagnostic)
+    # one sample, two time steps, two grid points, 6 dataset variables (tp, cp, z, tp_accum, cp_accum, q)
     base = torch.Tensor(
         [
             [
-                [[1.0, 2.0, 3.0, 4.0, 5.0], [6.0, 7.0, 8.0, 9.0, 10.0]],  # t=0
-                [[11.0, 12.0, 13.0, 14.0, 15.0], [16.0, 17.0, 18.0, 19.0, 20.0]],  # t=1
+                # t=0
+                [[101.0, 102.0, 1.0, 2.0, 3.0, 4.0], [201.0, 202.0, 6.0, 7.0, 8.0, 9.0]],
+                # t=1
+                [[103.0, 104.0, 11.0, 12.0, 13.0, 14.0], [203.0, 204.0, 16.0, 17.0, 18.0, 19.0]],
             ]
         ]
     )
@@ -58,7 +61,8 @@ def training_input_data():
 
 @pytest.fixture()
 def inference_input_data():
-    # one sample, two time steps, two grid points, 4 model input variables (excludes diagnostic)
+    # one sample, two time steps, two grid points, 4 model input variables (excludes diagnostics)
+    # model inputs remain [z, tp_accum, cp_accum, q]
     base = torch.Tensor(
         [
             [
