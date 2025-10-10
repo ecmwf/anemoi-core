@@ -78,6 +78,7 @@ class EnsNativeGridDataset(NativeGridDataset):
         self.ens_members_per_device = ens_members_per_device
         self.num_gpus_per_ens = num_gpus_per_ens
         self.num_gpus_per_model = num_gpus_per_model
+        self.ens_sample_comm_group_rank = 0
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.ens_comm_group_rank = 0
