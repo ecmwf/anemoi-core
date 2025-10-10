@@ -183,12 +183,6 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
-        # grid_shard_shapes is a list[int] for the grid-split
-        if grid_shard_shapes is not None:
-            assert sum(grid_shard_shapes) == x.shape[-2], f"Shard split {grid_shard_shapes} != grid {x.shape[-2]}"
-        
-        print("x_data_latent std:", float(x_data_latent.std()), "mean:", float(x_data_latent.mean()))
-
         # Encoder
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
@@ -199,7 +193,6 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             x_dst_is_sharded=False,
             keep_x_dst_sharded=True,
         )
-        assert torch.isfinite(x_latent).all(), "Non-finite AFTER encoder"
 
         # Do not pass x_data_latent to the decoder
         # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
@@ -401,9 +394,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         ensemble_size = x.shape[2]
         in_out_sharded = grid_shard_shapes is not None
 
-        assert not (
-            in_out_sharded and (grid_shard_shapes is None or model_comm_group is None)
-        ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
+        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # Prepare input
         x_data_latent, shard_shapes_data = self._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)

@@ -77,12 +77,6 @@ class GraphAutoEncoder(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
 
-        batch = self.model.pre_processors(batch)  # normalized in-place
-
-        if self.is_first_step:
-            self.define_delayed_scalers()
-            self.is_first_step = False
-
         x = batch[
             ...,
             self.data_indices.data.input.full,
