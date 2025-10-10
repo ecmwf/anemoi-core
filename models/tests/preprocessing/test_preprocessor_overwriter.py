@@ -31,13 +31,13 @@ def zero_overwriter():
                     ]
                 },
                 # training data categories
-                "forcing": ["tp_accum", "cp_accum", "z", "q"],
+                "forcing": ["z", "tp_accum", "cp_accum", "q"],
                 "diagnostic": ["other"],
             },
         },
     )
     # Dataset variable order (dataset space)
-    name_to_index = {"tp_accum": 0, "cp_accum": 1, "z": 2, "q": 3, "other": 4}
+    name_to_index = {"z": 0, "tp_accum": 1, "cp_accum": 2, "q": 3, "other": 4}
     data_indices = IndexCollection(config=config, name_to_index=name_to_index)
     return ZeroOverwriter(config=config.data.zero_overwriter, data_indices=data_indices, statistics=None)
 
