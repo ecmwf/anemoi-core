@@ -205,6 +205,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
+        members: list | None = None,
         **kwargs: Any,
     ) -> None:
         # Initialize PlotSample first
@@ -220,6 +221,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             every_n_batches,
             **kwargs,
         )
+        self.plot_members = members
 
     @rank_zero_only
     def _plot(
@@ -242,7 +244,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             for name in self.config.diagnostics.plot.parameters
         }
 
-        data, output_tensor = self.process(pl_module, outputs, batch, members=None)
+        data, output_tensor = self.process(pl_module, outputs, batch, members=self.plot_members)
 
         local_rank = pl_module.local_rank
         for rollout_step in range(pl_module.rollout):
