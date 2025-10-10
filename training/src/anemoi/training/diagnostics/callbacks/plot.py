@@ -560,8 +560,8 @@ class LongRolloutPlots(BasePlotCallback):
         output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
         data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
         # update min and max values for each variable for the colorbar
-        vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=1))
-        vmax[:] = np.maximum(vmax, np.nanmax(data_over_time[-1], axis=1))
+        vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=0))
+        vmax[:] = np.maximum(vmax, np.nanmax(data_over_time[-1], axis=0))
         return data_over_time, vmin, vmax
 
     @rank_zero_only
@@ -603,7 +603,7 @@ class LongRolloutPlots(BasePlotCallback):
             for frame_data in data_over_time:
                 ax, scatter_frame = get_scatter_frame(
                     ax,
-                    frame_data[idx],
+                    frame_data[:, idx],
                     self.latlons,
                     cmap=cmap,
                     vmin=vmin[idx],
