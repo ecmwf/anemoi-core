@@ -186,6 +186,8 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         # grid_shard_shapes is a list[int] for the grid-split
         if grid_shard_shapes is not None:
             assert sum(grid_shard_shapes) == x.shape[-2], f"Shard split {grid_shard_shapes} != grid {x.shape[-2]}"
+        
+        print("x_data_latent std:", float(x_data_latent.std()), "mean:", float(x_data_latent.mean()))
 
         # Encoder
         x_data_latent, x_latent = self.encoder(
@@ -193,13 +195,11 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
             model_comm_group=model_comm_group,
-            x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
-            x_dst_is_sharded=False,  # x_latent does not come sharded
-            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            x_src_is_sharded=in_out_sharded,
+            x_dst_is_sharded=False,
+            keep_x_dst_sharded=True,
         )
-
-        print("Model, x_data_lantent: ", x_data_latent[0])
-        print("Model, curr_latent: ", x_latent[0])
+        assert torch.isfinite(x_latent).all(), "Non-finite AFTER encoder"
 
         # Do not pass x_data_latent to the decoder
         # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
