@@ -945,14 +945,14 @@ def plot_predicted_ensemble(
         fig:
             The figure object handle.
     """
-    n_plots_per_sample = 4
     nens = y_pred.shape[0] if len(y_pred.shape) == 3 else 1
 
+    n_plots_per_sample = 4  # target, pred mean, mean error, ens sd
     n_plots_x, n_plots_y = len(parameters), nens + n_plots_per_sample
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
-    fig, ax = plt.subplots(n_plots_x, n_plots_y, figsize=figsize)
+    fig, axs = plt.subplots(n_plots_x, n_plots_y, figsize=figsize)
 
     lat, lon = latlons[:, 0], latlons[:, 1]
     projection = EquirectangularProjection()
@@ -964,7 +964,7 @@ def plot_predicted_ensemble(
     for plot_idx, (variable_idx, variable_name) in enumerate(parameters.items()):
         yp = y_pred[..., variable_idx].squeeze()
         yt = y_true[..., variable_idx].squeeze()
-        axs = ax[plot_idx, :] if n_plots_x > 1 else ax
+        _axs = axs[plot_idx, :] if n_plots_x > 1 else axs
 
         # get the colormap for the variable as defined in config file
         cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
@@ -976,7 +976,7 @@ def plot_predicted_ensemble(
 
         plot_ensemble_sample(
             fig=fig,
-            axs=axs,
+            axs=_axs,
             pc_lon=pc_lon,
             pc_lat=pc_lat,
             truth=yt,
@@ -1112,7 +1112,7 @@ def plot_ensemble_sample(
     )
 
     # ensemble members (difference from mean)
-    plot_index = 3
+    plot_index = 4
     for i_ens in range(nens):
         single_plot(
             fig,

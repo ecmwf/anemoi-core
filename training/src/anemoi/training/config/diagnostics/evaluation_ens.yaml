@@ -61,8 +61,8 @@ profiler: False
 enable_checkpointing: True
 checkpoint:
   every_n_minutes:
-    save_frequency: null # Approximate, as this is checked at the end of training steps
-    num_models_saved: 0 # If set to k, saves the 'last' k model weights in the training.
+    save_frequency: 30 # Approximate, as this is checked at the end of training steps
+    num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
 
   every_n_epochs:
     save_frequency: 1
@@ -78,7 +78,7 @@ log:
     offline: False
     log_model: False
     project: 'Anemoi'
-    entity: 'ecmwf'
+    entity: ???
     # logger options (these probably come with some overhead)
     gradients: False
     parameters: False
@@ -88,18 +88,19 @@ log:
     enabled: False
     offline: False
     authentication: False
-    log_model: False
     tracking_uri: ???
     experiment_name: 'anemoi-debug'
     project_name: 'Anemoi'
-    system: True
+    system: False
     terminal: True
     run_name: null # If set to null, the run name will be the a random UUID
     on_resume_create_child: True
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
     http_max_retries: 35
-  interval: 100
+    max_params_length: 2000
+  interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
+check_val_every_n_epoch: 1
 print_memory_summary: False

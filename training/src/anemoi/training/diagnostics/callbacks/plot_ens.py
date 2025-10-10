@@ -58,38 +58,6 @@ class EnsemblePlotMixin:
         # Return batch[0] (normalized data) and structured output like regular forecaster
         return batch[0] if isinstance(batch, list | tuple) else batch, [loss, y_preds]
 
-    def _get_ensemble_members_from_predictions(
-        self,
-        outputs: list,
-        sample_idx: int,
-        members: int | list[int] | None = None,
-    ) -> list:
-        """Extract first ensemble member from prediction to use callbacks from single.
-
-        Parameters
-        ----------
-        outputs : list
-            List of outputs from the model
-        sample_idx : int
-            Sample index
-        members : int, list[int], optional
-            Ensemble members to plot. If None, all members are returned. Default to None.
-
-        Returns
-        -------
-        list
-            Processed outputs (loss, ensemble predictions)
-        """
-        if len(outputs) > 1 and isinstance(outputs[1], list):
-            ensemble_outputs = []
-            for pred in outputs[1]:
-                if members is None:
-                    ensemble_outputs.append(pred[sample_idx : sample_idx + 1, :, ...].cpu())
-                else:
-                    ensemble_outputs.append(pred[sample_idx : sample_idx + 1, members, ...].cpu())
-            return [outputs[0], ensemble_outputs]
-        return outputs
-
     def process(
         self,
         pl_module: pl.LightningModule,
@@ -120,31 +88,35 @@ class EnsemblePlotMixin:
         # When running in Async mode, it might happen that in the last epoch these tensors
         # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
         # but internal ones would be on the cpu), The lines below allow to address this problem
-        if self.post_processors is None:
-            # Copy to be used across all the training cycle
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors).cpu()
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
 
-        input_tensor = batch[
-            self.sample_idx,
-            pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-            ...,
-            pl_module.data_indices.data.output.full,
-        ].cpu()
-
-        data = self.post_processors(input_tensor)
-
-        # Use the mixin method to extract first ensemble member
-        processed_outputs = self._get_ensemble_members_from_predictions(outputs, self.sample_idx, members=members)
-
-        output_tensor = self.post_processors(
-            torch.cat(tuple(processed_outputs[1])),
-            in_place=False,
+        input_tensor = (
+            batch[
+                :,
+                pl_module.multi_step : pl_module.multi_step + pl_module.rollout + 1,
+                ...,
+                pl_module.data_indices.data.output.full,
+            ]
+            .detach()
+            .cpu()
         )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
+        data = self.post_processors(input_tensor)[self.sample_idx]
+        output_tensor = torch.cat(
+            tuple(
+                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[
+                    self.sample_idx : self.sample_idx + 1,
+                    members,
+                    ...,
+                ]
+                for x in outputs[1]
+            ),
+        )
+
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=-2, fill_value=np.nan).numpy()
+        data = pl_module.output_mask.apply(data, dim=-2, fill_value=np.nan)
         data = data.numpy()
+
         return data, output_tensor
 
 
@@ -169,6 +141,15 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
 
         if batch_idx % self.every_n_batches == 0:
             processed_batch, processed_output = self._handle_ensemble_batch_and_output(pl_module, output, batch)
+
+            # When running in Async mode, it might happen that in the last epoch these tensors
+            # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
+            # but internal ones would be on the cpu), The lines below allow to address this problem
+            self.post_processors = copy.deepcopy(pl_module.model.post_processors)
+            for post_processor in self.post_processors.processors.values():
+                if hasattr(post_processor, "nan_locations"):
+                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
+            self.post_processors = self.post_processors.cpu()
 
             self.plot(
                 trainer,
@@ -270,8 +251,8 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 n_plots_per_sample=4,
                 latlons=self.latlons,
                 clevels=self.accumulation_levels_plot,
-                y_true=data[rollout_step + 1, ...],
-                y_pred=output_tensor[rollout_step, ...],
+                y_true=data[rollout_step + 1, ...].squeeze(),
+                y_pred=output_tensor[rollout_step, ...].squeeze(),
                 datashader=self.datashader_plotting,
                 precip_and_related_fields=self.precip_and_related_fields,
                 colormaps=self.colormaps,
