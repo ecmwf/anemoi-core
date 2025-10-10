@@ -55,7 +55,7 @@ class Logs(PydanticBaseModel):
 
 
 class PathsSchema(BaseModel):
-    input: Path | dict[str, Path] | None = None
+    data: Path | dict[str, Path] | None = None
     "Path to the data directory."
     graph: Path | None = None
     "Path to the graph directory."

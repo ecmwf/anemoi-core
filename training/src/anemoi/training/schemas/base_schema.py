@@ -137,7 +137,6 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
-    __import__("pdb").set_trace()  # TODO delme
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
 
