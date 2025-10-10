@@ -89,7 +89,7 @@ class GraphEnsForecaster(BaseGraphModule):
 
         self.lr = (
             config.system.hardware.num_nodes
-            * confsystem.ig.hardware.num_gpus_per_node
+            * config.system.hardware.num_gpus_per_node
             * config.training.lr.rate
             / config.system.hardware.num_gpus_per_ensemble
         )
