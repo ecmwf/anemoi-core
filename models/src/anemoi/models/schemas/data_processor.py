@@ -15,7 +15,10 @@ from typing import Union
 
 from pydantic import Field
 from pydantic import RootModel
+from pydantic import TypeAdapter
+from pydantic import ValidationError
 from pydantic import field_validator
+from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
@@ -293,6 +296,20 @@ target_to_schema = {
 
 class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
-    "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
+    "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper|overwriter]."
     config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema, ZeroOverwriterSchema]
     "Target schema containing processor methods."
+
+    @model_validator(mode="after")
+    def schema_consistent_with_target(self) -> type["PreprocessorSchema"]:
+        schema_cls = target_to_schema.get(self.target_)
+        if schema_cls is None:
+            error_msg = f"Unknown target: {self.target_}"
+            raise ValidationError(error_msg)
+
+        validated = TypeAdapter(schema_cls).validate_python(self.config)
+        # If it's a RootModel (like ConstantImputerSchema), extract the root dict
+        if hasattr(validated, "root"):
+            self.config = validated.root
+
+        return self
