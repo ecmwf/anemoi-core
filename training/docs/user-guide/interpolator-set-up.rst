@@ -40,6 +40,34 @@ required):
        _target_: anemoi.training.train.tasks.GraphForecaster
      # other training params as per your deterministic setup
 
+Control interpolation windows with ``training.explicit_times``. Indices
+in ``explicit_times`` are expressed in units of ``data.timestep``: -
+**input**: the temporal boundary indices you interpolate between. -
+**target**: the sequence of intermediate temporal indices to predict.
+
+.. code:: yaml
+
+   training:
+     explicit_times:
+       input: [0, 6]
+       target: [1, 2, 3, 4, 5]
+
+Examples: - 6h → 1h with 1h data
+
+   -  ``data.frequency: 1h``, ``data.timestep: 1h``
+   -  ``training.explicit_times: input: [0, 6], target: [1, 2, 3, 4,
+      5]``
+
+-  24h → 6h with 6h data
+
+   -  ``data.frequency: 6h``, ``data.timestep: 6h``
+   -  ``training.explicit_times: input: [0, 4], target: [1, 2, 3]``
+
+-  24h → 6h with 1h data
+
+   -  ``data.frequency: 1h``, ``data.timestep: 6h``
+   -  ``training.explicit_times: input: [0, 4], target: [1, 2, 3]``
+
 ******************************************
  Mass-conserving time interpolation setup
 ******************************************
@@ -47,26 +75,37 @@ required):
 To enforce mass conservation while interpolating in time (e.g., from
 6-hour to 1-hour precipitation):
 
--  **Require datasets**: - Base dataset at the target resolution (e.g.,
-   1h fields). - Aggregated dataset that provides the same variables
-   over a longer window (e.g., 6h or 24h accumulations).
+-  **Required datasets**:
 
--  **Dataloader rename**: - Import accumulated variables (e.g., cp, tp)
-   from the aggregated dataset. - Rename them to non-conflicting inputs
-   (e.g., cp_accum, tp_accum).
+   -  Base dataset at the target resolution (e.g., 1h fields).
+   -  Aggregated dataset that provides the same variables over a longer
+      window (e.g., 6h or 24h accumulations).
 
--  **Data config (model side)**: - Put accumulated inputs (tp_accum,
-   cp_accum) under ``forcing``. - Keep their high-frequency counterparts
-   (tp, cp) under ``diagnostic`` so they are predicted, not used as
-   inputs. - Normalize accumulated inputs with ``std`` only to preserve
-   zeros. - Remap statistics for diagnostic variables to their
-   accumulated counterparts. - Zero the first timestep of each input
-   window for accumulated inputs using ``ZeroOverwriter``. This provides
-   compatibility with anemoi-inference whereby the 0'th timestep index
-   of an accumlated field of forecast state is always zero. Therefore
-   this ZeroOverwriter allows training and inference to have aligned
-   zero values at the left temporal boundary (index 0) of each input
-   window.
+-  **Dataloader rename**:
+
+   -  Import accumulated variables (e.g., cp, tp) from the aggregated
+      dataset. - Rename them to non-conflicting inputs (e.g., cp_accum,
+      tp_accum).
+
+-  **Data config (model side)**:
+
+   -  Put accumulated inputs (tp_accum, cp_accum) under ``forcing``.
+
+   -  Keep their high-frequency counterparts (tp, cp) under
+      ``diagnostic`` so they are predicted, not used as inputs.
+
+   -  Normalize accumulated inputs with ``std`` only to preserve zeros.
+
+   -  Remap statistics for diagnostic variables to their accumulated
+      counterparts.
+
+   -  Zero the first timestep of each input window for accumulated
+      inputs using ``ZeroOverwriter``. This provides compatibility with
+      anemoi-inference whereby the 0'th timestep index of an accumulated
+      field of forecast state is always zero. Therefore this
+      ZeroOverwriter allows training and inference to have aligned zero
+      values at the left temporal boundary (index 0) of each input
+      window.
 
 Example (data config entries):
 
@@ -88,8 +127,8 @@ Example (data config entries):
      normalizer:
        default: "mean-std"
        remap:
-         tp: tp_accum
-         cp: cp_accum
+         tp: "tp_accum"
+         cp: "cp_accum"
        std:
          - "tp_accum"
          - "cp_accum"
@@ -118,10 +157,10 @@ window (e.g., 6h → 1h or 24h → 6h). Rename the accumulated variables to
 distinct names (e.g., tp_accum, cp_accum) so they can be referenced in
 the model configuration.
 
-Note in this scenario, the accumulated variables dataset must have
-accumulations over 24 hours but defined at 6hr intervals.
+This example details a 24hr to 6hr. The accumulated variables dataset
+must have accumulations over 24 hours but defined at 6hr intervals.
+Example (adapt to your paths):
 
-Example (adapt to your paths), example details a 24hr to 6hr
 interpolation:
 
 .. code:: yaml
