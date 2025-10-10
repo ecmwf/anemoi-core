@@ -34,7 +34,7 @@ from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .datamodule import DataModuleSchema
 from .diagnostics import DiagnosticsSchema
-from .hardware import HardwareSchema
+from .system import SystemSchema
 from .training import TrainingSchema
 
 _object_setattr = _model_construction.object_setattr
@@ -53,7 +53,7 @@ class BaseSchema(BaseModel):
     """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
-    hardware: HardwareSchema
+    system: SystemSchema
     """Hardware configuration."""
     graph: BaseGraphSchema
     """Graph configuration."""
@@ -67,20 +67,18 @@ class BaseSchema(BaseModel):
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:
         if not self.dataloader.read_group_size:
-            self.dataloader.read_group_size = self.hardware.num_gpus_per_model
+            self.dataloader.read_group_size = self.system.hardware.num_gpus_per_model
         return self
 
     @model_validator(mode="after")
     def check_log_paths_available_for_loggers(self) -> Self:
         logger = []
-        if self.diagnostics.log.wandb.enabled and (not self.hardware.paths.logs or not self.hardware.paths.logs.wandb):
+        if self.diagnostics.log.wandb.enabled and (not self.system.paths.logs or not self.system.paths.logs.wandb):
             logger.append("wandb")
-        if self.diagnostics.log.mlflow.enabled and (
-            not self.hardware.paths.logs or not self.hardware.paths.logs.mlflow
-        ):
+        if self.diagnostics.log.mlflow.enabled and (not self.system.paths.logs or not self.system.paths.logs.mlflow):
             logger.append("mlflow")
         if self.diagnostics.log.tensorboard.enabled and (
-            not self.hardware.paths.logs or not self.hardware.paths.logs.tensorboard
+            not self.system.paths.logs or not self.system.paths.logs.tensorboard
         ):
             logger.append("tensorboard")
 
@@ -122,7 +120,7 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
-    hardware: Any
+    system: Any
     """Hardware configuration."""
     graph: Any
     """Graph configuration."""
@@ -139,6 +137,7 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
+    __import__("pdb").set_trace()  # TODO delme
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
 

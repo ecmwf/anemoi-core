@@ -55,7 +55,7 @@ class Logs(PydanticBaseModel):
 
 
 class PathsSchema(BaseModel):
-    data: Path | dict[str, Path] | None = None
+    input: Path | dict[str, Path] | None = None
     "Path to the data directory."
     graph: Path | None = None
     "Path to the graph directory."
@@ -89,7 +89,12 @@ class HardwareSchema(BaseModel):
     "Number of GPUs per model."
     num_gpus_per_ensemble: NonNegativeInt = 1
     "Number of GPUs per ensemble."
+
+
+class SystemSchema(BaseModel):
+    hardware: HardwareSchema
+    "Specification of hardware and compute resources available including the number of nodes, GPUs, and accelerator type."
     files: FilesSchema
-    "Files schema."
+    "Definitions of specific input and output artifacts used relative to the directories defined in `paths`."
     paths: PathsSchema
-    "Paths schema."
+    "High-level directory structure describing where data is read from"

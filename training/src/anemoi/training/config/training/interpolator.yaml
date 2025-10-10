@@ -48,8 +48,8 @@ model_task: anemoi.training.train.tasks.GraphInterpolator
 
 # Instead of inferred using multistep and timeincrement, specify time indices explicitly
 explicit_times:
-  input: [0,6]
-  target: [1,2,3,4,5]
+  input: [0, 6]
+  target: [1, 2, 3, 4, 5]
 
 target_forcing: #forcing parameters for the target time to include as input
   data: #of which come from the dataset
@@ -59,7 +59,7 @@ target_forcing: #forcing parameters for the target time to include as input
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -77,7 +77,8 @@ training_loss:
   # A selection of available scalers are listed in training/scalers.
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+  scalers:
+    ["pressure_level", "general_variable", "nan_mask_weights", "node_weights"]
   ignore_nans: False
 
 # Validation metrics calculation,
@@ -123,13 +124,13 @@ validation_metrics:
 variable_groups:
   default: sfc
   pl:
-     param: [q, t, u, v, w, z]
+    param: [q, t, u, v, w, z]
 
 metrics:
-- z_500
-- t_850
-- u_850
-- v_850
+  - z_500
+  - t_850
+  - u_850
+  - v_850
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null

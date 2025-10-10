@@ -42,7 +42,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     resumed = config.training.run_id is not None
     forked = config.training.fork_run_id is not None
 
-    save_dir = config.hardware.paths.logs.mlflow
+    save_dir = config.system.paths.logs.mlflow
 
     offline = config.diagnostics.log.mlflow.offline
     if not offline:
@@ -52,10 +52,10 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         tracking_uri = None
 
     if (resumed or forked) and (offline):  # when resuming or forking offline -
-        # tracking_uri = ${hardware.paths.logs.mlflow}
+        # tracking_uri = ${system.paths.logs.mlflow}
         tracking_uri = str(save_dir)
     # create directory if it does not exist
-    Path(config.hardware.paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
+    Path(config.system.paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
 
     log_hyperparams = True
     if resumed and not config.diagnostics.log.mlflow.on_resume_create_child:
@@ -92,7 +92,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     )
 
     if config.diagnostics.log.mlflow.terminal:
-        logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)
+        logger.log_terminal_output(artifact_save_dir=config.system.paths.plots)
     if config.diagnostics.log.mlflow.system:
         logger.log_system_metrics()
 
@@ -120,7 +120,7 @@ def get_tensorboard_logger(config: DictConfig) -> pl.loggers.TensorBoardLogger |
     from pytorch_lightning.loggers import TensorBoardLogger
 
     return TensorBoardLogger(
-        save_dir=config.hardware.paths.logs.tensorboard,
+        save_dir=config.system.paths.logs.tensorboard,
         log_graph=False,
     )
 
@@ -160,7 +160,7 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
         project=config.diagnostics.log.wandb.project,
         entity=config.diagnostics.log.wandb.entity,
         id=config.training.run_id,
-        save_dir=config.hardware.paths.logs.wandb,
+        save_dir=config.system.paths.logs.wandb,
         offline=config.diagnostics.log.wandb.offline,
         log_model=config.diagnostics.log.wandb.log_model,
         resume=config.training.run_id is not None,

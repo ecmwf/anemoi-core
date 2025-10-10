@@ -2,9 +2,9 @@
 dataloader:
   dataset:
     cutout:
-      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+      - dataset: ${system.paths.data}/${system.files.dataset}
         thinning: 25 # ???-value in stretched config
-      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+      - dataset: ${system.paths.data}/${system.files.forcing_dataset}
   training:
     start: "2017-01-01"
     end: "2017-01-07"
@@ -15,23 +15,6 @@ dataloader:
 # need this modification since some variables set in the default zarr config are not part of the dataset
 data:
   forcing:
-  - "cos_latitude"
-  - "cos_longitude"
-  - "sin_latitude"
-  - "sin_longitude"
-  - "cos_julian_day"
-  - "cos_local_time"
-  - "sin_julian_day"
-  - "sin_local_time"
-  diagnostic:
-  - tp
-  normalizer:
-    default: "mean-std"
-    std:
-    - "tp"
-    min-max:
-    max:
-    none:
     - "cos_latitude"
     - "cos_longitude"
     - "sin_latitude"
@@ -40,8 +23,25 @@ data:
     - "cos_local_time"
     - "sin_julian_day"
     - "sin_local_time"
+  diagnostic:
+    - tp
+  normalizer:
+    default: "mean-std"
+    std:
+      - "tp"
+    min-max:
+    max:
+    none:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
 
-hardware:
+system:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:

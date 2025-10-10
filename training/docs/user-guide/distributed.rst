@@ -40,7 +40,7 @@ shown in the figure below
 
    Model Sharding (source: `Jacobs et al. (2023) <https://arxiv.org/pdf/2309.14509>`_)
 
-To use model sharding, set ``config.hardware.num_gpus_per_model`` to the
+To use model sharding, set ``config.system.hardware.num_gpus_per_model`` to the
 number of GPUs you wish to shard the model across. Set ``config.model.
 keep_batch_sharded=True`` to also keep batches fully sharded throughout
 training, reducing memory usage for large inputs or long rollouts. It is
@@ -57,7 +57,7 @@ For deterministic models, the ``DDPGroupStrategy`` is used:
 
    strategy:
       _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-      num_gpus_per_model: ${hardware.num_gpus_per_model}
+      num_gpus_per_model: ${system.hardware.num_gpus_per_model}
       read_group_size: ${dataloader.read_group_size}
 
 When using model sharding, ``config.dataloader.read_group_size`` allows
@@ -72,10 +72,10 @@ across GPUs:
 
    strategy:
      _target_: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
-     num_gpus_per_model: ${hardware.num_gpus_per_model}
+     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
      read_group_size: ${dataloader.read_group_size}
 
-This requires setting ``config.hardware.num_gpus_per_ensemble`` to the
+This requires setting ``config.system.hardware.num_gpus_per_ensemble`` to the
 number of GPUs you wish to parallelise the ensemble members across and
 ``config.training.ensemble_size_per_device`` to the number of ensemble
 members per GPU.
@@ -85,7 +85,7 @@ members per GPU.
 *********
 
 Suppose the job is running on 2 nodes each with 4 GPUs and that
-``config.hardware.num_gpus_per_model=2`` and
+``config.system.hardware.num_gpus_per_model=2`` and
 ``config.dataloader.batch_size.training=4``. Then each model will be
 sharded across 2 GPUs and the data sharded across ``total number of
 GPUs/num_gpus_per_model=4``. This means the effective batch size is 16.

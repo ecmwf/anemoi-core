@@ -39,6 +39,6 @@ class AnemoiEnsDatasetsDataModule(AnemoiDatasetsDataModule):
             grid_indices=self.grid_indices,
             label=label,
             ens_members_per_device=self.config.training.ensemble_size_per_device,
-            num_gpus_per_ens=self.config.hardware.num_gpus_per_ensemble,
-            num_gpus_per_model=self.config.hardware.num_gpus_per_model,
+            num_gpus_per_ens=self.config.system.hardware.num_gpus_per_ensemble,
+            num_gpus_per_model=self.config.system.hardware.num_gpus_per_model,
         )

@@ -1,13 +1,13 @@
 defaults:
-- data: zarr
-- dataloader: native_grid
-- datamodule: single
-- diagnostics: evaluation
-- hardware: example
-- graph: multi_scale
-- model: graphtransformer
-- training: interpolator
-- _self_
+  - data: zarr
+  - dataloader: native_grid
+  - datamodule: single
+  - diagnostics: evaluation
+  - system: example
+  - graph: multi_scale
+  - model: graphtransformer
+  - training: interpolator
+  - _self_
 
 config_validation: True
 
@@ -18,9 +18,9 @@ data:
   diagnostics: [] # Default behaviour is to interpolate between observed fields, not predict unseen fields
 
 #dataloader:
-  # model_run_info: #Add for non-analysis training
-  #  start: 2020-02-05T12:00:00
-  #  length: 18 #in number of dates (* frequency for actual time)
+# model_run_info: #Add for non-analysis training
+#  start: 2020-02-05T12:00:00
+#  length: 18 #in number of dates (* frequency for actual time)
 
 model:
   model:
@@ -31,8 +31,8 @@ model:
 training:
   # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
-    input: [0,6]
-    target: [1,2,3,4,5]
+    input: [0, 6]
+    target: [1, 2, 3, 4, 5]
 
   target_forcing: #forcing parameters for the target time to include as input
     data: #of which come from the dataset
