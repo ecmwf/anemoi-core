@@ -35,7 +35,6 @@ class ZeroOverwriter(BasePreprocessor):
     Notes
     -----
     - Operates on inputs; indices are built for both training and inference inputs.
-    - If `groups` is missing or malformed, no variables are overwritten.
     - See `training/config/data/zarr_interpolator.yaml` for an example configuration.
     """
 
@@ -53,12 +52,6 @@ class ZeroOverwriter(BasePreprocessor):
 
         # Accept config.groups as:
         # - list[{"vars": [...], "time_index": [int]}]
-        if not isinstance(groups, MutableSequence):
-            LOGGER.warning(
-                "ZeroOverwriter config is not a list; got %r. No variables will be zeroed.", type(groups).__name__
-            )
-            groups = []
-
         for entry in groups:
             if not isinstance(entry, MutableMapping):
                 LOGGER.warning("ZeroOverwriter group must be a dict, got %r; skipping.", type(entry).__name__)
