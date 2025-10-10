@@ -40,13 +40,13 @@ shown in the figure below
 
    Model Sharding (source: `Jacobs et al. (2023) <https://arxiv.org/pdf/2309.14509>`_)
 
-To use model sharding, set ``config.system.hardware.num_gpus_per_model`` to the
-number of GPUs you wish to shard the model across. Set ``config.model.
-keep_batch_sharded=True`` to also keep batches fully sharded throughout
-training, reducing memory usage for large inputs or long rollouts. It is
-recommended to only shard if the model does not fit in GPU memory, as
-data distribution is a much more efficient way to parallelise the
-training.
+To use model sharding, set ``config.system.hardware.num_gpus_per_model``
+to the number of GPUs you wish to shard the model across. Set
+``config.model. keep_batch_sharded=True`` to also keep batches fully
+sharded throughout training, reducing memory usage for large inputs or
+long rollouts. It is recommended to only shard if the model does not fit
+in GPU memory, as data distribution is a much more efficient way to
+parallelise the training.
 
 Anemoi Training provides different sharding strategies depending if the
 model task is deterministic or ensemble based.
@@ -75,10 +75,10 @@ across GPUs:
      num_gpus_per_model: ${system.hardware.num_gpus_per_model}
      read_group_size: ${dataloader.read_group_size}
 
-This requires setting ``config.system.hardware.num_gpus_per_ensemble`` to the
-number of GPUs you wish to parallelise the ensemble members across and
-``config.training.ensemble_size_per_device`` to the number of ensemble
-members per GPU.
+This requires setting ``config.system.hardware.num_gpus_per_ensemble``
+to the number of GPUs you wish to parallelise the ensemble members
+across and ``config.training.ensemble_size_per_device`` to the number of
+ensemble members per GPU.
 
 *********
  Example
