@@ -97,4 +97,4 @@ class SystemSchema(BaseModel):
     files: FilesSchema
     "Definitions of specific input and output artifacts used relative to the directories defined in `paths`."
     paths: PathsSchema
-    "High-level directory structure describing where data is read from"
+    "High-level directory structure describing where data is read from."
