@@ -181,10 +181,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
-        print("autocast enabled:", torch.is_autocast_enabled(), "dtype:", torch.get_autocast_gpu_dtype())
-
-        print("x_data_latent std:", float(x_data_latent.std()), "mean:", float(x_data_latent.mean()))
-
         # Encoder
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
@@ -195,12 +191,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
         )
-
-        assert torch.isfinite(x_latent).all(), "Non-finite AFTER encoder"
-
-        print("Model, x_data_lantent: ", x_data_latent[0])
-        print("Model, curr_latent: ", x_latent[0])
-        exit()
 
         # Processor
         x_latent_proc = self.processor(
