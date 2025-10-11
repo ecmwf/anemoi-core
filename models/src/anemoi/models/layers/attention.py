@@ -142,6 +142,7 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "flash_attention_v3": FlashAttentionV3Wrapper,
+            "flex_attention": FlexAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
         assert (
@@ -468,6 +469,81 @@ class FlashAttentionV3Wrapper(nn.Module):
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
 
+class FlexAttentionWrapper(nn.Module):
+    """Wrapper for Pytorch Flex attention."""
+
+    def __init__(self):
+        super().__init__()
+
+        if version.parse(torch.__version__) < version.parse("2.5.0"):
+            raise RuntimeError("Error: torch version is too low. Update to 2.5.0 or higher to use Flex Attention.")
+
+        self.is_attn_compiled = False
+
+        self.prev_seq_len = 0
+
+    def _not_implemented(self, causal: bool, dropout_p: float, softcap: Optional[float], alibi_slopes: torch.Tensor):
+        msg = ""
+        if causal is not False:
+            msg += "causal"
+        if dropout_p != 0.0:
+            msg += "dropout_p, "
+        if softcap is not None:
+            msg += "softcap, "
+        if alibi_slopes is not None:
+            msg += "alibi slobes, "
+        if len(msg) > 0:
+            msg = "The following features you requested are not yet implemented in the Flex-Attention backend: " + msg
+            raise NotImplementedError(msg)
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap: Optional[float] = None,
+        alibi_slopes: torch.Tensor = None,
+    ):
+
+        softcap = None
+        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
+
+        # recompile if seq len changes
+        if query.shape[2] != self.prev_seq_len:
+            self.is_attn_compiled = False
+            LOGGER.debug("Sequence length has changed - recompiling flex attention")
+
+        if not self.is_attn_compiled:
+            import functools
+
+            from torch.nn.attention.flex_attention import create_block_mask
+            from torch.nn.attention.flex_attention import flex_attention
+
+            if window_size is not None:
+
+                def sliding_window_mask(b, h, q_idx, kv_idx):
+                    return abs(q_idx - kv_idx) <= window_size
+
+                seq_len = query.shape[2]
+                self.block_mask = create_block_mask(
+                    sliding_window_mask, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len, _compile=True
+                )
+                self.attention = functools.partial(flex_attention, block_mask=self.block_mask)  # Cache the block mask
+                self.prev_seq_len = seq_len
+            else:
+                self.attention = flex_attention
+            self.attention = torch.compile(self.attention)
+            self.is_attn_compiled = True
+
+        torch._dynamo.config.optimize_ddp = False
+        out = self.attention(query, key, value)
+        torch._dynamo.config.optimize_ddp = True
+
+        return out
 
 def get_alibi_slopes(num_heads: int) -> Tensor:
     """Calculates linearly decreasing slopes for alibi attention.
