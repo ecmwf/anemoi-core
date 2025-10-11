@@ -78,6 +78,7 @@ class EnsNativeGridDataset(NativeGridDataset):
         self.ens_members_per_device = ens_members_per_device
         self.num_gpus_per_ens = num_gpus_per_ens
         self.num_gpus_per_model = num_gpus_per_model
+        self.ens_sample_comm_group_rank = 0
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.ens_comm_group_rank = 0
@@ -134,6 +135,7 @@ class EnsNativeGridDataset(NativeGridDataset):
         ens_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
+        ens_comm_subgroup_rank: int,
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -157,6 +159,8 @@ class EnsNativeGridDataset(NativeGridDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
+        ens_comm_subgroup_rank : int
+            Ensemble communication subgroup rank
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -170,6 +174,8 @@ class EnsNativeGridDataset(NativeGridDataset):
 
         self.sample_comm_group_id = ens_comm_group_id  # groups that work on the same sample / batch
         self.sample_comm_num_groups = ens_comm_num_groups
+
+        self.ens_sample_comm_group_rank = ens_comm_subgroup_rank # used to only read data once (rank0) per ensemble group
 
         assert self.reader_group_size >= 1, "reader_group_size must be positive"
 
@@ -266,53 +272,81 @@ class EnsNativeGridDataset(NativeGridDataset):
             shuffled_chunk_indices[:10],
         )
 
-        for i in shuffled_chunk_indices:
-            # start and end time indices, for analysis and EDA
-            start = i + self.relative_date_indices[0]
-            end_an = i + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
-            end_eda = i + timeincrement
-
-            if self.eda_flag:
-                _, eda_member_idx = self.sample_eda_members(self.num_eda_members)
-            else:
-                eda_member_idx = None
-
+        fake_dataloading=os.getenv("AIFS_FAKE_DATALOADING", "0") == "1"
+        initial_batch=None
+        # load dummy data on non-rank-0 of the ensemble subgroup (will be broadcasted)
+        if self.ens_sample_comm_group_rank != 0:
+            dates = len(self.relative_date_indices)
+            variables, ens = self.data.shape[1:3]
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x_an = self.data[start:end_an:timeincrement, :, 0:1, grid_shard_indices]
+                grid = (grid_shard_indices.stop - grid_shard_indices.start)
             else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x_an = self.data[start:end_an:timeincrement, :, 0:1, ...]
-                x_an = x_an[..., grid_shard_indices]  # select the grid shard
-            x_an = rearrange(x_an, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+                grid = len(grid_shard_indices)
 
-            x_pert: torch.Tensor | None = None
-            if self.eda_flag:
-                if isinstance(grid_shard_indices, slice):
-                    x_pert = self.data[start : end_eda : self.timeincrement, ..., grid_shard_indices]
+            shape = [dates, ens, grid, variables] # correct shape for easy broadcasting
+
+            for _ in range(len(shuffled_chunk_indices)):
+                yield (torch.empty(shape),)
+
+            return
+
+        for i in shuffled_chunk_indices:
+            if not fake_dataloading or (fake_dataloading and initial_batch is None):
+                # start and end time indices, for analysis and EDA
+                start = i + self.relative_date_indices[0]
+                end_an = i + self.relative_date_indices[-1] + 1
+                timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+                # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
+                # data[start...] will be replaced with data[self.relative_date_indices + i]
+                end_eda = i + timeincrement
+
+                if self.eda_flag:
+                    _, eda_member_idx = self.sample_eda_members(self.num_eda_members)
                 else:
-                    x_pert = self.data[start : end_eda : self.timeincrement, ...]
-                    x_pert = x_pert[..., grid_shard_indices]  # select the grid shard
-                x_pert = rearrange(
-                    x_pert[:, :, eda_member_idx, ...],
-                    "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
-                )
+                    eda_member_idx = None
 
-            if x_pert is not None:
-                sample = (
-                    torch.from_numpy(x_an),
-                    torch.from_numpy(x_pert),
-                )
+                grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+                if isinstance(grid_shard_indices, slice):
+                    # Load only shards into CPU memory
+                    x_an = self.data[start:end_an:timeincrement, :, 0:1, grid_shard_indices]
+                else:
+                    # Load full grid in CPU memory, select grid_shard after
+                    # Note that anemoi-datasets currently doesn't support slicing + indexing
+                    # in the same operation.
+                    x_an = self.data[start:end_an:timeincrement, :, 0:1, ...]
+                    x_an = x_an[..., grid_shard_indices]  # select the grid shard
+                x_an = rearrange(x_an, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+
+                x_pert: torch.Tensor | None = None
+                if self.eda_flag:
+                    if isinstance(grid_shard_indices, slice):
+                        x_pert = self.data[start : end_eda : self.timeincrement, ..., grid_shard_indices]
+                    else:
+                        x_pert = self.data[start : end_eda : self.timeincrement, ...]
+                        x_pert = x_pert[..., grid_shard_indices]  # select the grid shard
+                    x_pert = rearrange(
+                        x_pert[:, :, eda_member_idx, ...],
+                        "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
+                    )
+
+                if x_pert is not None:
+                    sample = (
+                        torch.from_numpy(x_an),
+                        torch.from_numpy(x_pert),
+                    )
+                else:
+                    sample = (torch.from_numpy(x_an),)
+
+                if fake_dataloading:
+                    initial_batch = sample
+                    
+                yield sample
+            elif (fake_dataloading and initial_batch is not None):
+                LOGGER.debug("Faking the dataloading")
+                yield initial_batch
             else:
-                sample = (torch.from_numpy(x_an),)
-
-            yield sample
+                raise ValueError("Unknown dataloading path")
 
     def __repr__(self) -> str:
         return (

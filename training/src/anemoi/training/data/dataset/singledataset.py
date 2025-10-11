@@ -22,7 +22,6 @@ from torch.utils.data import IterableDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
-import os
 
 LOGGER = logging.getLogger(__name__)
 
@@ -206,11 +205,11 @@ class NativeGridDataset(IterableDataset):
         shard_start = self.sample_comm_group_id * shard_size
         shard_end = (self.sample_comm_group_id + 1) * shard_size
 
-        if (os.getenv("DONT_SPLIT_DDP", "0") == "1"):
+        if os.getenv("DONT_SPLIT_DDP", "0") == "1":
             LOGGER.info("Not spliting dataset across model instances")
-            shard_size = len(self.valid_date_indices) 
+            shard_size = len(self.valid_date_indices)
             shard_start = 0
-            shard_end = shard_size 
+            shard_end = shard_size
 
         shard_len = shard_end - shard_start
         self.n_samples_per_worker = shard_len // n_workers
@@ -285,28 +284,41 @@ class NativeGridDataset(IterableDataset):
             shuffled_chunk_indices[:10],
         )
 
+        fake_dataloading = os.getenv("AIFS_FAKE_DATALOADING", "0") == "1"
+        initial_batch = None
+
         for i in shuffled_chunk_indices:
-            start = i + self.relative_date_indices[0]
-            end = i + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
+            if not fake_dataloading or (fake_dataloading and initial_batch is None):
+                start = i + self.relative_date_indices[0]
+                end = i + self.relative_date_indices[-1] + 1
+                timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+                # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
+                # data[start...] will be replaced with data[self.relative_date_indices + i]
 
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+                grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+                if isinstance(grid_shard_indices, slice):
+                    # Load only shards into CPU memory
+                    x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
 
+                else:
+                    # Load full grid in CPU memory, select grid_shard after
+                    # Note that anemoi-datasets currently doesn't support slicing + indexing
+                    # in the same operation.
+                    x = self.data[start:end:timeincrement, :, :, :]
+                    x = x[..., grid_shard_indices]  # select the grid shard
+                x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+                self.ensemble_dim = 1
+
+                sample = torch.from_numpy(x)
+                if fake_dataloading:
+                    initial_batch = sample
+
+                yield sample
+            elif fake_dataloading and initial_batch is not None:
+                LOGGER.debug("Faking the dataloading")
+                yield initial_batch
             else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-            self.ensemble_dim = 1
-
-            yield torch.from_numpy(x)
+                raise ValueError("Unknown dataloading path")
 
     def __repr__(self) -> str:
         return f"""
