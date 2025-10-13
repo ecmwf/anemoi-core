@@ -491,6 +491,29 @@ class AnemoiTrainer:
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
+    def _setup_precision(self) -> tuple[list, dict]:
+        """Set up precision plugin and settings for the Trainer.
+
+        Returns
+        -------
+        tuple[list, dict]
+            A tuple of (plugins_list, precision_settings_dict)
+        """
+        plugins = []
+        precision_settings = {}
+
+        if self.config.training.precision == "bf16-fp32-opt":
+            from anemoi.training.precision import BF16FP32OptPrecision
+
+            precision_plugin = BF16FP32OptPrecision()
+            plugins.append(precision_plugin)
+            # Don't pass precision argument when using custom plugin
+            # (Lightning will error if both plugin and precision are provided)
+        else:
+            precision_settings = {"precision": self.config.training.precision}
+
+        return plugins, precision_settings
+
     def train(self) -> None:
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
@@ -505,6 +528,7 @@ class AnemoiTrainer:
             seed = int(os.environ["ANEMOI_BASE_SEED"])
             torch.manual_seed(seed)
             np.random.seed(seed)
+        plugins, precision_settings = self._setup_precision()
 
         trainer = pl.Trainer(
             accelerator=self.accelerator,
@@ -514,7 +538,8 @@ class AnemoiTrainer:
             strategy=self.strategy,
             devices=self.config.hardware.num_gpus_per_node,
             num_nodes=self.config.hardware.num_nodes,
-            precision=self.config.training.precision,
+            **precision_settings,
+            plugins=plugins,
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
             logger=self.loggers,
@@ -540,7 +565,11 @@ class AnemoiTrainer:
             torch._dynamo.config.accumulated_cache_size_limit= max(8 * int(self.config.model.recompile_limit), 256)
             LOGGER.info(f"Recompile limit set to {torch._dynamo.config.cache_size_limit}.")
             #torch._dynamo.config.fail_on_cache_limit_hit=True
-        LOGGER.debug("Starting training..")
+
+        LOGGER.info("Active Strategy: %s", trainer.strategy.__class__.__name__)
+        LOGGER.info("Active precision plugin: %s", trainer.strategy.precision_plugin.__class__.__name__)
+
+        LOGGER.info("Starting training..")
 
         trainer.fit(
             self.model,
@@ -551,7 +580,7 @@ class AnemoiTrainer:
         if self.config.diagnostics.print_memory_summary and rank_zero_only.rank == 0:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
 
-        LOGGER.debug("---- DONE. ----")
+        LOGGER.info("---- DONE. ----")
 
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
