@@ -919,7 +919,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             self.loss = copy.deepcopy(pl_module.loss)
 
             if hasattr(self.loss.scaler, "nan_mask_weights"):
-                self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
+                # self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
+                pass
 
             super().on_validation_batch_end(
                 trainer,
