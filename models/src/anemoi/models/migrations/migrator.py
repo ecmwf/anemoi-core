@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib
+import importlib.util
 import logging
 import sys
 from collections.abc import Callable
@@ -25,6 +26,7 @@ from inspect import getsource
 from os import PathLike
 from pathlib import Path
 from pickle import Unpickler
+from types import ModuleType
 from typing import Any
 from typing import TypedDict
 
@@ -208,14 +210,23 @@ def _get_code_digest(content: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def _migrations_from_path(location: str | PathLike, package: str) -> list[Migration]:
+def _import_file(location: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(location.stem, location)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"{location} does not point to a valid path.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _migrations_from_path(location: str | PathLike, package: str | None) -> list[Migration]:
     """Returns the migrations from a given folder
 
     Parameters
     ----------
     location : str | PathLike
         Path to the migration folder
-    package : str
+    package : str | None
         Reference package for the import of the migrations
 
     Returns
@@ -229,7 +240,10 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
         if not file.is_file() and file.suffix != ".py" or file.name == "__init__.py":
             continue
         LOGGER.debug("Loading migration .%s from %s", file.stem, package)
-        migration = importlib.import_module(f".{file.stem}", package)
+        if package is not None:
+            migration = importlib.import_module(f".{file.stem}", package)
+        else:
+            migration = _import_file(file)
 
         args: dict[str, Any] = dict(
             name=file.stem, metadata=migration.metadata, signature=_get_code_digest(getsource(migration))
@@ -352,15 +366,15 @@ class Migrator:
         self._grouped_migrations.append(current_group)
 
     @classmethod
-    def from_path(cls, location: str | PathLike, package: str) -> Migrator:
+    def from_path(cls, location: str | PathLike, package: str | None = None) -> Migrator:
         """Load from a given folder
 
         Parameters
         ----------
         location : str | PathLike
             Path to the migration folder
-        package : str
-            Reference package for the import of the migrations
+        package : str | None, optional
+            Reference package for the import of the migrations. Defaults to None.
 
         Returns
         -------

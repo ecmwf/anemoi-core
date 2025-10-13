@@ -202,6 +202,12 @@ class Migration(Command):
             default=False,
             help="Set this if you do not plan to support rollbacking.",
         )
+        create_parser.add_argument(
+            "--path",
+            type=Path,
+            default=None,
+            help="If set, overrides the normal path to the migration scripts.",
+        )
 
         help_sync = "Apply migrations to a checkpoint."
         sync_parser = subparsers.add_parser("sync", help=help_sync, description=help_sync)
@@ -215,6 +221,12 @@ class Migration(Command):
         sync_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
         sync_parser.add_argument(
             "--log-level", default="NOTSET", choices=logging.getLevelNamesMapping(), help="Log level"
+        )
+        sync_parser.add_argument(
+            "--path",
+            type=Path,
+            default=None,
+            help="If set, overrides the normal path to the migration scripts.",
         )
 
         help_inspect = "Inspect migrations in a checkpoint."
@@ -265,7 +277,11 @@ class Migration(Command):
         imports.append("from anemoi.models.migrations import MigrationMetadata")
         template = Environment(trim_blocks=True, lstrip_blocks=True).from_string(migration_template_str)
 
-        with open(MIGRATION_PATH / name, "w") as f:
+        migration_path = MIGRATION_PATH
+        if args.path is not None and args.path.is_dir():
+            migration_path = args.path
+
+        with open(migration_path / name, "w") as f:
             f.write(
                 template.render(
                     {
@@ -278,7 +294,7 @@ class Migration(Command):
                 )
             )
 
-        print(f"Created migration {MIGRATION_PATH}/{name}")
+        print(f"Created migration {migration_path}/{name}")
 
     def run_sync(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
@@ -293,7 +309,10 @@ class Migration(Command):
         migrator_logger.setLevel(args.log_level)
 
         console = Console(force_terminal=not args.no_color, highlight=False)
-        migrator = Migrator()
+        if args.path is not None and args.path.is_dir():
+            migrator = Migrator.from_path(args.path)
+        else:
+            migrator = Migrator()
         ckpt_path = Path(args.ckpt)
         try:
             old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path)
