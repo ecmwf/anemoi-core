@@ -351,7 +351,7 @@ class Container(SampleProvider):
         self.container = container
         self.variables = container["variables"]
         self.data_group = container["data_group"]
-        self.extra = container.get("extra", {})
+        self.extra_configs = container.get("extra_configs", {})
         self.dh = _context["data_handler"]
         self._offset = _context.get("offset", "0h")
 
@@ -374,9 +374,9 @@ class Container(SampleProvider):
     @property
     def static(self):
         self._static = self.dh.static(data_group=self.data_group, variables=self.variables).copy()
-        extra = {**self._static.pop("extra", {}), **self.extra}
-        if extra:
-            self._static["extra"] = extra
+        extra_configs = {**self._static.pop("extra_configs", {}), **self.extra_configs}
+        if extra_configs:
+            self._static["extra_configs"] = extra_configs
         return self._static
 
     def _getitem(self, i):

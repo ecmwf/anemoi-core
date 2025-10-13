@@ -76,16 +76,22 @@ class OneDatasetDataHandler(DataHandler):
     _cache: dict = {}
 
     def __init__(
-        self, data_group: str, dataset: str, start, end, search_path: str | None = None, extra: dict | None = None
+        self,
+        data_group: str,
+        dataset: str,
+        start,
+        end,
+        search_path: str | None = None,
+        extra_configs: dict | None = None,
     ):
         super().__init__()
-        if extra is None:
-            extra = {}
+        if extra_configs is None:
+            extra_configs = {}
 
         self._dataset = dataset
         self._search_path = search_path
         self.data_groups = [data_group]  # note that self.data_groups is a list
-        self.extra = extra
+        self.extra_configs = extra_configs
         self.start = start
         self.end = end
 
@@ -103,7 +109,6 @@ class OneDatasetDataHandler(DataHandler):
         # context manager to group requests
         self._cache[i] = {}
         yield
-        print(f"❌ Clearing cache for i={i}")
         del self._cache[i]
 
     def get_item(self, container, i: int) -> DynamicDataDict:
@@ -112,9 +117,7 @@ class OneDatasetDataHandler(DataHandler):
         if not self._cache[i]:
             for p in self.registry:
                 self._cache[i][p] = self._get_item(p, i)
-            print(f"✅ Cache populated with {len(self._cache[i])} items for i={i}")
 
-        print("❤️ Using cached item for", container)
         return self._cache[i][container]
 
     @cached_property
@@ -152,11 +155,11 @@ class OneDatasetDataHandler(DataHandler):
             raise e
 
     def __repr__(self):
-        if isinstance(self.extra, dict):
-            extra = ", ".join(f"{k}={v}" for k, v in self.extra.items())
+        if isinstance(self.extra_configs, dict):
+            extra = ", ".join(f"{k}={v}" for k, v in self.extra_configs.items())
         else:
-            extra = extra.__class__.__name__ + " " + str(self.extra)[:10]
-        return f"{super().__repr__()}(dataset={self._dataset}, extra={extra})"
+            extra = extra.__class__.__name__ + " " + str(self.extra_configs)[:10]
+        return f"{super().__repr__()}(dataset={self._dataset}, extra_configs={self.extra_configs})"
 
     def _tree(self, prefix=""):
         tree = _RichTree(prefix if prefix else "")
@@ -166,8 +169,8 @@ class OneDatasetDataHandler(DataHandler):
             tree.add(f"start: {self.start}")
         if self.end:
             tree.add(f"end: {self.end}")
-        if self.extra:
-            tree.add(f"extra: {', '.join(f'{k}={v}' for k, v in self.extra.items())}")
+        if self.extra_configs:
+            tree.add(f"extra_configs: {', '.join(f'{k}={v}' for k, v in self.extra_configs.items())}")
         return tree
 
 
@@ -189,7 +192,7 @@ class GriddedDatasetDataHandler(OneDatasetDataHandler):
             variables=ds.variables,
             num_features=len(ds.variables),
             dimensions=self.dimensions,
-            extra=self.extra,
+            extra_configs=self.extra_configs,
         )
 
     def _get_item(self, container, i: int) -> DynamicDataDict:
@@ -231,7 +234,7 @@ class RecordsDataHandler(OneDatasetDataHandler):
             variables=ds.variables[data_group],
             num_features=len(ds.variables[data_group]),
             dimensions=self.dimensions,
-            extra=self.extra,
+            extra_configs=self.extra_configs,
         )
 
     def _get_item(self, container, i: int) -> DynamicDataDict:
@@ -288,6 +291,8 @@ class MultiDatasetDataHandler(DataHandler):
         for dh in self._data_handlers:
             if data_group in dh.data_groups:
                 return dh
+        print(self)
+        print(self.data_groups)
         raise KeyError(f"Data_group {data_group} not found in any data_handler")
 
     def group_requests(self, i):

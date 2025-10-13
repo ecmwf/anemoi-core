@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
 
 import yaml
 
@@ -31,7 +30,7 @@ def test_gridded():
 
               - dataset: aifs-ea-an-oper-0001-mars-20p0-2016-2016-6h-v1
                 data_group: era5_20
-                extra:
+                extra_configs:
                   normalisation:
                     {default: 'mean-std', 'mean-std': [tp, 2t]}
                   graph:
@@ -42,7 +41,7 @@ def test_gridded():
 
               - dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8
                 data_group: era5_o96
-                extra:
+                extra_configs:
                   normalisation:
                     {default: 'mean-std', 'mean-std': [tp, 2t]}
                   graph:
@@ -53,7 +52,7 @@ def test_gridded():
 
               - dataset: aifs-ea-an-oper-0001-mars-o48-1979-2022-6h-v6
                 data_group: era5_o48
-                extra:
+                extra_configs:
                   normalisation:
                     {default: 'mean-std', 'mean-std': [tp, 2t]}
                   graph:
@@ -65,7 +64,7 @@ def test_gridded():
               # unused in this example: era5 n320 resolution
               - dataset: aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8
                 data_group: era5_highres
-                extra:
+                extra_configs:
                   normalisation:
                     {default: 'mean-std', 'mean-std': [tp, 2t]}
                   graph:
@@ -77,7 +76,7 @@ def test_gridded():
               # unused in this example
               - dataset: cerra-rr-an-oper-0001-mars-5p0-2017-2017-6h-v1
                 data_group: cerra
-                extra:
+                extra_configs:
                   normalisation:
                     {default: 'mean-std', 'mean-std': [tp, 2t]}
                   graph:
@@ -103,7 +102,7 @@ def test_gridded():
               #       diagnostics: ["u_100", "v_100"]
               #     dimensions: [["offsets"], "ensembles", "values", "variables"]
               #     offsets: ["-6h", "+0h", "+6h"]
-              #     extra:
+              #     extra_configs:
               #       normalisation: # override the one in data_handler
               #         {default: 'mean-std', 'mean-std': [u_100, v_100]}
               #       more_config: {}
@@ -179,7 +178,7 @@ def test_observations():
                   offsets:
                     input: ["-6h", "+0h"]
                     target: ["+6h"]
-                  extra:
+                  extra_configs:
                     normalisation: # override the one in data_handler
                       {default: 'mean-std', 'mean-std': [u_100, v_100]}
                     more_config: {}
