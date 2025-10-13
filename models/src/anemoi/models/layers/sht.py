@@ -174,7 +174,7 @@ def precompute_legpoly(
     return legpoly(mmax, lmax, np.cos(t), norm=norm, inverse=inverse, csphase=csphase)
 
 
-class RealSHT(Module):
+class CartesianRealSHT(Module):
 
     def __init__(self, nlat: int, nlon: int, grid: str) -> None:
 
@@ -221,7 +221,7 @@ class RealSHT(Module):
         return x
 
 
-class InverseRealSHT(Module):
+class CartesianInverseRealSHT(Module):
 
     def __init__(self, nlat: int, nlon: int, lmax: int, grid: str) -> None:
 
@@ -257,5 +257,157 @@ class InverseRealSHT(Module):
             x[..., self.nlon // 2].imag = 0.0
         
         x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
+
+        return x
+
+
+class OctahedralRealSHT(Module):
+
+    def __init__(
+        self,
+        nlat: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        folding: bool = False,
+    ) -> None:
+
+        super().__init__()
+
+        self.lmax = lmax or nlat
+        self.mmax = mmax or nlat
+
+        self.nlat = nlat
+        self.nlon = [4 * (i + 1) + 16 for i in range(nlat // 2)]
+        self.nlon = self.nlon + self.nlon[::-1]
+        
+        self.slon = [0] + list(np.cumsum(self.nlon))[:-1]
+        self.rlon = [nlat + 8 - nlon // 2 for nlon in self.nlon]
+
+        self.folding = self.spectral_folding if folding else self.no_spectral_folding
+
+        theta, weight = legendre_gauss_weights(nlat)
+        theta = np.flip(np.arccos(theta))
+
+        pct = precompute_legpoly(self.mmax, self.lmax, theta)
+        pct = torch.from_numpy(pct)
+
+        weight = torch.from_numpy(weight)
+        weight = torch.einsum('mlk, k -> mlk', pct, weight)
+
+        self.register_buffer('weight', weight, persistent=False)
+
+    def spectral_folding(self, x: Tensor) -> Tensor:
+
+        raise NotImplementedError
+    
+    def no_spectral_folding(self, x: Tensor) -> Tensor:
+
+        return x
+    
+    def rfft(self, x: Tensor) -> Tensor:
+
+        return torch.fft.rfft(
+            input=self.folding(x),
+            norm="forward",
+        )
+    
+    def rfft_rings(self, x: Tensor) -> Tensor:
+
+        rfft = [
+            self.rfft(x[..., slon: slon + nlon])
+            for slon, nlon in zip(self.slon, self.nlon)
+        ]
+
+        rfft = [
+            torch.cat([x, torch.zeros((*x.shape[:-1], rlon), device=x.device)], dim=-1)
+            for x, rlon in zip(rfft, self.rlon)
+        ]
+
+        return torch.stack(
+            tensors=rfft,
+            dim=-2,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+
+        x = 2.0 * torch.pi * self.rfft_rings(x)
+        x = torch.view_as_real(x)
+
+        rl = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 0], self.weight.to(x.dtype))
+        im = torch.einsum('...km, mlk -> ...lm', x[..., :self.mmax, 1], self.weight.to(x.dtype))
+
+        x = torch.stack((rl, im), -1)
+        x = torch.view_as_complex(x)
+
+        return x
+
+
+class OctahedralInverseRealSHT(Module):
+
+    def __init__(
+        self,
+        nlat: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        folding: bool = False,
+    ) -> None:
+
+        super().__init__()
+
+        self.lmax = lmax or nlat
+        self.mmax = mmax or nlat
+
+        self.nlat = nlat
+        self.nlon = [4 * (i + 1) + 16 for i in range(nlat // 2)]
+        self.nlon = self.nlon + self.nlon[::-1]
+
+        self.folding = self.spectral_folding if folding else self.no_spectral_folding
+
+        theta, _ = legendre_gauss_weights(nlat)
+        theta = np.flip(np.arccos(theta))
+
+        pct = precompute_legpoly(self.mmax, self.lmax, theta, inverse=True)
+        pct = torch.from_numpy(pct)
+
+        self.register_buffer("pct", pct, persistent=False)
+    
+    def spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
+
+        raise NotImplementedError
+    
+    def no_spectral_folding(self, x: Tensor, nlon: int) -> Tensor:
+
+        return x
+    
+    def irfft(self, x: Tensor, nlon: int) -> Tensor:
+
+        return torch.fft.irfft(
+            input=self.folding(x, nlon),
+            n=nlon,
+            norm="forward",
+        )
+    
+    def irfft_rings(self, x: Tensor) -> Tensor:
+
+        irfft = [
+            self.irfft(x[..., t, :], nlon)
+            for t, nlon in enumerate(self.nlon)
+        ]
+
+        return torch.cat(
+            tensors=irfft,
+            dim=-1,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+
+        x = torch.view_as_real(x)
+
+        rl = torch.einsum("...lm, mlk -> ...km", x[..., 0], self.pct.to(x.dtype))
+        im = torch.einsum("...lm, mlk -> ...km", x[..., 1], self.pct.to(x.dtype))
+
+        x = torch.stack((rl, im), -1).to(x.dtype)
+        x = torch.view_as_complex(x)
+        x = self.irfft_rings(x)
 
         return x

@@ -13,7 +13,12 @@ import torch
 import einops
 
 from torch.nn import Parameter, Module
-from anemoi.models.layers.sht import RealSHT, InverseRealSHT
+from anemoi.models.layers.sht import (
+    CartesianRealSHT,
+    CartesianInverseRealSHT,
+    OctahedralRealSHT,
+    OctahedralInverseRealSHT,
+)
 
 
 class IdentityResidual(Module):
@@ -120,9 +125,18 @@ class BasicOrnsteinResidual(Module):
         weight[0, :, 0, 0, 0] = torch.from_numpy(theta_init)
 
         self.weight = Parameter(weight)
-        self.isht = InverseRealSHT(nlat, nlon, lmax, grid)
 
-        self.node_order = node_order.replace("-", " ")
+        if grid == "octahedral":
+            self.isht = OctahedralInverseRealSHT(nlat, lmax, lmax)
+            self.values_reshape_for = f"... values var -> ... var values"
+            self.values_reshape_inv = f"... var values -> ... values var"
+            self.kwargs_reshape_for = {}
+        else:
+            self.isht = CartesianInverseRealSHT(nlat, nlon, lmax, grid)
+            self.values_reshape_for = f"... ({node_order.replace("-", " ")}) var -> ... var lat lon"
+            self.values_reshape_inv = f"... var lat lon -> ... ({node_order.replace("-", " ")}) var"
+            self.kwargs_reshape_for = {"lat": nlat, "lon": nlon}
+
         self._regressors_input_idx = [variables[f] for f in regressors]
         self._internal_input_idx = input_idx
 
@@ -155,7 +169,7 @@ class BasicOrnsteinResidual(Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         weight = self.isht(torch.view_as_complex(self.weight * self.muzero))
-        weight = einops.rearrange(weight, f"coef var lat lon -> coef ({self.node_order}) var")
+        weight = einops.rearrange(weight, self.values_reshape_inv)
 
         return (
             + (1 - torch.sigmoid(weight[0, ...]) * (1 - self.theta_buff) - self.theta_buff)
@@ -203,8 +217,12 @@ class CompleteOrnsteinResidual(BasicOrnsteinResidual):
             statistics=statistics,
         )
 
-        self.x_fsht = RealSHT(nlat, nlon, grid)
-        self.x_isht = InverseRealSHT(nlat, nlon, self.x_fsht.lmax, grid)
+        if grid == "octahedral":
+            self.x_fsht = OctahedralRealSHT(nlat)
+            self.x_isht = OctahedralInverseRealSHT(nlat, self.x_fsht.lmax, self.x_fsht.mmax)
+        else:
+            self.x_fsht = CartesianRealSHT(nlat, nlon, grid)
+            self.x_isht = CartesianInverseRealSHT(nlat, nlon, self.x_fsht.lmax, grid)
 
         self._blurring_input_idx = [
             int(idx)
@@ -265,21 +283,13 @@ class CompleteOrnsteinResidual(BasicOrnsteinResidual):
 
     def blurring(self, x: torch.Tensor) -> torch.Tensor:
 
-        x = einops.rearrange(
-            tensor=x,
-            pattern=f"... ({self.node_order}) var -> ... var lat lon",
-            lat=self.x_fsht.nlat,
-            lon=self.x_fsht.nlon,
-        )
+        x = einops.rearrange(x, self.values_reshape_for, **self.kwargs_reshape_for)
 
         x[..., self._blurring_input_idx, :, :] = self.lpass_filter(
             x[..., self._blurring_input_idx, :, :]
         )
 
-        x = einops.rearrange(
-            tensor=x,
-            pattern=f"... var lat lon -> ... ({self.node_order}) var",
-        )
+        x = einops.rearrange(x, self.values_reshape_inv)
 
         return x
 
