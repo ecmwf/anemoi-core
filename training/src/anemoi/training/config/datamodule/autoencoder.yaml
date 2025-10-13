@@ -1,1 +1,1 @@
-_target_: anemoi.training.data.datamodule.AnemoiAutoencoderDatasetsDataModule
+_target_: anemoi.training.data.datamodule.AnemoiSingleTimestepDatasetsDataModule

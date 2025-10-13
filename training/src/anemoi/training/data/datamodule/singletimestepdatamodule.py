@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class AnemoiAutoencoderDatasetsDataModule(AnemoiDatasetsDataModule):
+class AnemoiSingleTimestepDatasetsDataModule(AnemoiDatasetsDataModule):
     """Anemoi Autoencoder Datasets data module for PyTorch Lightning."""
 
     def relative_date_indices(self) -> list:
