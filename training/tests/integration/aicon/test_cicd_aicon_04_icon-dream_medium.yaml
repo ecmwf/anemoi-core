@@ -168,7 +168,7 @@ model:
   cpu_offload: False
 
   model:
-    _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
 
   keep_batch_sharded: True
 
