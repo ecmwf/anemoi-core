@@ -315,7 +315,6 @@ locations change in time.
    processors:
    imputer:
       _target_: anemoi.models.preprocessing.imputer.InputImputer
-      _convert_: all
       config: ${data.imputer}
 
 ****************
