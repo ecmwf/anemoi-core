@@ -62,14 +62,20 @@ class GraphCreator:
         for edges_cfg in self.config.get("edges", {}):
             for edge_builder_cfg in edges_cfg.edge_builders:
                 edge_builder = instantiate(
-                    edge_builder_cfg, source_name=edges_cfg.source_name, target_name=edges_cfg.target_name
+                    edge_builder_cfg,
+                    source_name=edges_cfg.source_name,
+                    target_name=edges_cfg.target_name,
                 )
                 graph = edge_builder.update_graph(graph, attrs_config=None)
 
-            graph = edge_builder.register_attributes(graph, edges_cfg.get("attributes", {}))
+            graph = edge_builder.register_attributes(
+                graph, edges_cfg.get("attributes", {})
+            )
 
         if graph.num_nodes == 0:
-            LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration file.")
+            LOGGER.warning(
+                "The graph that was created has no nodes. Please check your graph configuration file."
+            )
 
         return graph
 
@@ -88,7 +94,9 @@ class GraphCreator:
         """
         LOGGER.info("Cleaning graph.")
         for type_name in chain(graph.node_types, graph.edge_types):
-            attr_names_to_remove = [attr_name for attr_name in graph[type_name] if attr_name.startswith("_")]
+            attr_names_to_remove = [
+                attr_name for attr_name in graph[type_name] if attr_name.startswith("_")
+            ]
             for attr_name in attr_names_to_remove:
                 del graph[type_name][attr_name]
                 LOGGER.info(f"{attr_name} deleted from graph.")
@@ -146,7 +154,9 @@ class GraphCreator:
                 f"Graph not saved because {save_path} already exists. If this occurred during a multi-process or multi-GPU run, another process likely saved it first. If you intended to recreate it, rerun with overwrite=True."
             )
 
-    def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
+    def create(
+        self, save_path: Path | None = None, overwrite: bool = False
+    ) -> HeteroData:
         """Create the graph and save it to the output path.
 
         Parameters
