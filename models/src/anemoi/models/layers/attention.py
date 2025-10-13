@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import enum
 import logging
 import math
 from typing import Any
@@ -64,9 +63,10 @@ class MultiHeadSelfAttention(nn.Module):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
-        softcap: Optional[float] = None,
+        softcap: float = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
+        _compile: bool = True,
     ):
         """Initialize MultiHeadSelfAttention.
 
@@ -100,6 +100,8 @@ class MultiHeadSelfAttention(nn.Module):
             Anything > 0 activates softcapping attention, by default None
         use_alibi_slopes : bool, optional
             Adds bias
+        _compile: bool
+            just for flex attention, determines if it will be compiled or run in eager mode
         """
         super().__init__()
 
@@ -119,6 +121,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.qk_norm = qk_norm
         self.softcap = softcap
         self.use_rotary_embeddings = use_rotary_embeddings
+        self._compile = _compile
 
         self.set_attention_function()
 
@@ -143,6 +146,7 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "flash_attention_v3": FlashAttentionV3Wrapper,
+            "flex_attention": FlexAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
         assert (
@@ -155,6 +159,8 @@ class MultiHeadSelfAttention(nn.Module):
             self.attention = attn_funcs[self.attention_implementation](
                 use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
             )
+        elif  self.attention_implementation == "flex_attention":
+            self.attention = attn_funcs[self.attention_implementation](_compile=self._compile)
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 
@@ -283,12 +289,6 @@ class SDPAAttentionWrapper(nn.Module):
         return out
 
 
-class FlashAttentionBackend(enum.Enum):
-    V2 = "flash_attention_v2"
-    V3 = "flash_attention_v3"
-    V4 = "flash_attention_v4"
-
-
 class FlashAttentionWrapper(nn.Module):
     """Wrapper for Flash attention.
 
@@ -302,11 +302,14 @@ class FlashAttentionWrapper(nn.Module):
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
 
-        flash_attn, self.flash_attn_backend = self._import_flash_attn()
+        flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
         self.deterministic=torch.are_deterministic_algorithms_enabled()
         LOGGER.info(f"attention.py deterministic mode = {self.deterministic}")
 
-        flash_attn_version = version.parse(flash_attn.__version__)
+        try:
+            flash_attn_version = version.parse(flash_attn.__version__)
+        except  AttributeError: #hack, early versions of FA3 didnt have a version
+             flash_attn_version = "3.0.0"
         self._init_rotary_embeddings(use_rotary_embeddings, head_dim, flash_attn_version)
 
         self.attention = flash_attn.flash_attn_func
@@ -314,13 +317,10 @@ class FlashAttentionWrapper(nn.Module):
     def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
         """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
         self.use_rotary_embeddings = False
-        # rotary technically is available in the "base" package of flash_attn. It could be possible to have
-        # both FAv2, FAv3, and FAv4 intalled and only distinguish the available backends for attn_func while
-        # allowing rotary embeddings in all cases with FAv2 installed.
         if use_rotary_embeddings:
-            if self.flash_attn_backend in (FlashAttentionBackend.V3, FlashAttentionBackend.V4):
-                raise RuntimeError("Rotary Embeddings not supported with flash attention v3 or v4.")
-            elif self.flash_attn_backend == FlashAttentionBackend.V2 and flash_attn_version <= version.parse("2.6"):
+            if flash_attn_version >= version.parse("3"):
+                raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
+            elif flash_attn_version <= version.parse("2.6"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
 
             from flash_attn.layers.rotary import RotaryEmbedding
@@ -335,61 +335,31 @@ class FlashAttentionWrapper(nn.Module):
             flash attention module
             use_flash_attention_v3 (bool)
         """
-        available_backends = {}
-        errors = {}
+        use_flash_attn_v3 = False
 
         # to detect which flash-attn interface we're using we try import them
         # Since each import is semantically different we use this to
-        # distringuish flash attention versions. Given that one might want to
-        # distinguish, all available backends are logged.
-
+        # distringuish flash attention versions
         try:
+            # first try import flash attn v2
             import flash_attn
-        except ImportError as e:
-            errors[FlashAttentionBackend.V2] = e
+
+        except ImportError as e_v2:
+
+            # failed importing flash attn v2,
+            # try import flash attn v3
+            try:
+                import flash_attn_interface as flash_attn
+
+            except ImportError as e_v3:
+                # print both errors if both fail
+                raise ImportError(f"Error importing flash-attn v2: {e_v2}\nError importing flash-attn v2: {e_v3}")
+            else:
+                LOGGER.info("Using flash attention v3")
+                use_flash_attn_v3 = True
         else:
-            available_backends[FlashAttentionBackend.V2] = flash_attn
-
-        try:
-            import flash_attn_interface as flash_attn
-        except ImportError as e:
-            errors[FlashAttentionBackend.V3] = e
-        else:
-            available_backends[FlashAttentionBackend.V3] = flash_attn
-
-        try:
-            # V4 is available as cute-based backend
-            # FWD-performance is good across Ampere, Hopper, and Blackwell GPUs.
-            # BWD-performance is work-in-progress and worse than FAv2 right now.
-            import flash_attn.cute as flash_attn
-        except ImportError as e:
-            errors[FlashAttentionBackend.V4] = e
-        else:
-            available_backends[FlashAttentionBackend.V4] = flash_attn
-
-        if not available_backends:
-            msg = "No flash attention backend available. Errors:\n"
-            for backend, error in errors.items():
-                msg += f"{backend.value}: {error}\n"
-            raise ImportError(msg)
-
-        msg_available = "Available flash attention backends:\n"
-        for backend in available_backends.keys():
-            msg_available += f"- {backend.value}\n"
-        LOGGER.info(msg_available)
-
-        # prefer backends in this order
-        # TODO: maybe expose config-option to choose backend
-        backends_priority = [
-            FlashAttentionBackend.V3,
-            FlashAttentionBackend.V4,
-            FlashAttentionBackend.V2,
-        ]
-
-        for backend in backends_priority:
-            if backend in available_backends:
-                LOGGER.info(f"Using flash attention backend: {backend.value}")
-                return available_backends[backend], backend
+            LOGGER.info("Using flash attention v2")
+        return flash_attn, use_flash_attn_v3
 
     def forward(
         self,
@@ -400,16 +370,16 @@ class FlashAttentionWrapper(nn.Module):
         causal: bool = False,
         window_size: int = None,
         dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
+        softcap = None,
         alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
 
-        if alibi_slopes is not None and (self.flash_attn_backend != FlashAttentionBackend.V2):
+        if alibi_slopes is not None and self.use_flash_attn_v3:
             NotImplementedError(
-                "Alibi slopes is currently not supported by flash attention v3 or v4. please switch to flash attention v2 or disable alibi slopes."
+                "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
             )
 
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
@@ -424,7 +394,7 @@ class FlashAttentionWrapper(nn.Module):
             key = keyvalue[:, :, 0, ...]
             value = keyvalue[:, :, 1, ...]
 
-        if self.flash_attn_backend != FlashAttentionBackend.V2:
+        if self.use_flash_attn_v3:
             out = self.attention(
                 query,
                 key,
@@ -435,8 +405,7 @@ class FlashAttentionWrapper(nn.Module):
                 deterministic=self.deterministic,
             )[
                 0
-            ]  # v3/v4 returns '(out, softmax_lse)'. here we drop to 'out'
-
+            ]  # fav3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
         else:
             out = self.attention(
                 query,
@@ -477,9 +446,7 @@ class FlashAttentionV3Wrapper(nn.Module):
         try:
             from flash_attn_interface import flash_attn_func
         except ImportError:
-            raise ImportError(
-                "Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3"
-            )
+            raise ImportError("Error: Flash-attn v3 not installed. Please build flash-attn/hopper from source to use flash-attn v3")
 
         self.attention = flash_attn_func
         self.deterministic=torch.are_deterministic_algorithms_enabled()
@@ -494,7 +461,7 @@ class FlashAttentionV3Wrapper(nn.Module):
         causal: bool = False,
         window_size: int = None,
         dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
+        softcap: float = None,
         alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (
@@ -511,6 +478,87 @@ class FlashAttentionV3Wrapper(nn.Module):
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
 
+class FlexAttentionWrapper(nn.Module):
+    """Wrapper for Pytorch Flex attention."""
+
+    def __init__(self, _compile=True):
+        """ If _compile is false, attention will be run in eager mode. this is not performant but is faster for very small test cases, and useful for correctness checks when there are issues with the compiler"""
+        super().__init__()
+
+        if version.parse(torch.__version__) < version.parse("2.5.0"):
+            raise RuntimeError("Error: torch version is too low. Update to 2.5.0 or higher to use Flex Attention.")
+
+        self.is_attn_compiled = False
+        self._compile = _compile
+
+        self.prev_seq_len = 0
+
+    def _not_implemented(self, causal: bool, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
+        msg = ""
+        if causal is not False:
+            msg += "causal"
+        if dropout_p != 0.0:
+            msg += "dropout_p, "
+        if softcap is not None:
+            msg += "softcap, "
+        if alibi_slopes is not None:
+            msg += "alibi slobes, "
+        if len(msg) > 0:
+            msg = "The following features you requested are not yet implemented in the Flex-Attention backend: " + msg
+            raise NotImplementedError(msg)
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap = None,
+        alibi_slopes: torch.Tensor = None,
+    ):
+
+        softcap = None
+        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
+
+        # recompile if seq len changes
+        if query.shape[2] != self.prev_seq_len:
+            self.is_attn_compiled = False
+            LOGGER.debug("Sequence length has changed - recompiling flex attention")
+
+        if (not self.is_attn_compiled):
+            import functools
+
+            from torch.nn.attention.flex_attention import create_block_mask
+            from torch.nn.attention.flex_attention import flex_attention
+
+            if window_size is not None:
+
+                def sliding_window_mask(b, h, q_idx, kv_idx):
+                    return abs(q_idx - kv_idx) <= window_size
+
+                seq_len = query.shape[2]
+                #self.block_mask = torch.compile(create_block_mask(
+                self.block_mask = create_block_mask(
+                    sliding_window_mask, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len, _compile=self._compile
+                )
+                self.attention = functools.partial(flex_attention, block_mask=self.block_mask)  # Cache the block mask
+                self.prev_seq_len = seq_len
+            else:
+                self.attention = flex_attention
+
+            if self._compile:
+                self.attention = torch.compile(self.attention)
+
+            self.is_attn_compiled = True
+
+        torch._dynamo.config.optimize_ddp = False
+        out = self.attention(query, key, value)
+        torch._dynamo.config.optimize_ddp = True
+
+        return out
 
 def get_alibi_slopes(num_heads: int) -> Tensor:
     """Calculates linearly decreasing slopes for alibi attention.
