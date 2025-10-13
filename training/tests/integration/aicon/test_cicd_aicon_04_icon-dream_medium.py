@@ -51,13 +51,14 @@ def aicon_config_with_tmp_dir() -> Iterator[DictConfig]:
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data: GetTestData) -> Iterator[DictConfig]:
+def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data: GetTestData) -> DictConfig:
     """Temporarily download the ICON grid specified in the config.
 
     Downloading the grid is required as the AICON grid is currently required as a netCDF file.
     """
-    grid = get_test_data(aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename)
-    aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = grid
+    aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.icon_mesh.node_builder.grid_filename,
+    )
     return aicon_config_with_tmp_dir
 
 

@@ -56,7 +56,7 @@ graph:
       node_builder:
         _target_: anemoi.graphs.nodes.ICONNodes
         name: "icon_grid_0026_R03B07_G"
-        grid_filename: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
+        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
         max_level_multimesh: 3
         max_level_dataset: 3
     # Data nodes
