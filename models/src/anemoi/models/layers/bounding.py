@@ -184,14 +184,24 @@ class NormalizedReluBounding(BaseBounding):
         return x
 
 
-class LeakyNormalizedReluBounding(NormalizedReluBounding):
+class NormalizedLeakyReluBounding(NormalizedReluBounding):
     """Initializes the bounding with a Leaky ReLU activation and customizable normalized thresholds."""
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.norm_min_val = self.norm_min_val.to(x.device)
         x[..., self.data_index] = (
             torch.nn.functional.leaky_relu(x[..., self.data_index] - self.norm_min_val) + self.norm_min_val
         )
         return x
+
+#class LeakyNormalizedReluBounding(NormalizedReluBounding):
+#    """Initializes the bounding with a Leaky ReLU activation and customizable normalized thresholds."""
+#
+#    def forward(self, x: torch.Tensor) -> torch.Tensor:
+#        x[..., self.data_index] = (
+#            torch.nn.functional.leaky_relu(x[..., self.data_index] - self.norm_min_val) + self.norm_min_val
+#        )
+#        return x
 
 
 class HardtanhBounding(BaseBounding):

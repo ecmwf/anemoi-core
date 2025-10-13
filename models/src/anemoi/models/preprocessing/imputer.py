@@ -124,9 +124,10 @@ class BaseImputer(BasePreprocessor, ABC):
         if not in_place:
             x = x.clone()
 
-        # Reset NaN locations outside of training for validation and inference.
-        if not self.training:
-            self.nan_locations = None
+        ## Reset NaN locations outside of training for validation and inference.
+        #if not self.training:
+        #    self.nan_locations = None
+        # RF edit, attempt to get atmos/coupled inference working
 
         # Initialise mask if not cached.
         if self.nan_locations is None:
