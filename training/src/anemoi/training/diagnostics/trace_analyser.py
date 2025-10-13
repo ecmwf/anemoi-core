@@ -36,6 +36,10 @@ def analyze_anemoi_durations(json_file_path):
     # durations = dict()
     durations = defaultdict(list)
 
+    if json_file_path is None:
+        LOGGER.info("trace not found. run for more steps to generate a trace file")
+        return
+
     with open(json_file_path) as f:
         data = json.load(f)
 
