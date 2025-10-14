@@ -13,7 +13,7 @@ from __future__ import annotations
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
-from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC001
+from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC002
 
 
 class DataSchema(PydanticBaseModel):
@@ -52,7 +52,7 @@ class DataSchema(PydanticBaseModel):
             Processors including imputers and normalizers are applied in order of definition."
     forcing: list[str]
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
-    diagnostic: list[str]
+    diagnostic: list[str] = Field(default_factory=list)
     "Features that are only part of the forecast state and are not used as an input to the model."
     target: list[str] | None = None
     (

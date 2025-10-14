@@ -193,7 +193,7 @@ def test_on_epoch_partial_rename_permute(
     with pytest.raises(ValueError, match="The variable order in the model and data is different."):
         callback.on_test_start(fake_trainer, fake_pl_module)
 
-    with pytest.raises(ValueError, match="The variable order in the model and data is different."):
+    with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
         fake_trainer.datamodule.data_indices.compare_variables(
             fake_pl_module._ckpt_model_name_to_index,
             name_to_index_partial_rename_permute,
