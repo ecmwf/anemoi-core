@@ -13,14 +13,13 @@
 # used for CI/CD!
 import os
 import pathlib
-import tempfile
-from collections.abc import Iterator
 from functools import reduce
 from operator import getitem
 
 import matplotlib as mpl
 import pytest
 import torch
+from conftest import GetTmpPaths
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
@@ -29,6 +28,7 @@ from typeguard import typechecked
 import anemoi.training
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import GetTestData
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
@@ -38,15 +38,23 @@ mpl.use("agg")
 
 @pytest.fixture
 @typechecked
-def aicon_config_with_tmp_dir() -> Iterator[DictConfig]:
+def aicon_config_with_tmp_dir(get_tmp_paths: GetTmpPaths, get_test_archive: GetTestArchive) -> DictConfig:
     """Get AICON config with temporary output paths."""
     with initialize(version_base=None, config_path="./"):
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
-    with tempfile.TemporaryDirectory() as output_dir:
-        config.hardware.paths.output = output_dir
-        config.hardware.paths.graph = output_dir
-        yield config
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(config, ["dataset", "forcing_dataset"])
+    config.hardware.paths.output = tmp_dir
+    config.hardware.paths.graph = tmp_dir
+    dataset, forcing_dataset = rel_paths
+    config.hardware.paths.data = tmp_dir
+    config.hardware.files.dataset = dataset
+    config.hardware.files.forcing_dataset = forcing_dataset
+
+    for url in dataset_urls:
+        get_test_archive(url)
+
+    return config
 
 
 @pytest.fixture
