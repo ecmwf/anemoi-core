@@ -19,57 +19,13 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     import torch
-    from torch_geometric.data import HeteroData
 
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
 
 class GraphAutoEncoder(BaseGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
-
-    def __init__(
-        self,
-        *,
-        config: BaseSchema,
-        graph_data: HeteroData,
-        truncation_data: dict,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict,
-        supporting_arrays: dict,
-    ) -> None:
-        """Initialize graph neural network forecaster.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Job configuration
-        graph_data : HeteroData
-            Graph object
-        statistics : dict
-            Statistics of the training data
-        data_indices : IndexCollection
-            Indices of the training data,
-        metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
-
-        """
-        super().__init__(
-            config=config,
-            graph_data=graph_data,
-            truncation_data=truncation_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
-        )
 
     def _step(
         self,
@@ -97,20 +53,6 @@ class GraphAutoEncoder(BaseGraphModule):
         )
 
         return loss, metrics, [y_pred]
-
-    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _ = self._step(batch, batch_idx)
-        self.log(
-            "train_" + self.loss.name + "_loss",
-            train_loss,
-            on_epoch=True,
-            on_step=True,
-            prog_bar=True,
-            logger=self.logger_enabled,
-            batch_size=batch.shape[0],
-            sync_dist=True,
-        )
-        return train_loss
 
     def on_train_epoch_end(self) -> None:
         pass

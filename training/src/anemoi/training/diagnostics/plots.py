@@ -619,6 +619,42 @@ def plot_flat_sample(
 
 
 def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
+    """Build a Cartopy Lambert Conformal projection suited to a given set of (lat, lon) points.
+
+    The projection is centered on the midpoint of the latitude/longitude
+    extent of the input, and uses two standard parallels placed at ±25% of
+    the latitude span around the central latitude. This gives a reasonable,
+    low-distortion projection for regional maps covering mid-latitudes.
+
+    Parameters
+    ----------
+    latlon : numpy.ndarray
+        Array of shape (N, 2) with columns ``[latitude, longitude]`` in degrees.
+        Longitudes may be in the range [-180, 180] or [0, 360]; values are used
+        as-is to compute the central longitude.
+
+    Returns
+    -------
+    object
+        A ``cartopy.crs.LambertConformal`` instance configured with:
+        - ``central_latitude`` at the midpoint of the latitude extent,
+        - ``central_longitude`` at the midpoint of the longitude extent,
+        - ``standard_parallels`` at ±25% of the latitude span around the center.
+
+    Raises
+    ------
+    ModuleNotFoundError
+        If ``cartopy`` is not installed. Install via the
+        ``optional-dependencies.plotting`` extra.
+
+    Notes
+    -----
+    - This heuristic works well for many regional plots. If your domain is very
+      tall/narrow or crosses the dateline, you may want to choose the
+      ``central_longitude`` or ``standard_parallels`` explicitly.
+    - Input is not validated; ensure ``latlon`` has at least two points and a
+      non-zero latitude span for meaningful standard parallels.
+    """
     try:
         import cartopy.crs as ccrs
 

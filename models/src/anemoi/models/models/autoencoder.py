@@ -33,24 +33,6 @@ LOGGER = logging.getLogger(__name__)
 
 class AnemoiModelAutoEncoder(BaseGraphModel):
 
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-        truncation_data: dict,
-    ) -> None:
-
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            truncation_data=truncation_data,
-        )
-
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
