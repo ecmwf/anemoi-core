@@ -127,6 +127,9 @@ class AnemoiModelEncProcDec(nn.Module):
             layer_kernels=self.layer_kernels_decoder,
         )
 
+        # Residual (latent) connection z_proc = z + processor(z) or z_proc = processor(z)
+        self.latent_residual = getattr(model_config.model, "latent_residual", True)
+
         # Residual connection x(t+1) = model(x(t)) + residual(x(t))
         self.residual = instantiate(
             model_config.model.residual,
@@ -312,7 +315,11 @@ class AnemoiModelEncProcDec(nn.Module):
             model_comm_group=model_comm_group,
         )
 
-        x_latent_proc = x_latent_proc + x_latent
+        x_latent_proc = (
+            x_latent_proc + x_latent
+            if self.latent_residual
+            else x_latent_proc
+        )
 
         x_out = self._run_mapper(
             self.decoder,
