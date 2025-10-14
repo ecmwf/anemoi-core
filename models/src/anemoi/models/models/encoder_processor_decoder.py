@@ -63,6 +63,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """Builds the model components."""
 
         # Encoder data -> hidden
+
         self.encoder = instantiate(
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here

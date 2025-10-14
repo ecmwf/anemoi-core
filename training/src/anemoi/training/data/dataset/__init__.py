@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .autoencoderdataset import AutoencoderNativeGridDataset
 from .ensdataset import EnsNativeGridDataset
 from .singledataset import NativeGridDataset
 
-__all__ = ["EnsNativeGridDataset", "NativeGridDataset"]
+__all__ = ["AutoencoderNativeGridDataset", "EnsNativeGridDataset", "NativeGridDataset"]

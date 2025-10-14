@@ -63,7 +63,7 @@ class AnemoiModelInterface(torch.nn.Module):
         metadata: dict,
         statistics_tendencies: dict = None,
         supporting_arrays: dict = None,
-        truncation_data: dict,
+        truncation_data: Optional[dict] = None,
     ) -> None:
         super().__init__()
         self.config = config
