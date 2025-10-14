@@ -106,6 +106,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[tuple] = None,
+        compute_dtype: Optional[torch.dtype] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Forward operator.
@@ -119,6 +120,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 Model communication group
             grid_shard_shapes : list, optional
                 Shard shapes of the grid, by default None
+            compute_dtype : Optional[torch.dtype], optional
+                Dtype to cast inputs to for computation, by default None
             **kwargs: Additional keyword arguments
 
         Returns:
@@ -136,6 +139,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=bse)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+
+        if compute_dtype is not None:
+            if x_data_latent.dtype != compute_dtype:
+                x_data_latent = x_data_latent.to(compute_dtype)
+            if x_hidden_latent.dtype != compute_dtype:
+                x_hidden_latent = x_hidden_latent.to(compute_dtype)
 
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
