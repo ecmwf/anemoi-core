@@ -1,8 +1,6 @@
-
-import torch
 import numpy as np
+import torch
 from jinja2 import Template
-
 
 HTML_TEMPLATE = """
 <!doctype html>
@@ -788,13 +786,14 @@ HTML_TEMPLATE = """
 </html>
 """
 
+
 def load_graph(
-    path: str, 
+    path: str,
     nodes: list[str] = ["data", "hidden"],
     edges: list[str] = ["data_to_hidden", "hidden_to_hidden", "hidden_to_data"],
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
     """Load a hetero graph from a file and separate nodes and edges by type.
-    
+
     Parameters
     ----------
     path : str
@@ -803,7 +802,7 @@ def load_graph(
         List of node types to extract.
     edges : list[str]
         List of edge types to extract.
-        
+
     Returns
     -------
     tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
@@ -811,17 +810,19 @@ def load_graph(
         - The first dictionary maps node types to their coordinates tensors.
         - The second dictionary maps edge types to their edge index tensors.
     """
-    hetero_data = torch.load(path, weights_only=False) 
+    hetero_data = torch.load(path, weights_only=False)
     out_nodes = {n: hetero_data[n].x for n in nodes}
     out_edges = {e: hetero_data[tuple(e.split("_"))].edge_index for e in edges}
     return out_nodes, out_edges
+
 
 def coords_to_latlon(coordinates):
     """Convert radians coordinates to latitude and longitude in degrees."""
     coordinates = np.rad2deg(coordinates)
     lats, lons = coordinates.T
     return lats, lons
-    
+
+
 def to_nodes_json(lats, lons, prefix="P"):
     """Convert nodes dictionary to JSON format for HTML rendering."""
     assert len(lats) == len(lons)
@@ -831,9 +832,8 @@ def to_nodes_json(lats, lons, prefix="P"):
 
 
 def to_edges_json(names1, names2, pairs):
-    edges = [[names1[i], names2[j]] for i,j in pairs]
+    edges = [[names1[i], names2[j]] for i, j in pairs]
     return edges
-
 
 
 if __name__ == "__main__":
@@ -842,8 +842,18 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Generate HTML visualization of a graph.")
     parser.add_argument("--path", type=str, required=True, help="Path to the graph file.")
-    parser.add_argument("--nodes", type=lambda s: s.split(","), default="data,hidden", help="Comma-separated list of node types to extract.")
-    parser.add_argument("--edges", type=lambda s: s.split(","), default="data_to_hidden,hidden_to_hidden,hidden_to_data", help="Comma-separated list of edge types to extract.")
+    parser.add_argument(
+        "--nodes",
+        type=lambda s: s.split(","),
+        default="data,hidden",
+        help="Comma-separated list of node types to extract.",
+    )
+    parser.add_argument(
+        "--edges",
+        type=lambda s: s.split(","),
+        default="data_to_hidden,hidden_to_hidden,hidden_to_data",
+        help="Comma-separated list of edge types to extract.",
+    )
     args = parser.parse_args()
 
     print("Starting graph HTML generation...")
@@ -854,17 +864,28 @@ if __name__ == "__main__":
     for node_set in nodes:
         node_lats, node_lons = coords_to_latlon(nodes[node_set].numpy())
         nodes[node_set] = to_nodes_json(node_lats, node_lons, prefix=node_set)
-    
+
     for edge_set in edges:
         src_nodes, dst_nodes = edge_set.split("_to_")
         src_names = [f"{src_nodes}_{i}" for i in range(len(nodes[src_nodes]))]
         dst_names = [f"{dst_nodes}_{i}" for i in range(len(nodes[dst_nodes]))]
         edges[edge_set] = to_edges_json(src_names, dst_names, edges[edge_set].numpy().T)
-    
 
-    colors = ["#5050ff", "#ff5050", "#50ff50", "#ffaa00", "#aa00ff", "#00aaff",
-              "#ff0055", "#55ff00", "#00ffaa", "#ff5500", "#0055ff", "#aa5500"]
-    
+    colors = [
+        "#5050ff",
+        "#ff5050",
+        "#50ff50",
+        "#ffaa00",
+        "#aa00ff",
+        "#00aaff",
+        "#ff0055",
+        "#55ff00",
+        "#00ffaa",
+        "#ff5500",
+        "#0055ff",
+        "#aa5500",
+    ]
+
     nodes_embed = []
     for i, (node_set, pts) in enumerate(nodes.items()):
         nodes_embed.append({"name": node_set, "points": pts, "color": colors[i % len(colors)], "radius": 25 + i * 2})
