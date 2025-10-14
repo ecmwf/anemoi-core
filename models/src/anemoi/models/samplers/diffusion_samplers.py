@@ -17,7 +17,8 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 DenoisingFunction = Callable[
-    [torch.Tensor, torch.Tensor, torch.Tensor, Optional[ProcessGroup], Optional[list]], torch.Tensor
+    [torch.Tensor, torch.Tensor, torch.Tensor, Optional[ProcessGroup], Optional[list]],
+    torch.Tensor,
 ]
 
 
@@ -58,7 +59,14 @@ class NoiseScheduler(ABC):
 class KarrasScheduler(NoiseScheduler):
     """Karras et al. EDM schedule."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, rho: float = 7.0, **kwargs):
+    def __init__(
+        self,
+        sigma_max: float,
+        sigma_min: float,
+        num_steps: int,
+        rho: float = 7.0,
+        **kwargs,
+    ):
         super().__init__(sigma_max, sigma_min, num_steps)
         self.rho = rho
 
@@ -91,7 +99,13 @@ class LinearScheduler(NoiseScheduler):
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
     ) -> torch.Tensor:
-        sigmas = torch.linspace(self.sigma_max, self.sigma_min, self.num_steps, device=device, dtype=dtype_compute)
+        sigmas = torch.linspace(
+            self.sigma_max,
+            self.sigma_min,
+            self.num_steps,
+            device=device,
+            dtype=dtype_compute,
+        )
 
         return sigmas
 
@@ -99,7 +113,14 @@ class LinearScheduler(NoiseScheduler):
 class CosineScheduler(NoiseScheduler):
     """Cosine schedule."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, s: float = 0.008, **kwargs):
+    def __init__(
+        self,
+        sigma_max: float,
+        sigma_min: float,
+        num_steps: int,
+        s: float = 0.008,
+        **kwargs,
+    ):
         super().__init__(sigma_max, sigma_min, num_steps)
         self.s = s  # small offset to prevent singularity
 
@@ -182,6 +203,10 @@ class DiffusionSampler(ABC):
         pass
 
 
+### WARNING : MODIFIED TEMPORARILY FOR DOWNSCALING
+from icecream import ic
+
+
 class EDMHeunSampler(DiffusionSampler):
     """EDM Heun sampler with stochastic churn following Karras et al."""
 
@@ -204,7 +229,8 @@ class EDMHeunSampler(DiffusionSampler):
 
     def sample(
         self,
-        x: torch.Tensor,
+        x_in_interp: torch.Tensor,
+        x_in_hres: torch.Tensor,
         y: torch.Tensor,
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
@@ -220,8 +246,10 @@ class EDMHeunSampler(DiffusionSampler):
         dtype = kwargs.get("dtype", self.dtype)
         eps_prec = kwargs.get("eps_prec", self.eps_prec)
 
-        batch_size, ensemble_size = x.shape[0], x.shape[2]
+        batch_size, ensemble_size = x_in_interp.shape[0], x_in_interp.shape[2]
         num_steps = len(sigmas) - 1
+
+        # ic("Before step", y[..., 64].mean())
 
         # Heun sampling loop
         for i in range(num_steps):
@@ -230,7 +258,10 @@ class EDMHeunSampler(DiffusionSampler):
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
             if apply_churn:
-                gamma = min(S_churn / num_steps, torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1)
+                gamma = min(
+                    S_churn / num_steps,
+                    torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1,
+                )
                 sigma_effective = sigma_i + gamma * sigma_i
                 epsilon = torch.randn_like(y) * S_noise
                 y = y + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
@@ -238,9 +269,12 @@ class EDMHeunSampler(DiffusionSampler):
                 sigma_effective = sigma_i
 
             D1 = denoising_fn(
-                x,
-                y.to(dtype=x.dtype),
-                sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(x.dtype),
+                x_in_interp,
+                x_in_hres,
+                y.to(dtype=x_in_interp.dtype),
+                sigma_effective.view(1, 1, 1, 1)
+                .expand(batch_size, ensemble_size, 1, 1)
+                .to(x_in_interp.dtype),
                 model_comm_group,
                 grid_shard_shapes,
             ).to(dtype)
@@ -251,9 +285,12 @@ class EDMHeunSampler(DiffusionSampler):
 
             if sigma_next > eps_prec:
                 D2 = denoising_fn(
-                    x,
-                    y_next.to(dtype=x.dtype),
-                    sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype=x.dtype),
+                    x_in_interp,
+                    x_in_hres,
+                    y_next.to(dtype=x_in_interp.dtype),
+                    sigma_next.view(1, 1, 1, 1)
+                    .expand(batch_size, ensemble_size, 1, 1)
+                    .to(dtype=x_in_interp.dtype),
                     model_comm_group,
                     grid_shard_shapes,
                 ).to(dtype)
@@ -296,8 +333,12 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = sigma.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1)
-            denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
+            sigma_expanded = sigma.view(1, 1, 1, 1).expand(
+                batch_size, ensemble_size, 1, 1
+            )
+            denoised = denoising_fn(
+                x, y, sigma_expanded, model_comm_group, grid_shard_shapes
+            )
 
             if sigma_next == 0:
                 y = denoised

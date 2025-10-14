@@ -74,7 +74,9 @@ class AnemoiModelInterface(torch.nn.Module):
         self.statistics_tendencies = statistics_tendencies
         self.truncation_data = truncation_data
         self.metadata = metadata
-        self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
+        self.supporting_arrays = (
+            supporting_arrays if supporting_arrays is not None else {}
+        )
         self.data_indices = data_indices
         self._build_model()
 
@@ -82,7 +84,14 @@ class AnemoiModelInterface(torch.nn.Module):
         """Builds the model and pre- and post-processors."""
         # Instantiate processors
         processors = [
-            [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
+            [
+                name,
+                instantiate(
+                    processor,
+                    data_indices=self.data_indices,
+                    statistics=self.statistics,
+                ),
+            ]
             for name, processor in self.config.data.processors.items()
         ]
 
@@ -93,7 +102,14 @@ class AnemoiModelInterface(torch.nn.Module):
         # If tendencies statistics are provided, instantiate the tendencies processors
         if self.statistics_tendencies is not None:
             processors = [
-                [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics_tendencies)]
+                [
+                    name,
+                    instantiate(
+                        processor,
+                        data_indices=self.data_indices,
+                        statistics=self.statistics_tendencies,
+                    ),
+                ]
                 for name, processor in self.config.data.processors.items()
             ]
             # Assign the processor list pre- and post-processors
@@ -119,8 +135,14 @@ class AnemoiModelInterface(torch.nn.Module):
         # Use the forward method of the model directly
         self.forward = self.model.forward
 
+    #### WARNING, THIS HAS BEEN CHANGED FOR DOWNSCALING TEMPORARILY
     def predict_step(
-        self, batch: torch.Tensor, model_comm_group: Optional[ProcessGroup] = None, gather_out: bool = True, **kwargs
+        self,
+        x_in_lres: torch.Tensor,
+        x_in_hres: torch.Tensor,
+        model_comm_group: Optional[ProcessGroup] = None,
+        gather_out: bool = True,
+        **kwargs,
     ) -> torch.Tensor:
         """Prediction step for the model.
 
@@ -140,7 +162,8 @@ class AnemoiModelInterface(torch.nn.Module):
         """
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
-            "batch": batch,
+            "x_in_lres": x_in_lres,
+            "x_in_hres": x_in_hres,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
             "multi_step": self.multi_step,
@@ -151,7 +174,9 @@ class AnemoiModelInterface(torch.nn.Module):
         if hasattr(self, "pre_processors_tendencies"):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
-            predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+            predict_kwargs["post_processors_tendencies"] = (
+                self.post_processors_tendencies
+            )
 
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)

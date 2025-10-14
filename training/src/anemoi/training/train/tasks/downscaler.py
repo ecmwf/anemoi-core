@@ -243,14 +243,31 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         rho: float,
         device: torch.device,
     ) -> tuple[torch.Tensor]:
+
         if self.training_approach == "probabilistic_high_noise":
             rnd_uniform = torch.rand(shape, device=device)
             sigma = (
                 sigma_max ** (1.0 / rho)
                 + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
             ) ** rho
-
         elif self.training_approach == "probabilistic":
+            if torch.rand(1, device=device) < 0.8:
+                log_sigma = torch.normal(
+                    mean=self.lognormal_mean,
+                    std=self.lognormal_std,
+                    size=shape,
+                    device=device,
+                )
+                sigma = torch.exp(log_sigma)
+            else:
+                rnd_uniform = torch.rand(shape, device=device)
+                sigma = (
+                    sigma_max ** (1.0 / rho)
+                    + rnd_uniform
+                    * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
+                ) ** rho
+
+        elif self.training_approach == "probabilistic_low_noise":
             log_sigma = torch.normal(
                 mean=self.lognormal_mean,
                 std=self.lognormal_std,
