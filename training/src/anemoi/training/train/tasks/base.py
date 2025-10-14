@@ -313,10 +313,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
             grid_shard_shapes=self.grid_shard_shapes,
         )
 
+    ### WARNING MODIFIED FOR DOWNSCALING TEMPORARILY
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
-        self._ckpt_model_name_to_index = checkpoint["hyper_parameters"][
+        self._ckpt_model_name_to_index_input_hres = checkpoint["hyper_parameters"][
             "data_indices"
-        ].name_to_index
+        ].name_to_index_input_hres
+        self._ckpt_model_name_to_index_input_lres = checkpoint["hyper_parameters"][
+            "data_indices"
+        ].name_to_index_input_lres
+        self._ckpt_model_name_to_index_output = checkpoint["hyper_parameters"][
+            "data_indices"
+        ].name_to_index_output
 
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
