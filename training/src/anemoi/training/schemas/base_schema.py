@@ -106,7 +106,6 @@ class BaseSchema(BaseModel):
                 error,
                 msg,
             )
-        return self
 
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)

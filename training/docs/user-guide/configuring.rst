@@ -22,7 +22,6 @@ settings at the top as follows:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - datamodule: single
    - hardware: example
    - graph: multi_scale
    - model: gnn
@@ -102,14 +101,12 @@ match the dataset you provide.
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - datamodule: single
    - hardware: example
    - graph: multi_scale
    - model: transformer # Change from default group
    - training: default
    - _self_
 
-   config_validation: True
    data:
       resolution: n320
 

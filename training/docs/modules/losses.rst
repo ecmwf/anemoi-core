@@ -206,40 +206,6 @@ are available.
         is_model_level: True
         param: 'z'
 
-The list of available metadata attributes is:
-
--  ``is_pressure_level``: whether the variable is a pressure level,
--  ``is_model_level``: whether the variable is a model level,
--  ``is_surface_level``: whether the variable is on the surface,
--  ``level``: the level of the variable,
--  ``is_constant_in_time``: whether the variable is constant in time,
--  ``is_instantanous``: whether the variable is instantaneous,
--  ``is_valid_over_a_period``: whether the variable is valid over a
-   period,
--  ``time_processing``: the time processing type of the variable,
--  ``period``: the variable's period as a timedelta,
--  ``is_accumulation``: whether the variable is an accumulation,
--  ``param``: the parameter name of the variable,
--  ``grib_keys``: the GRIB keys for the variable,
--  ``is_computed_forcing``: whether if the variable is a computed
-   forcing,
--  ``is_from_input``: whether the variable is from input.
-
-For example, to set a different scaler coefficient for a particular
-level, several groups can be defined:
-
-.. code:: yaml
-
-   variable_groups:
-     default: sfc
-     pl:
-        is_pressure_level: True
-     l_50:  # this needs to come first to take priority
-        param: ["z"]
-        level: [50]
-     l:
-        param: ["z"]
-
 If metadata is not available, complex variable groups cannot be defined,
 and an error will be raised.
 

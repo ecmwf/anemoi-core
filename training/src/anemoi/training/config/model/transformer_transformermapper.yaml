@@ -53,7 +53,8 @@ encoder:
   qk_norm: False
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
+  shard_strategy: heads
+
 
 decoder:
   _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
@@ -70,7 +71,7 @@ decoder:
   qk_norm: False
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
+  shard_strategy: heads
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

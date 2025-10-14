@@ -76,7 +76,6 @@ encoder:
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
 
 
 decoder:
@@ -90,7 +89,6 @@ decoder:
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

@@ -64,6 +64,7 @@ class RolloutEval(Callback):
                 batch,
                 rollout=self.rollout,
                 validation_mode=True,
+                training_mode=True,
             ):
                 loss += loss_next
                 metrics.update(metrics_next)

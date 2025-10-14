@@ -17,6 +17,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
 LOGGER = logging.getLogger(__name__)
 
@@ -89,6 +90,11 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         authentication=config.diagnostics.log.mlflow.authentication,
         on_resume_create_child=config.diagnostics.log.mlflow.on_resume_create_child,
         max_params_length=max_params_length,
+    )
+    config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
+    logger.log_hyperparams(
+        config_params,
+        expand_keys=config.diagnostics.log.mlflow.expand_hyperparams,
     )
 
     if config.diagnostics.log.mlflow.terminal:

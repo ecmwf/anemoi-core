@@ -322,7 +322,7 @@ class BaseTrainingSchema(BaseModel):
     deterministic: bool = Field(default=False)
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
     precision: str = Field(default="16-mixed")
-    "Precision. Options: '32', '16-mixed', 'bf16-mixed', 'bf16-fp32-opt'"
+    "Precision"
     multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
@@ -345,7 +345,7 @@ class BaseTrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations."
-    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
+    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str]]]
     "Groups for variable loss scaling"
     max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
