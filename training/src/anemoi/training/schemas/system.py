@@ -39,7 +39,7 @@ class FilesSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Path | None = None
     "Path to the inverse truncation matrix file."
-    checkpoint: dict[str, str]
+    checkpoint: Checkpoint = Field(default_factory=Checkpoint)
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
     warm_start: str | None = None
     "Name of the checkpoint file to use for warm starting the training"
@@ -96,5 +96,5 @@ class SystemSchema(BaseModel):
     "Specification of hardware and compute resources available including the number of nodes, GPUs, and accelerator type."
     files: FilesSchema
     "Definitions of specific input and output artifacts used relative to the directories defined in `paths`."
-    paths: PathsSchema
+    storage: StorageSchema
     "High-level directory structure describing where data is read from."
