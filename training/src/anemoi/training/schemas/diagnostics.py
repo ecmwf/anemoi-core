@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
@@ -101,11 +102,17 @@ class LongRolloutPlotsSchema(BaseModel):
 
 
 class FocusAreaSchema(BaseModel):
-    spacial_mask: str | None = Field(default=None)
+    spatial_mask: str | None = Field(default=None)
     "Name of the node attribute to use as masking. eg. cutout_mask"
 
     latlon_bounds: list[list[float]] | None = Field(default=None, min_items=2, max_items=2)
     "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self):
+        if (self.spacial_mask is None) == (self.latlon_bounds is None):
+            raise ValueError("Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both).")
+        return self
 
 
 class PlotSampleSchema(BaseModel):
@@ -131,7 +138,7 @@ class PlotSampleSchema(BaseModel):
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'spacial_mask' or 'latlon_bounds'."
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class PlotSpectrumSchema(BaseModel):

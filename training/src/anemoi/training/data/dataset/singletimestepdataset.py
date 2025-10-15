@@ -20,7 +20,6 @@ from .singledataset import NativeGridDataset
 LOGGER = logging.getLogger(__name__)
 
 
-
 class SingleTimestepNativeGridDataset(NativeGridDataset):
     """Iterable autoencoder dataset for AnemoI data on the arbitrary grids."""
 
