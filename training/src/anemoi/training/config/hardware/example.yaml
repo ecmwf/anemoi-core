@@ -1,5 +1,5 @@
 ---
 defaults:
-  - paths: example
+  - storage: example
   - files: example
   - hardware: example

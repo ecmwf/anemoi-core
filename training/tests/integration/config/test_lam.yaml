@@ -2,9 +2,9 @@
 dataloader:
   dataset:
     cutout:
-      - dataset: ${system.paths.data}/${system.files.dataset}
+      - dataset: ${system.storage.data}/${system.files.dataset}
         thinning: 25 # ???-value in lam template
-      - dataset: ${system.paths.data}/${system.files.forcing_dataset}
+      - dataset: ${system.storage.data}/${system.files.forcing_dataset}
   training:
     start: "2017-01-01"
     end: "2017-01-07"

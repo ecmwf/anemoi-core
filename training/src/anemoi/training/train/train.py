@@ -144,7 +144,7 @@ class AnemoiTrainer:
         """
         if self.config.system.files.graph is not None:
             graph_filename = Path(
-                self.config.system.paths.graph,
+                self.config.system.storage.graph,
                 self.config.system.files.graph,
             )
 
@@ -174,11 +174,11 @@ class AnemoiTrainer:
         truncation_data = {}
         if self.config.system.files.truncation is not None:
             truncation_data["down"] = load_npz(
-                Path(self.config.system.paths.truncation, self.config.system.files.truncation),
+                Path(self.config.system.storage.truncation, self.config.system.files.truncation),
             )
         if self.config.system.files.truncation_inv is not None:
             truncation_data["up"] = load_npz(
-                Path(self.config.system.paths.truncation, self.config.system.files.truncation_inv),
+                Path(self.config.system.storage.truncation, self.config.system.files.truncation_inv),
             )
 
         return truncation_data
@@ -288,14 +288,14 @@ class AnemoiTrainer:
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        warm_start_dir = getattr(self.config.system.paths, "warm_start", None)  # avoid breaking change
+        warm_start_dir = getattr(self.config.system.storage, "warm_start", None)  # avoid breaking change
         warm_start_file = self.config.system.files.warm_start
         warm_start_path = None
 
         if warm_start_dir or warm_start_file:
             assert (
                 warm_start_dir is not None
-            ), f"Please configure config.system.paths.warm_start correctly, found: {warm_start_dir}"
+            ), f"Please configure config.system.storage.warm_start correctly, found: {warm_start_dir}"
             assert (
                 warm_start_file is not None
             ), f"Please configure config.system.files.warm_start correctly, found: {warm_start_file}"
@@ -306,7 +306,7 @@ class AnemoiTrainer:
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
         """Returns the directory where checkpoints are stored."""
-        return Path(self.config.system.paths.checkpoints.parent, fork_id or self.lineage_run) / "last.ckpt"
+        return Path(self.config.system.storage.checkpoints.parent, fork_id or self.lineage_run) / "last.ckpt"
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
@@ -360,7 +360,7 @@ class AnemoiTrainer:
                 self.config.diagnostics.log.tensorboard.enabled
             ), "Tensorboard logging must be enabled when profiling! Check your job config."
             return PyTorchProfiler(
-                dirpath=self.config.system.paths.logs.tensorboard,
+                dirpath=self.config.system.storage.logs.tensorboard,
                 filename="anemoi-profiler",
                 export_to_chrome=False,
                 # profiler-specific keywords
@@ -370,7 +370,7 @@ class AnemoiTrainer:
                 ],
                 schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    dir_name=self.config.system.paths.logs.tensorboard,
+                    dir_name=self.config.system.storage.logs.tensorboard,
                 ),
                 profile_memory=True,
                 record_shapes=True,
@@ -455,16 +455,16 @@ class AnemoiTrainer:
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.lineage_run = self.parent_run_server2server or self.run_id
-            self.config.system.paths.checkpoints = Path(self.config.system.paths.checkpoints, self.lineage_run)
-            self.config.system.paths.plots = Path(self.config.system.paths.plots, self.lineage_run)
+            self.config.system.storage.checkpoints = Path(self.config.system.storage.checkpoints, self.lineage_run)
+            self.config.system.storage.plots = Path(self.config.system.storage.plots, self.lineage_run)
         elif self.config.training.fork_run_id:
             # WHEN USING MANY NODES/GPUS
             self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
-            self.config.system.paths.checkpoints = Path(self.config.system.paths.checkpoints, self.lineage_run)
+            self.config.system.storage.checkpoints = Path(self.config.system.storage.checkpoints, self.lineage_run)
 
-        LOGGER.info("Checkpoints path: %s", self.config.system.paths.checkpoints)
-        LOGGER.info("Plots path: %s", self.config.system.paths.plots)
+        LOGGER.info("Checkpoints path: %s", self.config.system.storage.checkpoints)
+        LOGGER.info("Plots path: %s", self.config.system.storage.plots)
 
     @rank_zero_only
     def _check_dry_run(self) -> None:
@@ -477,7 +477,7 @@ class AnemoiTrainer:
         if self.config.diagnostics.log.mlflow.enabled:
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
-                self.mlflow_logger._parent_dry_run and not Path(self.config.system.paths.checkpoints).is_dir()
+                self.mlflow_logger._parent_dry_run and not Path(self.config.system.storage.checkpoints).is_dir()
             )
             self.start_from_checkpoint = (
                 False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint

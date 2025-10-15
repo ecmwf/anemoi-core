@@ -503,7 +503,7 @@ a specific checkpoint. This can either be a checkpoint from the same run
 or a checkpoint from a different run that you have run in the past or
 that you using for transfer learning. To do this, set
 ``config.system.files.warm_start`` to be the checkpoint filename they
-want to restart from and ``config.system.paths.warm_start`` to be the
+want to restart from and ``config.system.storage.warm_start`` to be the
 path to the checkpoint. See the example below.
 
 .. code:: yaml

@@ -24,13 +24,13 @@ system:
     graph: none
     output: output_training/${data.resolution}/
     logs:
-      base: ${system.paths.output}logs/
-      wandb: ${system.paths.logs.base}
-      mlflow: ${system.paths.logs.base}mlflow/
-      tensorboard: ${system.paths.logs.base}tensorboard/
-    checkpoints: ${system.paths.output}checkpoint/
-    plots: ${system.paths.output}plots/
-    profiler: ${system.paths.output}profiler/
+      base: ${system.storage.output}logs/
+      wandb: ${system.storage.logs.base}
+      mlflow: ${system.storage.logs.base}mlflow/
+      tensorboard: ${system.storage.logs.base}tensorboard/
+    checkpoints: ${system.storage.output}checkpoint/
+    plots: ${system.storage.output}plots/
+    profiler: ${system.storage.output}profiler/
     data: "placeholder-for-config-validation"
   files:
     graph: none
@@ -383,7 +383,7 @@ dataloader:
   prefetch_factor: 1
   pin_memory: True
   read_group_size: ${system.hardware.num_gpus_per_model}
-  #dataset: ${system.paths.data}/${system.files.dataset}
+  #dataset: ${system.storage.data}/${system.files.dataset}
   batch_size:
     training: 1
     validation: 1
