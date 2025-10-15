@@ -229,11 +229,10 @@ HTML_TEMPLATE = """
             return [-r * Math.sin(phi) * Math.cos(theta), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta)];
         }
 
-        // === DATA PLACEHOLDERS (server-side template expected) ===
-        // Replace these template tokens with your actual JSON data when rendering server-side.
+        // === EMBEDDED DATA ===
+        // this will be rendered by Jinja template engine
         const NODE_SETS = {{ nodes | tojson }};
         const EDGE_SETS = {{ edges | tojson }};
-
         // =========================================================
 
         // Data processing
@@ -255,7 +254,10 @@ HTML_TEMPLATE = """
             if (degreeMap.has(a)) degreeMap.set(a, degreeMap.get(a) + 1);
             if (degreeMap.has(b)) degreeMap.set(b, degreeMap.get(b) + 1);
         }));
-        const maxDegree = Math.max(...degreeMap.values()), minDegree = Math.min(...degreeMap.values());
+
+        // this does not scale well for huge graphs, temporarily set hardcoded values
+        // const maxDegree = Math.max(...degreeMap.values()), minDegree = Math.min(...degreeMap.values());
+        const maxDegree = {{ max_degree }}, minDegree = {{ min_degree }};
         document.getElementById('maxDegree').textContent = maxDegree;
 
         // Selection state
@@ -463,7 +465,7 @@ HTML_TEMPLATE = """
         // Create meshes with per-instance DataTexture if WebGL2; else fall back to attribute
         const isWebGL2 = renderer.capabilities.isWebGL2;
         if (!isWebGL2) {
-            console.warn('WebGL2 not available: falling back to instanced attribute approach (may hit vertex attribute limits on some GPUs).');
+            console.log('WebGL2 not available: falling back to instanced attribute approach (may hit vertex attribute limits on some GPUs).');
         }
 
         // --- Large DataTexture safe NodeSet initialization ---
@@ -897,7 +899,7 @@ if __name__ == "__main__":
     # # Render and save
     print("Rendering HTML...")
     template = Template(HTML_TEMPLATE)
-    html_output = template.render(nodes=nodes_embed, edges=edges_embed)
+    html_output = template.render(nodes=nodes_embed, edges=edges_embed, max_degree=50, min_degree=1)
 
     with open("graph.html", "w") as f:
         f.write(html_output)
