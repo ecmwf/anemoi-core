@@ -4,10 +4,11 @@ defaults:
 - datamodule: single
 - diagnostics: evaluation
 - hardware: example
-- graph: hierarchical_3level
-- model: graphtransformer
+- graph: point_wise
+- model: point_wise
 - training: default
 - _self_
+
 
 config_validation: True
 
@@ -17,12 +18,3 @@ config_validation: True
 # For example to change from default GPU count:
 # hardware:
 #   num_gpus_per_node: 1
-
-model:
-  keep_batch_sharded: False # not yet supported for Hierarchical
-  model:
-    _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
-  enable_hierarchical_level_processing: True
-  level_process_num_layers: 2
-  processor:
-    num_chunks: 2

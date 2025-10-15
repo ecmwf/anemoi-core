@@ -63,6 +63,37 @@ class BaseBlock(nn.Module, ABC):
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
 
+class PointWiseMLPProcessorBlock(BaseBlock):
+    """Point-wise block with MLPs."""
+
+    def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
+        super().__init__()
+        assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
+        layers = [
+            layer_kernels.Linear(num_channels, hidden_dim),
+            # This pattern has been proven to produce good results in point-wise models
+            layer_kernels.LayerNorm(hidden_dim),
+            layer_kernels.Activation(),
+        ]
+        if num_channels != hidden_dim:
+            layers.append(layer_kernels.Linear(hidden_dim, num_channels))
+
+        if dropout_p is not None and dropout_p > 0:
+            layers.append(nn.Dropout(p=dropout_p))
+
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
+    ) -> Tensor:
+        return self.mlp(x)
+
+
 class TransformerProcessorBlock(BaseBlock):
     """Transformer block with MultiHeadSelfAttention and MLPs."""
 
