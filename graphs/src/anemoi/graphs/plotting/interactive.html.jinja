@@ -585,11 +585,22 @@
             // Dim edges
             edgeSetMeshes.forEach((mesh, setIdx) => {
                 const attr = mesh.geometry.attributes.edgeDimFactor;
+                const edgeSetName = EDGE_SETS[setIdx].name;
+                const parts = edgeSetName.split('_to_');
+                const sameNodeSet = (parts[0] === parts[1]);
+
                 if (!attr) return;
                 const dimFactors = attr.array;
                 edgeSetData[setIdx].forEach((edge, edgeIdx) => {
                     const isConnected = (edge.a === selectedNode || edge.b === selectedNode);
                     const dimValue = isConnected ? 1.0 : DIM_FACTOR_DIMMED;
+                    // if not connected and not sameNodeSet, dim completely
+                    if (!isConnected && !sameNodeSet) {
+                        dimFactors[edgeIdx * 2] = 0.0;
+                        dimFactors[edgeIdx * 2 + 1] = 0.0;
+                        return;
+                    }
+                    // else set to normal dimValue
                     dimFactors[edgeIdx * 2] = dimValue;
                     dimFactors[edgeIdx * 2 + 1] = dimValue;
                 });
