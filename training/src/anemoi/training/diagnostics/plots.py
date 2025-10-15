@@ -847,7 +847,7 @@ def plot_flat_recon(
         norms[0] = norm
         norms[1] = norm
 
-        # Clip extreme errors for more readable plots
+    # Clip extreme errors for more readable plots
     clipped_diff = np.clip(difference, 0, np.nanpercentile(difference, 99))
 
     # Set a fixed linear color normalization

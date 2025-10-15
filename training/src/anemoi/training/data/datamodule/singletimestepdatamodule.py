@@ -14,7 +14,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from anemoi.datasets.data import open_dataset
-from anemoi.training.data.dataset import AutoencoderNativeGridDataset
+from anemoi.training.data.dataset import SingleTimestepNativeGridDataset
 
 from .singledatamodule import AnemoiDatasetsDataModule
 
@@ -37,11 +37,11 @@ class AnemoiSingleTimestepDatasetsDataModule(AnemoiDatasetsDataModule):
         data_reader: Callable,
         shuffle: bool = True,
         label: str = "generic",
-    ) -> AutoencoderNativeGridDataset:
+    ) -> SingleTimestepNativeGridDataset:
 
         data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
 
-        return AutoencoderNativeGridDataset(
+        return SingleTimestepNativeGridDataset(
             data_reader=data_reader,
             relative_date_indices=self.relative_date_indices(),
             timestep=self.config.data.timestep,
@@ -51,7 +51,7 @@ class AnemoiSingleTimestepDatasetsDataModule(AnemoiDatasetsDataModule):
         )
 
     @cached_property
-    def ds_valid(self) -> AutoencoderNativeGridDataset:
+    def ds_valid(self) -> SingleTimestepNativeGridDataset:
         if not self.config.dataloader.training.end < self.config.dataloader.validation.start:
             LOGGER.warning(
                 "Training end date %s is not before validation start date %s.",
