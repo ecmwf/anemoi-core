@@ -31,10 +31,11 @@ system:
     checkpoints: ${system.storage.output}checkpoint/
     plots: ${system.storage.output}plots/
     profiler: ${system.storage.output}profiler/
-    data: "placeholder-for-config-validation"
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:
     graph: none
-    dataset: dataset_20220101_20230101_6H.zarr/3.zarr
+    dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
+    forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
     warm_start: null
     checkpoint:
       every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
@@ -57,7 +58,7 @@ graph:
       node_builder:
         _target_: anemoi.graphs.nodes.ICONNodes
         name: "icon_grid_0026_R03B07_G"
-        grid_filename: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
+        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
         max_level_multimesh: 3
         max_level_dataset: 3
     # Data nodes
@@ -168,7 +169,7 @@ model:
   cpu_offload: False
 
   model:
-    _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
 
   keep_batch_sharded: True
 
