@@ -65,6 +65,7 @@ dependencies = [
 ]
 
 optional-dependencies.all = [  ]
+optional-dependencies.checkpoint = [ "safetensors>=0.4" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
   "pre-commit>=3.3.3",
