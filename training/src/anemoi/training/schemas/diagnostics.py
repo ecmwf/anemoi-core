@@ -109,9 +109,10 @@ class FocusAreaSchema(BaseModel):
     "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
 
     @model_validator(mode="after")
-    def exactly_one_present(self):
+    def exactly_one_present(self) -> "FocusAreaSchema":
         if (self.spacial_mask is None) == (self.latlon_bounds is None):
-            raise ValueError("Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both).")
+            msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
+            raise ValueError(msg)
         return self
 
 
