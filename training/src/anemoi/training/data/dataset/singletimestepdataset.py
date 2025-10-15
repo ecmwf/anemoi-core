@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
 
 import torch
 from einops import rearrange
@@ -20,10 +19,6 @@ from .singledataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from anemoi.training.data.grid_indices import BaseGridIndices
 
 
 class SingleTimestepNativeGridDataset(NativeGridDataset):
