@@ -383,7 +383,7 @@ dataloader:
   prefetch_factor: 1
   pin_memory: True
   read_group_size: ${system.hardware.num_gpus_per_model}
-  #dataset: ${system.storage.data}/${system.files.dataset}
+  #dataset: ${system.storage.dataset}/${system.files.dataset}
   batch_size:
     training: 1
     validation: 1

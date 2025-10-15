@@ -21,9 +21,9 @@ config_validation: True
 dataloader:
   dataset:
     cutout:
-      - dataset: ${system.storage.data}/${system.files.dataset}
+      - dataset: ${system.storage.dataset}/${system.files.dataset}
         thinning: ???
-      - dataset: ${system.storage.data}/${system.files.forcing_dataset}
+      - dataset: ${system.storage.dataset}/${system.files.forcing_dataset}
     adjust: all
     min_distance_km: 0
   grid_indices:

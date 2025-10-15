@@ -54,8 +54,8 @@ class Logs(PydanticBaseModel):
     "Path to output tensorboard logs."
 
 
-class PathsSchema(BaseModel):
-    data: Path | dict[str, Path] | None = None
+class StorageSchema(BaseModel):
+    dataset: Path | dict[str, Path] | None = None
     "Path to the data directory."
     graph: Path | None = None
     "Path to the graph directory."
