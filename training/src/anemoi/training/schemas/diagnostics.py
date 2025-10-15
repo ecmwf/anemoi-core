@@ -110,7 +110,7 @@ class FocusAreaSchema(BaseModel):
 
     @model_validator(mode="after")
     def exactly_one_present(self) -> "FocusAreaSchema":
-        if (self.spacial_mask is None) == (self.latlon_bounds is None):
+        if (self.spatial_mask is None) == (self.latlon_bounds is None):
             msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
             raise ValueError(msg)
         return self
