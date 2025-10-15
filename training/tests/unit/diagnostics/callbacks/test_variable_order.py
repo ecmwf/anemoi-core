@@ -186,11 +186,11 @@ def test_on_epoch_partial_rename_permute(
     fake_trainer.datamodule.ds_train.name_to_index = name_to_index_partial_rename_permute
     fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_partial_rename_permute
     fake_trainer.datamodule.ds_test.name_to_index = name_to_index_partial_rename_permute
-    with pytest.raises(ValueError, match="The variable order in the model and data is different."):
+    with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
         callback.on_train_start(fake_trainer, fake_pl_module)
-    with pytest.raises(ValueError, match="The variable order in the model and data is different."):
+    with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
         callback.on_validation_start(fake_trainer, fake_pl_module)
-    with pytest.raises(ValueError, match="The variable order in the model and data is different."):
+    with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
         callback.on_test_start(fake_trainer, fake_pl_module)
 
     with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
