@@ -89,4 +89,4 @@ class PointWiseMLPProcessorSchema(PointWiseModelComponent):
     num_channels: NonNegativeInt = Field(example=128)
     "Number of channels."
     dropout_p: NonNegativeFloat = Field(example=0.1)
-    "Dropout probability used for multi-head self attention, default 0.0"
+    "Dropout probability, default 0.0"
