@@ -75,7 +75,9 @@ class BaseSchema(BaseModel):
         logger = []
         if self.diagnostics.log.wandb.enabled and (not self.system.storage.logs or not self.system.storage.logs.wandb):
             logger.append("wandb")
-        if self.diagnostics.log.mlflow.enabled and (not self.system.storage.logs or not self.system.storage.logs.mlflow):
+        if self.diagnostics.log.mlflow.enabled and (
+            not self.system.storage.logs or not self.system.storage.logs.mlflow
+        ):
             logger.append("mlflow")
         if self.diagnostics.log.tensorboard.enabled and (
             not self.system.storage.logs or not self.system.storage.logs.tensorboard
