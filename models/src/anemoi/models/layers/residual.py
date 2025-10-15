@@ -230,6 +230,12 @@ class CompleteOrnsteinResidual(BasicOrnsteinResidual):
             if idx not in [variables.get(v) for v in skip_blur]
         ]
 
+        self._var_axis_tail = (
+            (slice(None),) * len(self.kwargs_reshape_for)
+            if len(self.kwargs_reshape_for) > 0
+            else (slice(None),)
+        )
+
         filter = torch.ones(len(self._blurring_input_idx), self.x_fsht.lmax)
         filter = filter * max(theta_init, 0.01) / (0.5 - max(theta_init, 0.01))
         filter = torch.sqrt(filter / self.x_fsht.lmax)
@@ -285,8 +291,8 @@ class CompleteOrnsteinResidual(BasicOrnsteinResidual):
 
         x = einops.rearrange(x, self.values_reshape_for, **self.kwargs_reshape_for)
 
-        x[..., self._blurring_input_idx, :, :] = self.lpass_filter(
-            x[..., self._blurring_input_idx, :, :]
+        x[..., self._blurring_input_idx, *self._var_axis_tail] = self.lpass_filter(
+            x[..., self._blurring_input_idx, *self._var_axis_tail]
         )
 
         x = einops.rearrange(x, self.values_reshape_inv)
