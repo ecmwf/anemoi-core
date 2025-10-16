@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import TYPE_CHECKING
 from typing import Any
 
 from omegaconf import DictConfig
@@ -24,16 +25,18 @@ from pydantic_core import ValidationError
 
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
-from .data import DataSchema  # noqa: TC001
-from .dataloader import DataLoaderSchema  # noqa: TC001
-from .diagnostics import DiagnosticsSchema  # noqa: TC001
-from .graphs.base_graph import BaseGraphSchema  # noqa: TC001
-from .hardware import HardwareSchema  # noqa: TC001
-from .models.models import ModelSchema  # noqa: TC001
-from .training import TrainingSchema  # noqa: TC001
 from .utils import CUSTOM_MESSAGES
 from .utils import BaseModel
 from .utils import convert_errors
+
+if TYPE_CHECKING:
+    from .data import DataSchema
+    from .dataloader import DataLoaderSchema
+    from .diagnostics import DiagnosticsSchema
+    from .graphs.base_graph import BaseGraphSchema
+    from .hardware import HardwareSchema
+    from .models.models import ModelSchema
+    from .training import TrainingSchema
 
 _object_setattr = _model_construction.object_setattr
 

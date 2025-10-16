@@ -21,6 +21,7 @@ from omegaconf import DictConfig
 from pydantic import BaseModel
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
+from anemoi.training.diagnostics.callbacks.checkpoint_pipeline import CheckpointPipelineCallback
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
@@ -125,6 +126,24 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
     return checkpoint_callbacks
 
 
+def _get_checkpoint_pipeline_callback(config: DictConfig) -> list[CheckpointPipelineCallback]:
+    """Get checkpoint pipeline callback if configured."""
+    callbacks = []
+
+    # Check if checkpoint pipeline is configured
+    if (
+        hasattr(config.training, "checkpoint_pipeline")
+        and config.training.checkpoint_pipeline is not None
+        and hasattr(config.training.checkpoint_pipeline, "stages")
+        and len(config.training.checkpoint_pipeline.stages) > 0
+    ):
+
+        LOGGER.debug("Checkpoint pipeline configuration detected, adding pipeline callback")
+        callbacks.append(CheckpointPipelineCallback(config))
+
+    return callbacks
+
+
 def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
     """Get callbacks that are enabled in the config as according to CONFIG_ENABLED_CALLBACKS."""
     callbacks = []
@@ -181,6 +200,9 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     """
     trainer_callbacks: list[Callback] = []
+
+    # Get Checkpoint pipeline callback (if configured)
+    trainer_callbacks.extend(_get_checkpoint_pipeline_callback(config))
 
     # Get Checkpoint callback
     trainer_callbacks.extend(_get_checkpoint_callback(config))

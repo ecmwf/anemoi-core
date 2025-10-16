@@ -10,11 +10,17 @@
 from __future__ import annotations
 
 import logging
+import pickle  # noqa: S403  # pickle required for PyTorch checkpoint loading
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 
+# Import pipeline exceptions for consistent error handling
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
+from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.train.forecaster import GraphForecaster
 from anemoi.utils.checkpoints import save_metadata
 
@@ -71,14 +77,68 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
+    """Load checkpoint with transfer learning capabilities (DEPRECATED).
 
-    # Load the checkpoint
-    checkpoint = torch.load(ckpt_path, map_location=model.device)
+    .. deprecated:: 0.2.0
+        This function is deprecated and will be removed in a future version.
+        Use the checkpoint pipeline system instead:
+
+        .. code-block:: python
+
+            from anemoi.training.checkpoint import CheckpointPipeline, CheckpointContext
+            from omegaconf import OmegaConf
+
+            config = OmegaConf.create({
+                "stages": [
+                    {
+                        "_target_": "anemoi.training.checkpoint.sources.LocalSource",
+                        "path": ckpt_path
+                    },
+                    {
+                        "_target_": "anemoi.training.checkpoint.loaders.TransferLearningLoader",
+                        "skip_mismatched": True,
+                        "strict": False
+                    }
+                ]
+            })
+
+            pipeline = CheckpointPipeline.from_config(config)
+            context = CheckpointContext(model=model)
+            result = await pipeline.execute(context)
+            model = result.model
+    """
+    import warnings
+
+    warnings.warn(
+        "transfer_learning_loading() is deprecated and will be removed in a future version. "
+        "Use the checkpoint pipeline system with TransferLearningLoader instead. "
+        "See documentation for migration guide.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    # Load the checkpoint with proper error handling
+    # Get device from model parameters, defaulting to CPU
+    device = next(model.parameters()).device if len(list(model.parameters())) > 0 else "cpu"
+    try:
+        checkpoint = torch.load(ckpt_path, map_location=device)
+    except FileNotFoundError as e:
+        raise CheckpointNotFoundError(ckpt_path, {"original_error": str(e)}) from e
+    except (OSError, RuntimeError, pickle.UnpicklingError, EOFError, ValueError, TypeError) as e:
+        raise CheckpointLoadError(ckpt_path, e) from e
+
+    # Validate checkpoint structure
+    if "state_dict" not in checkpoint:
+        msg = "Invalid checkpoint format: missing 'state_dict' key"
+        raise CheckpointIncompatibleError(
+            msg,
+            details={"available_keys": list(checkpoint.keys()), "checkpoint_path": str(ckpt_path)},
+        )
 
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
-
     model_state_dict = model.state_dict()
+    shape_mismatches = {}
 
     for key in state_dict.copy():
         if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
@@ -86,16 +146,57 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
             LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
             LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
 
+            shape_mismatches[key] = (model_state_dict[key].shape, state_dict[key].shape)
             del state_dict[key]  # Remove the mismatched key
 
-    # Load the filtered st-ate_dict into the model
-    model.load_state_dict(state_dict, strict=False)
+    # Load the filtered state_dict into the model
+    try:
+        incompatible_keys = model.load_state_dict(state_dict, strict=False)
+
+        # Log loading results for transparency
+        if incompatible_keys.missing_keys:
+            LOGGER.info("Missing keys in checkpoint: %s", incompatible_keys.missing_keys)
+        if incompatible_keys.unexpected_keys:
+            LOGGER.info("Unexpected keys in checkpoint: %s", incompatible_keys.unexpected_keys)
+        if shape_mismatches:
+            LOGGER.info("Shape mismatches handled: %s", list(shape_mismatches.keys()))
+
+    except Exception as e:
+        msg = f"Failed to load state dict into model: {e}"
+        raise CheckpointIncompatibleError(
+            msg,
+            missing_keys=getattr(incompatible_keys, "missing_keys", None),
+            unexpected_keys=getattr(incompatible_keys, "unexpected_keys", None),
+            shape_mismatches=shape_mismatches,
+            details={"checkpoint_path": str(ckpt_path)},
+        ) from e
     return model
 
 
-def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
-    """
-    Recursively freezes the parameters of a submodule with the specified name.
+def freeze_submodule_by_name(module: nn.Module, target_name: str, _is_recursive_call: bool = False) -> bool:
+    """Recursively freezes the parameters of a submodule with the specified name (DEPRECATED).
+
+    .. deprecated:: 0.2.0
+        This function is deprecated and will be removed in a future version.
+        Use the checkpoint pipeline system instead:
+
+        .. code-block:: python
+
+            from anemoi.training.checkpoint import CheckpointPipeline, CheckpointContext
+            from omegaconf import OmegaConf
+
+            config = OmegaConf.create({
+                "stages": [
+                    {
+                        "_target_": "anemoi.training.checkpoint.modifiers.FreezingModifier",
+                        "layers": [target_name]
+                    }
+                ]
+            })
+
+            pipeline = CheckpointPipeline.from_config(config)
+            context = CheckpointContext(model=module)
+            result = await pipeline.execute(context)
 
     Parameters
     ----------
@@ -103,12 +204,51 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
         Pytorch model
     target_name : str
         The name of the submodule to freeze.
+
+    Returns
+    -------
+    bool
+        True if target module was found and frozen, False otherwise
     """
+    import warnings
+
+    warnings.warn(
+        "freeze_submodule_by_name() is deprecated and will be removed in a future version. "
+        "Use the checkpoint pipeline system with FreezingModifier instead. "
+        "See documentation for migration guide.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    # Validate inputs
+    if not target_name or not isinstance(target_name, str):
+        msg = f"Invalid target_name: must be a non-empty string, got {target_name!r}"
+        raise CheckpointConfigError(
+            msg,
+            details={"target_name": target_name, "type": type(target_name).__name__},
+        )
+
+    # Track if we found the target module
+    found_target = False
+
     for name, child in module.named_children():
         # If this is the target submodule, freeze its parameters
         if name == target_name:
+            param_count = 0
             for param in child.parameters():
                 param.requires_grad = False
+                param_count += 1
+
+            LOGGER.info("Frozen submodule '%s' with %d parameters", target_name, param_count)
+            found_target = True
         else:
             # Recursively search within children
-            freeze_submodule_by_name(child, target_name)
+            if freeze_submodule_by_name(child, target_name, _is_recursive_call=True):
+                found_target = True
+
+    # Warn if target was not found (but don't raise error for backward compatibility)
+    if not found_target and not _is_recursive_call:  # Only warn at top level
+        available_modules = [name for name, _ in module.named_children()]
+        LOGGER.warning("Target submodule '%s' not found. Available modules: %s", target_name, available_modules)
+
+    return found_target

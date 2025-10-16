@@ -9,8 +9,7 @@
 
 from __future__ import annotations
 
-from functools import partial
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING
 from typing import Annotated
 from typing import Union
 
@@ -19,9 +18,13 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 
-from anemoi.training.schemas.utils import allowed_values
-
 from .utils import BaseModel
+
+if TYPE_CHECKING:
+    from functools import partial
+    from pathlib import Path
+
+    from anemoi.training.schemas.utils import allowed_values
 
 
 class Checkpoint(BaseModel):

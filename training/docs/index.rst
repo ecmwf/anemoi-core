@@ -49,6 +49,14 @@ This package provides the *Anemoi* training functionality.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Checkpoint Pipeline System
+
+   checkpoint_pipeline_configuration
+   checkpoint_integration
+   checkpoint_troubleshooting
+
+.. toctree::
+   :maxdepth: 1
    :caption: Developing Anemoi Training
 
    dev/contributing

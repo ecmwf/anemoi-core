@@ -10,14 +10,12 @@
 
 from __future__ import annotations
 
-import datetime  # noqa: TC003
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
 from typing import Optional
 from typing import Union
 
-from omegaconf import DictConfig  # noqa: TC002
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -28,6 +26,12 @@ from pydantic import computed_field
 from anemoi.utils.dates import frequency_to_timedelta
 
 from .utils import BaseModel
+
+if TYPE_CHECKING:
+    import datetime
+    from pathlib import Path
+
+    from omegaconf import DictConfig
 
 
 class Frequency(RootModel):

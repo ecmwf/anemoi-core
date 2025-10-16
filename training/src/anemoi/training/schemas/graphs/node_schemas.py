@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING
 from typing import Annotated
 from typing import Literal
 from typing import Union
@@ -21,6 +21,9 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 
 from anemoi.training.schemas.utils import BaseModel
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 

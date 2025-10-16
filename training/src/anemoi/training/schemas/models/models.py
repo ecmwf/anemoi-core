@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
+from typing import TYPE_CHECKING
 from typing import Annotated
 from typing import Literal
 from typing import Union
@@ -22,13 +23,14 @@ from pydantic import model_validator
 
 from anemoi.training.schemas.utils import BaseModel
 
-from .decoder import GNNDecoderSchema  # noqa: TC001
-from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
-from .encoder import GNNEncoderSchema  # noqa: TC001
-from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
-from .processor import GNNProcessorSchema  # noqa: TC001
-from .processor import GraphTransformerProcessorSchema  # noqa: TC001
-from .processor import TransformerProcessorSchema  # noqa: TC001
+if TYPE_CHECKING:
+    from .decoder import GNNDecoderSchema
+    from .decoder import GraphTransformerDecoderSchema
+    from .encoder import GNNEncoderSchema
+    from .encoder import GraphTransformerEncoderSchema
+    from .processor import GNNProcessorSchema
+    from .processor import GraphTransformerProcessorSchema
+    from .processor import TransformerProcessorSchema
 
 LOGGER = logging.getLogger(__name__)
 

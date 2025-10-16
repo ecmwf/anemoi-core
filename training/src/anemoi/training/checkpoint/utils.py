@@ -14,8 +14,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from pathlib import Path  # noqa: TC003 - Used for actual Path operations, not just type hints
+import pickle  # noqa: S403  # pickle required for PyTorch checkpoint loading
+from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import aiohttp
 import torch
@@ -208,8 +213,79 @@ def validate_checkpoint(checkpoint_data: dict[str, Any]) -> bool:
 def _validate_model_keys(checkpoint_data: dict[str, Any], validation_errors: list[str]) -> None:
     """Validate that checkpoint contains model state."""
     model_keys = ["state_dict", "model_state_dict", "model"]
-    if not any(key in checkpoint_data for key in model_keys):
-        validation_errors.append(f"No model state found. Expected one of: {model_keys}")
+
+    # Check if checkpoint has expected model keys (wrapped checkpoint)
+    if any(key in checkpoint_data for key in model_keys):
+        return
+
+    # Check if this might be a raw state dictionary (contains parameter-like keys)
+    if _looks_like_state_dict(checkpoint_data):
+        return
+
+    # Provide helpful suggestions based on what we found
+    available_keys = list(checkpoint_data.keys())[:10]  # Show first 10 keys
+
+    error_msg = (
+        f"No model state found in checkpoint.\n"
+        f"Expected one of: {model_keys}\n"
+        f"Or a raw state dictionary with parameter tensors.\n"
+        f"Found keys: {available_keys}"
+    )
+
+    # Add specific suggestions based on the keys we see
+    if available_keys:
+        if any("model" in key.lower() for key in available_keys):
+            error_msg += "\nSuggestion: Found model-related keys - check if this checkpoint uses a different format"
+        elif any(key.endswith((".weight", ".bias")) for key in available_keys):
+            error_msg += "\nSuggestion: This looks like it might be a state dict, but validation failed"
+        else:
+            error_msg += "\nSuggestion: This may not be a valid checkpoint file - check the file format"
+
+    validation_errors.append(error_msg)
+
+
+def _looks_like_state_dict(data: dict[str, Any]) -> bool:
+    """Check if data looks like a raw state dictionary.
+
+    A raw state dict should contain mostly tensors with parameter-like names
+    (e.g., 'linear.weight', 'layer.bias', etc.).
+    """
+    if not data:
+        return False
+
+    # Count tensors vs non-tensors
+    tensor_count = 0
+    total_count = 0
+
+    for key, value in data.items():
+        total_count += 1
+        if isinstance(value, torch.Tensor):
+            tensor_count += 1
+            # Check if key looks like a parameter name
+            if not _looks_like_parameter_name(key):
+                continue
+        elif isinstance(value, dict):
+            # Nested dictionaries are also common in state dicts
+            continue
+        else:
+            # Non-tensor, non-dict values are less common in raw state dicts
+            continue
+
+    # Consider it a state dict if most values are tensors and we have a reasonable number
+    return tensor_count > 0 and (tensor_count / total_count) >= 0.3
+
+
+def _looks_like_parameter_name(name: str) -> bool:
+    """Check if a name looks like a model parameter name."""
+    # Parameter names often contain dots and end with common suffixes
+    common_suffixes = [".weight", ".bias", ".running_mean", ".running_var", ".num_batches_tracked"]
+
+    # Check for common parameter patterns
+    if any(name.endswith(suffix) for suffix in common_suffixes):
+        return True
+
+    # Or if it contains dots (indicating layer hierarchy)
+    return "." in name and len(name) > 3
 
 
 def _validate_tensors(checkpoint_data: dict[str, Any], validation_errors: list[str]) -> None:
@@ -224,9 +300,19 @@ def _validate_tensors(checkpoint_data: dict[str, Any], validation_errors: list[s
 def _check_tensor_validity(name: str, tensor: torch.Tensor, validation_errors: list[str]) -> None:
     """Check a single tensor for NaN/Inf values."""
     if torch.isnan(tensor).any():
-        validation_errors.append(f"Tensor '{name}' contains NaN values")
+        nan_count = torch.isnan(tensor).sum().item()
+        total_elements = tensor.numel()
+        validation_errors.append(
+            f"Tensor '{name}' contains {nan_count}/{total_elements} NaN values. "
+            f"This usually indicates training instability or data corruption.",
+        )
     if torch.isinf(tensor).any():
-        validation_errors.append(f"Tensor '{name}' contains Inf values")
+        inf_count = torch.isinf(tensor).sum().item()
+        total_elements = tensor.numel()
+        validation_errors.append(
+            f"Tensor '{name}' contains {inf_count}/{total_elements} infinite values. "
+            f"This may indicate exploding gradients or numerical overflow.",
+        )
 
 
 def _validate_nested_tensors(parent_key: str, nested_dict: dict, validation_errors: list[str]) -> None:
@@ -235,6 +321,10 @@ def _validate_nested_tensors(parent_key: str, nested_dict: dict, validation_erro
         if isinstance(sub_value, torch.Tensor):
             full_key = f"{parent_key}.{sub_key}"
             _check_tensor_validity(full_key, sub_value, validation_errors)
+        elif isinstance(sub_value, dict):
+            # Recursively validate nested dictionaries
+            full_key = f"{parent_key}.{sub_key}"
+            _validate_nested_tensors(full_key, sub_value, validation_errors)
 
 
 def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
@@ -303,7 +393,7 @@ def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
 
         return metadata  # noqa: TRY300
 
-    except (OSError, RuntimeError, KeyError, TypeError) as e:
+    except (OSError, RuntimeError, KeyError, TypeError, pickle.UnpicklingError, EOFError, ValueError) as e:
         raise CheckpointLoadError(checkpoint_path, e, {"operation": "extract_metadata"}) from e
 
 

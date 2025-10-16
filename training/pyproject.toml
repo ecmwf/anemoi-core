@@ -40,6 +40,7 @@ classifiers = [
 dynamic = [ "version" ]
 
 dependencies = [
+  "aiohttp>=3.9",
   "anemoi-datasets>=0.5.13",
   "anemoi-graphs>=0.4.1",
   "anemoi-models>=0.4.1",
@@ -85,7 +86,7 @@ optional-dependencies.profile = [
   "rich>=13.6",
   "tabulate>=0.9",
 ]
-optional-dependencies.tests = [ "hypothesis", "pytest", "pytest-mock" ]
+optional-dependencies.tests = [ "hypothesis", "pytest", "pytest-asyncio", "pytest-mock" ]
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
@@ -98,6 +99,11 @@ scripts.".anemoi-training-profile" = "anemoi.training.commands.profiler:main"
 scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
 # Add subcommand in the `commands` directory
 scripts.anemoi-training = "anemoi.training.__main__:main"
+
+[dependency-groups]
+dev = [
+  "pytest-asyncio>=1.1",
+]
 
 [tool.setuptools_scm]
 root = ".."

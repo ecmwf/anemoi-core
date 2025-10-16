@@ -18,34 +18,13 @@ from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import CheckpointError
 from anemoi.training.checkpoint import CheckpointPipeline
 from anemoi.training.checkpoint import PipelineStage
-
-
-class MockStage(PipelineStage):
-    """Mock pipeline stage for testing."""
-
-    def __init__(self, name: str, should_fail: bool = False):
-        self.name = name
-        self.should_fail = should_fail
-        self.process_called = False
-        self.context_received = None
-
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Process the context."""
-        self.process_called = True
-        self.context_received = context
-
-        if self.should_fail:
-            raise CheckpointError(f"Stage {self.name} failed")
-
-        # Add marker to metadata
-        context.update_metadata(**{f"stage_{self.name}": "processed"})
-        return context
+from tests.checkpoint.conftest import MockStage
 
 
 class TestCheckpointPipeline:
     """Test CheckpointPipeline class."""
 
-    def test_pipeline_initialization(self):
+    def test_pipeline_initialization(self) -> None:
         """Test pipeline initialization."""
         stages = [MockStage("stage1"), MockStage("stage2")]
         pipeline = CheckpointPipeline(stages)
@@ -55,7 +34,7 @@ class TestCheckpointPipeline:
         assert pipeline.async_execution is True
         assert pipeline.continue_on_error is False
 
-    def test_pipeline_initialization_with_options(self):
+    def test_pipeline_initialization_with_options(self) -> None:
         """Test pipeline initialization with options."""
         stages = [MockStage("stage1")]
         pipeline = CheckpointPipeline(stages, async_execution=False, continue_on_error=True)
@@ -64,7 +43,7 @@ class TestCheckpointPipeline:
         assert pipeline.continue_on_error is True
 
     @pytest.mark.asyncio
-    async def test_pipeline_execution_async(self):
+    async def test_pipeline_execution_async(self) -> None:
         """Test async pipeline execution."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2")
@@ -85,7 +64,7 @@ class TestCheckpointPipeline:
         assert result.metadata["stage_stage2"] == "processed"
         assert result.metadata["stage_stage3"] == "processed"
 
-    def test_pipeline_execution_sync(self):
+    def test_pipeline_execution_sync(self) -> None:
         """Test sync pipeline execution."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2")
@@ -101,7 +80,7 @@ class TestCheckpointPipeline:
         assert "stage_stage2" in result.metadata
 
     @pytest.mark.asyncio
-    async def test_pipeline_execution_with_error(self):
+    async def test_pipeline_execution_with_error(self) -> None:
         """Test pipeline execution with error."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2", should_fail=True)
@@ -122,7 +101,7 @@ class TestCheckpointPipeline:
         assert not stage3.process_called
 
     @pytest.mark.asyncio
-    async def test_pipeline_continue_on_error(self):
+    async def test_pipeline_continue_on_error(self) -> None:
         """Test pipeline continues on error when configured."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2", should_fail=True)
@@ -142,7 +121,7 @@ class TestCheckpointPipeline:
         assert "stage_1_MockStage" in result.metadata
         assert "failed" in result.metadata["stage_1_MockStage"]
 
-    def test_add_stage(self):
+    def test_add_stage(self) -> None:
         """Test adding stage to pipeline."""
         pipeline = CheckpointPipeline([])
         assert len(pipeline) == 0
@@ -153,7 +132,7 @@ class TestCheckpointPipeline:
         assert len(pipeline) == 1
         assert pipeline.stages[0] == stage
 
-    def test_remove_stage(self):
+    def test_remove_stage(self) -> None:
         """Test removing stage from pipeline."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2")
@@ -165,7 +144,7 @@ class TestCheckpointPipeline:
         assert len(pipeline) == 1
         assert pipeline.stages[0] == stage2
 
-    def test_remove_nonexistent_stage(self):
+    def test_remove_nonexistent_stage(self) -> None:
         """Test removing non-existent stage."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2")
@@ -176,7 +155,7 @@ class TestCheckpointPipeline:
         pipeline.remove_stage(stage2)
         assert len(pipeline) == 1
 
-    def test_clear_stages(self):
+    def test_clear_stages(self) -> None:
         """Test clearing all stages."""
         stages = [MockStage("stage1"), MockStage("stage2")]
         pipeline = CheckpointPipeline(stages)
@@ -187,7 +166,7 @@ class TestCheckpointPipeline:
         assert len(pipeline) == 0
         assert pipeline.stages == []
 
-    def test_pipeline_repr(self):
+    def test_pipeline_repr(self) -> None:
         """Test pipeline string representation."""
         stages = [MockStage("stage1"), MockStage("stage2")]
         pipeline = CheckpointPipeline(stages, async_execution=False)
@@ -198,7 +177,7 @@ class TestCheckpointPipeline:
         assert "async=False" in repr_str
 
     @pytest.mark.asyncio
-    async def test_empty_pipeline(self):
+    async def test_empty_pipeline(self) -> None:
         """Test executing empty pipeline."""
         pipeline = CheckpointPipeline([])
         context = CheckpointContext()
@@ -209,7 +188,7 @@ class TestCheckpointPipeline:
         assert result == context
 
     @pytest.mark.asyncio
-    async def test_context_passing(self):
+    async def test_context_passing(self) -> None:
         """Test context is passed correctly between stages."""
 
         class ModifyingStage(PipelineStage):
@@ -234,13 +213,13 @@ class TestCheckpointPipeline:
         assert result.metadata["key2"] == "value2"
         assert result.metadata["key3"] == "value3"
 
-    def test_pipeline_from_config(self):
+    def test_pipeline_from_config(self) -> None:
         """Test creating pipeline from Hydra config."""
         config = OmegaConf.create(
             {
                 "stages": [
-                    {"_target_": "tests.checkpoint.test_pipeline.MockStage", "name": "stage1", "should_fail": False},
-                    {"_target_": "tests.checkpoint.test_pipeline.MockStage", "name": "stage2", "should_fail": False},
+                    {"_target_": "tests.checkpoint.conftest.MockStage", "name": "stage1", "should_fail": False},
+                    {"_target_": "tests.checkpoint.conftest.MockStage", "name": "stage2", "should_fail": False},
                 ],
                 "async_execution": False,
                 "continue_on_error": True,
@@ -252,13 +231,16 @@ class TestCheckpointPipeline:
         assert len(pipeline) == 2
         assert pipeline.async_execution is False
         assert pipeline.continue_on_error is True
-        assert all(isinstance(stage, MockStage) for stage in pipeline.stages)
+        # Check that all stages are MockStage instances (by name, since import paths differ)
+        assert all(type(stage).__name__ == "MockStage" for stage in pipeline.stages)
+        # Also check they have the expected interface
+        assert all(hasattr(stage, "name") and hasattr(stage, "should_fail") for stage in pipeline.stages)
 
-    def test_pipeline_mixed_stages(self):
+    def test_pipeline_mixed_stages(self) -> None:
         """Test pipeline with mix of instantiated and config stages."""
         instantiated_stage = MockStage("instantiated")
         config_stage = {
-            "_target_": "tests.checkpoint.test_pipeline.MockStage",
+            "_target_": "tests.checkpoint.conftest.MockStage",
             "name": "from_config",
             "should_fail": False,
         }
@@ -267,15 +249,15 @@ class TestCheckpointPipeline:
 
         assert len(pipeline) == 2
         assert pipeline.stages[0] == instantiated_stage
-        assert isinstance(pipeline.stages[1], MockStage)
+        assert type(pipeline.stages[1]).__name__ == "MockStage"
         assert pipeline.stages[1].name == "from_config"
 
-    def test_add_stage_from_config(self):
+    def test_add_stage_from_config(self) -> None:
         """Test adding stage from Hydra config."""
         pipeline = CheckpointPipeline([])
 
         stage_config = {
-            "_target_": "tests.checkpoint.test_pipeline.MockStage",
+            "_target_": "tests.checkpoint.conftest.MockStage",
             "name": "added_stage",
             "should_fail": False,
         }
@@ -283,22 +265,22 @@ class TestCheckpointPipeline:
         pipeline.add_stage(stage_config)
 
         assert len(pipeline) == 1
-        assert isinstance(pipeline.stages[0], MockStage)
+        assert type(pipeline.stages[0]).__name__ == "MockStage"
         assert pipeline.stages[0].name == "added_stage"
 
     @pytest.mark.asyncio
-    async def test_hydra_configured_pipeline_execution(self):
+    async def test_hydra_configured_pipeline_execution(self) -> None:
         """Test executing pipeline created from Hydra config."""
         config = OmegaConf.create(
             {
                 "stages": [
                     {
-                        "_target_": "tests.checkpoint.test_pipeline.MockStage",
+                        "_target_": "tests.checkpoint.conftest.MockStage",
                         "name": "config_stage1",
                         "should_fail": False,
                     },
                     {
-                        "_target_": "tests.checkpoint.test_pipeline.MockStage",
+                        "_target_": "tests.checkpoint.conftest.MockStage",
                         "name": "config_stage2",
                         "should_fail": False,
                     },

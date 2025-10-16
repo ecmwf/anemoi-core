@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -18,11 +19,12 @@ from pydantic import model_validator
 
 from anemoi.training.schemas.utils import BaseModel
 
-from .edge_attributes_schemas import EdgeAttributeSchema  # noqa: TC001
-from .edge_schemas import EdgeBuilderSchemas  # noqa: TC001
-from .node_attributes_schemas import NodeAttributeSchemas  # noqa: TC001
-from .node_schemas import NodeBuilderSchemas  # noqa: TC001
-from .post_processors import ProcessorSchemas  # noqa: TC001
+if TYPE_CHECKING:
+    from .edge_attributes_schemas import EdgeAttributeSchema
+    from .edge_schemas import EdgeBuilderSchemas
+    from .node_attributes_schemas import NodeAttributeSchemas
+    from .node_schemas import NodeBuilderSchemas
+    from .post_processors import ProcessorSchemas
 
 LOGGER = logging.getLogger(__name__)
 

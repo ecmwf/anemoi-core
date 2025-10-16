@@ -197,6 +197,198 @@ class ReweightedGraphNodeAttributeSchema(BaseModel):
 NodeLossWeightsSchema = Union[GraphNodeAttributeSchema, ReweightedGraphNodeAttributeSchema]
 
 
+# Checkpoint Pipeline Schema Components
+class CheckpointSourceSchema(BaseModel):
+    """Base schema for checkpoint sources."""
+
+    type: str = Field(..., description="Type of checkpoint source (local, s3, http, etc.)")
+
+    @field_validator("type")
+    @classmethod
+    def validate_source_type(cls, v: str) -> str:
+        """Validate that the checkpoint source type is available."""
+        try:
+            from anemoi.training.checkpoint.catalog import ComponentCatalog
+
+            # This will raise CheckpointConfigError with helpful message if invalid
+            ComponentCatalog.get_source_target(v)
+            return v  # noqa: TRY300  # Return on success, exception handler below
+        except ImportError:
+            # If catalog isn't available, just warn but allow it
+            import logging
+
+            logging.getLogger(__name__).warning("Cannot validate checkpoint source type '%s': catalog not available", v)
+            return v  # Return on success, exception handler below
+
+
+class LocalSourceSchema(CheckpointSourceSchema):
+    """Local file checkpoint source."""
+
+    type: Literal["local"] = "local"
+    path: str = Field(..., description="Path to local checkpoint file")
+
+
+class S3SourceSchema(CheckpointSourceSchema):
+    """S3 checkpoint source."""
+
+    type: Literal["s3"] = "s3"
+    bucket: str = Field(..., description="S3 bucket name")
+    key: str = Field(..., description="S3 object key")
+    region: Union[str, None] = Field(default=None, description="AWS region")
+
+
+class HTTPSourceSchema(CheckpointSourceSchema):
+    """HTTP/HTTPS checkpoint source."""
+
+    type: Literal["http"] = "http"
+    url: str = Field(..., description="HTTP/HTTPS URL to checkpoint")
+
+
+CheckpointSourceSchemas = Union[LocalSourceSchema, S3SourceSchema, HTTPSourceSchema, CheckpointSourceSchema]
+
+
+class CheckpointLoadingSchema(BaseModel):
+    """Schema for checkpoint loading strategies."""
+
+    type: str = Field(..., description="Type of loading strategy (weights_only, transfer_learning, etc.)")
+    strict: bool = Field(default=True, description="Whether to use strict loading (all keys must match exactly)")
+
+    @field_validator("type")
+    @classmethod
+    def validate_loading_type(cls, v: str) -> str:
+        """Validate that the loading strategy type is available."""
+        try:
+            from anemoi.training.checkpoint.catalog import ComponentCatalog
+
+            # This will raise CheckpointConfigError with helpful message if invalid
+            ComponentCatalog.get_loader_target(v)
+            return v  # noqa: TRY300  # Return on success, exception handler below
+        except ImportError:
+            # If catalog isn't available, just warn but allow it
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Cannot validate checkpoint loading type '%s': catalog not available",
+                v,
+            )
+            return v  # Return on success, exception handler below
+
+
+class WeightsOnlyLoadingSchema(CheckpointLoadingSchema):
+    """Weights-only loading strategy."""
+
+    type: Literal["weights_only"] = "weights_only"
+    strict: bool = Field(
+        default=False,
+        description="Whether to require exact key matches (usually False for weights-only)",
+    )
+
+
+class TransferLearningLoadingSchema(CheckpointLoadingSchema):
+    """Transfer learning loading strategy."""
+
+    type: Literal["transfer_learning"] = "transfer_learning"
+    strict: bool = Field(default=False, description="Usually False to allow missing/extra keys")
+    skip_mismatched: bool = Field(default=True, description="Skip parameters with shape mismatches rather than failing")
+    freeze_loaded: bool = Field(default=False, description="Freeze loaded parameters after loading")
+
+
+class WarmStartLoadingSchema(CheckpointLoadingSchema):
+    """Warm start (resume training) loading strategy."""
+
+    type: Literal["warm_start"] = "warm_start"
+    strict: bool = Field(default=True, description="Usually True for exact state restoration")
+
+
+class ColdStartLoadingSchema(CheckpointLoadingSchema):
+    """Cold start (fresh training from pretrained) loading strategy."""
+
+    type: Literal["cold_start"] = "cold_start"
+    strict: bool = Field(default=False, description="Usually False to allow architectural differences")
+    reset_layers: list[str] = Field(default_factory=list, description="Layer names to reset after loading")
+
+
+CheckpointLoadingSchemas = Union[
+    WeightsOnlyLoadingSchema,
+    TransferLearningLoadingSchema,
+    WarmStartLoadingSchema,
+    ColdStartLoadingSchema,
+    CheckpointLoadingSchema,
+]
+
+
+class ModelModifierSchema(BaseModel):
+    """Schema for model modifiers."""
+
+    type: str = Field(..., description="Type of modifier (freeze, lora, quantize, etc.)")
+
+    @field_validator("type")
+    @classmethod
+    def validate_modifier_type(cls, v: str) -> str:
+        """Validate that the modifier type is available."""
+        try:
+            from anemoi.training.checkpoint.catalog import ComponentCatalog
+
+            # This will raise CheckpointConfigError with helpful message if invalid
+            ComponentCatalog.get_modifier_target(v)
+            return v  # noqa: TRY300  # Return on success, exception handler below
+        except ImportError:
+            # If catalog isn't available, just warn but allow it
+            import logging
+
+            logging.getLogger(__name__).warning("Cannot validate modifier type '%s': catalog not available", v)
+            return v  # Return on success, exception handler below
+
+
+class FreezeModifierSchema(ModelModifierSchema):
+    """Parameter freezing modifier."""
+
+    type: Literal["freeze"] = "freeze"
+    layers: list[str] = Field(..., description="Layer/module names to freeze")
+
+
+class CheckpointPipelineSchema(BaseModel):
+    """Configuration schema for checkpoint pipeline."""
+
+    source: Union[CheckpointSourceSchemas, None] = Field(default=None, description="Checkpoint source configuration")
+    loading: Union[CheckpointLoadingSchemas, None] = Field(
+        default=None,
+        description="Checkpoint loading strategy configuration",
+    )
+    modifiers: list[Union[ModelModifierSchema, FreezeModifierSchema]] = Field(
+        default_factory=list,
+        description="List of model modifiers to apply after loading",
+    )
+    async_execution: bool = Field(default=True, description="Whether to use async execution for pipeline stages")
+    continue_on_error: bool = Field(
+        default=False,
+        description="Whether to continue pipeline execution if a stage fails",
+    )
+
+    @model_validator(mode="after")
+    def validate_pipeline_configuration(self) -> CheckpointPipelineSchema:
+        """Validate the overall pipeline configuration."""
+        # If we have a source but no loading strategy, provide helpful guidance
+        if self.source is not None and self.loading is None:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Checkpoint source specified but no loading strategy configured. "
+                "Consider adding a loading strategy like 'weights_only' or 'transfer_learning'.",
+            )
+
+        # If we have modifiers but no source/loading, that's unusual
+        if self.modifiers and self.source is None and self.loading is None:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Model modifiers specified but no checkpoint source/loading configured. "
+                "Modifiers typically work best with loaded checkpoints.",
+            )
+
+        return self
+
+
 class ScaleValidationMetrics(BaseModel):
     """Configuration for scaling validation metrics.
 
@@ -217,12 +409,29 @@ class TrainingSchema(BaseModel):
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in hardware.files.warm_start."
     fork_run_id: Union[str, None] = Field(example=None)
     "Run ID to fork from, either last.ckpt or specified in hardware.files.warm_start."
-    load_weights_only: bool = Field(example=False)
-    "Load only the weights from the checkpoint, not the optimiser state."
-    transfer_learning: bool = Field(example=False)
-    "Flag to activate transfer learning mode when loading a checkpoint."
-    submodules_to_freeze: list[str] = Field(example=["processor"])
-    "List of submodules to freeze during transfer learning."
+    # Legacy checkpoint loading fields (deprecated - use checkpoint_pipeline instead)
+    load_weights_only: bool = Field(
+        default=False,
+        description="DEPRECATED: Use checkpoint_pipeline.loading.type='weights_only' instead. "
+        "Load only the weights from the checkpoint, not the optimiser state.",
+    )
+    transfer_learning: bool = Field(
+        default=False,
+        description="DEPRECATED: Use checkpoint_pipeline.loading.type='transfer_learning' instead. "
+        "Flag to activate transfer learning mode when loading a checkpoint.",
+    )
+    submodules_to_freeze: list[str] = Field(
+        default_factory=list,
+        description="DEPRECATED: Use checkpoint_pipeline.modifiers with type='freeze' instead. "
+        "List of submodules to freeze during transfer learning.",
+    )
+
+    # New checkpoint pipeline configuration
+    checkpoint_pipeline: Union[CheckpointPipelineSchema, None] = Field(
+        default=None,
+        description="Modern checkpoint pipeline configuration. "
+        "Replaces load_weights_only, transfer_learning, and submodules_to_freeze.",
+    )
     deterministic: bool = Field(default=False)
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
     precision: str = Field(default="16-mixed")
@@ -265,3 +474,42 @@ class TrainingSchema(BaseModel):
     "List of metrics"
     node_loss_weights: NodeLossWeightsSchema
     "Node loss weights configuration."
+
+    @model_validator(mode="after")
+    def validate_checkpoint_configuration(self) -> TrainingSchema:
+        """Validate checkpoint configuration and provide migration guidance."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        has_legacy = self.load_weights_only or self.transfer_learning or self.submodules_to_freeze
+        has_modern = self.checkpoint_pipeline is not None
+
+        # If both old and new are specified, warn about conflict
+        if has_legacy and has_modern:
+            logger.warning(
+                "Both legacy checkpoint settings (load_weights_only, transfer_learning, submodules_to_freeze) "
+                "and modern checkpoint_pipeline are configured. The checkpoint_pipeline will take precedence. "
+                "Consider migrating fully to checkpoint_pipeline configuration.",
+            )
+
+        # If only legacy is used, provide migration guidance
+        elif has_legacy and not has_modern:
+            logger.info(
+                "Using legacy checkpoint configuration. Consider migrating to the new checkpoint_pipeline format:",
+            )
+
+            if self.load_weights_only:
+                logger.info("  load_weights_only=True → checkpoint_pipeline.loading.type='weights_only'")
+
+            if self.transfer_learning:
+                logger.info("  transfer_learning=True → checkpoint_pipeline.loading.type='transfer_learning'")
+
+            if self.submodules_to_freeze:
+                logger.info(
+                    "  submodules_to_freeze=%s → checkpoint_pipeline.modifiers=[{type: 'freeze', layers: %s}]",
+                    self.submodules_to_freeze,
+                    self.submodules_to_freeze,
+                )
+
+        return self

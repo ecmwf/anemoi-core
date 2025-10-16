@@ -42,7 +42,6 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
-from anemoi.training.schemas.base_schema import BaseSchema  # noqa: TC001
 
 if TYPE_CHECKING:
     from typing import Any
@@ -52,6 +51,7 @@ if TYPE_CHECKING:
     from omegaconf import OmegaConf
 
     from anemoi.models.layers.graph import NamedNodesAttributes
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 

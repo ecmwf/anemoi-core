@@ -167,6 +167,66 @@ class AnemoiTrainer:
 
         model = GraphForecaster(**kwargs)
 
+        # Apply checkpoint loading and model modifications
+        return self._apply_checkpoint_pipeline(model, **kwargs)
+
+    def _apply_checkpoint_pipeline(self, model: GraphForecaster, **kwargs) -> GraphForecaster:
+        """Apply checkpoint loading and model modifications using the pipeline system.
+
+        This method provides backward compatibility with legacy configuration while
+        using the modern checkpoint pipeline system internally.
+
+        Parameters
+        ----------
+        model : GraphForecaster
+            The model to apply checkpoint loading to
+        **kwargs : dict
+            Additional keyword arguments for GraphForecaster
+
+        Returns
+        -------
+        GraphForecaster
+            Model with checkpoint loaded and modifications applied
+        """
+        # Check if we should use the modern checkpoint pipeline
+        if hasattr(self.config.training, "checkpoint_pipeline") and self.config.training.checkpoint_pipeline:
+            return self._use_modern_checkpoint_pipeline(model)
+
+        # Use legacy checkpoint logic for backward compatibility
+        return self._use_legacy_checkpoint_logic(model, **kwargs)
+
+    def _use_modern_checkpoint_pipeline(self, model: GraphForecaster) -> GraphForecaster:
+        """Use the modern checkpoint pipeline system."""
+        try:
+            import asyncio
+
+            from anemoi.training.checkpoint import CheckpointContext
+            from anemoi.training.checkpoint import CheckpointPipeline
+
+            LOGGER.info("Using modern checkpoint pipeline system")
+
+            # Create pipeline from configuration
+            pipeline = CheckpointPipeline.from_config(self.config.training.checkpoint_pipeline)
+
+            # Create context
+            context = CheckpointContext(model=model, config=self.config)
+
+            # Execute pipeline
+            result = asyncio.run(pipeline.execute(context))
+
+            LOGGER.info("Checkpoint pipeline executed successfully")
+            if result.metadata:
+                LOGGER.debug("Pipeline metadata: %s", result.metadata)
+
+            return result.model  # noqa: TRY300  # Return on success, exception handler below
+
+        except Exception:
+            LOGGER.exception("Modern checkpoint pipeline failed")
+            LOGGER.warning("Falling back to legacy checkpoint logic")
+            return self._use_legacy_checkpoint_logic(model)
+
+    def _use_legacy_checkpoint_logic(self, model: GraphForecaster, **kwargs) -> GraphForecaster:
+        """Use legacy checkpoint logic for backward compatibility."""
         # Load the model weights
         if self.load_weights_only:
             if hasattr(self.config.training, "transfer_learning"):

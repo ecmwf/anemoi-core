@@ -31,9 +31,6 @@ from anemoi.training.losses.utils import grad_scaler
 from anemoi.training.losses.weightedloss import BaseWeightedLoss
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.schemas.training import LossScalingSchema  # noqa: TC001
-from anemoi.training.schemas.training import PressureLevelScalerSchema  # noqa: TC001
-from anemoi.training.schemas.training import TrainingSchema  # noqa: TC001
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -45,6 +42,9 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.schemas.training import LossScalingSchema
+    from anemoi.training.schemas.training import PressureLevelScalerSchema
+    from anemoi.training.schemas.training import TrainingSchema
 
 
 LOGGER = logging.getLogger(__name__)
