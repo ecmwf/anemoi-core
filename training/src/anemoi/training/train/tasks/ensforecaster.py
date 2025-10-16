@@ -193,7 +193,6 @@ class GraphEnsForecaster(BaseGraphModule):
                 Shard shapes for later gathering
         """
         batch_size, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1]
-
         y_pred_ens_interp = einops.rearrange(y_pred_ens, "b e g c -> (b e) g c")
         shard_shapes = apply_shard_shapes(y_pred_ens_interp, self.grid_dim, self.grid_shard_shapes)
         y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, model_comm_group)
@@ -256,7 +255,7 @@ class GraphEnsForecaster(BaseGraphModule):
 
         is_multi_scale_loss = any(x is not None for x in self.loss_trunc_matrices)
         shard_shapes, shard_shapes_y = None, None
-        if self.keep_batch_sharded and is_multi_scale_loss:
+        if self.keep_batch_sharded and is_multi_scale_loss and torch.distributed.get_world_size() > 1:
             # go to full sequence dimension for interpolation / smoothing
             y_pred_ens_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
                 y_pred_ens,
