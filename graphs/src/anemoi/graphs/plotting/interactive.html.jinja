@@ -17,7 +17,6 @@
             top: 10px;
             right: 10px;
             color: #fff;
-            font-family: monospace;
             background: rgba(0, 0, 0, 0.7);
             padding: 10px 14px;
             font-size: 12px;
@@ -30,27 +29,33 @@
             left: 10px;
             display: flex;
             flex-direction: column;
-            gap: 20px;
-            /* space between each box */
+            gap: 10px;
+            max-height: 98vh;
+            overflow: hidden; /* keep structure fixed */
         }
 
         .controls {
             position: relative;
-            /* change from absolute to relative */
             width: 220px;
             background: rgba(255, 255, 255, 0.9);
             padding: 14px;
             border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.15);
-            max-height: 90vh;
-            overflow-y: auto;
+            border: 2px solid #ccc;
+            display: flex;
+            flex-direction: column;
             overflow-x: hidden;
+        }
+
+        .controls > div {
+            overflow-y: hidden;
+            overflow-x: hidden;
+            flex: 1;
         }
 
         button {
             display: block;
             width: 100%;
-            margin: 6px 0;
+            margin: 4px 0;
             padding: 8px 12px;
             background: #222;
             color: #fff;
@@ -60,6 +65,7 @@
             font-size: 12px;
             font-family: monospace;
             transition: background 0.2s;
+            text-align: left;
         }
 
         button:hover {
@@ -69,6 +75,7 @@
         button.active {
             background: #0066cc;
         }
+
 
         label {
             color: #222;
@@ -96,8 +103,9 @@
         hr {
             border: 0;
             border-top: 3px solid #ccc;
-            margin: 20px 0;
+            margin: 5px 0;
         }
+
 
         #selectedNodeInfo {
             position: absolute;
@@ -110,14 +118,15 @@
             font-size: 12px;
             display: none;
         }
+
     </style>
 </head>
-
 <body>
 
     <div id="controlsWrapper">
-        <div class="controls">
-            Global controls
+    <div class="controls" style="min-height: 150px;">
+      <strong>Global controls</strong>
+      <div>
             <button id="toggleMap">Toggle Map</button>
 
             <label>Map Radius: <span id="mapRadiusValue">20</span></label>
@@ -125,14 +134,18 @@
 
             <label>Global Node Scale: <span id="scaleFactorValue">1.0</span></label>
             <input id="scaleFactorRange" type="range" min="0.5" max="3.0" step="0.1" value="1.0" />
+
         </div>
-        <div class="controls">
-            Nodes controls
-            <div id="nodeSetControls"></div>
+    </div>
+
+    <div class="controls" style="height: 300px;">
+      <strong>Nodes</strong>
+      <div id="nodeSetControls" style="overflow-y: auto;"></div>
         </div>
+
         <div class="controls">
-            Edges controls
-            <div id="edgeSetControls"></div>
+      <strong>Edges</strong>
+      <div id="edgeSetControls" style="overflow-y: auto;";></div>
         </div>
     </div>
 
