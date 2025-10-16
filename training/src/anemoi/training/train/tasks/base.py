@@ -33,7 +33,8 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
-from anemoi.training.optimizers.AdEMAMix import AdEMAMix
+from anemoi.training.optimizers import CUSTOM_OPTIMIZERS
+from anemoi.training.optimizers import get_custom_optimizer_class
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
@@ -745,7 +746,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """Create optimizer from its class name in the config.
 
         The config should include:
-            name: class name as string (e.g., 'AdamW')
+            name: class name as string (e.g., 'AdamW' or 'AdEMAMix')
             zero: optional bool, wrap in ZeroRedundancyOptimizer
             other kwargs: lr, weight_decay, betas, etc.
         """
@@ -754,14 +755,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
         kwargs.pop("name", None)
         zero = kwargs.pop("zero", False)
 
-        # Look up optimizer class in torch.optim
-        try:
-            optimizer_cls = getattr(torch.optim, class_name)
-        except AttributeError:
-            raise ValueError(
-                f"Optimizer '{class_name}' not found in torch.optim. "
-                f"Available optimizers: {dir(torch.optim)}"
-            )
+        # Try custom optimizers first
+        optimizer_cls = get_custom_optimizer_class(class_name)
+
+        # Fallback to torch.optim if not found in custom list
+        if optimizer_cls is None:
+            optimizer_cls = getattr(torch.optim, class_name, None)
+            if optimizer_cls is None:
+                available_custom = list(get_custom_optimizer_class.__globals__['CUSTOM_OPTIMIZERS'].keys())
+                available_torch = getattr(torch.optim, "__all__", [])
+                raise ValueError(
+                    f"Optimizer '{class_name}' not found in custom or torch.optim.\n"
+                    f"Available custom: {available_custom}\n"
+                    f"Available torch: {available_torch}"
+                )
 
         params = filter(lambda p: p.requires_grad, self.parameters())
 
@@ -774,7 +781,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
         else:
-            optimizer = optimizer_cls(params,lr=self.lr, **kwargs)
+            optimizer = optimizer_cls(params, lr=self.lr, **kwargs)
 
         return optimizer
     
