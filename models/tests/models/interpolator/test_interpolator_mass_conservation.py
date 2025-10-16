@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import pytest
 import torch
 
 from anemoi.models.models.interpolator import AnemoiModelEncProcDecInterpolator
@@ -73,3 +74,113 @@ def test_resolve_mass_conservations_conserves_total():
     summed = y_out[..., target_idxs].sum(dim=1, keepdim=True)  # (B, 1, E, G, V)
     constraints = x_input[:, -1:, ..., constraint_idxs]
     assert torch.allclose(summed, constraints, atol=1e-6, rtol=0), "Mass is not conserved across time steps"
+
+
+def test_setup_mass_conserving_accumulations_builds_indices():
+    # Build dummy data_indices and config with a valid mapping
+    class _NI:
+        def __init__(self, mapping):
+            self.name_to_index = mapping
+
+    class _ModelIdx:
+        def __init__(self, out_map, in_map):
+            self.output = _NI(out_map)
+            self.input = _NI(in_map)
+
+    class _Data:
+        def __init__(self, forcing):
+            self._forcing = forcing
+
+    class _DI:
+        def __init__(self, out_map, in_map, forcing):
+            self.model = _ModelIdx(out_map, in_map)
+            self.data = _Data(forcing)
+
+    class _CfgModel:
+        def __init__(self, mapping):
+            self.mass_conserving_accumulations = mapping
+
+    class _Cfg:
+        def __init__(self, mapping):
+            self.model = _CfgModel(mapping)
+
+    out_map = {"outA": 0, "outB": 1, "outC": 2}
+    in_map = {"inA": 10, "inB": 11, "inC": 12}
+    forcing = {"inA", "inB", "inC"}
+
+    data_indices = _DI(out_map, in_map, forcing)
+    mapping = {"outA": "inA", "outC": "inC"}
+    cfg = _Cfg(mapping)
+
+    dummy = type("Dummy", (), {})()
+
+    AnemoiModelEncProcDecInterpolator.setup_mass_conserving_accumulations(dummy, data_indices, cfg)
+
+    assert isinstance(dummy.map_accum_indices, torch.nn.ParameterDict)
+    t = dummy.map_accum_indices["target_idxs"].detach().cpu().tolist()
+    c = dummy.map_accum_indices["constraint_idxs"].detach().cpu().tolist()
+    assert dummy.map_accum_indices["target_idxs"].dtype == torch.long
+    assert dummy.map_accum_indices["constraint_idxs"].dtype == torch.long
+    assert t == [0, 2]
+    assert c == [10, 12]
+
+
+def test_setup_mass_conserving_accumulations_none_mapping_sets_none():
+    # Config without 'mass_conserving_accumulations' should set map_accum_indices to None
+    class _CfgModelEmpty:
+        pass
+
+    class _Cfg:
+        def __init__(self):
+            self.model = _CfgModelEmpty()
+
+    dummy = type("Dummy", (), {})()
+    # data_indices won't be used in this branch; pass any object
+    AnemoiModelEncProcDecInterpolator.setup_mass_conserving_accumulations(dummy, object(), _Cfg())
+    assert dummy.map_accum_indices is None
+
+
+def test_setup_mass_conserving_accumulations_raises_on_missing_names():
+    # Prepare common scaffolding
+    class _NI:
+        def __init__(self, mapping):
+            self.name_to_index = mapping
+
+    class _ModelIdx:
+        def __init__(self, out_map, in_map):
+            self.output = _NI(out_map)
+            self.input = _NI(in_map)
+
+    class _Data:
+        def __init__(self, forcing):
+            self._forcing = forcing
+
+    class _DI:
+        def __init__(self, out_map, in_map, forcing):
+            self.model = _ModelIdx(out_map, in_map)
+            self.data = _Data(forcing)
+
+    class _CfgModel:
+        def __init__(self, mapping):
+            self.mass_conserving_accumulations = mapping
+
+    class _Cfg:
+        def __init__(self, mapping):
+            self.model = _CfgModel(mapping)
+
+    out_map = {"outA": 0, "outB": 1}
+    in_map = {"inA": 10, "inB": 11, "inZ": 15}
+    forcing = {"inA", "inB"}  # 'inZ' is intentionally missing
+
+    # Case 1: input constraint not in forcing set
+    data_indices = _DI(out_map, in_map, forcing)
+    cfg_bad_input = _Cfg({"outA": "inZ"})
+    dummy1 = type("Dummy", (), {})()
+    with pytest.raises(AssertionError):
+        AnemoiModelEncProcDecInterpolator.setup_mass_conserving_accumulations(dummy1, data_indices, cfg_bad_input)
+
+    # Case 2: output variable not in model output mapping
+    cfg_bad_output = _Cfg({"outZ": "inA"})
+    dummy2 = type("Dummy", (), {})()
+    with pytest.raises(AssertionError):
+        AnemoiModelEncProcDecInterpolator.setup_mass_conserving_accumulations(dummy2, data_indices, cfg_bad_output)
