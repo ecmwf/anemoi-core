@@ -33,7 +33,6 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
-from anemoi.training.optimizers import CUSTOM_OPTIMIZERS
 from anemoi.training.optimizers import get_custom_optimizer_class
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -762,12 +761,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if optimizer_cls is None:
             optimizer_cls = getattr(torch.optim, class_name, None)
             if optimizer_cls is None:
-                available_custom = list(get_custom_optimizer_class.__globals__['CUSTOM_OPTIMIZERS'].keys())
+                available_custom = list(get_custom_optimizer_class.__globals__["CUSTOM_OPTIMIZERS"].keys())
                 available_torch = getattr(torch.optim, "__all__", [])
                 raise ValueError(
                     f"Optimizer '{class_name}' not found in custom or torch.optim.\n"
                     f"Available custom: {available_custom}\n"
-                    f"Available torch: {available_torch}"
+                    f"Available torch: {available_torch}",
                 )
 
         params = filter(lambda p: p.requires_grad, self.parameters())
@@ -784,7 +783,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             optimizer = optimizer_cls(params, lr=self.lr, **kwargs)
 
         return optimizer
-    
+
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict:
         """Helper to create the cosine LR scheduler."""
         scheduler = CosineLRScheduler(
