@@ -20,6 +20,8 @@ from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.truncation import make_truncation_matrix
+from anemoi.models.truncation import truncate_fields
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.inicond import EnsembleInitialConditions
@@ -124,7 +126,7 @@ class GraphEnsForecaster(BaseGraphModule):
         loss_matrices = []
         for i, interp_data_loss in enumerate(truncation_data["loss"]):
             if interp_data_loss is not None:
-                loss_matrices.append(self.model.model._make_truncation_matrix(interp_data_loss))
+                loss_matrices.append(make_truncation_matrix(interp_data_loss))
                 LOGGER.info("Loss truncation: %s %s", i, loss_matrices[i].shape)
             else:
                 loss_matrices.append(None)
@@ -253,6 +255,8 @@ class GraphEnsForecaster(BaseGraphModule):
             mgroup=ens_comm_subgroup,
         )
 
+        #########
+
         is_multi_scale_loss = any(x is not None for x in self.loss_trunc_matrices)
         shard_shapes, shard_shapes_y = None, None
         if self.keep_batch_sharded and is_multi_scale_loss and torch.distributed.get_world_size() > 1:
@@ -315,7 +319,7 @@ class GraphEnsForecaster(BaseGraphModule):
     def _interpolate_batch(self, batch: torch.Tensor, intp_matrix: torch.Tensor) -> torch.Tensor:
         input_shape = batch.shape  # e.g. (batch steps ensemble grid vars) or (batch steps grid vars)
         batch = batch.reshape(-1, *input_shape[-2:])
-        batch = self.model.model._truncate_fields(batch, intp_matrix)  # to coarse resolution
+        batch = truncate_fields(batch, intp_matrix)  # to coarse resolution
         return batch.reshape(*input_shape)
 
     def advance_input(

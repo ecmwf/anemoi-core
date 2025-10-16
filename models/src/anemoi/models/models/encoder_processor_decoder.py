@@ -12,7 +12,6 @@ import logging
 from typing import Optional
 
 import einops
-import numpy as np
 import torch
 from hydra.utils import instantiate
 from torch import Tensor
@@ -29,6 +28,8 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
+from anemoi.models.truncation import make_truncation_matrix
+from anemoi.models.truncation import truncate_fields
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -81,10 +82,10 @@ class AnemoiModelEncProcDec(nn.Module):
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
         self.A_down, self.A_up = None, None
         if "down" in self._truncation_data:
-            self.A_down = self._make_truncation_matrix(self._truncation_data["down"])
+            self.A_down = make_truncation_matrix(self._truncation_data["down"])
             LOGGER.info("Truncation: A_down %s", self.A_down.shape)
         if "up" in self._truncation_data:
-            self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
+            self.A_up = make_truncation_matrix(self._truncation_data["up"])
             LOGGER.info("Truncation: A_up %s", self.A_up.shape)
 
         # Encoder data -> hidden
@@ -135,32 +136,6 @@ class AnemoiModelEncProcDec(nn.Module):
             ]
         )
 
-    def _make_truncation_matrix(self, A, data_type=torch.float32):
-        A_ = torch.sparse_coo_tensor(
-            torch.tensor(np.vstack(A.nonzero()), dtype=torch.long),
-            torch.tensor(A.data, dtype=data_type),
-            size=A.shape,
-        ).coalesce()
-        return A_
-
-    def _multiply_sparse(self, x, A):
-        if torch.cuda.is_available():
-            with torch.amp.autocast(device_type="cuda", enabled=False):
-                out = torch.sparse.mm(A, x)
-        else:
-            with torch.amp.autocast(device_type="cpu", enabled=False):
-                out = torch.sparse.mm(A, x)
-        return out
-
-    def _truncate_fields(self, x, A, batch_size=None, auto_cast=False):
-        if not batch_size:
-            batch_size = x.shape[0]
-        out = []
-        with torch.amp.autocast(device_type="cuda", enabled=auto_cast):
-            for i in range(batch_size):
-                out.append(self._multiply_sparse(x[i, ...], A))
-        return torch.stack(out)
-
     def _get_shard_shapes(self, x, dim=0, shard_shapes_dim=None, model_comm_group=None):
         if shard_shapes_dim is None:
             return get_shard_shapes(x, dim, model_comm_group)
@@ -178,10 +153,10 @@ class AnemoiModelEncProcDec(nn.Module):
             # hence we check that they are on the correct device ; copy should only happen in the first forward run
             if self.A_down is not None:
                 self.A_down = self.A_down.to(x.device)
-                x = self._truncate_fields(x, self.A_down)  # to coarse resolution
+                x = truncate_fields(x, self.A_down)  # to coarse resolution
             if self.A_up is not None:
                 self.A_up = self.A_up.to(x.device)
-                x = self._truncate_fields(x, self.A_up)  # back to high resolution
+                x = truncate_fields(x, self.A_up)  # back to high resolution
 
             if grid_shard_shapes is not None:
                 # back to grid-sharding as before
