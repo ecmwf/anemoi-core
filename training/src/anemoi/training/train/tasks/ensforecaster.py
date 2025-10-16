@@ -20,8 +20,8 @@ from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.truncation import interpolate_batch
 from anemoi.models.truncation import make_truncation_matrix
-from anemoi.models.truncation import truncate_fields
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.inicond import EnsembleInitialConditions
@@ -306,21 +306,16 @@ class GraphEnsForecaster(BaseGraphModule):
                     group=model_comm_group,
                 ),
             )
+        ###########
 
         return loss_inc, y_pred_ens if return_pred_ens else None
 
     def _interp_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
         if self.loss_trunc_matrices[i] is not None:
             self.loss_trunc_matrices[i] = self.loss_trunc_matrices[i].to(x.device)
-            x = self._interpolate_batch(x, self.loss_trunc_matrices[i])
-            y = self._interpolate_batch(y, self.loss_trunc_matrices[i])
+            x = interpolate_batch(x, self.loss_trunc_matrices[i])
+            y = interpolate_batch(y, self.loss_trunc_matrices[i])
         return x, y
-
-    def _interpolate_batch(self, batch: torch.Tensor, intp_matrix: torch.Tensor) -> torch.Tensor:
-        input_shape = batch.shape  # e.g. (batch steps ensemble grid vars) or (batch steps grid vars)
-        batch = batch.reshape(-1, *input_shape[-2:])
-        batch = truncate_fields(batch, intp_matrix)  # to coarse resolution
-        return batch.reshape(*input_shape)
 
     def advance_input(
         self,

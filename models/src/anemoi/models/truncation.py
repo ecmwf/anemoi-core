@@ -39,3 +39,10 @@ def multiply_sparse(x, A):
         with torch.amp.autocast(device_type="cpu", enabled=False):
             out = torch.sparse.mm(A, x)
     return out
+
+
+def interpolate_batch(batch: torch.Tensor, intp_matrix: torch.Tensor) -> torch.Tensor:
+    input_shape = batch.shape  # e.g. (batch steps ensemble grid vars) or (batch steps grid vars)
+    batch = batch.reshape(-1, *input_shape[-2:])
+    batch = truncate_fields(batch, intp_matrix)  # to coarse resolution
+    return batch.reshape(*input_shape)
