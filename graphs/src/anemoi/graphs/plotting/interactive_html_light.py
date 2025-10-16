@@ -30,9 +30,17 @@ def load_graph(
         - The first dictionary maps node types to their coordinates tensors.
         - The second dictionary maps edge types to their edge index tensors.
     """
-    hetero_data = torch.load(path, weights_only=False)
+    hetero_data = torch.load(path, weights_only=False, map_location="cpu")
     out_nodes = {n: hetero_data[n].x for n in nodes}
-    out_edges = {e: hetero_data[tuple(e.split("_"))].edge_index for e in edges}
+
+    out_edges = {}
+    for e in edges:
+        # needed because in hierarchical graphs nodes names contain underscores...
+        edge_key = e.split("_to_")
+        edge_key = (edge_key[0], "to", edge_key[1])
+        # -----------------
+        out_edges[e] = hetero_data[edge_key].edge_index
+
     return out_nodes, out_edges
 
 
@@ -61,7 +69,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate HTML visualization of a graph.")
-    parser.add_argument("path", type=str, help="Path to the graph file.")
+    parser.add_argument("graph_path", type=str, help="Path to the graph file.")
+    parser.add_argument("output_path", type=str, help="Path to save the output HTML file.")
     parser.add_argument(
         "--nodes",
         type=lambda s: s.split(","),
@@ -79,7 +88,7 @@ if __name__ == "__main__":
     print("Starting graph HTML generation...")
     print(f"Arguments: {args}")
 
-    nodes, edges = load_graph(args.path, nodes=args.nodes, edges=args.edges)
+    nodes, edges = load_graph(args.graph_path, nodes=args.nodes, edges=args.edges)
 
     for node_set in nodes:
         node_lats, node_lons = coords_to_latlon(nodes[node_set].numpy())
@@ -108,7 +117,7 @@ if __name__ == "__main__":
 
     nodes_embed = []
     for i, (node_set, pts) in enumerate(nodes.items()):
-        nodes_embed.append({"name": node_set, "points": pts, "color": colors[i % len(colors)], "radius": 25 + i * 2})
+        nodes_embed.append({"name": node_set, "points": pts, "color": colors[i % len(colors)], "radius": 21 + i * 2})
 
     edges_embed = []
     for i, (edge_set, eds) in enumerate(edges.items()):
@@ -122,7 +131,7 @@ if __name__ == "__main__":
     template = Template(HTML_TEMPLATE)
     html_output = template.render(nodes=nodes_embed, edges=edges_embed, max_degree=50, min_degree=1)
 
-    with open("graph.html", "w") as f:
+    with open(args.output_path, "w") as f:
         f.write(html_output)
 
-    print("HTML file generated: graph.html")
+    print(f"HTML file generated: {args.output_path}")
