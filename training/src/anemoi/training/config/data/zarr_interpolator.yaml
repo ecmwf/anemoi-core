@@ -65,6 +65,8 @@ normalizer:
   std:
     - "tp_accum"
     - "cp_accum"
+    - "tp"
+    - "cp"
     # atmospheric variables
     - "q_50"
     - "q_100"
