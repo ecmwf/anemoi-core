@@ -190,7 +190,7 @@ class AnemoiTrainer:
         graphs = {}
         for dataset_name, dataset_config in self.config.dataloader.training.datasets.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
+            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config, dataset_name)
         return graphs
 
     @cached_property
