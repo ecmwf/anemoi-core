@@ -42,11 +42,18 @@ from .utils import format_size
 from .utils import get_checkpoint_metadata
 from .utils import validate_checkpoint
 
+# Import validation utilities with graceful fallback
+try:
+    from .validation import validate_pipeline_health
+except ImportError:
+    # Validation module not available
+    validate_pipeline_health = None
+
 __all__ = [
+    # Exceptions
     "CheckpointConfigError",
     # Core classes
     "CheckpointContext",
-    # Exceptions
     "CheckpointError",
     "CheckpointIncompatibleError",
     "CheckpointLoadError",
@@ -57,14 +64,15 @@ __all__ = [
     "CheckpointValidationError",
     "ComponentCatalog",
     "PipelineStage",
+    # Utilities
     "calculate_checksum",
     "compare_state_dicts",
-    # Utilities
     "download_with_retry",
     "estimate_checkpoint_memory",
     "format_size",
     "get_checkpoint_metadata",
     "validate_checkpoint",
+    "validate_pipeline_health",
 ]
 
 __version__ = "0.1.0"
