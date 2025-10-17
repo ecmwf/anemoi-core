@@ -134,6 +134,8 @@ Example (data config entries):
        std:
          - "tp_accum"
          - "cp_accum"
+         - "tp"
+         - "cp"
 
      processors:
        normalizer:
