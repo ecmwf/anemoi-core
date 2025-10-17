@@ -917,7 +917,11 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             self.loss = copy.deepcopy(pl_module.loss)
 
-            if hasattr(self.loss.scaler, "nan_mask_weights"):
+            # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+            if (
+                hasattr(self.loss.scaler, "nan_mask_weights")
+                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+            ):
                 self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
 
             super().on_validation_batch_end(
@@ -1179,6 +1183,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         sample_idx: int,
         parameters: list[str],
         precip_and_related_fields: list[str] | None = None,
+        log_scale: bool = False,
         every_n_batches: int | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
@@ -1200,6 +1205,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.precip_and_related_fields = precip_and_related_fields
+        self.log_scale = log_scale
         LOGGER.info(
             "Using precip histogram plotting method for fields: %s.",
             self.precip_and_related_fields,
@@ -1241,6 +1247,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 self.precip_and_related_fields,
+                self.log_scale,
             )
 
             self._output_figure(

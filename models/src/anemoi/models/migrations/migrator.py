@@ -30,6 +30,7 @@ from types import ModuleType
 from typing import Any
 from typing import TypedDict
 
+from anemoi.models import __version__
 from anemoi.models.migrations.setup_context import DeserializeMigrationContext
 from anemoi.models.migrations.setup_context import MigrationContext
 from anemoi.models.migrations.setup_context import ReversedSetupCallback
@@ -45,6 +46,10 @@ LOGGER = logging.getLogger(__name__)
 
 class IncompatibleCheckpointException(BaseException):
     """The provided checkpoint cannot be migrated because it is to old/recent."""
+
+
+class IncompleteMigrationScript(BaseException):
+    """The migration script is missing some mandatory content (metadata)."""
 
 
 CkptType = MutableMapping[str, Any]
@@ -244,10 +249,15 @@ def _migrations_from_path(location: str | PathLike, package: str | None) -> list
             migration = importlib.import_module(f".{file.stem}", package)
         else:
             migration = _import_file(file)
+        if not hasattr(migration, "metadata"):
+            raise IncompleteMigrationScript("Migration script is missing metadata.")
 
         args: dict[str, Any] = dict(
             name=file.stem, metadata=migration.metadata, signature=_get_code_digest(getsource(migration))
         )
+        if not isinstance(args["metadata"], MigrationMetadata):
+            raise IncompleteMigrationScript("Migration script is missing metadata.")
+
         if hasattr(migration, "migrate"):
             args["migrate"] = migration.migrate
         if hasattr(migration, "migrate_setup"):
@@ -256,6 +266,10 @@ def _migrations_from_path(location: str | PathLike, package: str | None) -> list
             args["rollback"] = migration.rollback
         if hasattr(migration, "rollback_setup"):
             args["rollback_setup"] = migration.rollback_setup
+
+        if args["metadata"].versions["anemoi-models"] == "%NEXT_ANEMOI_MODELS_VERSION%":
+            args["metadata"].versions["anemoi-models"] = __version__
+
         migrations.append(Migration(**args))
     return migrations
 
