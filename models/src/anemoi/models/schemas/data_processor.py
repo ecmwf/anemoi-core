@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from collections.abc import Iterable
+from collections.abc import MutableSequence
 from enum import Enum
 from typing import Any
 from typing import Union
@@ -232,6 +233,42 @@ class RemapperSchema(BaseModel):
     "Variables not to be remapped."
 
 
+class ZeroOverwriterGroup(BaseModel):
+    vars: Union[list[str], None] = Field(default_factory=list)
+    time_indices: Union[list[int], None] = Field(default_factory=list)
+
+    @field_validator("vars", mode="before")
+    @classmethod
+    def _validate_vars(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, MutableSequence) or not all(isinstance(i, str) for i in v):
+            raise TypeError(f"'vars' must be a list[str], got {type(v).__name__}")
+        return v
+
+    @field_validator("time_indices", mode="before")
+    @classmethod
+    def _validate_time_indices(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, MutableSequence) or not all(isinstance(i, int) for i in v):
+            raise TypeError(f"'time_indices' must be a list[int], got {type(v).__name__}")
+        return v
+
+
+class ZeroOverwriterSchema(BaseModel):
+    groups: Union[list[ZeroOverwriterGroup], None] = Field(default_factory=list)
+
+    @field_validator("groups", mode="before")
+    @classmethod
+    def _validate_groups(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, MutableSequence):
+            raise TypeError(f"'groups' must be a list, got {type(v).__name__}")
+        return v
+
+
 class PreprocessorTarget(str, Enum):
     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
@@ -241,6 +278,7 @@ class PreprocessorTarget(str, Enum):
     conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
     conditional_nan_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor"
     normalized_relu_postprocessor = "anemoi.models.preprocessing.postprocessor.NormalizedReluPostprocessor"
+    zero_overwriter = "anemoi.models.preprocessing.overwriter.ZeroOverwriter"
 
 
 target_to_schema = {
@@ -252,13 +290,14 @@ target_to_schema = {
     PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
     PreprocessorTarget.conditional_nan_postprocessor: ConditionalNaNPostprocessorSchema,
     PreprocessorTarget.normalized_relu_postprocessor: NormalizedReluPostprocessorSchema,
+    PreprocessorTarget.zero_overwriter: ZeroOverwriterSchema,
 }
 
 
 class PreprocessorSchema(BaseModel, validate_assignment=False):
     target_: PreprocessorTarget = Field(..., alias="_target_")
-    "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper]."
-    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema]
+    "Processor object from anemoi.models.preprocessing.[normalizer|imputer|remapper|overwriter]."
+    config: Union[dict, NormalizerSchema, ImputerSchema, PostprocessorSchema, RemapperSchema, ZeroOverwriterSchema]
     "Target schema containing processor methods."
 
     @model_validator(mode="after")
