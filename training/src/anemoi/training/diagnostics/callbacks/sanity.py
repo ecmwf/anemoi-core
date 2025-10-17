@@ -8,8 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
+
+if TYPE_CHECKING:
+    from anemoi.training.data.dataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,59 +24,64 @@ class CheckVariableOrder(pl.callbacks.Callback):
     def __init__(self) -> None:
         super().__init__()
 
-    def on_train_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
+    def _check_variable_order(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset: "NativeGridDataset",
+    ) -> None:
+        """Check the order of variables between model checkpoint and dataset.
+
+        Parameters
+        ----------
+        trainer : pl.Trainer
+            Pytorch Lightning trainer
+        pl_module : pl.LightningModule
+            Lightning module (already unwrapped by PyTorch Lightning)
+        dataset : NativeGridDataset
+            Dataset to compare against
+        """
+        data_name_to_index = dataset.name_to_index
+
+        if hasattr(pl_module, "_ckpt_model_name_to_index"):
+            model_name_to_index = pl_module._ckpt_model_name_to_index
+        else:
+            model_name_to_index = trainer.datamodule.data_indices.name_to_index
+
+        trainer.datamodule.data_indices.compare_variables(model_name_to_index, data_name_to_index)
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the training data.
 
         Parameters
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+        pl_module : pl.LightningModule
+            Lightning module
         """
-        data_name_to_index = trainer.datamodule.ds_train.name_to_index
+        self._check_variable_order(trainer, pl_module, trainer.datamodule.ds_train)
 
-        if hasattr(trainer.model.module, "_ckpt_model_name_to_index"):
-            self._model_name_to_index = trainer.model.module._ckpt_model_name_to_index
-        else:
-            self._model_name_to_index = trainer.datamodule.data_indices.name_to_index
-
-        trainer.datamodule.data_indices.compare_variables(self._model_name_to_index, data_name_to_index)
-
-    def on_validation_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
+    def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.
 
         Parameters
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+        pl_module : pl.LightningModule
+            Lightning module
         """
-        data_name_to_index = trainer.datamodule.ds_valid.name_to_index
+        self._check_variable_order(trainer, pl_module, trainer.datamodule.ds_valid)
 
-        if hasattr(trainer.model.module, "_ckpt_model_name_to_index"):
-            self._model_name_to_index = trainer.model.module._ckpt_model_name_to_index
-        else:
-            self._model_name_to_index = trainer.datamodule.data_indices.name_to_index
-
-        trainer.datamodule.data_indices.compare_variables(self._model_name_to_index, data_name_to_index)
-
-    def on_test_start(self, trainer: pl.Trainer, _: pl.LightningModule) -> None:
+    def on_test_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the test data.
 
         Parameters
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+        pl_module : pl.LightningModule
+            Lightning module
         """
-        data_name_to_index = trainer.datamodule.ds_test.name_to_index
-
-        if hasattr(trainer.model.module, "_ckpt_model_name_to_index"):
-            self._model_name_to_index = trainer.model.module._ckpt_model_name_to_index
-        else:
-            self._model_name_to_index = trainer.datamodule.data_indices.name_to_index
-
-        trainer.datamodule.data_indices.compare_variables(self._model_name_to_index, data_name_to_index)
+        self._check_variable_order(trainer, pl_module, trainer.datamodule.ds_test)

@@ -22,6 +22,7 @@ from torch_geometric.typing import Size
 
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.utils.config import DotDict
@@ -66,6 +67,41 @@ class BaseProcessorChunk(nn.Module, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> Tensor: ...
+
+
+class PointWiseMLPProcessorChunk(BaseProcessorChunk):
+    """Wraps point-wise MLP blocks for checkpointing in Processor."""
+
+    def __init__(
+        self,
+        num_channels: int,
+        num_layers: int,
+        layer_kernels: DotDict,
+        mlp_hidden_ratio: int = 4,
+        dropout_p: float = 0.0,
+    ) -> None:
+        super().__init__(num_channels=num_channels, num_layers=num_layers)
+
+        self.build_blocks(
+            PointWiseMLPProcessorBlock,
+            num_channels=num_channels,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
+            layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
+        )
+
+    def forward(
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
+    ) -> Tensor:
+        for i in range(self.num_layers):
+            x = self.blocks[i](x, shapes, batch_size, model_comm_group=model_comm_group, **kwargs)
+
+        return (x,)
 
 
 class TransformerProcessorChunk(BaseProcessorChunk):

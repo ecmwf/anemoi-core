@@ -8,10 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
 import datashader as dsh
 import matplotlib.cm as cm
@@ -26,19 +24,16 @@ from matplotlib.colors import BoundaryNorm
 from matplotlib.colors import Colormap
 from matplotlib.colors import Normalize
 from matplotlib.colors import TwoSlopeNorm
+from matplotlib.figure import Figure
 from pyshtools.expand import SHGLQ
 from pyshtools.expand import SHExpandGLQ
 from scipy.interpolate import griddata
+from torch import Tensor
+from torch import nn
 
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-
-if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-    from torch import nn, Tensor
-
-from dataclasses import dataclass
 
 LOGGER = logging.getLogger(__name__)
 
@@ -234,15 +229,15 @@ def plot_power_spectrum(
     grid_pc_lon, grid_pc_lat = np.meshgrid(regular_pc_lon, regular_pc_lat)
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        yt = y_true[..., variable_idx].squeeze()
-        yp = y_pred[..., variable_idx].squeeze()
+        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
         # check for any nan in yt
         nan_flag = np.isnan(yt).any()
 
         method = "linear" if nan_flag else "cubic"
         if output_only:
-            xt = x[..., variable_idx].squeeze()
+            xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1)
             yt_i = griddata((pc_lon, pc_lat), (yt - xt), (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
             yp_i = griddata((pc_lon, pc_lat), (yp - xt), (grid_pc_lon, grid_pc_lat), method=method, fill_value=0.0)
         else:
@@ -313,6 +308,7 @@ def plot_histogram(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     precip_and_related_fields: list | None = None,
+    log_scale: bool = False,
 ) -> Figure:
     """Plots histogram.
 
@@ -331,6 +327,8 @@ def plot_histogram(
         Predicted data of shape (lat*lon, nvar*level)
     precip_and_related_fields : list, optional
         List of precipitation-like variables, by default []
+    log_scale : bool, optional
+        Plot histograms with a log-scale, by default False
 
     Returns
     -------
@@ -348,14 +346,14 @@ def plot_histogram(
         ax = [ax]
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        yt = y_true[..., variable_idx].squeeze()
-        yp = y_pred[..., variable_idx].squeeze()
+        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
         # postprocessed outputs so we need to handle possible NaNs
 
         # Calculate the histogram and handle NaNs
         if output_only:
             # histogram of true increment and predicted increment
-            xt = x[..., variable_idx].squeeze() * int(output_only)
+            xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
             yt_xt = yt - xt
             yp_xt = yp - xt
             # enforce the same binning for both histograms
@@ -382,6 +380,8 @@ def plot_histogram(
         ax[plot_idx].set_title(variable_name)
         ax[plot_idx].set_xlabel(variable_name)
         ax[plot_idx].set_ylabel("Density")
+        if log_scale:
+            ax[plot_idx].set_yscale("log")
         ax[plot_idx].legend()
         ax[plot_idx].set_aspect("auto", adjustable=None)
 
@@ -444,9 +444,9 @@ def plot_predicted_multilevel_flat_sample(
         colormaps = {}
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
-        xt = x[..., variable_idx].squeeze() * int(output_only)
-        yt = y_true[..., variable_idx].squeeze()
-        yp = y_pred[..., variable_idx].squeeze()
+        xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
+        yt = (y_true if y_true.ndim == 1 else y_true[..., variable_idx]).reshape(-1)
+        yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
         # get the colormap for the variable as defined in config file
         cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
@@ -548,7 +548,7 @@ def plot_flat_sample(
         # converting to mm from m
         truth *= 1000.0
         pred *= 1000.0
-        if sum(input_) != 0:
+        if np.nansum(input_) != 0:
             input_ *= 1000.0
     data = [None for _ in range(6)]
     # truth, prediction and prediction error always plotted
@@ -585,7 +585,7 @@ def plot_flat_sample(
         norms[1] = norm
         norms[2] = norm
 
-    if sum(input_) != 0:
+    if np.nansum(input_) != 0:
         # prognostic fields: plot input and increment as well
         data[0] = input_
         data[4] = pred - input_

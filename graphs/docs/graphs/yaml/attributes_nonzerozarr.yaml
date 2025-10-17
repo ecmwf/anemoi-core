@@ -1,0 +1,10 @@
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      # ...
+    attributes:
+      land_mask:
+        _target_: anemoi.graphs.nodes.attributes.NonzeroAnemoiDatasetVariable
+        variable: lsm
+  hidden: ...

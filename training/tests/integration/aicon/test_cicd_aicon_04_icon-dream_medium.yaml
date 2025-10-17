@@ -31,10 +31,11 @@ hardware:
     checkpoints: ${hardware.paths.output}checkpoint/
     plots: ${hardware.paths.output}plots/
     profiler: ${hardware.paths.output}profiler/
-    data: "placeholder-for-config-validation"
+    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:
     graph: none
-    dataset: dataset_20220101_20230101_6H.zarr/3.zarr
+    dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
+    forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
     warm_start: null
     checkpoint:
       every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
@@ -56,7 +57,7 @@ graph:
       node_builder:
         _target_: anemoi.graphs.nodes.ICONNodes
         name: "icon_grid_0026_R03B07_G"
-        grid_filename: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples/dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
+        grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
         max_level_multimesh: 3
         max_level_dataset: 3
     # Data nodes
@@ -168,7 +169,7 @@ model:
   cpu_offload: False
 
   model:
-    _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
 
   keep_batch_sharded: True
 
@@ -396,8 +397,8 @@ dataloader:
   training:
     dataset:
       join:
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/dataset_20220101_20230101_6H.zarr
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/forcings_20220101_20230101_6H.zarr
+      - ${hardware.paths.data}/${hardware.files.dataset}
+      - ${hardware.paths.data}/${hardware.files.forcing_dataset}
       #- ../dataset_20220101_20230101_6H.zarr
       #- ../forcings_20220101_20230101_6H.zarr
     start: "2022-01-01T00:00:00"
@@ -407,8 +408,8 @@ dataloader:
   validation:
     dataset:
       join:
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/dataset_20220101_20230101_6H.zarr
-      - https://object-store.os-api.cci2.ecmwf.int/aicon-cicd-data/test_data_2024-12-06_00/forcings_20220101_20230101_6H.zarr
+      - ${hardware.paths.data}/${hardware.files.dataset}
+      - ${hardware.paths.data}/${hardware.files.forcing_dataset}
       #- ../dataset_20220101_20230101_6H.zarr
       #- ../forcings_20220101_20230101_6H.zarr
     start: "2022-01-04T06:00:00"

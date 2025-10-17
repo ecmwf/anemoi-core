@@ -7,22 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 from typing import Any
 
+import torch
 from omegaconf import DictConfig
 
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.scaler_tensor import ScaleTensor
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    import torch
 
 
 class CombinedLoss(BaseLoss):
@@ -128,7 +123,7 @@ class CombinedLoss(BaseLoss):
         assert len(losses) > 0, "At least one loss must be provided"
 
         for i, loss in enumerate(losses):
-            if isinstance(loss, (DictConfig, dict)):
+            if isinstance(loss, DictConfig | dict):
                 self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
                 self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
             elif isinstance(loss, type):
@@ -141,6 +136,7 @@ class CombinedLoss(BaseLoss):
 
             self.add_module(str(i), self.losses[-1])  # (self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
+        del self.scaler  # Remove scaler property from parent class, as it is not used here
 
     def forward(
         self,
@@ -172,23 +168,6 @@ class CombinedLoss(BaseLoss):
             else:
                 loss = self.loss_weights[i] * loss_fn(pred, target, **kwargs)
         return loss
-
-    @property
-    def scaler(self) -> ScaleTensor:
-        """Get union of underlying scalers."""
-        scalers = {}
-        for loss in self.losses:
-            scalers.update(loss.scaler.tensors)
-        return ScaleTensor(scalers)
-
-    @scaler.setter
-    def scaler(self, _: Any) -> None:
-        """Set underlying loss scalers."""
-        if not self._initial_set_scaler:  # Allow parent class to 'initialise' the scaler
-            self._initial_set_scaler = True
-            return
-        excep_msg = "Cannot set `CombinedLoss` scaler directly, use `add_scaler` or `update_scaler`."
-        raise AttributeError(excep_msg)
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:

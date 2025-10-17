@@ -41,7 +41,7 @@ def map_config_to_primitives(config: OmegaConf) -> dict:
         Cannot map object to primitives.
 
     """
-    if config is None or isinstance(config, (int, float, str, bool)):
+    if config is None or isinstance(config, int | float | str | bool):
         return config
 
     if isinstance(config, Path):
@@ -50,15 +50,15 @@ def map_config_to_primitives(config: OmegaConf) -> dict:
         config = config.isoformat()
     elif isinstance(config, datetime.timedelta):
         config = frequency_to_string(config)
-    elif isinstance(config, (list, tuple)):
+    elif isinstance(config, list | tuple):
         config = [map_config_to_primitives(v) for v in config]
     elif isinstance(config, dict):
         config = {k: map_config_to_primitives(v) for k, v in config.items()}
-    elif isinstance(config, (DictConfig, ListConfig)):
+    elif isinstance(config, DictConfig | ListConfig):
         config = map_config_to_primitives(OmegaConf.to_container(config, resolve=True))
     elif isinstance(config, torch.Tensor):
         config = map_config_to_primitives(config.tolist())
-    elif isinstance(config, (IndexCollection, BaseTensorIndex, BaseIndex)):
+    elif isinstance(config, IndexCollection | BaseTensorIndex | BaseIndex):
         config = map_config_to_primitives(config.todict())
     else:
         msg = f"Cannot serialize object of type {type(config)}"

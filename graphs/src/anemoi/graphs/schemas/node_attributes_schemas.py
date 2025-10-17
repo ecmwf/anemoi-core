@@ -8,11 +8,8 @@
 #
 
 
-from __future__ import annotations
-
 import logging
 from typing import Literal
-from typing import Union
 
 from pydantic import Field
 
@@ -23,7 +20,6 @@ LOGGER = logging.getLogger(__name__)
 
 class PlanarAreaWeightSchema(BaseModel):
     target_: Literal[
-        "anemoi.graphs.nodes.attributes.AreaWeights",
         "anemoi.graphs.nodes.attributes.PlanarAreaWeights",
         "anemoi.graphs.nodes.attributes.UniformWeights",
         "anemoi.graphs.nodes.attributes.CosineLatWeightedAttribute",
@@ -60,7 +56,7 @@ class CutOutMaskSchema(BaseModel):
 class GridsMaskSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.GridsMask"] = Field(..., alias="_target_")
     "Implementation of the grids mask from anemoi.graphs.nodes.attributes."
-    grids: Union[list[int], int] = Field(examples=[0, [0]])
+    grids: list[int] | int = Field(examples=[0, [0]])
     "Position of the grids to consider as True."
 
 
@@ -74,14 +70,14 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     "The anemoi-datasets variable to use."
 
 
-SingleAttributeSchema = Union[
-    PlanarAreaWeightSchema,
-    MaskedPlanarAreaWeightsSchema,
-    SphericalAreaWeightSchema,
-    CutOutMaskSchema,
-    GridsMaskSchema,
-    NonmissingAnemoiDatasetVariableSchema,
-]
+SingleAttributeSchema = (
+    PlanarAreaWeightSchema
+    | MaskedPlanarAreaWeightsSchema
+    | SphericalAreaWeightSchema
+    | CutOutMaskSchema
+    | GridsMaskSchema
+    | NonmissingAnemoiDatasetVariableSchema
+)
 
 
 class BooleanOperationSchema(BaseModel):
@@ -91,10 +87,7 @@ class BooleanOperationSchema(BaseModel):
         "anemoi.graphs.nodes.attributes.BooleanOrMask",
     ] = Field(..., alias="_target_")
     "Implementation of boolean masks from anemoi.graphs.nodes.attributes"
-    masks: Union[str, list[str], SingleAttributeSchema, list[SingleAttributeSchema]]
+    masks: str | SingleAttributeSchema | list[str | SingleAttributeSchema]
 
 
-NodeAttributeSchemas = Union[
-    SingleAttributeSchema,
-    BooleanOperationSchema,
-]
+NodeAttributeSchemas = SingleAttributeSchema | BooleanOperationSchema
