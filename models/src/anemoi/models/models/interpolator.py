@@ -21,6 +21,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
@@ -67,9 +68,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.latent_skip = model_config.model.latent_skip
         self.grid_skip = model_config.model.grid_skip
 
-        self.setup_mass_conserving_accumulations(data_indices, model_config)
-
-    def _calculate_input_dim(self, model_config):
+    # Overwrite base class
+    def _calculate_input_dim(self):
         return (
             self.num_input_times * self.num_input_channels
             + self.node_attributes.attr_ndims[self._graph_name_data]
@@ -79,7 +79,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
     def _assemble_input(self, x, target_forcing, batch_size, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -91,13 +93,15 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
 
         if self.grid_skip is not None:
             x_skip = x[:, self.grid_skip, ...]
-            if self.A_down is not None or self.A_up is not None:
+            if self.truncation.A_down is not None or self.truncation.A_up is not None:
                 x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-                x_skip = self._apply_truncation(x_skip, grid_shard_shapes, model_comm_group)
+                x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
                 x_skip = einops.rearrange(
                     x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size
                 )
@@ -146,11 +150,10 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
 
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
         # Run encoder
-        x_data_latent, x_latent = self._run_mapper(
-            self.encoder,
+        x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -172,8 +175,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         # Run decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
@@ -294,33 +296,29 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         return y_preds
 
     def resolve_mass_conservations(self, y_preds, x_input, include_right_boundary=False) -> torch.Tensor:
-        """Enforce a "mass conservation" style constraint on a subset of output variables by
-        redistributing a known total (taken from the input constraints) across the time
-        dimension using softmax weights derived from the model's logits.
+        """Enforce a mass-conservation constraint for selected output variables by redistributing a
+        known total (taken from input constraints) across the time dimension using softmax weights
+        derived from the model's logits.
 
-        Args:
-            y_preds (torch.Tensor):
-                Model outputs with shape (B, T, E, G, V_out) where:
-                - B: batch
-                - T: time / interpolation steps
-                - E, G: extra dims (e.g., ensemble, grid) — passed through unchanged
-                - V_out: total number of output variables
-                The subset `target_indices` inside V_out are the "accumulated" variables whose
-                per-time-step values must sum to a constraint.
-            x_input (torch.Tensor):
-                Model inputs with shape compatible with y_preds selection. We read the
-                *right-boundary* (last time slice) constraint values from:
-                    x_input[:, -1:, ..., input_constraint_indxs]
-                yielding shape (B, 1, E, G, V_acc).
-            include_right_boundary (bool):
-                If False: distribute the constraint over the existing T steps.
-                If True:  append an extra (T+1)-th step representing the right boundary and
-                        distribute over T+1 steps; also copy non-target outputs at that
-                        boundary from inputs.
+        Parameters
+        ----------
+        y_preds : torch.Tensor
+            Model outputs of shape (B, T, E, G, V_out).
+            The subset `target_indices` inside V_out are the accumulated variables constrained to
+            sum to the input totals.
+        x_input : torch.Tensor
+            Input tensor compatible with `y_preds`. Constraint totals are read from the right boundary:
+            x_input[:, -1:, ..., input_constraint_indxs] with shape (B, 1, E, G, V_acc).
+        include_right_boundary : bool, optional
+            If False, distribute the constraint over the existing T steps.
+            If True, append an extra (T+1)-th step representing the right boundary and distribute over T+1 steps;
+            non-target outputs at that boundary are copied from inputs.
 
-        Returns:
-            torch.Tensor: Updated y_preds with target outputs replaced by a constrained,
-                        softmax-weighted allocation that conserves the total "mass".
+        Returns
+        -------
+        torch.Tensor
+            `y_preds` with the constrained target variables replaced by a softmax-weighted allocation that conserves
+            the total. Shape is (B, T, E, G, V_out) or (B, T+1, E, G, V_out) if `include_right_boundary` is True.
         """
 
         # Indices mapping:

@@ -34,6 +34,7 @@ from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
+from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 
 LOGGER = logging.getLogger(__name__)
@@ -215,7 +216,9 @@ class BaseModelSchema(PydanticBaseModel):
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
     grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
     "Index of grid residual connection, or use none. Currently only in interpolator."
-    processor: Union[GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema] = Field(
+    processor: Union[
+        GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema, PointWiseMLPProcessorSchema
+    ] = Field(
         ...,
         discriminator="target_",
     )
