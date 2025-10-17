@@ -33,7 +33,10 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
+<<<<<<< HEAD
 from anemoi.training.optimizers import get_custom_optimizer_class
+=======
+>>>>>>> 6cf0e093 (optimizer init from hydra config)
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
@@ -735,13 +738,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return val_loss, y_preds
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> Tuple[List[torch.optim.Optimizer], List[Dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
         scheduler = self._create_scheduler(optimizer)
         return [optimizer], [scheduler]
 
     def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
+<<<<<<< HEAD
         """Create optimizer from its class name in the config.
 
         The config should include:
@@ -769,22 +773,35 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     f"Available torch: {available_torch}",
                 )
 
+=======
+        """Instantiate optimizer directly via Hydra config (_target_ style)."""
+>>>>>>> 6cf0e093 (optimizer init from hydra config)
         params = filter(lambda p: p.requires_grad, self.parameters())
 
-        # Create optimizer
-        if zero:
+        use_zero = opt_cfg.pop("zero", False) is True
+        
+        kwargs = {k: v for k, v in opt_cfg.items() if k != "_target_"}
+
+        if use_zero:
+            # Instantiate optimizer class to pass to ZeroRedundancyOptimizer
+            optimizer_cls = instantiate(opt_cfg, params=params, lr=self.lr).__class__
             optimizer = ZeroRedundancyOptimizer(
-                params,
+                self.parameters(),
                 lr=self.lr,
                 optimizer_class=optimizer_cls,
                 **kwargs,
             )
         else:
-            optimizer = optimizer_cls(params, lr=self.lr, **kwargs)
+            optimizer = instantiate(opt_cfg, params=params, lr=self.lr)
 
         return optimizer
 
+<<<<<<< HEAD
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict:
+=======
+
+    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> Dict[str, Any]:
+>>>>>>> 6cf0e093 (optimizer init from hydra config)
         """Helper to create the cosine LR scheduler."""
         scheduler = CosineLRScheduler(
             optimizer,

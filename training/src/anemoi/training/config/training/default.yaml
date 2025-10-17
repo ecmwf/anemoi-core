@@ -41,18 +41,16 @@ swa:
 # Optimizer configuration
 # =====================================================================
 optimizer:
-
   # ---------------------------------------------------------------
-  # Choose optimizer type
+  # Choose optimizer type (_target_ approach)
   # ---------------------------------------------------------------
-  # Any PyTorch optimizer name can be used here (e.g. AdamW, SGD, RMSprop)
-  # or one of your custom ones (e.g. AdEMAMix)
-  name: AdamW
+  # Default optimizer: AdamW
+  _target_: torch.optim.AdamW
 
   # ---------------------------------------------------------------
   # Common optimizer parameters
   # ---------------------------------------------------------------
-  # Learning rate is defined elsewhere (e.g. training.lr)
+  # Learning rate is usually defined elsewhere (e.g., training.lr)
   betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
   zero: false              # Use ZeroRedundancyOptimizer for large distributed models
 
@@ -60,13 +58,13 @@ optimizer:
   # Optional: configuration for AdEMAMix (custom optimizer)
   # Uncomment the lines below to enable it
   # ---------------------------------------------------------------
-  # name: AdEMAMix          # Custom optimizer (see optimizers/AdEMAMix.py)
+  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
   # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
-  # alpha: 8.0              # Mixing factor controlling EMA fusion
-  # beta3_warmup: 260000    # Warm-up steps for β₃ (in iterations)
-  # alpha_warmup: 260000    # Warm-up steps for α (in iterations)
+  # alpha: 8.0                   # Mixing factor controlling EMA fusion
+  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
   # weight_decay: 0.1
-  # zero: false             # Use ZeroRedundancyOptimizer for large distributed models
+  # zero: false                   # Use ZeroRedundancyOptimizer for large distributed models
 
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
