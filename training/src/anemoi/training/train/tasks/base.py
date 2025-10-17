@@ -34,11 +34,6 @@ from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
 
-<<<<<<< HEAD
-from anemoi.training.optimizers import get_custom_optimizer_class
-
-=======
->>>>>>> 6cf0e093 (optimizer init from hydra config)
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
@@ -747,37 +742,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return [optimizer], [scheduler]
 
     def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
-<<<<<<< HEAD
-        """Create optimizer from its class name in the config.
-
-        The config should include:
-            name: class name as string (e.g., 'AdamW' or 'AdEMAMix')
-            zero: optional bool, wrap in ZeroRedundancyOptimizer
-            other kwargs: lr, weight_decay, betas, etc.
-        """
-        class_name = opt_cfg.name
-        kwargs = dict(opt_cfg)
-        kwargs.pop("name", None)
-        zero = kwargs.pop("zero", False)
-
-        # Try custom optimizers first
-        optimizer_cls = get_custom_optimizer_class(class_name)
-
-        # Fallback to torch.optim if not found in custom list
-        if optimizer_cls is None:
-            optimizer_cls = getattr(torch.optim, class_name, None)
-            if optimizer_cls is None:
-                available_custom = list(get_custom_optimizer_class.__globals__["CUSTOM_OPTIMIZERS"].keys())
-                available_torch = getattr(torch.optim, "__all__", [])
-                raise ValueError(
-                    f"Optimizer '{class_name}' not found in custom or torch.optim.\n"
-                    f"Available custom: {available_custom}\n"
-                    f"Available torch: {available_torch}",
-                )
-
-=======
         """Instantiate optimizer directly via Hydra config (_target_ style)."""
->>>>>>> 6cf0e093 (optimizer init from hydra config)
         params = filter(lambda p: p.requires_grad, self.parameters())
 
         use_zero = opt_cfg.pop("zero", False) is True
@@ -798,12 +763,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return optimizer
 
-<<<<<<< HEAD
-    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict:
-=======
 
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> Dict[str, Any]:
->>>>>>> 6cf0e093 (optimizer init from hydra config)
         """Helper to create the cosine LR scheduler."""
         scheduler = CosineLRScheduler(
             optimizer,
