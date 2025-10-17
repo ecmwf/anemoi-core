@@ -115,8 +115,8 @@ class BaseSchema(BaseModel):
             return self
 
         for value in self.__dict__.values():
-            if hasattr(value, "validate_cross_subschema"):
-                value.validate_cross_subschema(self)
+            if hasattr(value, "validate_across_subschemas"):
+                value.validate_across_subschemas(self)
 
         return self
 

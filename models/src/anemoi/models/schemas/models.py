@@ -277,7 +277,7 @@ class InterpolatorModelSchema(BaseModelSchema):
         ),
     )
 
-    def validate_cross_subschema(self, base_schema: BaseSchema) -> None:
+    def validate_across_subschemas(self, base_schema: BaseSchema) -> None:
         """Run cross-schema checks that require both model and data configuration.
 
         Currently validates mass-conserving accumulations when configured.
