@@ -53,22 +53,18 @@ class ZeroOverwriter(BasePreprocessor):
         # Accept config.groups as:
         # - list[{"vars": [...], "time_indices": [int]}]
         for entry in groups:
-            if not isinstance(entry, MutableMapping):
-                LOGGER.warning("ZeroOverwriter group must be a dict, got %r; skipping.", type(entry).__name__)
-                continue
+            assert isinstance(entry, MutableMapping), f"ZeroOverwriter group must be a dict, got {type(entry).__name__}"
 
             vars_list = entry["vars"]
             time_indices = entry["time_indices"]
 
-            if not isinstance(vars_list, MutableSequence) or not all(isinstance(v, str) for v in vars_list):
-                LOGGER.warning("ZeroOverwriter group 'vars' must be a list[str], got %r; skipping.", vars_list)
-                continue
+            assert isinstance(vars_list, MutableSequence) and all(
+                isinstance(v, str) for v in vars_list
+            ), f"ZeroOverwriter group 'vars' must be a list[str], got {vars_list!r}"
 
-            if not isinstance(time_indices, MutableSequence) or not all(isinstance(t, int) for t in time_indices):
-                LOGGER.warning(
-                    "ZeroOverwriter group 'time_indices' must be a list[int], got %r; skipping.", time_indices
-                )
-                continue
+            assert isinstance(time_indices, MutableSequence) and all(
+                isinstance(t, int) for t in time_indices
+            ), f"ZeroOverwriter group 'time_indices' must be a list[int], got {time_indices!r}"
 
             train_idxs = [train_map[v] for v in vars_list if v in train_map]
             infer_idxs = [infer_map[v] for v in vars_list if v in infer_map]
