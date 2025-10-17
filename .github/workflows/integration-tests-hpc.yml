@@ -52,6 +52,7 @@ jobs:
             #SBATCH --gpus=1
             #SBATCH --gres=gpu:1
             #SBATCH --mem=30G
+          troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
   benchmark-tests:
     runs-on: hpc
     timeout-minutes: 360 #increase timeout, if slurm queues for ~1 hour then github actions can timeout
