@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
@@ -100,8 +101,26 @@ class LongRolloutPlotsSchema(BaseModel):
     "List of colormaps to use, by default None."
 
 
+class FocusAreaSchema(BaseModel):
+    spatial_mask: str | None = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+
+    latlon_bounds: list[list[float]] | None = Field(default=None, min_items=2, max_items=2)
+    "Latitude and longitude bounds as [[lat_min, lon_min], [lat_max, lon_max]]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self) -> "FocusAreaSchema":
+        if (self.spatial_mask is None) == (self.latlon_bounds is None):
+            msg = "Provide exactly one of 'spatial_mask' or 'latlon_bounds' (not both)."
+            raise ValueError(msg)
+        return self
+
+
 class PlotSampleSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
+    target_: Literal[
+        "anemoi.training.diagnostics.callbacks.plot.PlotSample",
+        "anemoi.training.diagnostics.callbacks.plot.PlotReconstruction",
+    ] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
     sample_idx: int
     "Index of sample to plot, must be inside batch size."
@@ -119,6 +138,8 @@ class PlotSampleSchema(BaseModel):
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to, specified by 'spatial_mask' or 'latlon_bounds'."
 
 
 class PlotSpectrumSchema(BaseModel):

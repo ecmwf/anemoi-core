@@ -9,5 +9,6 @@
 
 from .ensdataset import EnsNativeGridDataset
 from .singledataset import NativeGridDataset
+from .singletimestepdataset import SingleTimestepNativeGridDataset
 
-__all__ = ["EnsNativeGridDataset", "NativeGridDataset"]
+__all__ = ["EnsNativeGridDataset", "NativeGridDataset", "SingleTimestepNativeGridDataset"]
