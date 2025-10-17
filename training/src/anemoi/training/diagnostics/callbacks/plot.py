@@ -917,8 +917,11 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             self.loss = copy.deepcopy(pl_module.loss)
 
-            # gather nan_mask_weights along grid dim if necessary, don't gather if grid dim is broadcastable
-            if hasattr(self.loss.scaler, "nan_mask_weights") and self.loss.scaler.nan_mask_weights.shape[-2] != 1:
+            # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+            if (
+                hasattr(self.loss.scaler, "nan_mask_weights")
+                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+            ):
                 self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
 
             super().on_validation_batch_end(
