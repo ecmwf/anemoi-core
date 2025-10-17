@@ -27,7 +27,7 @@ def zero_overwriter():
                         {
                             # zero accumulative precipitation variables at t=0
                             "vars": ["tp_accum", "cp_accum"],
-                            "time_index": [0],
+                            "time_indices": [0],
                         }
                     ]
                 },

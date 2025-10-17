@@ -5,7 +5,7 @@ format: zarr
 # - Ensure `normalizer.remap` maps the reduced timescale accumulatations to their accumulated counterparts for statistics
 #   (e.g., tp -> tp_accum, cp -> cp_accum) so the outputs use the correct scale.
 # - Use `normalizer.std` for the accumulated inputs (tp_accum, cp_accum) to preserve zero as zero.
-# - Add `processors.zero_overwriter` for the accumulated inputs with `time_index: [0]` so the first time slice in each input window is zeroed.
+# - Add `processors.zero_overwriter` for the accumulated inputs with `time_indices: [0]` so the first time slice in each input window is zeroed.
 #   This is critical when preparing, for example, 6-hour accumulated inputs while training/interpolating at 1-hour resolution.
 
 # Time frequency requested from dataset
@@ -122,7 +122,7 @@ processors:
         - vars:
             - "tp_accum"
             - "cp_accum"
-          time_index: [0]
+          time_indices: [0]
 
 # Values set in the code
 num_features: null # number of features in the forecast state

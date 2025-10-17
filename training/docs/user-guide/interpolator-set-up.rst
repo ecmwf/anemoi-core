@@ -149,7 +149,7 @@ Example (data config entries):
              - vars:
                  - "tp_accum"
                  - "cp_accum"
-               time_index: [0]
+               time_indices: [0]
 
 ******************************
  Changes in dataloader config
@@ -213,7 +213,7 @@ Putting it together:
 #. Data config wires mass conservation: - Accumulated inputs as forcing,
    diagnostic predictions for instantaneous outputs, stats remap,
    ``std`` normalization for accumulations, and ``ZeroOverwriter`` with
-   ``time_index: [0]``.
+   ``time_indices: [0]``.
 
 #. Dataloader joins the aggregated dataset and renames its variables:
 
@@ -231,7 +231,7 @@ Putting it together:
       as diagnostic
    -  Stats remap for tp/cp -> tp_accum/cp_accum
    -  Std normalization for accumulations
-   -  ZeroOverwriter with time_index: [0]
+   -  ZeroOverwriter with time_indices: [0]
 
 .. note::
 

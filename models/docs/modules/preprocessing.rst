@@ -97,11 +97,11 @@ timesteps 0 and 3, and var_c and var_d to zero at timesteps 0 and 4.
            - vars:
                - "var_a"
                - "var_b"
-             time_index: [0, 3]
+             time_indices: [0, 3]
            - vars:
                - "var_c"
                - "var_d"
-             time_index: [0, 4]
+             time_indices: [0, 4]
 
 API
 ===

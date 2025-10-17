@@ -235,7 +235,7 @@ class RemapperSchema(BaseModel):
 
 class ZeroOverwriterGroup(BaseModel):
     vars: Union[list[str], None] = Field(default_factory=list)
-    time_index: Union[list[int], None] = Field(default_factory=list)
+    time_indices: Union[list[int], None] = Field(default_factory=list)
 
     @field_validator("vars", mode="before")
     @classmethod
@@ -246,13 +246,13 @@ class ZeroOverwriterGroup(BaseModel):
             raise TypeError(f"'vars' must be a list[str], got {type(v).__name__}")
         return v
 
-    @field_validator("time_index", mode="before")
+    @field_validator("time_indices", mode="before")
     @classmethod
-    def _validate_time_index(cls, v):
+    def _validate_time_indices(cls, v):
         if v is None:
             return []
         if not isinstance(v, MutableSequence) or not all(isinstance(i, int) for i in v):
-            raise TypeError(f"'time_index' must be a list[int], got {type(v).__name__}")
+            raise TypeError(f"'time_indices' must be a list[int], got {type(v).__name__}")
         return v
 
 

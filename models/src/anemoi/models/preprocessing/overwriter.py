@@ -29,7 +29,7 @@ class ZeroOverwriter(BasePreprocessor):
     groups: list[dict]
         - vars: list[str]
             Variable names to overwrite with zero.
-        - time_index: list[int]
+        - time_indices: list[int]
             Timesteps (relative to the input window) to set to zero, e.g., [0].
 
     Notes
@@ -51,21 +51,23 @@ class ZeroOverwriter(BasePreprocessor):
         infer_map = self.data_indices.model.input.name_to_index
 
         # Accept config.groups as:
-        # - list[{"vars": [...], "time_index": [int]}]
+        # - list[{"vars": [...], "time_indices": [int]}]
         for entry in groups:
             if not isinstance(entry, MutableMapping):
                 LOGGER.warning("ZeroOverwriter group must be a dict, got %r; skipping.", type(entry).__name__)
                 continue
 
             vars_list = entry["vars"]
-            time_index = entry["time_index"]
+            time_indices = entry["time_indices"]
 
             if not isinstance(vars_list, MutableSequence) or not all(isinstance(v, str) for v in vars_list):
                 LOGGER.warning("ZeroOverwriter group 'vars' must be a list[str], got %r; skipping.", vars_list)
                 continue
 
-            if not isinstance(time_index, MutableSequence) or not all(isinstance(t, int) for t in time_index):
-                LOGGER.warning("ZeroOverwriter group 'time_index' must be a list[int], got %r; skipping.", time_index)
+            if not isinstance(time_indices, MutableSequence) or not all(isinstance(t, int) for t in time_indices):
+                LOGGER.warning(
+                    "ZeroOverwriter group 'time_indices' must be a list[int], got %r; skipping.", time_indices
+                )
                 continue
 
             train_idxs = [train_map[v] for v in vars_list if v in train_map]
@@ -76,15 +78,15 @@ class ZeroOverwriter(BasePreprocessor):
             if missing_train or missing_infer:
                 LOGGER.debug("ZeroOverwriter: variables not found (train=%s, infer=%s)", missing_train, missing_infer)
 
-            self._train_time_to_idxs.setdefault(time_index, [])
-            self._infer_time_to_idxs.setdefault(time_index, [])
+            self._train_time_to_idxs.setdefault(time_indices, [])
+            self._infer_time_to_idxs.setdefault(time_indices, [])
 
             for idx in train_idxs:
-                if idx not in self._train_time_to_idxs[time_index]:
-                    self._train_time_to_idxs[time_index].append(idx)
+                if idx not in self._train_time_to_idxs[time_indices]:
+                    self._train_time_to_idxs[time_indices].append(idx)
             for idx in infer_idxs:
-                if idx not in self._infer_time_to_idxs[time_index]:
-                    self._infer_time_to_idxs[time_index].append(idx)
+                if idx not in self._infer_time_to_idxs[time_indices]:
+                    self._infer_time_to_idxs[time_indices].append(idx)
 
     def transform(self, x: Tensor, in_place: bool = True) -> Tensor:
         if not in_place:
