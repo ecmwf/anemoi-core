@@ -231,7 +231,6 @@ class Migration(Command):
         sync_parser.add_argument(
             "--add-migration-key",
             action="store_true",
-            type=bool,
             default=False,
             help=(
                 "Whether to add the migration key in the checkpoint. "
