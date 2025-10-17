@@ -39,7 +39,7 @@ class FilesSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Path | None = None
     "Path to the inverse truncation matrix file."
-    checkpoint: dict[str, str]
+    checkpoint: Checkpoint = Field(default_factory=Checkpoint)
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
     warm_start: str | None = None
     "Name of the checkpoint file to use for warm starting the training"
@@ -54,8 +54,8 @@ class Logs(PydanticBaseModel):
     "Path to output tensorboard logs."
 
 
-class PathsSchema(BaseModel):
-    data: Path | dict[str, Path] | None = None
+class StorageSchema(BaseModel):
+    dataset: Path | dict[str, Path] | None = None
     "Path to the data directory."
     graph: Path | None = None
     "Path to the graph directory."
@@ -89,7 +89,12 @@ class HardwareSchema(BaseModel):
     "Number of GPUs per model."
     num_gpus_per_ensemble: NonNegativeInt = 1
     "Number of GPUs per ensemble."
+
+
+class SystemSchema(BaseModel):
+    hardware: HardwareSchema
+    "Specification of hardware and compute resources available including the number of nodes, GPUs, and accelerator type."
     files: FilesSchema
-    "Files schema."
-    paths: PathsSchema
-    "Paths schema."
+    "Definitions of specific input and output artifacts used relative to the directories defined in `paths`."
+    storage: StorageSchema
+    "High-level directory structure describing where data is read from."

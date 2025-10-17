@@ -1,0 +1,14 @@
+data: ???
+output: ???
+
+truncation: null
+logs:
+  base: ${system.storage.output}logs/
+  wandb: ${system.storage.logs.base}wandb/
+  mlflow: ${system.storage.logs.base}mlflow/
+  tensorboard: ${system.storage.logs.base}tensorboard/
+checkpoints: ${system.storage.output}checkpoint/
+plots: ${system.storage.output}plots/
+profiler: ${system.storage.output}profiler/
+graph: ${system.storage.output}graphs/
+warm_start: null
