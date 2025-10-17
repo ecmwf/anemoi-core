@@ -307,6 +307,10 @@ def architecture_config_with_checkpoint(
         existing_ckpt = get_test_data(
             "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2025-07-31.ckpt",
         )
+    elif "transformer" in model_architecture:
+        existing_ckpt = get_test_data(
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-transformer-global-2025-10-17.ckpt",
+        )
     else:
         msg_error = f"Unknown architecture in config: {cfg.model.architecture}"
         raise ValueError(msg_error)
