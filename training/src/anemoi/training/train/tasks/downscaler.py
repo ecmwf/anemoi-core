@@ -65,7 +65,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.rho = config.model.model.diffusion.rho
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
-        self.training_approach = "probabilistic"
+        self.training_approach = getattr(
+            config.training, "training_approach", "probabilistic"
+        )
         self.x_in_matching_channel_indices = match_tensor_channels(
             self.data_indices.data.input[0].name_to_index,
             {
