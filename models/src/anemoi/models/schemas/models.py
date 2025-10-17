@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
+from typing import TYPE_CHECKING
 from typing import Annotated
 from typing import Literal
 from typing import Union
@@ -21,6 +22,7 @@ from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
+from pydantic_core import PydanticCustomError
 
 from anemoi.utils.schemas import BaseModel
 
@@ -35,6 +37,9 @@ from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 
 LOGGER = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 
 class DefinedModels(str, Enum):
@@ -271,6 +276,99 @@ class InterpolatorModelSchema(BaseModelSchema):
             "(e.g., {'tp': 'tp_accum', 'cp': 'cp_accum'})."
         ),
     )
+
+    def validate_cross_subschema(self, base_schema: BaseSchema) -> None:
+        """Run cross-schema checks that require both model and data configuration.
+
+        Currently validates mass-conserving accumulations when configured.
+        """
+        mca = getattr(self, "mass_conserving_accumulations", None)
+        if mca is not None:
+            self._validate_mass_conserving_accumulations(base_schema)
+
+        return self
+
+    def _validate_mass_conserving_accumulations(self, base_schema: BaseSchema) -> None:
+        """Validate consistency of mass-conserving accumulations between model and data config.
+
+        Requirements:
+        - Each target in model.mass_conserving_accumulations is listed in data.diagnostic
+        - Each constraint in model.mass_conserving_accumulations is listed in data.forcing
+        - data.processors.zero_overwriter exists and includes all constraint variables in at least one group's vars
+        - data.processors.normalizer.config.remap maps each target to its corresponding constraint
+        """
+        mca = self.mass_conserving_accumulations
+        assert mca is not None  # for type-checkers
+
+        # Ensure mapping is dict-like
+        try:
+            pairs = list(mca.items())
+        except Exception as e:  # noqa: BLE001
+            error_title = "mass_conserving_accumulations_invalid"
+            error_msg = "model.mass_conserving_accumulations must be a mapping of target -> constraint. " f"Error: {e}"
+            raise PydanticCustomError(error_title, error_msg) from None
+
+        targets = [t for t, _ in pairs]
+        constraints = [c for _, c in pairs]
+
+        # 1) Targets must be in data.diagnostic
+        diagnostic = getattr(base_schema.data, "diagnostic", None) or []
+        missing_diag = [t for t in targets if t not in diagnostic]
+        if missing_diag:
+            error_title = "mass_conserving_accumulations_target_not_diagnostic"
+            error_msg = f"The following targets must appear in data.diagnostic: {missing_diag}"
+            raise PydanticCustomError(error_title, error_msg)
+
+        # 2) Constraints must be in data.forcing
+        forcing = getattr(base_schema.data, "forcing", None) or []
+        missing_forcing = [c for c in constraints if c not in forcing]
+        if missing_forcing:
+            error_title = "mass_conserving_accumulations_constraint_not_forcing"
+            error_msg = f"The following constraint variables must appear in data.forcing: {missing_forcing}"
+            raise PydanticCustomError(error_title, error_msg)
+
+        # 3) zero_overwriter processor must exist and include all constraint vars in at least one group's vars
+        processors = getattr(base_schema.data, "processors", None) or {}
+        zero_overwriter = processors.get("zero_overwriter")
+        if zero_overwriter is None:
+            error_title = "zero_overwriter_missing"
+            error_msg = (
+                "data.processors.zero_overwriter must be defined to zero the left boundary of accumulated inputs."
+            )
+            raise PydanticCustomError(error_title, error_msg)
+
+        zow_cfg = getattr(zero_overwriter, "config", None) or {}
+        groups = zow_cfg.get("groups") or []
+        zow_vars: set[str] = set()
+        for grp in groups:
+            if isinstance(grp, dict):
+                v = grp.get("vars")
+                if isinstance(v, list):
+                    zow_vars.update(v)
+
+        missing_zow_vars = [c for c in constraints if c not in zow_vars]
+        if missing_zow_vars:
+            error_title = "zero_overwriter_missing_vars"
+            error_msg = (
+                "The following constraint variables must appear in at least one "
+                f"data.processors.zero_overwriter.config.groups[*].vars list: {missing_zow_vars}"
+            )
+            raise PydanticCustomError(error_title, error_msg)
+
+        # 4) normalizer remap must include each target -> constraint mapping
+        normalizer_proc = processors.get("normalizer", None) or {}
+        norm_cfg = getattr(normalizer_proc, "config", None) or {}
+        remap = norm_cfg.get("remap", {}) or {}
+
+        remap_mismatch = [t for (t, c) in pairs if remap.get(t) != c]
+        if remap_mismatch:
+            error_title = "normalizer_remap_mismatch"
+            error_msg = (
+                "data.processors.normalizer.config.remap must map each target to its corresponding "
+                f"constraint variable. Mismatches: {remap_mismatch}. By default, include every pair "
+                "from config.model.mass_conserving_accumulations."
+            )
+            raise PydanticCustomError(error_title, error_msg)
 
 
 class HierarchicalModelSchema(BaseModelSchema):
