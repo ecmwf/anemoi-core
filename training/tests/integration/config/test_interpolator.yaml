@@ -9,9 +9,57 @@ hardware:
     truncation_inv: null
     graph: null
 
+model:
+  mass_conserving_accumulations: null
+
+# set -a; source /home/ecm9156/inference_and_quaver/envs/interpolation_pr_version.env; set +a; pytest training/tests/integration/test_training_cycle.py::test_training_cycle_interpolator -q
+
 data:
   frequency: 6h
-  timestep: 12h
+  timestep: 6h
+
+  forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "insolation"
+    - "lsm"
+    - "sdor"
+    - "slor"
+    - "z"
+
+  normalizer:
+    std:
+    - "tp"
+    - "cp"
+    - "q_50"
+    - "q_100"
+    - "q_150"
+    - "q_200"
+    - "q_250"
+    - "q_300"
+    - "q_400"
+    - "q_500"
+    - "q_600"
+    - "q_700"
+    - "q_850"
+    - "q_925"
+    - "q_1000"
+
+    remap:
+      tp: tp
+      cp: tp
+
+  processors:
+    zero_overwriter:
+      _target_: anemoi.models.preprocessing.overwriter.ZeroOverwriter
+      config:
+        groups: []
 
 dataloader:
   training:

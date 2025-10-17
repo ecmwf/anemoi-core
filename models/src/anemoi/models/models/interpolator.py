@@ -68,6 +68,8 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.latent_skip = model_config.model.latent_skip
         self.grid_skip = model_config.model.grid_skip
 
+        self.setup_mass_conserving_accumulations(data_indices, model_config)
+
     # Overwrite base class
     def _calculate_input_dim(self):
         return (
