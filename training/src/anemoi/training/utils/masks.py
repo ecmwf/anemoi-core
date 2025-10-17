@@ -104,7 +104,7 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
             indices = (~mask).nonzero(as_tuple=True)[0]
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
-        mask = self.broadcast_like(x, dim, grid_shard_slice)
+        mask = self.broadcast_like(x, dim, grid_shard_slice).cpu()
         return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
     def rollout_boundary(
