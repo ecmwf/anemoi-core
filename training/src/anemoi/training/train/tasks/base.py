@@ -33,7 +33,6 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
-
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
@@ -762,7 +761,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             optimizer = instantiate(opt_cfg, params=params, lr=self.lr)
 
         return optimizer
-
 
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> Dict[str, Any]:
         """Helper to create the cosine LR scheduler."""
