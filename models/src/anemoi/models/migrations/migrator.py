@@ -598,13 +598,16 @@ class Migrator:
             mod_start = sys.modules[attribute_path_start]
             setattr(mod_start, mod_name_start, attr_end)
 
-    def sync(self, path: str | PathLike) -> tuple[CkptType, CkptType, list[BaseOp]]:
+    def sync(self, path: str | PathLike, *, add_migration_key: bool = False) -> tuple[CkptType, CkptType, list[BaseOp]]:
         """Migrate or rollbacks the checkpoint using provided migrations
 
         Parameters
         ----------
         path : str | PathLike
             The checkpoint to migrate.
+        add_migration_key : bool
+            Whether to add the migration key in the checkpoint. By default, checkpoint
+            without the migration key are considered too old to be migrated. Defaults to False.
 
         Returns
         -------
@@ -618,6 +621,8 @@ class Migrator:
         # migrations from the checkpoint. The real checkpoint is reloaded afterwards.
         old_ckpt = _load_ckpt(path, replace_attrs=True)
         ckpt = deepcopy(old_ckpt)
+        if add_migration_key:
+            ckpt[_ckpt_migration_key] = []
 
         if not self.is_compatible_ckpt(ckpt):
             first_incompatible_version = self.get_first_incompatible_version(ckpt)

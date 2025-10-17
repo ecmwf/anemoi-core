@@ -228,6 +228,17 @@ class Migration(Command):
             default=None,
             help="If set, overrides the normal path to the migration scripts.",
         )
+        sync_parser.add_argument(
+            "--add-migration-key",
+            action="store_true",
+            type=bool,
+            default=False,
+            help=(
+                "Whether to add the migration key in the checkpoint. "
+                "By default, checkpoint without the migration key are considered too "
+                "old to be migrated. Defaults to False."
+            ),
+        )
 
         help_inspect = "Inspect migrations in a checkpoint."
         inspect_parser = subparsers.add_parser("inspect", help=help_inspect, description=help_inspect)
@@ -315,7 +326,7 @@ class Migration(Command):
             migrator = Migrator()
         ckpt_path = Path(args.ckpt)
         try:
-            old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path)
+            old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path, add_migration_key=args.add_migration_key)
             if len(done_ops) and not args.dry_run:
                 registered_migrations = migrator.registered_migrations(old_ckpt)
                 version = ""
