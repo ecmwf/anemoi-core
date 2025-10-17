@@ -37,11 +37,34 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# Optimizer settings
+# =====================================================================
+# Optimizer configuration
+# =====================================================================
 optimizer:
-  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-  kwargs:
-    betas: [0.9, 0.95]
+  # ---------------------------------------------------------------
+  # Choose optimizer type (_target_ approach)
+  # ---------------------------------------------------------------
+  # Default optimizer: AdamW
+  _target_: torch.optim.AdamW
+
+  # ---------------------------------------------------------------
+  # Common optimizer parameters
+  # ---------------------------------------------------------------
+  # Learning rate is usually defined elsewhere (e.g., training.lr)
+  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
+  zero: false              # Use ZeroRedundancyOptimizer for large distributed models
+
+  # ---------------------------------------------------------------
+  # Optional: configuration for AdEMAMix (custom optimizer)
+  # Uncomment the lines below to enable it
+  # ---------------------------------------------------------------
+  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
+  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
+  # alpha: 8.0                   # Mixing factor controlling EMA fusion
+  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
+  # weight_decay: 0.1
+  # zero: false                   # Use ZeroRedundancyOptimizer for large distributed models
 
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
