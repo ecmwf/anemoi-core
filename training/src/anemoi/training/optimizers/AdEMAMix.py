@@ -152,14 +152,20 @@ class AdEMAMix(Optimizer):
                 # Compute the effective alpha and beta3 in case warmup is used
                 if alpha_warmup is not None:
                     alpha = linear_warmup_scheduler(
-                        state["step"], alpha_end=alpha_final, alpha_start=0, warmup=alpha_warmup,
+                        state["step"],
+                        alpha_end=alpha_final,
+                        alpha_start=0,
+                        warmup=alpha_warmup,
                     )
                 else:
                     alpha = alpha_final
 
                 if beta3_warmup is not None:
                     beta3 = linear_hl_warmup_scheduler(
-                        state["step"], beta_end=beta3_final, beta_start=beta1, warmup=beta3_warmup,
+                        state["step"],
+                        beta_end=beta3_final,
+                        beta_start=beta1,
+                        warmup=beta3_warmup,
                     )
                 else:
                     beta3 = beta3_final

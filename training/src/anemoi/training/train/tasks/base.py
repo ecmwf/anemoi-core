@@ -33,8 +33,10 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
+
 <<<<<<< HEAD
 from anemoi.training.optimizers import get_custom_optimizer_class
+
 =======
 >>>>>>> 6cf0e093 (optimizer init from hydra config)
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -779,7 +781,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         params = filter(lambda p: p.requires_grad, self.parameters())
 
         use_zero = opt_cfg.pop("zero", False) is True
-        
+
         kwargs = {k: v for k, v in opt_cfg.items() if k != "_target_"}
 
         if use_zero:
