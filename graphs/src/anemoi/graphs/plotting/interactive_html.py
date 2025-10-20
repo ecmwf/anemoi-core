@@ -235,6 +235,7 @@ def plot_interactive_nodes(graph: HeteroData, nodes_name: str, out_file: str | N
             sliders=[
                 dict(active=0, currentvalue={"visible": False}, len=0.4, x=0.5, xanchor="center", steps=slider_steps)
             ],
+            titlefont_size=16,
             showlegend=False,
             hovermode="closest",
             margin={"b": 20, "l": 5, "r": 5, "t": 40},
