@@ -35,10 +35,10 @@ hardware:
     graph: graph_anemoi_new_${data.resolution}.pt
 
     # Primary dataset for ERA5
-    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
+    dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
 
     # Secondary dataset for ERA5_copy (using same file for debugging)
-    dataset_b: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
+    dataset_b: cerra-rr-an-oper-0001-mars-5p5km-1984-2022-6h-v3-hmsi.zarr
 
   accelerator: auto
   num_gpus_per_node: 1
