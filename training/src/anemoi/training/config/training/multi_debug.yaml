@@ -142,7 +142,7 @@ scalers:
           tp: 0.025   # ERA5 has precipitation
           cp: 0.0025  # ERA5 has convective precipitation
 
-    era5_copy:
+    cerra:
       # ERA5_copy uses same configuration as ERA5 for debugging
       general_variable:
         _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
@@ -153,9 +153,7 @@ scalers:
           u: 0.8
           v: 0.5
           w: 0.001
-          z: 3       # Same as ERA5
           sp: 10
-          10u: 1    # Same as ERA5
 
       pressure_level:
         _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
@@ -226,8 +224,8 @@ loss_and_metrics:
         - tp_sfc  # precipitation at surface
         - sp_sfc  # surface pressure
 
-    era5_copy:
-      # ERA5_copy uses same configuration as ERA5 for debugging
+    cerra:
+      # cerra uses same configuration as ERA5 for debugging
       training_loss:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
