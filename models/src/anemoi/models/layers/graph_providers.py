@@ -85,8 +85,8 @@ class BaseGraphProvider(nn.Module, ABC):
 
         Parameters
         ----------
-        batch_size : int
-            Number of times to expand the edge index (static mode only)
+        batch_size : int, optional
+            Number of times to expand the edge index (used by static mode)
 
         Returns
         -------
@@ -168,8 +168,8 @@ class StaticGraphProvider(BaseGraphProvider):
 
         Returns
         -------
-        Tensor
-            Edge Index
+        Adj
+            Expanded edge index
         """
         edge_index = torch.cat(
             [edge_index + i * edge_inc for i in range(batch_size)],
@@ -187,10 +187,6 @@ class StaticGraphProvider(BaseGraphProvider):
         ----------
         batch_size : int
             Number of times to expand the edge index
-        edge_index : Adj, optional
-            Ignored for static provider
-        edge_attr : Tensor, optional
-            Ignored for static provider
 
         Returns
         -------
@@ -257,11 +253,17 @@ class DynamicGraphProvider(BaseGraphProvider):
 
     def get_edges(
         self,
+        batch_size: Optional[int] = None,
     ) -> tuple[Tensor, Adj]:
         """Get dynamic edges.
 
         This method will be implemented in the future to return edges
         constructed on-the-fly via build_graph().
+
+        Parameters
+        ----------
+        batch_size : int, optional
+            Batch size (currently unused, reserved for future implementation)
 
         Returns
         -------
