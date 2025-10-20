@@ -215,7 +215,10 @@ class MultiDataset(IterableDataset):
         for i in indices:
             start = i + dataset.relative_date_indices[0]
             end = i + dataset.relative_date_indices[-1] + 1
-            timeincrement = dataset.relative_date_indices[1] - dataset.relative_date_indices[0]
+            if len(dataset.relative_date_indices) == 1: # autoencoder & downscaling
+                timeincrement = 1
+            else:
+                timeincrement = dataset.relative_date_indices[1] - dataset.relative_date_indices[0]
 
             grid_shard_indices = dataset.grid_indices.get_shard_indices(dataset.reader_group_rank)
             if isinstance(grid_shard_indices, slice):

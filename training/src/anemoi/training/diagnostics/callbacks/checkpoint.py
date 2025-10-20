@@ -193,7 +193,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             torch.save(model, inference_checkpoint_filepath)
 
-            save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
+            save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=None) #supporting_arrays)
 
             model.config = save_config
             model.metadata = tmp_metadata
