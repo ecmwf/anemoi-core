@@ -107,8 +107,9 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
         from anemoi.datasets import open_dataset
 
         assert "_dataset" in nodes and isinstance(
-            nodes["_dataset"], dict
-        ), "The '_dataset' attribute must be a dictionary."
+            nodes["_dataset"], (dict, str)
+        ), "The '_dataset' attribute must be a dictionary or string."
+
         return open_dataset(nodes["_dataset"]).grids
 
     @staticmethod

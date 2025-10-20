@@ -23,6 +23,7 @@ from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.chunk import GNNProcessorChunk
 from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
+from anemoi.models.layers.chunk import PointWiseMLPProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
 from anemoi.models.layers.graph_providers import BaseGraphProvider
 from anemoi.models.layers.utils import load_layer_kernels
@@ -81,6 +82,66 @@ class BaseProcessor(nn.Module, ABC):
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
         x = self.run_layers((x,), *args, **kwargs)
+        return x
+
+
+class PointWiseMLPProcessor(BaseProcessor):
+    """Point-wise MLP Processor."""
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        num_channels: int,
+        num_chunks: int,
+        mlp_hidden_ratio: int,
+        cpu_offload: bool = False,
+        dropout_p: float = 0.0,
+        layer_kernels: DotDict,
+        **kwargs,
+    ):
+        super().__init__(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+        )
+
+        self.build_layers(
+            PointWiseMLPProcessorChunk,
+            num_channels=num_channels,
+            num_layers=self.chunk_size,
+            layer_kernels=self.layer_factory,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            dropout_p=dropout_p,
+        )
+
+        self.offload_layers(cpu_offload)
+
+        self._has_dropout = dropout_p > 0 if dropout_p else False
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_shapes: tuple[tuple[int], ...],
+        model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
+        if model_comm_group:
+            assert (
+                model_comm_group.size() == 1 or batch_size == 1
+            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+
+            assert (
+                model_comm_group.size() > 1 and not self._has_dropout
+            ), "Dropout is not supported when model is sharded across GPUS"
+
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+
         return x
 
 
