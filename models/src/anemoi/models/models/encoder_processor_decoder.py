@@ -167,51 +167,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_out = bounding(x_out)
         return x_out
 
-    def _calculate_input_dim(self, model_config):
-        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-
-    def _calculate_input_dim_latent(self, model_config):
-        return self.node_attributes.attr_ndims[self._graph_name_hidden]
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        self.num_input_channels = len(data_indices.model.input)
-        self.num_output_channels = len(data_indices.model.output)
-        self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
-        self._internal_input_idx = data_indices.model.input.prognostic
-        self._internal_output_idx = data_indices.model.output.prognostic
-
-    def _assert_matching_indices(self, data_indices: dict) -> None:
-        assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
-            data_indices.model.output.diagnostic
-        ), (
-            f"Mismatch between the internal data indices ({len(self._internal_output_idx)}) and "
-            f"the output indices excluding diagnostic variables "
-            f"({len(data_indices.model.output.full) - len(data_indices.model.output.diagnostic)})",
-        )
-        assert len(self._internal_input_idx) == len(
-            self._internal_output_idx,
-        ), f"Model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
-
-    def _assert_valid_sharding(
-        self,
-        batch_size: int,
-        ensemble_size: int,
-        in_out_sharded: bool,
-        model_comm_group: Optional[ProcessGroup] = None,
-    ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
-
-        if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
-
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
-
     def forward(
         self,
         x: Tensor,

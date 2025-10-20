@@ -26,6 +26,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -70,6 +71,16 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
+        # Create graph providers
+        self.encoder_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            sub_graph_edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            edge_dim=model_config.model.encoder.get("edge_dim"),
+        )
+
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
@@ -77,22 +88,36 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             in_channels_src=self.input_dim,
             in_channels_dst=self.input_dim_latent,
             hidden_dim=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            edge_dim=self.encoder_graph_provider.edge_dim,
         )
 
         # Processor hidden -> hidden
+        self.processor_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            sub_graph_edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            edge_dim=model_config.model.processor.get("edge_dim"),
+        )
+
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Decoder hidden -> data
+        self.decoder_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            sub_graph_edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            edge_dim=model_config.model.decoder.get("edge_dim"),
+        )
+
         self.decoder = instantiate(
             model_config.model.decoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -100,9 +125,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            edge_dim=self.decoder_graph_provider.edge_dim,
         )
 
     def _calculate_input_dim(self):
