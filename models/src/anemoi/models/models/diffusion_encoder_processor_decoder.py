@@ -24,15 +24,17 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.layers.graph_providers import create_graph_provider
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
+class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     """Diffusion Model."""
 
     def __init__(
@@ -68,8 +70,68 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
-    def _calculate_input_dim(self, model_config):
-        base_input_dim = super()._calculate_input_dim(model_config)
+    def _build_networks(self, model_config: DotDict) -> None:
+        """Builds the model components."""
+
+        # Create graph providers
+        self.encoder_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            sub_graph_edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.encoder.get("trainable_size", 0),
+            edge_dim=model_config.model.encoder.get("edge_dim"),
+        )
+
+        # Encoder data -> hidden
+        self.encoder = instantiate(
+            model_config.model.encoder,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            in_channels_src=self.input_dim,
+            in_channels_dst=self.input_dim_latent,
+            hidden_dim=self.num_channels,
+            edge_dim=self.encoder_graph_provider.edge_dim,
+        )
+
+        # Processor hidden -> hidden
+        self.processor_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            sub_graph_edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            edge_dim=model_config.model.processor.get("edge_dim"),
+        )
+
+        self.processor = instantiate(
+            model_config.model.processor,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            num_channels=self.num_channels,
+            edge_dim=self.processor_graph_provider.edge_dim,
+        )
+
+        # Decoder hidden -> data
+        self.decoder_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            sub_graph_edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
+            trainable_size=model_config.model.decoder.get("trainable_size", 0),
+            edge_dim=model_config.model.decoder.get("edge_dim"),
+        )
+
+        self.decoder = instantiate(
+            model_config.model.decoder,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            in_channels_src=self.num_channels,
+            in_channels_dst=self.input_dim,
+            hidden_dim=self.num_channels,
+            out_channels_dst=self.num_output_channels,
+            edge_dim=self.decoder_graph_provider.edge_dim,
+        )
+
+    def _calculate_input_dim(self):
+        base_input_dim = super()._calculate_input_dim()
         return base_input_dim + self.num_output_channels  # input + noised targets
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
@@ -82,7 +144,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
@@ -94,7 +158,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
 
         return x_data_latent, None, shard_shapes_data
 
@@ -168,8 +234,8 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
         # prepare noise conditionings
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(sigma)
-        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group)
-        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group)
+        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
+        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
 
         c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
         c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
@@ -182,10 +248,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
             x, y_noised, bse, grid_shard_shapes, model_comm_group
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
-        x_data_latent, x_latent = self._run_mapper(
-            self.encoder,
+        x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -208,8 +273,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
         x_latent_proc = x_latent_proc + x_latent
 
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
@@ -287,7 +351,7 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
 
         grid_shard_shapes = None
         if model_comm_group is not None:
-            shard_shapes = get_shard_shapes(x, -2, model_comm_group)
+            shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
         x = pre_processors(x, in_place=False)
@@ -331,7 +395,9 @@ class AnemoiDiffusionModelEncProcDec(AnemoiModelEncProcDec):
         out = post_processors(out, in_place=False)
 
         if gather_out and model_comm_group is not None:
-            out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
+            out = gather_tensor(
+                out, -2, apply_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
+            )
 
         return out
 
@@ -535,7 +601,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             truncation_data=truncation_data,
         )
 
-    def _calculate_input_dim(self, model_config):
+    def _calculate_input_dim(self):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
         input_dim += self.num_output_channels  # noised targets
         input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
@@ -544,14 +610,16 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         x_trunc = x[:, -1, :, :, self._internal_input_idx]
         x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_trunc = self._apply_truncation(x_trunc, grid_shard_shapes, model_comm_group)
+        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
 
         # Get node attributes
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
 
         # Shard node attributes if grid sharding is enabled
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
@@ -564,7 +632,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
 
         return x_data_latent, None, shard_shapes_data
 
@@ -716,10 +786,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         grid_shard_shapes = None
         if model_comm_group is not None:
-            shard_shapes = get_shard_shapes(x, -2, model_comm_group)
+            shard_shapes = get_shard_shapes(x, -2, model_comm_group=model_comm_group)
             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
-            shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group)
+            shard_shapes = get_shard_shapes(x_t0, -2, model_comm_group=model_comm_group)
             x_t0 = shard_tensor(x_t0, -2, shard_shapes, model_comm_group)
 
         x = pre_processors(x, in_place=False)
@@ -761,7 +831,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         # Gather if needed
         if gather_out and model_comm_group is not None:
-            out = gather_tensor(out, -2, apply_shard_shapes(out, -2, grid_shard_shapes), model_comm_group)
+            out = gather_tensor(
+                out, -2, apply_shard_shapes(out, -2, shard_shapes_dim=grid_shard_shapes), model_comm_group
+            )
 
         return out
 
@@ -782,5 +854,5 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         bs, ens, _, _ = x.shape
         x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-        x_trunc = self._apply_truncation(x_trunc, grid_shard_shapes, model_comm_group)
+        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
         return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
