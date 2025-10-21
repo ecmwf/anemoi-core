@@ -24,7 +24,7 @@ system:
     graph: none
     output: output_training/${data.resolution}/
     logs:
-      base: ${system.output}logs/
+      base: ${system.output.output}logs/
       wandb: ${system.output.logs.base}
       mlflow: ${system.output.logs.base}mlflow/
       tensorboard: ${system.output.logs.base}tensorboard/
