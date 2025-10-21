@@ -26,7 +26,7 @@ def data_indices():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "e": 4, "d": 5, "other": 6}
-    return IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    return IndexCollection(config.data, name_to_index=name_to_index)
 
 
 @pytest.fixture()
@@ -42,7 +42,7 @@ def data_indices_with_target():
         },
     )
     name_to_index = {"tp_point": 0, "tp_radar": 1, "tp": 2, "dem": 3}
-    return IndexCollection(config=config, name_to_index=name_to_index)
+    return IndexCollection(config.data, name_to_index=name_to_index)
 
 
 def test_dataindices_init(data_indices) -> None:
