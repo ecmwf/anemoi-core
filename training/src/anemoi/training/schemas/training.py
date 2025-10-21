@@ -81,6 +81,8 @@ class LR(BaseModel):
 class OptimizerSchema(BaseModel):
     """Optimizer configuration."""
 
+    _target_: str = Field(...)
+    "Full path to the optimizer class, e.g. `torch.optim.AdamW`."
     zero: bool = Field(example=False)
     "Use Zero optimiser."
     kwargs: dict[str, Any] = Field(default_factory=dict)

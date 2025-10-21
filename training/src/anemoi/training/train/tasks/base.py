@@ -744,10 +744,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """Instantiate optimizer directly via Hydra config (_target_ style)."""
         params = filter(lambda p: p.requires_grad, self.parameters())
 
-        use_zero = opt_cfg.pop("zero", False) is True
+        # Extract and remove ZeroRedundancy flag
+        use_zero = opt_cfg.pop("zero", False)
 
-        kwargs = {k: v for k, v in opt_cfg.items() if k != "_target_"}
-
+        # Flatten kwargs into top-level config
+        kwargs = opt_cfg.pop("kwargs", {}) or {}
+        for k, v in kwargs.items():
+            opt_cfg[k] = v
+            
         if use_zero:
             # Instantiate optimizer class to pass to ZeroRedundancyOptimizer
             optimizer_cls = instantiate(opt_cfg, params=params, lr=self.lr).__class__
