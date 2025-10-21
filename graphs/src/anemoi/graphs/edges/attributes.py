@@ -287,11 +287,6 @@ class RadialBasisFeatures(EdgeLength):
         self.epsilon = epsilon
         super().__init__(norm=norm, dtype=dtype)
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        # Get great-circle distances (in radians)
-        dists = super().compute(x_i, x_j)
-        return dists
-
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
         """Aggregate edge features with per-node scaling and per-target-node normalization.
 
