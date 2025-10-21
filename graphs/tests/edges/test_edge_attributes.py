@@ -77,9 +77,14 @@ def test_radial_basis_features_default(graph_nodes_and_edges):
     assert edge_attr.shape[0] == edge_index.shape[1]  # num_edges
     assert edge_attr.shape[1] == 5  # default 5 centers
 
-    # Check per-edge normalization: each edge's features should sum to ~1
-    edge_sums = edge_attr.sum(dim=1)
-    assert torch.allclose(edge_sums, torch.ones_like(edge_sums), atol=1e-6)
+    # Check per-target-node per-RBF-center normalization
+    # Within each RBF center, edges to same target should sum to ~1
+    target_indices = edge_index[1]  # Target nodes for each edge
+    for center_idx in range(edge_attr.shape[1]):
+        for target_node in target_indices.unique():
+            mask = target_indices == target_node
+            center_sum = edge_attr[mask, center_idx].sum()
+            assert torch.isclose(center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6)
 
 
 def test_radial_basis_features_global_scale(graph_nodes_and_edges):
@@ -93,9 +98,13 @@ def test_radial_basis_features_global_scale(graph_nodes_and_edges):
     assert isinstance(edge_attr, torch.Tensor)
     assert edge_attr.shape[0] == edge_index.shape[1]
 
-    # Check per-edge normalization
-    edge_sums = edge_attr.sum(dim=1)
-    assert torch.allclose(edge_sums, torch.ones_like(edge_sums), atol=1e-6)
+    # Check per-target-node per-RBF-center normalization
+    target_indices = edge_index[1]
+    for center_idx in range(edge_attr.shape[1]):
+        for target_node in target_indices.unique():
+            mask = target_indices == target_node
+            center_sum = edge_attr[mask, center_idx].sum()
+            assert torch.isclose(center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6)
 
 
 def test_radial_basis_features_custom_centers(graph_nodes_and_edges):
@@ -110,9 +119,13 @@ def test_radial_basis_features_custom_centers(graph_nodes_and_edges):
     assert isinstance(edge_attr, torch.Tensor)
     assert edge_attr.shape[1] == len(custom_centers)
 
-    # Check per-edge normalization
-    edge_sums = edge_attr.sum(dim=1)
-    assert torch.allclose(edge_sums, torch.ones_like(edge_sums), atol=1e-6)
+    # Check per-target-node per-RBF-center normalization
+    target_indices = edge_index[1]
+    for center_idx in range(edge_attr.shape[1]):
+        for target_node in target_indices.unique():
+            mask = target_indices == target_node
+            center_sum = edge_attr[mask, center_idx].sum()
+            assert torch.isclose(center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6)
 
 
 def test_radial_basis_features_epsilon(graph_nodes_and_edges):
@@ -125,17 +138,6 @@ def test_radial_basis_features_epsilon(graph_nodes_and_edges):
 
     assert isinstance(edge_attr, torch.Tensor)
     # Should not crash with division by zero
-
-
-def test_radial_basis_features_no_norm_parameter():
-    """Test that RadialBasisFeatures doesn't accept norm parameter."""
-    # Should work without norm
-    rbf = RadialBasisFeatures()
-    assert rbf is not None
-
-    # Trying to pass norm parameter should raise TypeError
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
-        RadialBasisFeatures(norm="l1")
 
 
 def test_directional_harmonics_default(graph_nodes_and_edges):

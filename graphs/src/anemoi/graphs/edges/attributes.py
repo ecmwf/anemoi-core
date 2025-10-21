@@ -18,6 +18,7 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
 from torch_geometric.typing import Size
+from torch_geometric.utils import scatter
 
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
@@ -220,7 +221,8 @@ class RadialBasisFeatures(EdgeLength):
 
     Provides RBF features via per-node adaptive scaling.
     By default, each destination node's edges are normalized by that node's maximum edge length.
-    Each edge's RBF features are normalized to sum to 1 across all centers.
+    RBF features are normalized per target node per RBF center: within each RBF center,
+    all edges pointing to the same target node have values that sum to 1 (L1 norm).
 
     Parameters
     ----------
@@ -236,27 +238,27 @@ class RadialBasisFeatures(EdgeLength):
         Controls how localized each basis function is around its center.
     epsilon : float, optional
         Small constant to avoid division by zero. Default is 1e-10.
-        Used when computing scales and normalizing features.
     dtype : str, optional
         Data type for computations. Default is "float32".
 
     Note
     ----
-    RBF features are normalized per-edge (each edge's features sum to 1).
+    RBF features are normalized per target node per RBF center.
+    Within each RBF center, all edges to the same target node sum to 1.
 
     Methods
     -------
     compute(x_i, x_j)
         Compute raw edge distances (RBF computation happens in aggregate).
     aggregate(edge_features, index, ptr, dim_size)
-        Compute RBF features with adaptive scaling and per-edge normalization.
+        Compute RBF features with adaptive scaling and per-target-node normalization.
 
     Examples
     --------
-    # Default: per-node adaptive scaling, per-edge normalized RBF
+    # Default: per-node adaptive scaling with grouped normalization
     rbf = RadialBasisFeatures()
 
-    # Use global scale for fixed-resolution graphs
+    # To use global scale
     rbf_global = RadialBasisFeatures(r_scale=1.0)
 
     # Custom RBF centers and width
@@ -275,6 +277,7 @@ class RadialBasisFeatures(EdgeLength):
         r_scale: float | None = None,
         centers: list[float] | None = None,
         sigma: float = 0.2,
+        norm: str = "l1",
         epsilon: float = 1e-10,
         dtype: str = "float32",
     ) -> None:
@@ -282,16 +285,15 @@ class RadialBasisFeatures(EdgeLength):
         self.centers = centers if centers is not None else [0.0, 0.25, 0.5, 0.75, 1.0]
         self.sigma = sigma
         self.epsilon = epsilon
-        super().__init__(norm=None, dtype=dtype)
+        super().__init__(norm=norm, dtype=dtype)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get great-circle distances (in radians)
-        # Return raw distances - RBF computation happens in aggregate
         dists = super().compute(x_i, x_j)
         return dists
 
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
-        """Aggregate edge features with per-node scaling and per-edge normalization.
+        """Aggregate edge features with per-node scaling and per-target-node normalization.
 
         Parameters
         ----------
@@ -307,7 +309,8 @@ class RadialBasisFeatures(EdgeLength):
         Returns
         -------
         torch.Tensor
-            RBF features, shape [num_edges, num_centers], normalized per-edge
+            RBF features, shape [num_edges, num_centers].
+            Normalized per target node per RBF center .
         """
         # Ensure edge_features is 1D
         if edge_features.ndim == 2:
@@ -316,12 +319,7 @@ class RadialBasisFeatures(EdgeLength):
         # 1. Compute scale factor per destination node
         if self.r_scale is None:
             # Per-node max edge length scaling
-            # Create output tensor for max values per node
-            if dim_size is None:
-                dim_size = index.max().item() + 1
-
-            max_dists = torch.full((dim_size,), float("-inf"), dtype=edge_features.dtype, device=edge_features.device)
-            max_dists.scatter_reduce_(0, index, edge_features, reduce="amax", include_self=False)
+            max_dists = scatter(edge_features, index.long(), dim=0, dim_size=dim_size, reduce="max")
 
             # Clamp to epsilon to avoid division by zero
             max_dists = torch.clamp(max_dists, min=self.epsilon)
@@ -344,9 +342,8 @@ class RadialBasisFeatures(EdgeLength):
         # Stack: shape [num_edges, num_centers]
         rbf_features = torch.stack(rbf_features, dim=1)
 
-        # 3. Normalize per-edge across all RBF centers (each edge sums to 1)
-        rbf_sum = rbf_features.sum(dim=1, keepdim=True)
-        rbf_features = rbf_features / torch.clamp(rbf_sum, min=self.epsilon)
+        # Within each RBF center, edges to the same target node sum to 1
+        rbf_features = self.normalise(rbf_features, index, dim_size)
 
         return rbf_features
 
