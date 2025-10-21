@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/models-0.9.6...models-0.9.7) (2025-10-20)
+
+
+### Features
+
+* **models:** Point-mlp proccesor ([#367](https://github.com/ecmwf/anemoi-core/issues/367)) ([ee2a067](https://github.com/ecmwf/anemoi-core/commit/ee2a067689b6efe18acb13ceac8ed0be512633d5))
+
+
+### Bug Fixes
+
+* **models:** Replace placeholder of migration script anemoi-models version in main ([#600](https://github.com/ecmwf/anemoi-core/issues/600)) ([9c18580](https://github.com/ecmwf/anemoi-core/commit/9c18580eda64b0eb53cf17652ea6b6675fbee77a))
+
 ## [0.9.6](https://github.com/ecmwf/anemoi-core/compare/models-0.9.5...models-0.9.6) (2025-10-09)
 
 
