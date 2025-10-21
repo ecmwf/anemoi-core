@@ -54,7 +54,7 @@ class BaseSchema(BaseModel):
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
     system: SystemSchema
-    """Hardware configuration."""
+    """System configuration, including filesystem and hardware specification."""
     graph: BaseGraphSchema
     """Graph configuration."""
     model: ModelSchema
