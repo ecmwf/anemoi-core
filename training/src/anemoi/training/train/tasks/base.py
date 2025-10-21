@@ -751,7 +751,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         kwargs = opt_cfg.pop("kwargs", {}) or {}
         for k, v in kwargs.items():
             opt_cfg[k] = v
-            
+
         if use_zero:
             # Instantiate optimizer class to pass to ZeroRedundancyOptimizer
             optimizer_cls = instantiate(opt_cfg, params=params, lr=self.lr).__class__
