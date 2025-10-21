@@ -85,7 +85,7 @@ class HardwareSchema(BaseModel):
 
 class SystemSchema(BaseModel):
     hardware: HardwareSchema
-    "Specification of hardware and compute resources available including the number of nodes, GPUs, and accelerator type."
+    "Specification of hardware and compute resources available including the number of nodes, GPUs, and accelerator."
     input: InputSchema
     "Definitions of specific input and output artifacts used relative to the directories defined in `paths`."
     output: OutputSchema
