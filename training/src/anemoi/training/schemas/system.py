@@ -21,7 +21,7 @@ from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
 
-class Checkpoint(BaseModel):
+class CheckpointsSchema(BaseModel):
     every_n_epochs: str = "anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}"
     "File name pattern for checkpoint files saved by epoch frequency."
     every_n_train_steps: str = "anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}"
@@ -59,8 +59,8 @@ class OutputSchema(BaseModel):
     "Path to the output directory."
     logs: Logs | None = None
     "Logging directories."
-    checkpoint: Checkpoint
-    "Path to the checkpoints directory."
+    checkpoints: CheckpointsSchema
+    "Paths to the checkpoints."
     plots: Path | None = None
     "Path to the plots directory."
     profiler: Path | None
