@@ -84,7 +84,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
-            config.system.files.checkpoint[key],
+            config.system.output.checkpoint[key],
             frequency,
             n_saved,
         )
