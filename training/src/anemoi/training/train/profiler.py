@@ -127,8 +127,6 @@ class AnemoiProfiler(AnemoiTrainer):
     def _get_logger(self) -> dict[str, Logger]:
         if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):
             logger_info = {"logger_name": "wandb", "logger": self.wandb_logger}
-        elif self.config.diagnostics.log.tensorboard.enabled:
-            logger_info = {"logger_name": "tensorboard", "logger": self.tensorboard_logger}
         elif self.config.diagnostics.log.mlflow.enabled:
             logger_info = {"logger_name": "mlflow", "logger": self.mlflow_logger}
         else:

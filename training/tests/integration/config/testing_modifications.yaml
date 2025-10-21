@@ -17,8 +17,6 @@ diagnostics:
     wandb:
       enabled: False
       entity: null # override '???'
-    tensorboard:
-      enabled: False
     mlflow:
       enabled: False
       tracking_uri: null # override '???'

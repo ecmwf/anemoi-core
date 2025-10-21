@@ -99,32 +99,6 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     return logger
 
 
-def get_tensorboard_logger(config: DictConfig) -> pl.loggers.TensorBoardLogger | None:
-    """Setup TensorBoard experiment logger.
-
-    Parameters
-    ----------
-    config : DictConfig
-        Job configuration
-
-    Returns
-    -------
-    pl.loggers.TensorBoardLogger | None
-        Logger object, or None
-
-    """
-    if not config.diagnostics.log.tensorboard.enabled:
-        LOGGER.debug("Tensorboard logging is disabled.")
-        return None
-
-    from pytorch_lightning.loggers import TensorBoardLogger
-
-    return TensorBoardLogger(
-        save_dir=config.hardware.paths.logs.tensorboard,
-        log_graph=False,
-    )
-
-
 def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.loggers.WandbLogger | None:
     """Setup Weights & Biases experiment logger.
 

@@ -22,14 +22,12 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
 
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
-from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -281,11 +279,6 @@ class AnemoiTrainer:
         """Mlflow logger."""
         return get_mlflow_logger(self.config)
 
-    @cached_property
-    def tensorboard_logger(self) -> pl.loggers.TensorBoardLogger:
-        """TensorBoard logger."""
-        return get_tensorboard_logger(self.config)
-
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
         warm_start_dir = getattr(self.config.hardware.paths, "warm_start", None)  # avoid breaking change
@@ -353,40 +346,11 @@ class AnemoiTrainer:
         return self.datamodule.supporting_arrays
 
     @cached_property
-    def profiler(self) -> PyTorchProfiler | None:
-        """Returns a pytorch profiler object, if profiling is enabled."""
-        if self.config.diagnostics.profiler:
-            assert (
-                self.config.diagnostics.log.tensorboard.enabled
-            ), "Tensorboard logging must be enabled when profiling! Check your job config."
-            return PyTorchProfiler(
-                dirpath=self.config.hardware.paths.logs.tensorboard,
-                filename="anemoi-profiler",
-                export_to_chrome=False,
-                # profiler-specific keywords
-                activities=[
-                    # torch.profiler.ProfilerActivity.CPU,  # this is memory-hungry
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
-                schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    dir_name=self.config.hardware.paths.logs.tensorboard,
-                ),
-                profile_memory=True,
-                record_shapes=True,
-                with_stack=True,
-            )
-        return None
-
-    @cached_property
     def loggers(self) -> list:
         loggers = []
         if self.config.diagnostics.log.wandb.enabled:
             LOGGER.info("W&B logger enabled")
             loggers.append(self.wandb_logger)
-        if self.config.diagnostics.log.tensorboard.enabled:
-            LOGGER.info("TensorBoard logger enabled")
-            loggers.append(self.tensorboard_logger)
         if self.config.diagnostics.log.mlflow.enabled:
             LOGGER.info("MLFlow logger enabled")
             loggers.append(self.mlflow_logger)
