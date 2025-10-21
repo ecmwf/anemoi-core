@@ -24,13 +24,13 @@ system:
     graph: none
     output: output_training/${data.resolution}/
     logs:
-      base: ${system.storage.output}logs/
-      wandb: ${system.storage.logs.base}
-      mlflow: ${system.storage.logs.base}mlflow/
-      tensorboard: ${system.storage.logs.base}tensorboard/
-    checkpoints: ${system.storage.output}checkpoint/
-    plots: ${system.storage.output}plots/
-    profiler: ${system.storage.output}profiler/
+      base: ${system.output}logs/
+      wandb: ${system.output.logs.base}
+      mlflow: ${system.output.logs.base}mlflow/
+      tensorboard: ${system.output.logs.base}tensorboard/
+    checkpoints: ${system.output.output}checkpoint/
+    plots: ${system.output.output}plots/
+    profiler: ${system.output.output}profiler/
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:
     graph: none
@@ -384,7 +384,6 @@ dataloader:
   prefetch_factor: 1
   pin_memory: True
   read_group_size: ${system.hardware.num_gpus_per_model}
-  #dataset: ${system.storage.dataset}/${system.files.dataset}
   batch_size:
     training: 1
     validation: 1

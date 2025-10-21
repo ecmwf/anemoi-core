@@ -332,11 +332,11 @@ class AnemoiProfiler(AnemoiTrainer):
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
-            self.config.system.storage.profiler = Path(self.config.system.storage.profiler, self.run_id)
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, self.run_id)
         elif self.config.training.fork_run_id:
             parent_run = self.config.training.fork_run_id
-            self.config.system.storage.profiler = Path(self.config.system.storage.profiler, parent_run)
-        LOGGER.info("Profiler path: %s", self.config.system.storage.profiler)
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, parent_run)
+        LOGGER.info("Profiler path: %s", self.config.system.output.profiler)
 
     def _close_logger(self) -> None:
         if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):

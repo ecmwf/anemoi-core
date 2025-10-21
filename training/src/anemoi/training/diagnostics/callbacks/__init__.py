@@ -62,7 +62,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         return []
 
     checkpoint_settings = {
-        "dirpath": config.system.storage.checkpoints,
+        "dirpath": config.system.output.checkpoints,
         "verbose": False,
         # save weights, optimizer states, LR-schedule states, hyperparameters etc.
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint

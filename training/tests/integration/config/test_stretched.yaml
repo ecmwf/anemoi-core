@@ -2,9 +2,9 @@
 dataloader:
   dataset:
     cutout:
-      - dataset: ${system.storage.dataset}/${system.files.dataset}
+      - dataset: ${system.input.dataset}
         thinning: 25 # ???-value in stretched config
-      - dataset: ${system.storage.dataset}/${system.files.forcing_dataset}
+      - dataset: ${system.input.forcing_dataset}
   training:
     start: "2017-01-01"
     end: "2017-01-07"

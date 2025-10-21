@@ -30,7 +30,7 @@ class Checkpoint(BaseModel):
     "File name pattern for checkpoint files saved by time frequency (minutes)."
 
 
-class Inputchema(PydanticBaseModel):
+class InputSchema(PydanticBaseModel):
     dataset: Path | dict[str, Path] | None = Field(default=None)  # dict option for multiple datasets
     "Path to the dataset file."
     graph: Path | None = None

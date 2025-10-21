@@ -1,4 +1,4 @@
-dataset: ${system.storage.dataset}/${system.files.dataset}
+dataset: ${system.input.dataset}
 
 training:
   dataset: ${dataloader.dataset}

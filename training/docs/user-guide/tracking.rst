@@ -113,7 +113,7 @@ manually installed:
 To enable offline logging, set
 ``config.diagnostics.logger.mlflow.offline`` to ``True`` and run the
 training as usual. Logs will be saved to the directory specified in
-``config.system.storage.logs``
+``config.system.output.logs``
 
 When training is done, use the ``mlflow sync`` command to sync the
 offline logs to a server:

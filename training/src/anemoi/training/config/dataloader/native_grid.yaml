@@ -50,7 +50,7 @@ grid_indices:
 # See https://anemoi-datasets.readthedocs.io
 # ============
 
-dataset: ${system.storage.dataset}/${system.files.dataset}
+dataset: ${system.input.dataset}
 
 training:
   dataset: ${dataloader.dataset}

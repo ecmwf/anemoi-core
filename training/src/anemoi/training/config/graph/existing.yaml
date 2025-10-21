@@ -4,4 +4,3 @@ overwrite: False
 data: "data"
 hidden: "hidden"
 # This config file can be used to load a graph from your local filesystem
-# ${system.storage.graph}/${system.files.graph}

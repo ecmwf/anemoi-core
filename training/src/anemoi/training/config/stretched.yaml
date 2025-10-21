@@ -21,9 +21,9 @@ config_validation: True
 dataloader:
   dataset:
     cutout:
-      - dataset: ${system.storage.dataset}/${system.files.dataset}
+      - dataset: ${system.input.dataset}
         thinning: ???
-      - dataset: ${system.storage.dataset}/${system.files.forcing_dataset}
+      - dataset: ${system.input.forcing_dataset}
     adjust: all
     min_distance_km: 0
 training:
