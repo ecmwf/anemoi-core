@@ -167,14 +167,10 @@ class AnemoiTrainer:
         Loads truncation data.
         """
         truncation_data = {}
-        if self.config.system.files.truncation is not None:
-            truncation_data["down"] = load_npz(
-                Path(self.config.system.input.truncation, self.config.system.files.truncation),
-            )
-        if self.config.system.files.truncation_inv is not None:
-            truncation_data["up"] = load_npz(
-                Path(self.config.system.input.truncation, self.config.system.files.truncation_inv),
-            )
+        if self.config.system.input.truncation is not None:
+            truncation_data["down"] = load_npz(self.config.system.input.truncation)
+        if self.config.system.input.truncation_inv is not None:
+            truncation_data["up"] = load_npz(self.config.system.input.truncation_inv)
 
         return truncation_data
 
