@@ -322,7 +322,7 @@ class RadialBasisFeatures(EdgeLength):
             # Broadcast to each edge
             scales = max_dists[index]
         else:
-            # Global scaling (convert to tensor for consistent handling)
+            # Global scaling
             scales = torch.full_like(edge_features, max(self.r_scale, self.epsilon))
 
         # 2. Normalize distances and compute RBF features
@@ -334,10 +334,9 @@ class RadialBasisFeatures(EdgeLength):
             rbf = torch.exp(-(((alpha - center) / self.sigma) ** 2))
             rbf_features.append(rbf)
 
-        # Stack: shape [num_edges, num_centers]
         rbf_features = torch.stack(rbf_features, dim=1)
 
-        # Within each RBF center, edges to the same target node sum to 1
+        # Within each RBF center, normalise edges to the same target node
         rbf_features = self.normalise(rbf_features, index, dim_size)
 
         return rbf_features
