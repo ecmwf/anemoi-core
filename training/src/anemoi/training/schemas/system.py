@@ -39,7 +39,7 @@ class InputSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Path | None = None
     "Path to the inverse truncation matrix file."
-    checkpoint: Checkpoint = Field(default_factory=Checkpoint)
+    checkpoint: Checkpoint | None = Field(default_factory=Checkpoint)
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
     warm_start: str | None = None
     "Name of the checkpoint file to use for warm starting the training"
