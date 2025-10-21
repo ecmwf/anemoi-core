@@ -55,7 +55,7 @@ al. (2023).
 
 The physical data is encoded on to a multi-mesh latent space of
 decreasing resolution. This multi-mesh is defined by the graph given in
-``config.system.files.graph``.
+``config.system.input.graph``.
 
 .. figure:: ../images/gnn-encoder-decoder-multimesh.jpg
    :width: 500

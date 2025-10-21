@@ -50,7 +50,7 @@ def build_mock_config(
     config.training.fork_run_id = fork_run_id
     config.training.load_weights_only = False
     config.training.transfer_learning = False
-    config.system.files.warm_start = warm_start
+    config.system.input.warm_start = warm_start
     config.system.input.checkpoint = checkpoints_path
     config.system.input.warm_start = warm_start_path
     config.diagnostics.log.mlflow.enabled = False
@@ -261,7 +261,7 @@ def test_restart_warm_start_misconfiguration_filename(
     # This should raise because the warm start file is not in the expected location
     with pytest.raises(
         AssertionError,
-        match=r"Please configure config.system.files.warm_start correctly, found: None",
+        match=r"Please configure config.system.input.warm_start correctly, found: None",
     ):
         _ = trainer.last_checkpoint
 

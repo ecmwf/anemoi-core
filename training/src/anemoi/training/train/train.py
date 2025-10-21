@@ -74,7 +74,7 @@ class AnemoiTrainer:
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
-            or bool(self.config.system.files.warm_start)
+            or bool(self.config.system.input.warm_start)
         )
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 

@@ -530,7 +530,7 @@ flag to True in the configuration file.
       transfer_learning: True
 
 When this flag is active and a checkpoint path is specified in
-config.system.files.warm_start or self.last_checkpoint, the system loads
+config.system.input.warm_start or self.last_checkpoint, the system loads
 the pre-trained weights using the `transfer_learning_loading` function.
 This approach ensures only compatible weights are loaded and mismatched
 layers are handled appropriately.
