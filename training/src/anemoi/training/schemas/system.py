@@ -30,7 +30,7 @@ class Checkpoint(BaseModel):
     "File name pattern for checkpoint files saved by time frequency (minutes)."
 
 
-class FilesSchema(PydanticBaseModel):
+class Inputchema(PydanticBaseModel):
     dataset: Path | dict[str, Path] | None = Field(default=None)  # dict option for multiple datasets
     "Path to the dataset file."
     graph: Path | None = None
@@ -54,25 +54,17 @@ class Logs(PydanticBaseModel):
     "Path to output tensorboard logs."
 
 
-class StorageSchema(BaseModel):
-    dataset: Path | dict[str, Path] | None = None
-    "Path to the data directory."
-    graph: Path | None = None
-    "Path to the graph directory."
-    truncation: Path | None = None
-    "Path to the truncation matrix directory."
+class OutputSchema(BaseModel):
     output: Path | None = None
     "Path to the output directory."
     logs: Logs | None = None
     "Logging directories."
-    checkpoints: Path
+    checkpoint: Checkpoint
     "Path to the checkpoints directory."
     plots: Path | None = None
     "Path to the plots directory."
     profiler: Path | None
     "Path to the profiler directory."
-    warm_start: str | None = None
-    "Path to the checkpoint to use for warm starting the training"
 
 
 class HardwareSchema(BaseModel):
@@ -94,7 +86,7 @@ class HardwareSchema(BaseModel):
 class SystemSchema(BaseModel):
     hardware: HardwareSchema
     "Specification of hardware and compute resources available including the number of nodes, GPUs, and accelerator type."
-    files: FilesSchema
+    input: InputSchema
     "Definitions of specific input and output artifacts used relative to the directories defined in `paths`."
-    storage: StorageSchema
+    output: OutputSchema
     "High-level directory structure describing where data is read from."
