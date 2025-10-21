@@ -162,7 +162,7 @@ def fake_data_variable_groups() -> tuple[
         },
     )
     name_to_index = {"x": 0, "y_50": 1, "y_500": 2, "y_850": 3, "z": 5, "q": 4, "other": 6, "d": 7}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(config.data, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]}
     metadata_variables = {
