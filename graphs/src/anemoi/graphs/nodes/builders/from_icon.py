@@ -16,25 +16,27 @@ from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 
+class BaseICONNodeBuilder(BaseNodeBuilder):
+    """Base ICON Node Builder."""
+
+    icon_node_class: type[ICONCellDataGrid] | type[ICONMultiMesh]
+
+    def __init__(self, name: str, grid_filename: str, max_level: int) -> None:
+        self.icon_nodes = ICONCellDataGrid(grid_filename, multi_mesh=None, max_level=max_level)
+        super().__init__(name)
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"icon_nodes"}
+
+    def get_coordinates(self) -> torch.Tensor:
+        return torch.from_numpy(self.icon_nodes.nodeset.gc_vertices.astype(np.float32)).fliplr()
+
+
 class ICONMultimeshNodes(BaseNodeBuilder):
     """Processor mesh based on an ICON grid."""
 
-    def __init__(self, name: str, grid_filename: str, max_level: int) -> None:
-        self.multi_mesh = ICONMultiMesh(grid_filename, max_level=max_level)
-        super().__init__(name)
-        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"multi_mesh"}
-
-    def get_coordinates(self) -> torch.Tensor:
-        return torch.from_numpy(self.multi_mesh.nodeset.gc_vertices.astype(np.float32)).fliplr()
+    icon_node_class = ICONMultiMesh
 
 
 class ICONCellGridNodes(BaseNodeBuilder):
     """Data mesh based on an ICON grid."""
 
-    def __init__(self, name: str, grid_filename: str, max_level: int) -> None:
-        self.cell_grid = ICONCellDataGrid(grid_filename, multi_mesh=None, max_level=max_level)
-        super().__init__(name)
-        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"cell_grid"}
-
-    def get_coordinates(self) -> torch.Tensor:
-        return torch.from_numpy(self.cell_grid.nodeset.gc_vertices.astype(np.float32)).fliplr()
+    icon_node_class = ICONCellDataGrid

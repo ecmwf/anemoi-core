@@ -40,7 +40,7 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
-        edge_index = source_nodes["_multi_mesh"].edge_vertices.T
+        edge_index = source_nodes["_icon_nodes"].edge_vertices.T
         return torch.from_numpy(edge_index)
 
 
@@ -55,8 +55,8 @@ class ICONTopologicalEncoderEdges(BaseEdgeBuilder):
     vertex_index: tuple[int, int] = (0, 1)
     
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        cell_grid = source_nodes["_cell_grid"]
-        multi_mesh = target_nodes["_multi_mesh"]
+        cell_grid = source_nodes["_icon_nodes"]
+        multi_mesh = target_nodes["_icon_nodes"]
         edge_vertices = cell_grid.get_grid2mesh_edges(multi_mesh)
         return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
 
@@ -72,7 +72,7 @@ class ICONTopologicalDecoderEdges(BaseEdgeBuilder):
     vertex_index: tuple[int, int] = (1, 0)
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        cell_grid = target_nodes["_cell_grid"]
-        multi_mesh = source_nodes["_multi_mesh"]
+        cell_grid = target_nodes["_icon_nodes"]
+        multi_mesh = source_nodes["_icon_nodes"]
         edge_vertices = cell_grid.get_grid2mesh_edges(multi_mesh)
         return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
