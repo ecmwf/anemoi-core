@@ -23,6 +23,7 @@ from typing import Literal
 from weakref import WeakValueDictionary
 
 import mlflow
+from mlflow.exceptions import RestException
 from mlflow.tracking import MlflowClient
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
@@ -478,7 +479,16 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 cleaned_metrics.pop(k)
                 continue
             self._logged_metrics.add(metric_id)
-        return super().log_metrics(metrics=cleaned_metrics, step=step)
+        try:
+            return super().log_metrics(metrics=cleaned_metrics, step=step)
+        except RestException as e:
+            # Handle duplicate metric key issue gracefully
+            if "duplicate key value violates unique constraint" in str(e):
+                LOGGER.warning("Duplicate metric detected %s", e)
+                # Optionally: return None or continue silently
+            else:
+                # Re-raise if it's a different kind of error
+                raise
 
     @rank_zero_only
     def log_system_metrics(self) -> None:

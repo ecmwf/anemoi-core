@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
+from anemoi.training.schemas.diagnostics import MlflowSchema
 
 
 @pytest.fixture(scope="session")
@@ -44,3 +45,24 @@ def test_mlflowlogger_metric_deduplication(default_logger: AnemoiMLflowLogger) -
     assert len(default_logger._logged_metrics) == 1
     assert next(iter(default_logger._logged_metrics))[0] == "foo"  # key
     assert next(iter(default_logger._logged_metrics))[1] == 5  # step
+
+
+def test_mlflow_schema() -> None:
+    config = {
+        "enabled": False,
+        "offline": False,
+        "authentication": False,
+        "tracking_uri": None,
+        "experiment_name": "anemoi-debug",
+        "project_name": "Anemoi",
+        "system": False,
+        "terminal": False,
+        "run_name": None,  # If set to null, the run name will be a random UUID
+        "on_resume_create_child": True,
+        "expand_hyperparams": ["config"],  # Which keys in hyperparams to expand
+        "http_max_retries": 35,
+        "max_params_length": 2000,
+    }
+    schema = MlflowSchema(**config)
+
+    assert not schema.enabled
