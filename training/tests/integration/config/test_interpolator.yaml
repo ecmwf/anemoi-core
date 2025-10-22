@@ -12,8 +12,6 @@ hardware:
 model:
   mass_conserving_accumulations: null
 
-# set -a; source /home/ecm9156/inference_and_quaver/envs/interpolation_pr_version.env; set +a; pytest training/tests/integration/test_training_cycle.py::test_training_cycle_interpolator -q
-
 data:
   frequency: 6h
   timestep: 6h
