@@ -133,10 +133,14 @@ class GraphDownscaler(BaseGraphModule):
             ]
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         # Compute loss for each dataset and sum them up
-        total_loss = None
+        total_loss = 0
         metrics_next = {}
 
         for dataset_name in batch:
+            # Skip empty target datasets (e.g. forcing-only datasets)
+            if y[dataset_name].numel() == 0:
+                continue
+
             dataset_loss, dataset_metrics = checkpoint(
                 self.compute_loss_metrics,
                 y_pred[dataset_name],
@@ -147,11 +151,8 @@ class GraphDownscaler(BaseGraphModule):
                 use_reentrant=False,
             )
 
-            # should the loss of 2 empty tensors of size (2, 1, 40320, 0) be None or 0.0?? 
-            dataset_loss = dataset_loss if dataset_loss is not None else 0.0 
-
             # Add to total loss
-            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
+            total_loss = total_loss + dataset_loss
 
             # Store metrics with dataset prefix
             for metric_name, metric_value in dataset_metrics.items():
