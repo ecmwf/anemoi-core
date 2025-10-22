@@ -325,18 +325,16 @@ class ICONMultiMesh(GeneralGraph):
 
 
 @typechecked
-class ICONCellDataGrid(BipartiteGraph):
+class ICONCellDataGrid(NodeSet):
     """Reads cell locations from an ICON grid file; builds grid-to-mesh edges based on ICON topology."""
 
     uuidOfHGrid: str
-    nodeset: NodeSet  # set of ICON cell circumcenters
     max_level: int
     select_c: np.ndarray
 
     def __init__(
         self,
         icon_grid_filename: str,
-        multi_mesh: ICONMultiMesh | None = None,
         max_level: int | None = None,
     ):
         # open file, representing the finest level
@@ -351,29 +349,23 @@ class ICONCellDataGrid(BipartiteGraph):
 
             self.uuidOfHGrid = ncfile.uuidOfHGrid
 
-        if max_level is not None:
-            self.max_level = max_level
-        else:
-            self.max_level = reflvl_cell.max()
+        self.max_level = max_level if max_level is not None else reflvl_cell.max()
 
         # restrict to level `max_level`:
-        self.select_coarse_cell_refinement = np.argwhere(reflvl_cell <= self.max_level)
-        # generate source grid node set:
-        self.nodeset = NodeSet(clon[self.select_coarse_cell_refinement], clat[self.select_coarse_cell_refinement])
+        self.select_c = np.argwhere(reflvl_cell <= self.max_level)
+        clon = clon[self.select_c]
+        clat = clat[self.select_c]
 
-        if multi_mesh is not None:
-            # generate edges between source grid nodes and multi-mesh nodes:
-            edge_vertices = self.get_grid2mesh_edges(multi_mesh=multi_mesh)
-            super().__init__((self.nodeset, multi_mesh.nodeset), edge_vertices)
+        super().__init__(clon, clat)
 
     def get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
         """Create "grid-to-mesh" edges, ie. edges from (clat,clon) to the
         vertices of the multi-mesh.
         """
-        num_cells = self.select_coarse_cell_refinement.shape[0]
+        num_cells = self.select_c.shape[0]
         num_vertices_per_cell = multi_mesh.cell_vertices.shape[1]
         src_list = np.kron(np.arange(num_cells), np.ones((1, num_vertices_per_cell), dtype=np.int64)).flatten()
-        dst_list = multi_mesh.cell_vertices[self.select_coarse_cell_refinement[:, 0], :].flatten()
+        dst_list = multi_mesh.cell_vertices[self.select_c[:, 0], :].flatten()
         edge_vertices = np.stack((src_list, dst_list), axis=1, dtype=np.int64)
         return edge_vertices
 
