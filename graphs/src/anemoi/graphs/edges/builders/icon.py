@@ -81,7 +81,7 @@ class ICONTopologicalEncoderEdges(ICONTopologicalBaseEdgeBuilder):
 
     vertex_index: tuple[int, int] = (0, 1)
     sub_graph_address: str = "_cell_grid"
-    
+
     def compute_edge_index(self, _source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         edge_vertices = self.icon_sub_graph._get_grid2mesh_edges(self.multi_mesh)
         return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
