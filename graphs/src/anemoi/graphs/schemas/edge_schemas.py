@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
@@ -36,12 +37,29 @@ class CutoffEdgeSchema(BaseModel):
         ..., alias="_target_"
     )
     "Cut-off based edges implementation from anemoi.graphs.edges."
-    cutoff_factor: PositiveFloat = Field(example=0.6)
-    "Factor to multiply the grid reference distance to get the cut-off radius. Default to 0.6."
+    cutoff_factor: PositiveFloat | None = Field(default=None, example=0.6)
+    "Factor to multiply the grid reference distance to get the cut-off radius. Mutually exclusive with cutoff_distance_km."
+    cutoff_distance_km: PositiveFloat | None = Field(default=None, example=500.0)
+    "Cutoff radius in kilometers. Mutually exclusive with cutoff_factor."
     source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
+    max_num_neighbours: PositiveInt = Field(default=64, example=64)
+    "Maximum number of nearest neighbours to consider when building edges. Default to 64."
+
+    @model_validator(mode="after")
+    def validate_cutoff_params(self):
+        """Validate that exactly one of cutoff_factor or cutoff_distance_km is provided."""
+        cutoff_factor = self.cutoff_factor
+        cutoff_distance_km = self.cutoff_distance_km
+
+        if cutoff_factor is None and cutoff_distance_km is None:
+            raise ValueError("Either cutoff_factor or cutoff_distance_km must be provided.")
+        if cutoff_factor is not None and cutoff_distance_km is not None:
+            raise ValueError("cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one.")
+
+        return self
 
 
 class MultiScaleEdgeSchema(BaseModel):
