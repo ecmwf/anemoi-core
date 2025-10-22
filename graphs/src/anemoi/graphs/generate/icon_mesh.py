@@ -325,10 +325,11 @@ class ICONMultiMesh(GeneralGraph):
 
 
 @typechecked
-class ICONCellDataGrid(NodeSet):
+class ICONCellDataGrid:
     """Reads cell locations from an ICON grid file; builds grid-to-mesh edges based on ICON topology."""
 
     uuidOfHGrid: str
+    nodeset: NodeSet
     max_level: int
     select_c: np.ndarray
 
@@ -353,10 +354,8 @@ class ICONCellDataGrid(NodeSet):
 
         # restrict to level `max_level`:
         self.select_c = np.argwhere(reflvl_cell <= self.max_level)
-        clon = clon[self.select_c]
-        clat = clat[self.select_c]
 
-        super().__init__(clon, clat)
+        self.nodeset = NodeSet(clon[self.select_c], clat[self.select_c])
 
     def get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
         """Create "grid-to-mesh" edges, ie. edges from (clat,clon) to the
