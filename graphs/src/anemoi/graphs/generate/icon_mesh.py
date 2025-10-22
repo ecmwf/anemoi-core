@@ -363,10 +363,10 @@ class ICONCellDataGrid(BipartiteGraph):
 
         if multi_mesh is not None:
             # generate edges between source grid nodes and multi-mesh nodes:
-            edge_vertices = self._get_grid2mesh_edges(multi_mesh=multi_mesh)
+            edge_vertices = self.get_grid2mesh_edges(multi_mesh=multi_mesh)
             super().__init__((self.nodeset, multi_mesh.nodeset), edge_vertices)
 
-    def _get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
+    def get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
         """Create "grid-to-mesh" edges, ie. edges from (clat,clon) to the
         vertices of the multi-mesh.
         """
