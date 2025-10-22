@@ -183,7 +183,7 @@ class ICONMultiMesh:
     @cached_property
     def _vertices(self) -> tuple[list[np.ndarray], np.ndarray]:
         edge_vertices_fine, cell_vertices_fine = self._read_vertices_data()
-        
+
         edge_vertices, cell_vertices = self._get_hierarchy_of_icon_edge_graphs(edge_vertices_fine, cell_vertices_fine)
 
         if self.max_level < len(edge_vertices):
@@ -194,7 +194,7 @@ class ICONMultiMesh:
     def edge_vertices(self) -> list[np.ndarray]:
         """Returns the multi-mesh edges as a list of arrays of vertex indices."""
         return self._vertices[0]
-    
+
     @property
     def cell_vertices(self) -> np.ndarray:
         """Returns the multi-mesh cell_vertices."""
