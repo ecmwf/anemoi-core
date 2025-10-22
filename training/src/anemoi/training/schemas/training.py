@@ -324,8 +324,11 @@ class BaseTrainingSchema(BaseModel):
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
-    """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
+    """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
+    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
+    multistep_output: PositiveInt = Field(example=1)
+    """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
+    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)]."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
@@ -365,6 +368,11 @@ class ForecasterSchema(BaseTrainingSchema):
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
 
+class MultiForecasterSchema(BaseTrainingSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphMultiForecaster",] = Field(..., alias="model_task")
+    "Training objective."
+    rollout: Rollout = Field(default_factory=Rollout)
+    "Rollout configuration."
 
 class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
@@ -397,6 +405,7 @@ class InterpolationSchema(BaseTrainingSchema):
 
 TrainingSchema = Annotated[
     ForecasterSchema
+    | MultiForecasterSchema
     | ForecasterEnsSchema
     | InterpolationSchema
     | DiffusionForecasterSchema

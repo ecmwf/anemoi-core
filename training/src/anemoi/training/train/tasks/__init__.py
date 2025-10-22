@@ -12,6 +12,7 @@ from .diffusionforecaster import GraphDiffusionTendForecaster
 from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
+from .multi_forecaster import GraphMultiForecaster
 
 __all__ = [
     "GraphDiffusionForecaster",
@@ -19,4 +20,5 @@ __all__ = [
     "GraphEnsForecaster",
     "GraphForecaster",
     "GraphInterpolator",
+    "GraphMultiForecaster",
 ]
