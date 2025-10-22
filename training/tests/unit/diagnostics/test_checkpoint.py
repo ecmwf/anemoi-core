@@ -13,48 +13,15 @@ import shutil
 from pathlib import Path
 
 import pytest
-import torch
+import pytorch_lightning as pl
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
-from pytorch_lightning.demos.boring_classes import BoringModel
-from torch import nn
 
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.checkpoints import load_metadata
 from anemoi.utils.config import DotDict
-
-
-class DummyModel(torch.nn.Module):
-    """Dummy pytorch model for testing."""
-
-    def __init__(self, *, config: DotDict, metadata: dict):
-        super().__init__()
-
-        self.config = config
-        self.metadata = metadata
-        self.supporting_arrays = {}
-        self.fc1 = nn.Linear(32, 5)
-        self.fc2 = nn.Linear(5, 1)
-        self.relu = nn.ReLU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.fc1(x)
-        x = self.relu(x)
-        return self.fc2(x)
-
-
-class DummyModule(BoringModel):
-    """Dummy lightning module for testing."""
-
-    def __init__(self, *, config: DotDict, metadata: dict) -> None:
-        super().__init__()
-        self.model = DummyModel(config=config, metadata=metadata)
-        self.save_hyperparameters()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
 
 
 @pytest.fixture
@@ -97,26 +64,8 @@ def callback(tmp_path: str, config: DictConfig, checkpoint_settings: dict) -> An
     return callback
 
 
-@pytest.fixture
-def metadata(config: DictConfig) -> dict:
-    return map_config_to_primitives(
-        {
-            "config": config,
-        },
-    )
-
-
-@pytest.fixture
-def model(metadata: dict, config: DictConfig) -> DummyModule:
-    kwargs = {
-        "metadata": metadata,
-        "config": config,
-    }
-    return DummyModule(**kwargs)
-
-
 @pytest.mark.data_dependent
-def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule) -> None:
+def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: pl.LightningModule) -> None:
     """Test if the inference checkpoints and lightning checkpoints store same uuid.
 
     Args:
@@ -134,7 +83,7 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
             if Path(tmp_path + "/" + pl_ckpt_name).exists():
                 uuid = load_metadata(ckpt_path)["uuid"]
 
-                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name)
+                pl_model = model.model.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name)
 
                 assert uuid == pl_model.hparams["metadata"]["uuid"]
 
