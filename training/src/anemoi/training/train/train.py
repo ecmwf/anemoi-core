@@ -446,7 +446,7 @@ class AnemoiTrainer:
             # WHEN USING MANY NODES/GPUS
             self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
-            self.config.system.output.checkpoints = Path(self.config.system.output.checkpoints, self.lineage_run)
+            self.config.system.output.checkpoints.root = Path(self.config.system.output.checkpoints.root, self.lineage_run)
 
         LOGGER.info("Checkpoints path: %s", self.config.system.output.checkpoints)
         LOGGER.info("Plots path: %s", self.config.system.output.plots)
