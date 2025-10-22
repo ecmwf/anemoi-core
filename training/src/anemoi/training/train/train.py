@@ -288,7 +288,7 @@ class AnemoiTrainer:
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
         """Returns the directory where checkpoints are stored."""
-        return Path(self.config.system.output.checkpoints, fork_id or self.lineage_run) / "last.ckpt"
+        return Path(self.config.system.output.checkpoints.root, fork_id or self.lineage_run) / "last.ckpt"
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
@@ -437,7 +437,9 @@ class AnemoiTrainer:
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.lineage_run = self.parent_run_server2server or self.run_id
-            self.config.system.output.checkpoints = Path(self.config.system.output.checkpoints, self.lineage_run)
+            self.config.system.output.checkpoints.root = Path(
+                self.config.system.output.checkpoints.root, self.lineage_run
+            )
             self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
         elif self.config.training.fork_run_id:
             # WHEN USING MANY NODES/GPUS
