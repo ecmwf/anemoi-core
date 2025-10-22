@@ -44,7 +44,7 @@ def aicon_config_with_tmp_dir(get_tmp_paths: GetTmpPaths, get_test_archive: GetT
         config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
 
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(config, ["dataset", "forcing_dataset"])
-    config.system.output = tmp_dir
+    config.system.output.root = tmp_dir
     config.system.input.graph = tmp_dir
     dataset, forcing_dataset = rel_paths
     config.system.input.data = tmp_dir
