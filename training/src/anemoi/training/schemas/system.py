@@ -65,11 +65,10 @@ class CheckpointsSchema(BaseModel):
     def model_post_init(self, _):
         self.expand_paths()
 
-    def expand_paths(self):
+    def expand_paths(self) -> None:
         self.every_n_epochs = str(self.root / self.every_n_epochs)
         self.every_n_train_steps = str(self.root / self.every_n_train_steps)
         self.every_n_minutes = str(self.root / self.every_n_minutes)
-        return self
 
 
 class Logs(PydanticBaseModel):
@@ -84,7 +83,7 @@ class Logs(PydanticBaseModel):
     def model_post_init(self, _):
         self.expand_paths()
 
-    def expand_paths(self):
+    def expand_paths(self) -> None:
         base = self.root
         if self.wandb is None:
             self.wandb = base / "wandb"
@@ -109,7 +108,7 @@ class OutputSchema(BaseModel):
     def model_post_init(self, _):
         self.expand_paths()
 
-    def expand_paths(self):
+    def expand_paths(self) -> None:
 
         if self.plots:
             self.plots = self.root / self.plots
@@ -121,8 +120,6 @@ class OutputSchema(BaseModel):
 
         self.checkpoints.root = self.root / self.checkpoints.root
         self.checkpoints.expand_paths()
-
-        return self
 
 
 class SystemSchema(BaseModel):
