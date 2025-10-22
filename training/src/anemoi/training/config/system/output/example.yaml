@@ -1,13 +1,13 @@
-output: ???
+root: ???
 logs:
-  base: ${system.output.output}/logs
-  wandb: ${system.output.logs.base}/wandb
-  mlflow: ${system.output.logs.base}/mlflow/
-  tensorboard: ${system.output.logs.base}/tensorboard
-checkpoints: ${system.output.output}/checkpoint
-checkpoint:
-  every_n_epochs: ${system.output.checkpoints}/anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
-  every_n_train_steps: ${system.output.checkpoints}/anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
-  every_n_minutes: ${system.output.checkpoints}/anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
-plots: ${system.output.output}/plots/
-profiler: ${system.output.output}/profiler/
+  root: logs
+  wandb: wandb
+  mlflow: mlflow
+  tensorboard: tensorboard
+checkpoints:
+  root: checkpoint
+  every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+  every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+  every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+plots: plots
+profiler: profiler

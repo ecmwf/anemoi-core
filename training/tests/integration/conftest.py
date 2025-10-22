@@ -40,7 +40,7 @@ def set_working_directory() -> None:
 def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
     testing_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/testing_modifications.yaml")
     assert isinstance(testing_modifications, DictConfig)
-    testing_modifications.hardware.paths.output = str(tmp_path)
+    testing_modifications.system.output.root = str(tmp_path)
     return testing_modifications
 
 
@@ -98,8 +98,7 @@ def architecture_config(
     assert isinstance(use_case_modifications, DictConfig)
 
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    use_case_modifications.system.input.dataset = Path(tmp_dir, rel_paths[0])
 
     # Add the imputer here as it's not part of the default config
     imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
