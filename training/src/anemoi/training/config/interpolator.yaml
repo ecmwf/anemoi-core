@@ -5,7 +5,7 @@ defaults:
 - diagnostics: evaluation
 - hardware: example
 - graph: multi_scale
-- model: transformer
+- model: graphtransformer
 - training: interpolator
 - _self_
 
