@@ -10,7 +10,6 @@
 import itertools
 import logging
 import uuid
-from dataclasses import dataclass
 from functools import cached_property
 
 import netCDF4
@@ -46,6 +45,11 @@ class NodeSet:
         """Cartesian coordinates [rad], shape [:,3]."""
         return self._gc_to_cartesian()
 
+    def __getitem__(self, mask: np.ndarray) -> Self:
+        """Returns a new NodeSet with vertices selected by mask."""
+        selected_gc = self.gc_vertices[mask]
+        return NodeSet(selected_gc[:, 0], selected_gc[:, 1])
+
     def __add__(self, other: Self) -> Self:
         """concatenates two node sets."""
         gc_vertices = np.concatenate((self.gc_vertices, other.gc_vertices))
@@ -66,92 +70,12 @@ class NodeSet:
 
 
 @typechecked
-@dataclass
-class EdgeID:
-    """Stores additional categorical data for each edge (IDs for heterogeneous input)."""
-
-    edge_id: np.ndarray
-    num_classes: int
-
-    def __add__(self, other: Self):
-        """Concatenates two edge ID datasets."""
-        assert self.num_classes == other.num_classes
-        return EdgeID(
-            edge_id=np.concatenate((self.edge_id, other.edge_id)),
-            num_classes=self.num_classes,
-        )
-
-
-@typechecked
-class GeneralGraph:
-    """Stores edges for a given node set."""
-
-    nodeset: NodeSet  # graph nodes
-    edge_vertices: np.ndarray  # vertex indices for each edge, shape [:,2]
-
-    def __init__(self, nodeset: NodeSet, bidirectional: bool, edge_vertices: np.ndarray):
-        self.nodeset = nodeset
-        # (optional) duplicate edges (bi-directional):
-        if bidirectional:
-            self.edge_vertices = np.concatenate([edge_vertices, np.fliplr(edge_vertices)])
-        else:
-            self.edge_vertices = edge_vertices
-
-    @property
-    def num_vertices(self) -> int:
-        return self.nodeset.num_vertices
-
-    @property
-    def num_edges(self) -> int:
-        return self.edge_vertices.shape[0]
-
-
-@typechecked
-class BipartiteGraph:
-    """Graph defined on a pair of NodeSets."""
-
-    nodeset: tuple[NodeSet, NodeSet]  # source and target node set
-    edge_vertices: np.ndarray  # vertex indices for each edge, shape [:,2]
-    edge_id: np.ndarray  # additional ID for each edge (markers for heterogeneous input)
-
-    def __init__(
-        self,
-        nodeset: tuple[NodeSet, NodeSet],
-        edge_vertices: np.ndarray,
-        edge_id: EdgeID | None = None,
-    ):
-        self.nodeset = nodeset
-        self.edge_vertices = edge_vertices
-        self.edge_id = edge_id
-
-    @property
-    def num_edges(self) -> int:
-        return self.edge_vertices.shape[0]
-
-    def __add__(self, other: "BipartiteGraph"):
-        """Concatenates two bipartite graphs that share a common target node set.
-        Shifts the node indices of the second bipartite graph.
-        """
-
-        if not self.nodeset[1] == other.nodeset[1]:
-            raise ValueError("Only bipartite graphs with common target node set can be merged.")
-        shifted_edge_vertices = other.edge_vertices
-        shifted_edge_vertices[:, 0] += self.nodeset[0].num_vertices
-        # (Optional:) merge one-hot-encoded categorical data (`edge_id`)
-        edge_id = None if None in (self.edge_id, other.edge_id) else self.edge_id + other.edge_id
-
-        return BipartiteGraph(
-            nodeset=(self.nodeset[0] + other.nodeset[0], self.nodeset[1]),
-            edge_vertices=np.concatenate((self.edge_vertices, shifted_edge_vertices)),
-            edge_id=edge_id,
-        )
-
-
-@typechecked
 class ICONMultiMesh:
     """Reads vertices and topology from an ICON grid file; creates multi-mesh."""
 
+    icon_grid_filename: str
     uuidOfHGrid: str
+    reflvl_vertex: np.ndarray
     max_level: int
     nodeset: NodeSet  # set of ICON grid vertices
 
@@ -168,6 +92,7 @@ class ICONMultiMesh:
             reflvl_vertex = ncfile.variables["refinement_level_v"][:]
             assert ncfile.variables["refinement_level_v"].dimensions == ("vertex",)
 
+            self.nodeset = NodeSet(vlon, vlat)
             self.uuidOfHGrid = ncfile.uuidOfHGrid
 
         self.reflvl_vertex = reflvl_vertex
@@ -175,15 +100,12 @@ class ICONMultiMesh:
 
         # restrict edge-vertex list to multi_mesh level "max_level":
         if self.max_level < self.reflvl_vertex.max():
-            vlon, vlat = vlon[self.reflvl_vertex < self.max_level], vlat[self.reflvl_vertex < self.max_level]
-
-        # store vertices as a `NodeSet`:
-        self.nodeset = NodeSet(vlon, vlat)
+            self.nodeset = self.nodeset[self.reflvl_vertex < self.max_level]
 
     @cached_property
     def _vertices(self) -> tuple[list[np.ndarray], np.ndarray]:
         edge_vertices_fine, cell_vertices_fine = self._read_vertices_data()
-        
+
         edge_vertices, cell_vertices = self._get_hierarchy_of_icon_edge_graphs(edge_vertices_fine, cell_vertices_fine)
 
         if self.max_level < len(edge_vertices):
@@ -194,7 +116,7 @@ class ICONMultiMesh:
     def edge_vertices(self) -> list[np.ndarray]:
         """Returns the multi-mesh edges as a list of arrays of vertex indices."""
         return self._vertices[0]
-    
+
     @property
     def cell_vertices(self) -> np.ndarray:
         """Returns the multi-mesh cell_vertices."""
@@ -361,7 +283,6 @@ class ICONCellDataGrid:
 
         # restrict to level `max_level`:
         self.select_c = np.argwhere(reflvl_cell <= self.max_level)
-
         self.nodeset = NodeSet(clon[self.select_c], clat[self.select_c])
 
     def get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:

@@ -9,12 +9,14 @@
 
 
 import logging
-from torch_geometric.data import HeteroData
-from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid, ICONMultiMesh
+
 import torch
+from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
+from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
+from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +53,9 @@ class BaseICONEdgeBuilder(BaseEdgeBuilder):
     def prepare_node_data(self, graph: HeteroData) -> tuple[ICONCellDataGrid, ICONMultiMesh]:
         nodes_names = self.source_name, self.target_name
         cell_grid = graph[nodes_names[self.vertex_index[0]]]["_icon_nodes"]
-        assert isinstance(cell_grid, ICONCellDataGrid), f"{self.__class__.__name__}: source nodes must be ICONCellDataGrid"
+        assert isinstance(
+            cell_grid, ICONCellDataGrid
+        ), f"{self.__class__.__name__}: source nodes must be ICONCellDataGrid"
         multi_mesh = graph[nodes_names[self.vertex_index[1]]]["_icon_nodes"]
         assert isinstance(multi_mesh, ICONMultiMesh), f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
         return cell_grid, multi_mesh
