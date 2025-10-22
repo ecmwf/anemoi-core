@@ -135,7 +135,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
+        truncation_data: dict | None = None,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -146,7 +146,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        config : DictConfig
+        config : BaseSchema
             Job configuration
         graph_data : HeteroData
             Graph object
