@@ -37,23 +37,6 @@ class ICONTopologicalBaseEdgeBuilder(BaseEdgeBuilder, ABC):
     vertex_index: tuple[int, int]
     sub_graph_address: str
 
-    def __init__(
-        self,
-        source_name: str,
-        target_name: str,
-        icon_mesh: str,
-        source_mask_attr_name: str | None = None,
-        target_mask_attr_name: str | None = None,
-    ):
-        self.icon_mesh = icon_mesh
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
-
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict = None) -> HeteroData:
-        """Update the graph with the edges."""
-        assert self.icon_mesh is not None, f"{self.__class__.__name__} requires initialized icon_mesh."
-        self.icon_sub_graph = graph[self.icon_mesh][self.sub_graph_address]
-        return super().update_graph(graph, attrs_config)
-
     def compute_edge_index(self, _source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices for the KNN method.
 
@@ -83,6 +66,10 @@ class ICONTopologicalProcessorEdges(ICONTopologicalBaseEdgeBuilder):
     vertex_index: tuple[int, int] = (0, 1)
     sub_graph_address: str = "_multi_mesh"
 
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+        self.icon_sub_graph = graph[self.source_name][self.sub_graph_address]
+        return super().update_graph(graph, attrs_config)
+
 
 class ICONTopologicalEncoderEdges(ICONTopologicalBaseEdgeBuilder):
     """ICON Topological Encoder Edges
@@ -94,6 +81,15 @@ class ICONTopologicalEncoderEdges(ICONTopologicalBaseEdgeBuilder):
 
     vertex_index: tuple[int, int] = (0, 1)
     sub_graph_address: str = "_cell_grid"
+    
+    def compute_edge_index(self, _source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        edge_vertices = self.icon_sub_graph._get_grid2mesh_edges(self.multi_mesh)
+        return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
+
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+        self.icon_sub_graph = graph[self.source_name][self.sub_graph_address]
+        self.multi_mesh = graph[self.target_name]["_multi_mesh"]
+        return super().update_graph(graph, attrs_config)
 
 
 class ICONTopologicalDecoderEdges(ICONTopologicalBaseEdgeBuilder):
@@ -106,3 +102,12 @@ class ICONTopologicalDecoderEdges(ICONTopologicalBaseEdgeBuilder):
 
     vertex_index: tuple[int, int] = (1, 0)
     sub_graph_address: str = "_cell_grid"
+
+    def compute_edge_index(self, _source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        edge_vertices = self.icon_sub_graph._get_grid2mesh_edges(self.multi_mesh)
+        return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
+
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+        self.icon_sub_graph = graph[self.target_name][self.sub_graph_address]
+        self.multi_mesh = graph[self.source_name]["_multi_mesh"]
+        return super().update_graph(graph, attrs_config)

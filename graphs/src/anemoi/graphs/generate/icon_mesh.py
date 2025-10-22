@@ -357,24 +357,23 @@ class ICONCellDataGrid(BipartiteGraph):
             self.max_level = reflvl_cell.max()
 
         # restrict to level `max_level`:
-        self.select_c = np.argwhere(reflvl_cell <= self.max_level)
+        self.select_coarse_cell_refinement = np.argwhere(reflvl_cell <= self.max_level)
         # generate source grid node set:
-        self.nodeset = NodeSet(clon[self.select_c], clat[self.select_c])
+        self.nodeset = NodeSet(clon[self.select_coarse_cell_refinement], clat[self.select_coarse_cell_refinement])
 
         if multi_mesh is not None:
             # generate edges between source grid nodes and multi-mesh nodes:
-            edge_vertices = self._get_grid2mesh_edges(self.select_c, multi_mesh=multi_mesh)
+            edge_vertices = self._get_grid2mesh_edges(multi_mesh=multi_mesh)
             super().__init__((self.nodeset, multi_mesh.nodeset), edge_vertices)
 
-    def _get_grid2mesh_edges(self, select_c: np.ndarray, multi_mesh: ICONMultiMesh) -> np.ndarray:
+    def _get_grid2mesh_edges(self, multi_mesh: ICONMultiMesh) -> np.ndarray:
         """Create "grid-to-mesh" edges, ie. edges from (clat,clon) to the
         vertices of the multi-mesh.
         """
-
-        num_cells = select_c.shape[0]
+        num_cells = self.select_coarse_cell_refinement.shape[0]
         num_vertices_per_cell = multi_mesh.cell_vertices.shape[1]
         src_list = np.kron(np.arange(num_cells), np.ones((1, num_vertices_per_cell), dtype=np.int64)).flatten()
-        dst_list = multi_mesh.cell_vertices[select_c[:, 0], :].flatten()
+        dst_list = multi_mesh.cell_vertices[self.select_coarse_cell_refinement[:, 0], :].flatten()
         edge_vertices = np.stack((src_list, dst_list), axis=1, dtype=np.int64)
         return edge_vertices
 
