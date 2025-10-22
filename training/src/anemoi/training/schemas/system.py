@@ -126,6 +126,6 @@ class SystemSchema(BaseModel):
     hardware: HardwareSchema
     "Specification of hardware and compute resources available including the number of nodes, GPUs, and accelerator."
     input: InputSchema
-    "Definitions of specific input and output artifacts used relative to the directories defined in `paths`."
+    "Definitions of specific input and output artifacts used relative to the directories defined in `output`."
     output: OutputSchema
     "High-level directory structure describing where data is read from."
