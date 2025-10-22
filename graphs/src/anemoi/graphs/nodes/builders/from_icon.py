@@ -22,7 +22,7 @@ class BaseICONNodeBuilder(BaseNodeBuilder):
     icon_node_class: type[ICONCellDataGrid] | type[ICONMultiMesh]
 
     def __init__(self, name: str, grid_filename: str, max_level: int) -> None:
-        self.icon_nodes = ICONCellDataGrid(grid_filename, multi_mesh=None, max_level=max_level)
+        self.icon_nodes = self.icon_node_class(icon_grid_filename=grid_filename, max_level=max_level)
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"icon_nodes"}
 
@@ -30,13 +30,13 @@ class BaseICONNodeBuilder(BaseNodeBuilder):
         return torch.from_numpy(self.icon_nodes.nodeset.gc_vertices.astype(np.float32)).fliplr()
 
 
-class ICONMultimeshNodes(BaseNodeBuilder):
+class ICONMultimeshNodes(BaseICONNodeBuilder):
     """Processor mesh based on an ICON grid."""
 
     icon_node_class = ICONMultiMesh
 
 
-class ICONCellGridNodes(BaseNodeBuilder):
+class ICONCellGridNodes(BaseICONNodeBuilder):
     """Data mesh based on an ICON grid."""
 
     icon_node_class = ICONCellDataGrid

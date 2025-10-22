@@ -148,22 +148,67 @@ class BipartiteGraph:
 
 
 @typechecked
-class ICONMultiMesh(GeneralGraph):
+class ICONMultiMesh:
     """Reads vertices and topology from an ICON grid file; creates multi-mesh."""
 
     uuidOfHGrid: str
     max_level: int
     nodeset: NodeSet  # set of ICON grid vertices
-    cell_vertices: np.ndarray
 
     def __init__(self, icon_grid_filename: str, max_level: int | None = None):
+        self.icon_grid_filename = icon_grid_filename
 
         # open file, representing the finest level
-        LOGGER.debug(f"{type(self).__name__}: read ICON grid file '{icon_grid_filename}'")
+        LOGGER.debug(f"{type(self).__name__}: read coordinates from ICON grid file '{icon_grid_filename}'")
         with netCDF4.Dataset(icon_grid_filename, "r") as ncfile:
             # read vertex coordinates
             vlon = read_coordinate_array(ncfile, "vlon", "vertex")
             vlat = read_coordinate_array(ncfile, "vlat", "vertex")
+
+            reflvl_vertex = ncfile.variables["refinement_level_v"][:]
+            assert ncfile.variables["refinement_level_v"].dimensions == ("vertex",)
+
+            self.uuidOfHGrid = ncfile.uuidOfHGrid
+
+        self.reflvl_vertex = reflvl_vertex
+        self.max_level = max_level if max_level is not None else reflvl_vertex.max()
+
+        # restrict edge-vertex list to multi_mesh level "max_level":
+        if self.max_level < self.reflvl_vertex.max():
+            vlon, vlat = vlon[self.reflvl_vertex < self.max_level], vlat[self.reflvl_vertex < self.max_level]
+
+        # store vertices as a `NodeSet`:
+        self.nodeset = NodeSet(vlon, vlat)
+
+    @cached_property
+    def _vertices(self) -> tuple[list[np.ndarray], np.ndarray]:
+        edge_vertices_fine, cell_vertices_fine = self._read_vertices_data()
+        
+        edge_vertices, cell_vertices = self._get_hierarchy_of_icon_edge_graphs(edge_vertices_fine, cell_vertices_fine)
+
+        if self.max_level < len(edge_vertices):
+            edge_vertices, cell_vertices = self._restrict_multi_mesh_edges_and_cells(edge_vertices, cell_vertices)
+        return edge_vertices, cell_vertices
+
+    @property
+    def edge_vertices(self) -> list[np.ndarray]:
+        """Returns the multi-mesh edges as a list of arrays of vertex indices."""
+        return self._vertices[0]
+    
+    @property
+    def cell_vertices(self) -> np.ndarray:
+        """Returns the multi-mesh cell_vertices."""
+        return self._vertices[1]
+
+    @property
+    def multi_mesh_edges(self) -> np.ndarray:
+        """Returns the multi-mesh edges as an arrays of vertex indices."""
+        # concatenate edge-vertex lists (= edges of the multi-level mesh):
+        return np.concatenate([edges for edges in self.edge_vertices], axis=0)
+
+    def _read_vertices_data(self):
+        LOGGER.debug(f"{type(self).__name__}: read vertices data from ICON grid file '{self.icon_grid_filename}'")
+        with netCDF4.Dataset(self.icon_grid_filename, "r") as ncfile:
 
             edge_vertices_fine = np.asarray(ncfile.variables["edge_vertices"][:] - 1, dtype=np.int64).transpose()
             assert ncfile.variables["edge_vertices"].dimensions == ("nc", "edge")
@@ -171,68 +216,34 @@ class ICONMultiMesh(GeneralGraph):
             cell_vertices_fine = np.asarray(ncfile.variables["vertex_of_cell"][:] - 1, dtype=np.int64).transpose()
             assert ncfile.variables["vertex_of_cell"].dimensions == ("nv", "cell")
 
-            reflvl_vertex = ncfile.variables["refinement_level_v"][:]
-            assert ncfile.variables["refinement_level_v"].dimensions == ("vertex",)
+        return edge_vertices_fine, cell_vertices_fine
 
-            self.uuidOfHGrid = ncfile.uuidOfHGrid
-
-        self.max_level = max_level if max_level is not None else reflvl_vertex.max()
-
-        # generate edge-vertex relations for coarser levels:
-        (edge_vertices, cell_vertices) = self._get_hierarchy_of_icon_edge_graphs(
-            edge_vertices_fine=edge_vertices_fine,
-            cell_vertices_fine=cell_vertices_fine,
-            reflvl_vertex=reflvl_vertex,
-        )
-        # restrict edge-vertex list to multi_mesh level "max_level":
-        if self.max_level < len(edge_vertices):
-            (self.edge_vertices, self.cell_vertices, vlon, vlat) = self._restrict_multi_mesh_level(
-                edge_vertices,
-                cell_vertices,
-                reflvl_vertex=reflvl_vertex,
-                vlon=vlon,
-                vlat=vlat,
-            )
-        # store vertices as a `NodeSet`:
-        self.nodeset = NodeSet(vlon, vlat)
-        # concatenate edge-vertex lists (= edges of the multi-level mesh):
-        multi_mesh_edges = np.concatenate([edges for edges in self.edge_vertices], axis=0)
-        # generate multi-mesh graph data structure:
-        super().__init__(nodeset=self.nodeset, bidirectional=True, edge_vertices=multi_mesh_edges)
-
-    def _restrict_multi_mesh_level(
+    def _restrict_multi_mesh_edges_and_cells(
         self,
         edge_vertices: list[np.ndarray],
         cell_vertices: np.ndarray,
-        reflvl_vertex: np.ndarray,
-        vlon: np.ndarray,
-        vlat: np.ndarray,
-    ) -> tuple[list[np.ndarray], np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[list[np.ndarray], np.ndarray]:
         """Creates a new mesh with only the vertices at the desired level."""
-
-        num_vertices = reflvl_vertex.shape[0]
-        vertex_mask = reflvl_vertex <= self.max_level
+        vertex_mask = self.reflvl_vertex < self.max_level
+        num_vertices = vertex_mask.shape[0]
         vertex_glb2loc = np.zeros(num_vertices, dtype=int)
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
         return (
             [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level + 1]],
             # cell_vertices: preserve negative indices (incomplete cells)
             np.where(cell_vertices >= 0, vertex_glb2loc[cell_vertices], cell_vertices),
-            vlon[vertex_mask],
-            vlat[vertex_mask],
         )
 
     def _get_hierarchy_of_icon_edge_graphs(
         self,
         edge_vertices_fine: np.ndarray,
         cell_vertices_fine: np.ndarray,
-        reflvl_vertex: np.ndarray,
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Returns a list of edge-vertex relations (coarsest to finest level)."""
 
         edge_vertices = [edge_vertices_fine]  # list of edge-vertex relations (coarsest to finest level).
 
-        num_vertices = reflvl_vertex.shape[0]
+        num_vertices = self.reflvl_vertex.shape[0]
         # edge-to-vertex adjacency matrix with 2 non-zero entries per row:
         edge2vertex_matrix = convert_list_to_adjacency_matrix(edge_vertices_fine, num_vertices)
         # cell-to-vertex adjacency matrix with 3 non-zero entries per row:
@@ -243,7 +254,7 @@ class ICONMultiMesh(GeneralGraph):
         selected_vertex_coarse = scipy.sparse.diags(np.ones(num_vertices), dtype=bool)
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
-        for ilevel in reversed(range(1, reflvl_vertex.max() + 1)):
+        for ilevel in reversed(range(1, self.reflvl_vertex.max() + 1)):
             LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
 
             # define edge selection matrix (selecting only edges of which have
@@ -251,14 +262,14 @@ class ICONMultiMesh(GeneralGraph):
             #
             # get a boolean mask, matching all edges where one of its vertices
             # has refinement level index `ilevel`:
-            ref_level_mask = reflvl_vertex[edge_vertices[0]] == ilevel
+            ref_level_mask = self.reflvl_vertex[edge_vertices[0]] == ilevel
             edges_coarse = np.logical_xor(ref_level_mask[:, 0], ref_level_mask[:, 1])  # = bisected coarse edges
             idx_edge2edge = np.argwhere(edges_coarse).flatten()
             selected_edges = selection_matrix(idx_edge2edge, edges_coarse.shape[0])
 
             # define vertex selection matrix selecting only vertices of
             # level `ilevel`:
-            idx_v_fine = np.argwhere(reflvl_vertex == ilevel).flatten()
+            idx_v_fine = np.argwhere(self.reflvl_vertex == ilevel).flatten()
             selected_vertex_fine = selection_matrix(idx_v_fine, num_vertices)
             # define vertex selection matrix, selecting only vertices of
             # level < `ilevel`, by successively removing `s_fine` from an identity matrix.
@@ -333,11 +344,7 @@ class ICONCellDataGrid:
     max_level: int
     select_c: np.ndarray
 
-    def __init__(
-        self,
-        icon_grid_filename: str,
-        max_level: int | None = None,
-    ):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None):
         # open file, representing the finest level
         LOGGER.debug(f"{type(self).__name__}: read ICON grid file '{icon_grid_filename}'")
         with netCDF4.Dataset(icon_grid_filename, "r") as ncfile:

@@ -9,7 +9,8 @@
 
 
 import logging
-
+from torch_geometric.data import HeteroData
+from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid, ICONMultiMesh
 import torch
 from torch_geometric.data.storage import NodeStorage
 
@@ -40,11 +41,27 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
-        edge_index = source_nodes["_icon_nodes"].edge_vertices.T
-        return torch.from_numpy(edge_index)
+        edge_index = source_nodes["_icon_nodes"].multi_mesh_edges
+        return torch.from_numpy(edge_index.T)
 
 
-class ICONTopologicalEncoderEdges(BaseEdgeBuilder):
+class BaseICONEdgeBuilder(BaseEdgeBuilder):
+    """Base ICON Edge Builder."""
+
+    def prepare_node_data(self, graph: HeteroData) -> tuple[ICONCellDataGrid, ICONMultiMesh]:
+        nodes_names = self.source_name, self.target_name
+        cell_grid = graph[nodes_names[self.vertex_index[0]]]["_icon_nodes"]
+        assert isinstance(cell_grid, ICONCellDataGrid), f"{self.__class__.__name__}: source nodes must be ICONCellDataGrid"
+        multi_mesh = graph[nodes_names[self.vertex_index[1]]]["_icon_nodes"]
+        assert isinstance(multi_mesh, ICONMultiMesh), f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
+        return cell_grid, multi_mesh
+
+    def compute_edge_index(self, cell_grid: ICONCellDataGrid, multi_mesh: ICONMultiMesh) -> torch.Tensor:
+        edge_vertices = cell_grid.get_grid2mesh_edges(multi_mesh)
+        return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
+
+
+class ICONTopologicalEncoderEdges(BaseICONEdgeBuilder):
     """ICON Topological Encoder Edges
 
     Computes encoder edges based on ICON grid topology: ICON cell
@@ -53,26 +70,14 @@ class ICONTopologicalEncoderEdges(BaseEdgeBuilder):
     """
 
     vertex_index: tuple[int, int] = (0, 1)
-    
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        cell_grid = source_nodes["_icon_nodes"]
-        multi_mesh = target_nodes["_icon_nodes"]
-        edge_vertices = cell_grid.get_grid2mesh_edges(multi_mesh)
-        return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
 
 
-class ICONTopologicalDecoderEdges(BaseEdgeBuilder):
+class ICONTopologicalDecoderEdges(BaseICONEdgeBuilder):
     """ICON Topological Decoder Edges
 
-    Computes encoder edges based on ICON grid topology: mapping from
+    Computes decoder edges based on ICON grid topology: mapping from
     processor grid built from ICON grid vertices onto ICON cell
     circumcenters.
     """
 
     vertex_index: tuple[int, int] = (1, 0)
-
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        cell_grid = target_nodes["_icon_nodes"]
-        multi_mesh = source_nodes["_icon_nodes"]
-        edge_vertices = cell_grid.get_grid2mesh_edges(multi_mesh)
-        return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
