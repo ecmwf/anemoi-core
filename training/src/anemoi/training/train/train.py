@@ -282,7 +282,7 @@ class AnemoiTrainer:
         warm_start_path = self.config.system.input.warm_start
 
         if warm_start_path:
-            msg = "Warm start checkpoint not found: %s", warm_start_path
+            msg = f"Warm start checkpoint not found: {warm_start_path}"
             assert Path.is_file(warm_start_path), msg
         return warm_start_path
 
