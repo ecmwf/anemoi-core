@@ -439,7 +439,6 @@ class AnemoiTrainer:
             self.lineage_run = self.parent_run_server2server or self.run_id
             self.config.system.output.checkpoints.root = Path(
                 self.config.system.output.checkpoints.root,
-                self.lineage_run,
             )
             self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
         elif self.config.training.fork_run_id:
@@ -448,7 +447,6 @@ class AnemoiTrainer:
             # Only rank non zero in the forked run will go here
             self.config.system.output.checkpoints.root = Path(
                 self.config.system.output.checkpoints.root,
-                self.lineage_run,
             )
 
         LOGGER.info("Checkpoints path: %s", self.config.system.output.checkpoints)

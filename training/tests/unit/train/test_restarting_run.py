@@ -51,6 +51,7 @@ def build_mock_config(
     config.training.load_weights_only = False
     config.training.transfer_learning = False
     config.system.input.checkpoint = checkpoints_path
+    config.system.output.checkpoints.root = checkpoints_path
     config.system.input.warm_start = warm_start_path / warm_start if warm_start_path and warm_start else None
     config.diagnostics.log.mlflow.enabled = False
     return config
@@ -91,7 +92,6 @@ def test_restart_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: 
 
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id == run_id
-
     assert trainer.last_checkpoint == expected_path
 
 
