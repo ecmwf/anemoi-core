@@ -531,80 +531,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return y_pred_full, y_full, final_grid_shard_slice
 
-    def _compute_loss(
-        self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
-        **_kwargs,
-    ) -> torch.Tensor:
-        """Compute the loss function.
-
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
-        grid_shard_slice : slice | None
-            Grid shard slice for distributed training
-        dataset_name : str | None
-            Dataset name for multi-dataset scenarios
-        **_kwargs
-            Additional arguments
-
-        Returns
-        -------
-        torch.Tensor
-            Computed loss
-        """
-        # Handle multi-dataset case
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
-        loss_fn = self.loss[dataset_name]
-
-        return loss_fn(
-            y_pred,
-            y,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-        )
-
-    def _compute_metrics(
-        self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        rollout_step: int = 0,
-        grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Compute validation metrics.
-
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
-        rollout_step : int
-            Current rollout step
-        grid_shard_slice : slice | None
-            Grid shard slice for distributed training
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Computed metrics
-        """
-        return self.calculate_val_metrics(
-            y_pred,
-            y,
-            rollout_step,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
-        )
-
-    def compute_loss_metrics(
+    def _compute_loss_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
@@ -641,20 +568,80 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_name,
         )
 
-        loss = self._compute_loss(
+        loss = self.loss[dataset_name](
             y_pred=y_pred_full,
             y=y_full,
             grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
             **kwargs,
         )
 
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice, dataset_name)
+            metrics_next = self.calculate_val_metrics(
+                y_pred_full, y_full, rollout_step, grid_shard_slice, dataset_name
+            )
 
         return loss, metrics_next
+
+    def get_inputs(self, batch: dict, sample_length: int) -> dict:
+        # start rollout of preprocessed batch
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.multi_step,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, multi_step, latlon, nvar)
+            msg = (
+                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {sample_length}"
+            )
+            assert dataset_batch.shape[1] >= sample_length, msg
+        return x
+
+    def get_targets(self, batch: dict, lead_step: int) -> dict:
+        y = {}
+        for dataset_name, dataset_batch in batch.items():
+            y[dataset_name] = dataset_batch[
+                :,
+                lead_step,
+                ...,
+                self.data_indices[dataset_name].data.output.full,
+            ]
+        return y
+
+    def compute_loss_metrics(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        rollout_step: int,
+        validation_mode: bool = False,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        total_loss = None
+        metrics_next = {}
+
+        for dataset_name in y:
+            dataset_loss, dataset_metrics = checkpoint(
+                self._compute_loss_metrics,
+                y_pred[dataset_name],
+                y[dataset_name],
+                rollout_step,
+                validation_mode,
+                dataset_name,
+                use_reentrant=False,
+            )
+
+            # Add to total loss
+            total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
+
+            # Store metrics with dataset prefix
+            for metric_name, metric_value in dataset_metrics.items():
+                metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
+        
+        return total_loss, metrics_next
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.

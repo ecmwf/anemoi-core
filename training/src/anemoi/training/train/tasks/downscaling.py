@@ -80,88 +80,6 @@ class GraphDownscaler(BaseGraphModule):
         self.dataset_names = list(graph_data.keys())
         LOGGER.info("Forecaster initialized with datasets: %s", self.dataset_names)
 
-    def rollout_step(
-        self,
-        batch: dict,
-        rollout: int | None = None,
-        validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
-        """Rollout step for the forecaster.
-
-        Parameters
-        ----------
-        batch : dict
-            Dictionary batch to use for rollout (assumed to be already preprocessed)
-        rollout : Optional[int], optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
-        validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
-
-        Yields
-        ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
-            Loss value, metrics, and predictions (per step)
-
-        """
-        # start rollout of preprocessed batch
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.multi_step,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
-            msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {self.multi_step}"
-            )
-            assert dataset_batch.shape[1] >= self.multi_step, msg
-
-        # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-        y_pred = self(x)
-
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[
-                :,
-                self.multi_step,
-                ...,
-                self.data_indices[dataset_name].data.output.full,
-            ]
-        # y includes the auxiliary variables, so we must leave those out when computing the loss
-        # Compute loss for each dataset and sum them up
-        total_loss = 0
-        metrics_next = {}
-
-        for dataset_name in batch:
-            # Skip empty target datasets (e.g. forcing-only datasets)
-            if y[dataset_name].numel() == 0:
-                continue
-
-            dataset_loss, dataset_metrics = checkpoint(
-                self.compute_loss_metrics,
-                y_pred[dataset_name],
-                y[dataset_name],
-                rollout,
-                validation_mode,
-                dataset_name,
-                use_reentrant=False,
-            )
-
-            # Add to total loss
-            total_loss = total_loss + dataset_loss
-
-            # Store metrics with dataset prefix
-            for metric_name, metric_value in dataset_metrics.items():
-                metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
-
-        loss = total_loss
-
-        yield loss, metrics_next, y_pred
-
     def _step(
         self,
         batch: dict,
@@ -170,12 +88,15 @@ class GraphDownscaler(BaseGraphModule):
 
         batch_dtype = next(iter(batch.values())).dtype
         loss = torch.zeros(1, dtype=batch_dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
 
-        for loss_next, metrics_next, y_preds_next in self.rollout_step(batch, 0, validation_mode=validation_mode):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
+        x = self.get_inputs(batch, sample_length=self.multi_step)
 
-        return loss, metrics, y_preds
+        y_pred = self(x)
+
+        y = self.get_targets(batch, lead_step=self.multi_step-1)
+
+        # y includes the auxiliary variables, so we must leave those out when computing the loss
+        # Compute loss for each dataset and sum them up
+        loss, metrics = self.compute_loss_metrics(y_pred, y, 0, validation_mode=validation_mode)
+
+        return loss, metrics, y_pred

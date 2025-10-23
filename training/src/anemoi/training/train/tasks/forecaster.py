@@ -166,54 +166,17 @@ class GraphForecaster(BaseGraphModule):
 
         """
         # start rollout of preprocessed batch
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.multi_step,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, multi_step, latlon, nvar)
-            msg = (
-                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {rollout + self.multi_step}"
-            )
-            assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
+        x = self.get_inputs(batch, sample_length=rollout + self.multi_step)
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
 
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[
-                    :,
-                    self.multi_step + rollout_step,
-                    ...,
-                    self.data_indices[dataset_name].data.output.full,
-                ]
+            y = self.get_targets(batch, lead_step=self.multi_step + rollout_step)
+
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
-            total_loss = None
-            metrics_next = {}
-
-            for dataset_name in batch:
-                dataset_loss, dataset_metrics = checkpoint(
-                    self.compute_loss_metrics,
-                    y_pred[dataset_name],
-                    y[dataset_name],
-                    rollout_step,
-                    validation_mode,
-                    dataset_name,
-                    use_reentrant=False,
-                )
-
-                # Add to total loss
-                total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
-
-                # Store metrics with dataset prefix
-                for metric_name, metric_value in dataset_metrics.items():
-                    metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
+            loss, metrics_next = self.compute_loss_metrics(y_pred, y, rollout_step, validation_mode=validation_mode)
 
             # Advance input state for each dataset
             for dataset_name in batch:
@@ -225,8 +188,6 @@ class GraphForecaster(BaseGraphModule):
                     self.data_indices[dataset_name],
                     self.output_mask[dataset_name],
                 )
-
-            loss = total_loss
 
             yield loss, metrics_next, y_pred
 
