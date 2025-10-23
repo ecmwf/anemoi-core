@@ -13,6 +13,7 @@ from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
 from .downscaling import GraphDownscaler
+from .multidomain import GraphMultiDomainForecaster
 
 __all__ = [
     "GraphDiffusionForecaster",
@@ -21,4 +22,5 @@ __all__ = [
     "GraphForecaster",
     "GraphInterpolator",
     "GraphDownscaler",
+    "GraphMultiDomainForecaster", 
 ]
