@@ -242,7 +242,17 @@ class AnemoiTrainer:
 
     @rank_zero_only
     def _get_mlflow_run_id(self) -> str:
-        run_id = self.mlflow_logger.run_id
+        from anemoi.utils.mlflow.client import AnemoiMlflowClient
+        client = AnemoiMlflowClient(self.config.diagnostics.log.mlflow.tracking_uri, authentication=True)
+        experiment = client.get_experiment_by_name(self.config.diagnostics.log.mlflow.experiment_name)
+        experiment_id = (
+            experiment.experiment_id
+            if experiment is not None
+            else client.create_experiment(self.config.diagnostics.log.mlflow.experiment_name)
+        )
+        run_name= self.config.diagnostics.log.mlflow.run_name if self.config.diagnostics.log.mlflow.run_name else None
+        run = client.create_run(experiment_id, run_name=run_name)
+        run_id = run.info.run_id
         # for resumed runs or offline runs logging this can be useful
         LOGGER.info("Mlflow Run id: %s", run_id)
         return run_id
@@ -335,14 +345,21 @@ class AnemoiTrainer:
     def supporting_arrays(self) -> dict:
         return self.datamodule.supporting_arrays
 
+    # @cached_property
+    # def mlflow_logger(self) -> pl.loggers.MLFlowLogger:
+    #     """Mlflow logger."""
+    #     return get_mlflow_logger(self)
+
+
     @cached_property
     def loggers(self) -> list:
         diagnostics_config = self.config.diagnostics
-
+        print(self.config.run_id.self.run_id)
+        stop
         kwargs = {
             "diagnostics_config": self.diagnostics_config,
-            "run_id": self.my_config.run_id,
-            "fork_run_id": self.my_config.fork_run_id,
+            "run_id": self.config.run_id,
+            "fork_run_id": self.config.fork_run_id,
             "paths": self.config.hardware.paths,
             "model": self.model_task,
             "config": self.config,
