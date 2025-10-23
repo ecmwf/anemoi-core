@@ -773,14 +773,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             # Log hyperparameters on rank 0
             hyper_params = OmegaConf.to_container(convert_to_omegaconf(self.config), resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
-            # Expand keys for better visibility
-            expand_keys = OmegaConf.select(
-                convert_to_omegaconf(self.config),
-                "diagnostics.log.mlflow.expand_hyperparams",
-                default=["config"],
-            )
             # Log hyperparameters
             self.logger.log_hyperparams(
                 hyper_params,
-                expand_keys=expand_keys,
             )

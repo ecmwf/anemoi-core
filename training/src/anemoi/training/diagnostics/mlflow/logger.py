@@ -262,6 +262,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
         log_hyperparams: bool | None = True,
         on_resume_create_child: bool | None = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
+        expand_keys: list[str] | None = None,
     ) -> None:
         """Initialize the AnemoiMLflowLogger.
 
@@ -299,10 +300,15 @@ class AnemoiMLflowLogger(MLFlowLogger):
             Whether to create a child run when resuming a run, by default False
         max_params_length: int | None, optional
             Maximum number of params to be logged to Mlflow
+        expand_keys : list[str] | None, optional
+            keys to expand within params. Any key being expanded will
+            have lists converted according to `expand_iterables`,
+            by default None.
         """
         self._resumed = resumed
         self._forked = forked
         self._flag_log_hparams = log_hyperparams
+        self._expand_keys = expand_keys
 
         self._fork_run_server2server = None
         self._parent_run_server2server = None
@@ -553,8 +559,6 @@ class AnemoiMLflowLogger(MLFlowLogger):
     def log_hyperparams(
         self,
         params: dict[str, Any] | Namespace,
-        *,
-        expand_keys: list[str] | None = None,
     ) -> None:
         """Overwrite the log_hyperparams method.
 
@@ -566,16 +570,12 @@ class AnemoiMLflowLogger(MLFlowLogger):
         ----------
         params : dict[str, Any] | Namespace
             params to log
-        expand_keys : list[str] | None, optional
-            keys to expand within params. Any key being expanded will
-            have lists converted according to `expand_iterables`,
-            by default None.
         """
         AnemoiMLflowLogger.log_hyperparams_in_mlflow(
             self.experiment,
             self.run_id,
             params,
-            expand_keys=expand_keys,
+            expand_keys=self._expand_keys,
             log_hyperparams=self._flag_log_hparams,
             max_params_length=self._max_params_length,
         )

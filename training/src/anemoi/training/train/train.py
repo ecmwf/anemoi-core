@@ -269,16 +269,6 @@ class AnemoiTrainer:
 
         return str(uuid.uuid4())
 
-    @cached_property
-    def wandb_logger(self) -> pl.loggers.WandbLogger:
-        """WandB logger."""
-        return get_wandb_logger(self.config, self.model)
-
-    @cached_property
-    def mlflow_logger(self) -> pl.loggers.MLFlowLogger:
-        """Mlflow logger."""
-        return get_mlflow_logger(self.config)
-
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
         warm_start_dir = getattr(self.config.hardware.paths, "warm_start", None)  # avoid breaking change
@@ -347,13 +337,23 @@ class AnemoiTrainer:
 
     @cached_property
     def loggers(self) -> list:
+        diagnostics_config = self.config.diagnostics
+
+        kwargs = {
+            "diagnostics_config": self.diagnostics_config,
+            "run_id": self.my_config.run_id,
+            "fork_run_id": self.my_config.fork_run_id,
+            "paths": self.config.hardware.paths,
+            "model": self.model_task,
+            "config": self.config,
+        }
         loggers = []
-        if self.config.diagnostics.log.wandb.enabled:
+        if diagnostics_config.log.wandb.enabled:
             LOGGER.info("W&B logger enabled")
-            loggers.append(self.wandb_logger)
-        if self.config.diagnostics.log.mlflow.enabled:
+            loggers.append(get_wandb_logger(**kwargs))
+        if diagnostics_config.log.mlflow.enabled:
             LOGGER.info("MLFlow logger enabled")
-            loggers.append(self.mlflow_logger)
+            loggers.append(get_mlflow_logger(**kwargs))
         return loggers
 
     @cached_property

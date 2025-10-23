@@ -1,6 +1,6 @@
 # (C) Copyright 2024 Anemoi contributors.
 #
-# This software is licensed under the terms of the Apache Licence Version 2.0
+# This software is licensed under the gitrms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 #
 # In applying this licence, ECMWF does not waive the privileges and immunities
@@ -11,23 +11,31 @@
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import pytorch_lightning as pl
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
 LOGGER = logging.getLogger(__name__)
 
 
-def get_mlflow_logger(config: BaseSchema) -> None:
-    if not config.diagnostics.log.mlflow.enabled:
+def get_mlflow_logger(
+    diagnostics_config: Any,
+    run_id: Any,
+    fork_run_id: Any,
+    paths: Any,
+    config: Any,
+    **kwargs,
+) -> None:
+    del kwargs
+    if not diagnostics_config.log.mlflow.enabled:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
     # 35 retries allow for 1 hour of server downtime
-    http_max_retries = config.diagnostics.log.mlflow.http_max_retries
+    http_max_retries = diagnostics_config.log.mlflow.http_max_retries
 
     os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(http_max_retries)
     os.environ["_MLFLOW_HTTP_REQUEST_MAX_RETRIES_LIMIT"] = str(http_max_retries + 1)
@@ -39,14 +47,14 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
-    resumed = config.training.run_id is not None
-    forked = config.training.fork_run_id is not None
+    resumed = run_id is not None
+    forked = fork_run_id is not None
 
-    save_dir = config.hardware.paths.logs.mlflow
+    save_dir = paths.logs.mlflow
 
-    offline = config.diagnostics.log.mlflow.offline
+    offline = diagnostics_config.log.mlflow.offline
     if not offline:
-        tracking_uri = config.diagnostics.log.mlflow.tracking_uri
+        tracking_uri = diagnostics_config.log.mlflow.tracking_uri
         LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
     else:
         tracking_uri = None
@@ -55,10 +63,10 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         # tracking_uri = ${hardware.paths.logs.mlflow}
         tracking_uri = str(save_dir)
     # create directory if it does not exist
-    Path(config.hardware.paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
+    Path(paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
 
     log_hyperparams = True
-    if resumed and not config.diagnostics.log.mlflow.on_resume_create_child:
+    if resumed and not diagnostics_config.log.mlflow.on_resume_create_child:
         LOGGER.info(
             (
                 "Resuming run without creating child run - MLFlow logs will not update the"
@@ -69,37 +77,52 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         )
         log_hyperparams = False
 
-    max_params_length = getattr(config.diagnostics.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
+    max_params_length = getattr(diagnostics_config.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
     LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
-    log_model = getattr(config.diagnostics.log.mlflow, "log_model", LOG_MODEL)
+    log_model = getattr(diagnostics_config.log.mlflow, "log_model", LOG_MODEL)
+
+    # Expand keys for better visibility
+    expand_keys = OmegaConf.select(
+        convert_to_omegaconf(config),
+        "diagnostics.log.mlflow.expand_hyperparams",
+        default=["config"],
+    )
 
     logger = AnemoiMLflowLogger(
-        experiment_name=config.diagnostics.log.mlflow.experiment_name,
-        project_name=config.diagnostics.log.mlflow.project_name,
+        experiment_name=diagnostics_config.log.mlflow.experiment_name,
+        project_name=diagnostics_config.log.mlflow.project_name,
         tracking_uri=tracking_uri,
         save_dir=save_dir,
-        run_name=config.diagnostics.log.mlflow.run_name,
-        run_id=config.training.run_id,
-        fork_run_id=config.training.fork_run_id,
+        run_name=diagnostics_config.log.mlflow.run_name,
+        run_id=run_id,
+        fork_run_id=fork_run_id,
         log_model=log_model,
         offline=offline,
         resumed=resumed,
         forked=forked,
         log_hyperparams=log_hyperparams,
-        authentication=config.diagnostics.log.mlflow.authentication,
-        on_resume_create_child=config.diagnostics.log.mlflow.on_resume_create_child,
+        authentication=diagnostics_config.log.mlflow.authentication,
+        on_resume_create_child=diagnostics_config.log.mlflow.on_resume_create_child,
         max_params_length=max_params_length,
+        expand_keys=expand_keys,
     )
 
-    if config.diagnostics.log.mlflow.terminal:
+    if diagnostics_config.log.mlflow.terminal:
         logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)
-    if config.diagnostics.log.mlflow.system:
+    if diagnostics_config.log.mlflow.system:
         logger.log_system_metrics()
 
     return logger
 
 
-def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.loggers.WandbLogger | None:
+def get_wandb_logger(
+    diagnostics_config: Any,
+    run_id: Any,
+    paths: Any,
+    model: pl.LightningModule,
+    config: Any,
+    **kwargs,
+) -> pl.loggers.WandbLogger | None:
     """Setup Weights & Biases experiment logger.
 
     Parameters
@@ -120,9 +143,13 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
         If `wandb` is not installed
 
     """
-    if not config.diagnostics.log.wandb.enabled:
+    del kwargs
+
+    if not diagnostics_config.log.wandb.enabled:
         LOGGER.debug("Weights & Biases logging is disabled.")
         return None
+
+    save_dir = paths.logs.wandb
 
     try:
         from pytorch_lightning.loggers.wandb import WandbLogger
@@ -131,22 +158,22 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
         raise ImportError(msg) from err
 
     logger = WandbLogger(
-        project=config.diagnostics.log.wandb.project,
-        entity=config.diagnostics.log.wandb.entity,
-        id=config.training.run_id,
-        save_dir=config.hardware.paths.logs.wandb,
-        offline=config.diagnostics.log.wandb.offline,
-        log_model=config.diagnostics.log.wandb.log_model,
-        resume=config.training.run_id is not None,
+        project=diagnostics_config.log.wandb.project,
+        entity=diagnostics_config.log.wandb.entity,
+        id=run_id,
+        save_dir=save_dir,
+        offline=diagnostics_config.log.wandb.offline,
+        log_model=diagnostics_config.log.wandb.log_model,
+        resume=run_id is not None,
     )
     logger.log_hyperparams(OmegaConf.to_container(config, resolve=True))
-    if config.diagnostics.log.wandb.gradients or config.diagnostics.log.wandb.parameters:
-        if config.diagnostics.log.wandb.gradients and config.diagnostics.log.wandb.parameters:
+    if diagnostics_config.log.wandb.gradients or diagnostics_config.log.wandb.parameters:
+        if diagnostics_config.log.wandb.gradients and diagnostics_config.log.wandb.parameters:
             log_ = "all"
-        elif config.diagnostics.log.wandb.gradients:
+        elif diagnostics_config.log.wandb.gradients:
             log_ = "gradients"
         else:
             log_ = "parameters"
-        logger.watch(model, log=log_, log_freq=config.diagnostics.log.interval, log_graph=False)
+        logger.watch(model, log=log_, log_freq=diagnostics_config.log.interval, log_graph=False)
 
     return logger
