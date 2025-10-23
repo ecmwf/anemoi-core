@@ -308,7 +308,7 @@ class BenchmarkProfiler(Profiler):
 
     @rank_zero_only
     def create_output_path(self) -> None:
-        self.dirpath = Path(self.config.system.output.profiler)
+        self.dirpath = Path(self.config.hardware.paths.profiler)
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def broadcast_profiler_path(self, string_var: str, src_rank: int) -> str:
@@ -502,7 +502,7 @@ class BenchmarkProfiler(Profiler):
 
         # when using flash attention model, we need to convert the input and model to float16 and cuda
         # since FlashAttention only supports fp16 and bf16 data type
-        for dataset_name in example_input_array:
+        for dataset_name in example_input_array.keys():
             example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
             example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")
         model.half()
@@ -660,11 +660,10 @@ class ProfilerProgressBar(TQDMProgressBar):
         List to store training rates (it/s).
     """
 
-    def __init__(self, refresh_rate: int = 1):
+    def __init__(self):
         super().__init__()
         self.validation_rates = []
         self.training_rates = []
-        self._refresh_rate = refresh_rate
 
     def _extract_rate(self, pbar: _tqdm) -> float:
         """Extracts the iteration rate from the progress bar.
