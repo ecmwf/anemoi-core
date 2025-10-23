@@ -820,21 +820,95 @@ def test_op(BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM, causal, window_size=None, 
     assert torch.allclose(flex_dV, tri_dV, atol=atol, rtol=rtol), f"flex-tri dV mismatch"
     assert torch.allclose(flex_dQ, tri_dQ, atol=atol, rtol=rtol), f"flex-tri dQ mismatch"
 
+HAS_FLASH=False
+try:
+    import flash_attn
+except ImportError as e_v2:
+    print("Flash Attn v2 not found")
+else:
+     HAS_FLASH=True
+
+def generate_benchmark_configs():
+    configs=[]
+    BATCH, N_HEADS = 1, 8
+
+    for HEAD_DIM in [64, 128]:
+        for mode in ["fwd", "bwd"]:
+            for window in [0, 256]:
+                    configs.append(
+                        triton.testing.Benchmark(
+                            x_names=["N_CTX"],
+                            x_vals=[2**i for i in range(10, 15)],
+                            line_arg="provider",
+                            line_vals=["triton"] + (["flash"] if HAS_FLASH else []),
+                            line_names=["Triton [FP16]"] + (["Flash-2"] if HAS_FLASH else []),
+                            styles=[("red", "-"), ("blue", "-"), ("green", "-")],
+                            ylabel="TFLOPS",
+                            plot_name=
+                            f"fused-attention-batch{BATCH}-head{N_HEADS}-d{HEAD_DIM}-{mode}-window={window}",
+                            args={
+                                "H": N_HEADS,
+                                "BATCH": BATCH,
+                                "HEAD_DIM": HEAD_DIM,
+                                "mode": mode,
+                                "window": window,
+                            },
+                        ))
+    return configs
+@triton.testing.perf_report(generate_benchmark_configs())
+def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, window, mode, provider, device="cuda"):
+    assert mode in ["fwd", "bwd"]
+    dtype = torch.float16
+    causal=False
+    sm_scale = 1  / (HEAD_DIM**0.5)
+    if "triton" in provider:
+        q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        v = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        fn = lambda: TritonAttention.apply(q, k, v, causal, sm_scale, window).half()
+        if mode == "bwd":
+            o = fn()
+            do = torch.randn_like(o)
+            fn = lambda: o.backward(do, retain_graph=True)
+        ms = triton.testing.do_bench(fn)
+
+    if provider == "flash":
+        q = torch.randn((BATCH, N_CTX, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        k = torch.randn((BATCH, N_CTX, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        v = torch.randn((BATCH, N_CTX, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        fn = lambda: flash_attn.flash_attn_func(q, k, v, causal=causal,  window_size=(window, window), softmax_scale=sm_scale)
+        if mode == "bwd":
+            o = fn()
+            do = torch.randn_like(o)
+            fn = lambda: o.backward(do, retain_graph=True)
+        ms = triton.testing.do_bench(fn)
+    flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX * HEAD_DIM
+    total_flops = 2 * flops_per_matmul
+    if window is not None:
+        total_flops *= 1 #TODO fix
+    if mode == "bwd":
+        total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+    return total_flops * 1e-12 / (ms * 1e-3)
 
 if __name__ == "__main__":
-    print("Testing standard causal attention...")
-    test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=True)
-    
-    print("Testing non-causal attention...")
-    test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False)
-    
-    print("Testing sliding window attention (window=512)...")
-    test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=512)
-    
-    print("Testing sliding window attention (window=256)...")
-    test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=256)
-    
-    print("Testing sliding window attention (window=1024)...")
-    test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=1024)
-    
-    print("ALL TESTS PASSED!")
+    testCorrectness=False
+    benchmark=True
+    if testCorrectness:
+        print("Testing standard causal attention...")
+        test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=True)
+        
+        print("Testing non-causal attention...")
+        test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False)
+        
+        print("Testing sliding window attention (window=512)...")
+        test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=512)
+        
+        print("Testing sliding window attention (window=256)...")
+        test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=256)
+        
+        print("Testing sliding window attention (window=1024)...")
+        test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=1024)
+        
+        print("ALL TESTS PASSED!")
+    if benchmark:
+        bench_flash_attention.run(save_path=".", print_data=True)
