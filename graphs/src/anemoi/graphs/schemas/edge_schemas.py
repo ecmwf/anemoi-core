@@ -66,8 +66,6 @@ class ICONTopologicalEdgeSchema(BaseModel):
         "anemoi.graphs.edges.ICONTopologicalEncoderEdges",
         "anemoi.graphs.edges.ICONTopologicalDecoderEdges",
     ] = Field("anemoi.graphs.edges.ICONTopologicalProcessorEdges", alias="_target_")
-    icon_mesh: str
-    "The name of the ICON mesh (defines both the processor mesh and the data)."
     source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])

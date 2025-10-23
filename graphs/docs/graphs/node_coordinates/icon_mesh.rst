@@ -27,31 +27,23 @@ file in NetCDF format, making use of the `refinement_level_v` and
    value 0 denotes the cells of the base grid, ie. the icosahedron
    including the step of root subdivision RXXB00.
 
-To avoid multiple runs of the reconstruction algorithm, a separate
-`ICONNodes` instance is created and used by the builders, see the
-following YAML example:
+See the following YAML example:
 
 .. code:: yaml
 
    nodes:
-     # ICON mesh
-     icon_mesh:
-       node_builder:
-         _target_: anemoi.graphs.nodes.ICONNodes
-         name: "icon_grid_0026_R03B07_G"
-         grid_filename: "icon_grid_0026_R03B07_G.nc"
-         max_level_multimesh: 3
-         max_level_dataset: 3
      # Data nodes
      data:
        node_builder:
          _target_: anemoi.graphs.nodes.ICONCellGridNodes
-         icon_mesh: "icon_mesh"
+         grid_filename: "icon_grid_0026_R03B07_G.nc"
+         max_level: 3
      # Hidden nodes
      hidden:
        node_builder:
          _target_: anemoi.graphs.nodes.ICONMultimeshNodes
-         icon_mesh: "icon_mesh"
+         grid_filename: "icon_grid_0026_R03B07_G.nc"
+         max_level: 3
 
    edges:
      # Processor configuration
@@ -59,4 +51,3 @@ following YAML example:
        target_name: "hidden"
        edge_builders:
        - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
-         icon_mesh: "icon_mesh"
