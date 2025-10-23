@@ -621,6 +621,21 @@ class TritonAttention(torch.autograd.Function):
         Q, K, V, O, M = ctx.saved_tensors
 
         assert dO.is_contiguous()
+        #print(f"Q stride: {Q.stride()}")
+        #print(f"K stride: {K.stride()}")
+        #print(f"V stride: {V.stride()}")
+        #print(f"O stride: {O.stride()}")
+        #print(f"dO stride: {dO.stride()}")
+
+        # weird hack for when O does not match stride in BW pass
+        #attn.py::TestAttentionEquivalence::test_backward[512-2048-64] Q stride: (131072, 131072, 64, 1)
+        #K stride: (131072, 131072, 64, 1)
+        #V stride: (131072, 131072, 64, 1)
+        #O stride: (131072, 131072, 64, 1)
+        #dO stride: (131072, 64, 64, 1)
+        # If shapes match but strides don't, reshape to match
+        if dO.shape == O.shape and dO.stride() != O.stride():
+            dO = dO.reshape(O.shape).contiguous()
         assert Q.stride() == K.stride() == V.stride() == O.stride() == dO.stride()
         dQ = torch.empty_like(Q)
         dK = torch.empty_like(K)

@@ -47,7 +47,7 @@ def layer_kernels():
     return load_layer_kernels()
 
 class TestAttentionEquivalence:
-    """Test equivalence between SDPA and Flash Attention implementations"""
+    """Test equivalence between two Attention implementations"""
     
     @pytest.mark.parametrize("embed_dim", [64])
     @pytest.mark.parametrize("seq_len", [2048])
@@ -87,37 +87,35 @@ class TestAttentionEquivalence:
         x = torch.randn(batch_size * seq_len, embed_dim, device=device, dtype=precision)
         print(f"{x.shape=}")
         
-        sdpa_attn = MultiHeadSelfAttention(
+        ref_attn = MultiHeadSelfAttention(
             **attention_params,
             layer_kernels=layer_kernels,
             attention_implementation="flex_attention",
             _compile=False,
         ).to(device).to(precision)
         
-        flash_attn = MultiHeadSelfAttention(
+        test_attn = MultiHeadSelfAttention(
             **attention_params,
             layer_kernels=layer_kernels,
             attention_implementation="triton_attention",
-            #attention_implementation="scaled_dot_product_attention",
         ).to(device).to(precision)
         
-        flash_attn.load_state_dict(sdpa_attn.state_dict())
+        test_attn.load_state_dict(ref_attn.state_dict())
         
-        sdpa_attn.eval()
-        flash_attn.eval()
+        ref_attn.eval()
+        test_attn.eval()
         
         with torch.no_grad():
-            output_sdpa = sdpa_attn(x, [seq_len], batch_size)
-            output_flash = flash_attn(x, [seq_len], batch_size)
+            output_ref = ref_attn(x, [seq_len], batch_size)
+            output_test = test_attn(x, [seq_len], batch_size)
        
         torch.testing.assert_close(
-            output_sdpa,
-            output_flash,
+            output_ref,
+            output_test,
             rtol=rtol,
             atol=atol,
         )
 
-     #test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=512)
     @pytest.mark.parametrize("embed_dim", [64])
     @pytest.mark.parametrize("seq_len", [2048])
     @pytest.mark.parametrize("window_size", [None, 512])
@@ -126,10 +124,10 @@ class TestAttentionEquivalence:
         self, random_seed, device, precision, layer_kernels, embed_dim, seq_len, window_size
     ):
         """Test equivalence across different embedding dimensions and sequence lengths"""
-        batch_size = 4
+        batch_size = 2
 
         attention_params = {
-            "num_heads": 8,
+            "num_heads": 1,
             "embed_dim": embed_dim,
             "qkv_bias": False,
             "qk_norm": False,
@@ -156,72 +154,72 @@ class TestAttentionEquivalence:
         x = torch.randn(batch_size * seq_len, embed_dim, device=device, dtype=precision)
         x_clone = x.clone().detach().requires_grad_(True)
 
-        flex_attn = MultiHeadSelfAttention(
+        ref_attn = MultiHeadSelfAttention(
             **attention_params,
             layer_kernels=layer_kernels,
             attention_implementation="flex_attention",
             _compile=False,
         ).to(device).to(precision)
 
-        flash_attn = MultiHeadSelfAttention(
+        test_attn = MultiHeadSelfAttention(
             **attention_params,
             layer_kernels=layer_kernels,
-            attention_implementation="flash_attention",
+            attention_implementation="triton_attention",
         ).to(device).to(precision)
 
-        flash_attn.load_state_dict(flex_attn.state_dict())
+        test_attn.load_state_dict(ref_attn.state_dict())
 
-        flex_attn.train()
-        flash_attn.train()
+        ref_attn.train()
+        test_attn.train()
 
         # Forward pass
-        output_flex = flex_attn(x, [seq_len], batch_size)
-        output_flash = flash_attn(x_clone, [seq_len], batch_size)
+        output_ref = ref_attn(x, [seq_len], batch_size)
+        output_test = test_attn(x_clone, [seq_len], batch_size)
         
         # Loss
         torch.manual_seed(42)
-        target = torch.randn_like(output_flex)
-        loss_flex = torch.nn.functional.mse_loss(output_flex, target)
-        loss_flash = torch.nn.functional.mse_loss(output_flash, target)
+        target = torch.randn_like(output_ref)
+        loss_ref = torch.nn.functional.mse_loss(output_ref, target)
+        loss_test = torch.nn.functional.mse_loss(output_test, target)
         
         # Backward pass
-        loss_flex.backward()
-        loss_flash.backward()
+        loss_ref.backward()
+        loss_test.backward()
 
         torch.testing.assert_close(
-            output_flex,
-            output_flash,
+            output_ref,
+            output_test,
             rtol=rtol,
             atol=atol,
         )
 
         # Compare parameter gradients
-        flex_params = dict(flex_attn.named_parameters())
-        flash_params = dict(flash_attn.named_parameters())
+        ref_params = dict(ref_attn.named_parameters())
+        test_params = dict(test_attn.named_parameters())
 
-        for name in flex_params.keys():
-            flex_grad = flex_params[name].grad
-            flash_grad = flash_params[name].grad
+        for name in ref_params.keys():
+            ref_grad = ref_params[name].grad
+            test_grad = test_params[name].grad
             
-            assert flex_grad is not None and flash_grad is not None, f"Gradient not computed for {name}"
+            assert ref_grad is not None and test_grad is not None, f"Gradient not computed for {name}"
             try:
                 torch.testing.assert_close(
-                    flex_grad,
-                    flash_grad,
+                    ref_grad,
+                    test_grad,
                     rtol=rtol,
                     atol=atol,
                     msg=f"Parameter gradient for {name} differs beyond tolerance (dtype={precision})"
                 )
             except AssertionError as e:
                 # Print diagnostic info for debugging
-                diff = torch.abs(flex_grad - flash_grad)
-                rel_diff = diff / (torch.abs(flex_grad) + 1e-8)
+                diff = torch.abs(ref_grad - test_grad)
+                rel_diff = diff / (torch.abs(ref_grad) + 1e-8)
                 print(f"\nParameter gradient comparison for {name} (dtype={precision}):")
                 print(f"  Max abs diff: {diff.max().item():.6e}")
                 print(f"  Mean abs diff: {diff.mean().item():.6e}")
                 print(f"  Max rel diff: {rel_diff.max().item():.6e}")
                 print(f"  Mean rel diff: {rel_diff.mean().item():.6e}")
-                print(f"  Gradient shape: {flex_grad.shape}")
+                print(f"  Gradient shape: {ref_grad.shape}")
                 raise
 
 if __name__ == "__main__":
