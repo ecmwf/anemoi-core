@@ -67,6 +67,7 @@ class AnemoiMOSModelEncProcDec(nn.Module):
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
         self.multi_step = model_config.training.multistep_input
+        self.multi_out = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
@@ -76,6 +77,7 @@ class AnemoiMOSModelEncProcDec(nn.Module):
 
         self.input_dim = self._calculate_input_dim(model_config)
         self.input_dim_latent = self._calculate_input_dim_latent(model_config)
+        self.output_dim = self._calculate_output_dim(model_config)
 
         # we can't register these as buffers because DDP does not support sparse tensors
         # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
@@ -116,7 +118,7 @@ class AnemoiMOSModelEncProcDec(nn.Module):
             in_channels_src=self.num_channels,
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
+            out_channels_dst=self.output_dim,
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -210,37 +212,30 @@ class AnemoiMOSModelEncProcDec(nn.Module):
         x_out = (
             einops.rearrange(
                 x_out,
-                # "(batch ensemble grid) vars -> batch ensemble grid vars",
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
-                time=1,  # TODO: need to change size of decoder out, soft code multi_out
+                time=self.multi_out,
             )
             .to(dtype=dtype)
             .clone()
         )
-        LOGGER.info("Original size: [2, 1, 40320, 68]")
-        LOGGER.info(f"Size of x_out: {x_out.size()}")
-        # # modification above should allow to have multiple timestep output
-        # # for now we cut down again to the first of those
-        # # TODO: deal with actual mutiple output steps
-        # x_out = x_out[:, 0, ...]
-        # LOGGER.info(f"Size of x_out: {x_out.size()}")
 
         # residual connection (just for the prognostic variables)
-        LOGGER.info(f"Size of x_skip: {x_skip.size()}")
-        x_skip = x_skip.unsqueeze(1)  # add time dim
-        x_skip = x_skip.expand(-1,1,-1,-1,-1) # go to N (1) time steps
-        LOGGER.info(f"Size of expanded x_skip: {x_skip.size()}")
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
         x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
 
         for bounding in self.boundings:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
+
         return x_out
 
     def _calculate_input_dim(self, model_config):
         return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+    
+    def _calculate_output_dim(self, model_config):
+        return self.multi_out * self.num_output_channels
 
     def _calculate_input_dim_latent(self, model_config):
         return self.node_attributes.attr_ndims[self._graph_name_hidden]
