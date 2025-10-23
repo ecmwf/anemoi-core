@@ -225,7 +225,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 metadata = model.metadata.copy()
                 supporting_arrays = model.supporting_arrays.copy()
 
-                save_metadata(lightning_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
+                save_metadata(lightning_checkpoint_filepath, metadata, supporting_arrays=None) #supporting_arrays)
 
             # notify loggers
             for logger in trainer.loggers:
