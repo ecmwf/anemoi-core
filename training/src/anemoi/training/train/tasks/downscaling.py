@@ -12,7 +12,6 @@ import logging
 from typing import TYPE_CHECKING
 
 import torch
-from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.base import BaseGraphModule
 
