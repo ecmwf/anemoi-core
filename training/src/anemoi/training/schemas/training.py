@@ -368,11 +368,13 @@ class ForecasterSchema(BaseTrainingSchema):
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
 
+
 class MultiForecasterSchema(BaseTrainingSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphMultiForecaster",] = Field(..., alias="model_task")
     "Training objective."
     rollout: Rollout = Field(default_factory=Rollout)
     "Rollout configuration."
+
 
 class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")

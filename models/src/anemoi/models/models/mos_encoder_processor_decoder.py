@@ -214,20 +214,24 @@ class AnemoiMOSModelEncProcDec(nn.Module):
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
-                time=1, #TODO: make multi_out
+                time=1,  # TODO: need to change size of decoder out, soft code multi_out
             )
             .to(dtype=dtype)
             .clone()
         )
-        LOGGER.info(f"Original size: [2, 1, 40320, 68]")
+        LOGGER.info("Original size: [2, 1, 40320, 68]")
         LOGGER.info(f"Size of x_out: {x_out.size()}")
         # # modification above should allow to have multiple timestep output
         # # for now we cut down again to the first of those
         # # TODO: deal with actual mutiple output steps
-        x_out = x_out[:, 0, ...]
-        LOGGER.info(f"Size of x_out: {x_out.size()}")
+        # x_out = x_out[:, 0, ...]
+        # LOGGER.info(f"Size of x_out: {x_out.size()}")
 
         # residual connection (just for the prognostic variables)
+        LOGGER.info(f"Size of x_skip: {x_skip.size()}")
+        x_skip = x_skip.unsqueeze(1)  # add time dim
+        x_skip = x_skip.expand(-1,1,-1,-1,-1) # go to N (1) time steps
+        LOGGER.info(f"Size of expanded x_skip: {x_skip.size()}")
         x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
 
         for bounding in self.boundings:

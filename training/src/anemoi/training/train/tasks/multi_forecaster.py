@@ -114,6 +114,8 @@ class GraphMultiForecaster(BaseGraphModule):
 
         # Get prognostic variables
         x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
+            :,
+            0, # currently only single step, TODO: extend to multi-step output
             ...,
             self.data_indices.model.output.prognostic,
         ]
@@ -191,9 +193,15 @@ class GraphMultiForecaster(BaseGraphModule):
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
-
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
+            LOGGER.info(f"Size of y_pred: {y_pred.size()}")
+            y = batch[:, [self.multi_step + rollout_step], ...]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
+            y = y[..., self.data_indices.data.output.full]
+            LOGGER.info(f"Size of y: {y.size()}")
+            # uncomment below for testing
+            # y_pred = y_pred.squeeze(1)  # remove time dim
+            # y = y.squeeze(1)  # remove time dim
+            
             loss, metrics_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
