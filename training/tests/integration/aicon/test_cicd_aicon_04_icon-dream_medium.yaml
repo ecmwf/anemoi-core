@@ -20,27 +20,23 @@
 config_validation: True
 
 system:
-  paths:
+  input:
     graph: none
-    output: output_training/${data.resolution}/
-    logs:
-      base: ${system.output.output}logs/
-      wandb: ${system.output.logs.base}
-      mlflow: ${system.output.logs.base}mlflow/
-      tensorboard: ${system.output.logs.base}tensorboard/
     checkpoints: ${system.output.output}checkpoint/
     plots: ${system.output.output}plots/
     profiler: ${system.output.output}profiler/
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
-  files:
-    graph: none
     dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
     forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
     warm_start: null
-    checkpoint:
-      every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
-      every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
-      every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+  output:
+    root: output_training/${data.resolution}
+    logs:
+      root: ${system.output.output}logs
+      wandb: ""
+      mlflow: mlflow
+      tensorboard: tensorboard
+    profiler: profiler/
   # number of GPUs per node and number of nodes (for DDP)
   hardware:
     accelerator: auto
