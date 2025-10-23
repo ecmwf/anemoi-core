@@ -29,6 +29,8 @@ LOGGER = logging.getLogger(__name__)
 
 class MultiscaleLossWrapper(nn.Module):
 
+    name: str = "MultiscaleLossWrapper"
+
     def __init__(
         self,
         truncation_path: Path | str,
@@ -50,6 +52,7 @@ class MultiscaleLossWrapper(nn.Module):
 
         self.truncation_matrices = self.load_loss_truncation_matrices(truncation_path, filenames)
         self.loss = loss
+        self.scaler = self.loss.scaler
 
     def load_loss_truncation_matrices(
         self,
@@ -66,7 +69,7 @@ class MultiscaleLossWrapper(nn.Module):
                 LOGGER.info("Loss truncation: %s %s", truncation_matrix.shape[0], truncation_matrix.shape[1])
             else:
                 truncation_matrices.append(None)
-                LOGGER.info("Loss truncation: %s %s", None)
+                LOGGER.info("Loss truncation: %s", None)
 
         return truncation_matrices
 
@@ -175,3 +178,5 @@ class MultiscaleLossWrapper(nn.Module):
                     group=model_comm_group,
                 ),
             )
+
+        return loss_inc
