@@ -527,7 +527,8 @@ class AnemoiTrainer:
     def strategy(self) -> Any:
         return instantiate(
             convert_to_omegaconf(self.config).training.strategy,
-            static_graph=not self.config.training.accum_grad_batches > 1,
+            static_graph=False, #not self.config.training.accum_grad_batches > 1,
+            find_unused_parameters=True,
         )
 
     def train(self) -> None:
