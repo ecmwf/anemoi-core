@@ -15,6 +15,7 @@ from .scalers import create_scalers
 from .variable import GeneralVariableLossScaler
 from .variable_level import LinearVariableLevelScaler
 from .variable_level import NoVariableLevelScaler
+from .output_steps import OutputStepScaler
 from .variable_level import PolynomialVariableLevelScaler
 from .variable_level import ReluVariableLevelScaler
 from .variable_masking import VariableMaskingLossScaler
@@ -29,6 +30,7 @@ __all__ = [
     "NaNMaskScaler",
     "NoTendencyScaler",
     "NoVariableLevelScaler",
+    "OutputStepScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
