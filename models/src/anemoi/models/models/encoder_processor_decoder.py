@@ -443,6 +443,7 @@ class AnemoiModelEncProcDec(nn.Module):
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
+        dataset_names=None, 
         **kwargs,
     ) -> Tensor:
         """Forward pass of the model.
@@ -510,10 +511,8 @@ class AnemoiModelEncProcDec(nn.Module):
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
-            dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
-        x_latent = sum(dataset_latents.values())
 
         # Processor
         # Multi-dataset case: use shard shapes from first dataset (all should be the same)
