@@ -233,7 +233,7 @@ class AnemoiMOSModelEncProcDec(nn.Module):
 
     def _calculate_input_dim(self, model_config):
         return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-    
+
     def _calculate_output_dim(self, model_config):
         return self.multi_out * self.num_output_channels
 
