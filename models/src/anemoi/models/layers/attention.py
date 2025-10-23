@@ -142,6 +142,8 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
+            #"flex_attention": FlexAttentionWrapper,
+            "triton_attention": TritonAttentionWrapper,
         }
         assert (
             self.attention_implementation in attn_funcs
@@ -405,6 +407,51 @@ class FlashAttentionWrapper(nn.Module):
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
+
+class TritonAttentionWrapper(nn.Module):
+    """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
+
+    def __init__(self, _compile=True):
+        super().__init__()
+
+        from anemoi.models.triton.attention import TritonAttention
+        self.attention=TritonAttention
+
+        #TODO check if triton is installed
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap = None,
+        alibi_slopes: torch.Tensor = None,
+    ):
+
+        #expects  (BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM)
+        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
+
+        softmax_scale=1 / math.sqrt(query.size(-1))
+
+        out = self.attention.apply(query, key, value, causal, softmax_scale, window_size).half()
+
+        return out
+
+    def _not_implemented(self, causal: bool, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
+        msg = ""
+        if dropout_p != 0.0:
+            msg += "dropout_p, "
+        if softcap is not None:
+            msg += "softcap, "
+        if alibi_slopes is not None:
+            msg += "alibi slobes, "
+        if len(msg) > 0:
+            msg = "The following features you requested are not yet implemented in the Flex-Attention backend: " + msg
+            raise NotImplementedError(msg)
 
 
 class MultiHeadCrossAttention(MultiHeadSelfAttention):
