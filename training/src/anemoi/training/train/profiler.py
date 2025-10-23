@@ -91,7 +91,7 @@ class AnemoiProfiler(AnemoiTrainer):
 
         if model_summary is not None:
             self.print_report("Model Summary", model_summary, color="Orange", emoji="robot")
-            num_gpus = self.config.hardware.num_gpus_per_node * self.config.hardware.num_nodes
+            num_gpus = self.config.system.hardware.num_gpus_per_node * self.config.system.hardware.num_nodes
             if num_gpus > 1:
                 LOGGER.info("Model Summary displays the stats for a single GPU.")
 
@@ -332,11 +332,11 @@ class AnemoiProfiler(AnemoiTrainer):
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
-            self.config.hardware.paths.profiler = Path(self.config.hardware.paths.profiler, self.run_id)
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, self.run_id)
         elif self.config.training.fork_run_id:
             parent_run = self.config.training.fork_run_id
-            self.config.hardware.paths.profiler = Path(self.config.hardware.paths.profiler, parent_run)
-        LOGGER.info("Profiler path: %s", self.config.hardware.paths.profiler)
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, parent_run)
+        LOGGER.info("Profiler path: %s", self.config.system.output.profiler)
 
     def _close_logger(self) -> None:
         if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):
