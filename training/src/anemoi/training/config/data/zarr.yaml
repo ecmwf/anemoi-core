@@ -3,7 +3,8 @@ format: zarr
 frequency: 6h
 
 datasets:
-  data: # user-defined name for the dataset
+  data: # user-defined key
+
     # features that are not part of the forecast state
     # but are used as forcing to generate the forecast state
     forcing:
@@ -31,8 +32,6 @@ datasets:
     #   0: []
 
     # processors including imputers and normalizers are applied in order of definition
-    # the order of definition from this file is preserved when this config is included
-    # and new processors in the main config file are added at the end of the dictionary
     processors:
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
@@ -71,11 +70,9 @@ datasets:
           - "lsm"
       # const_imputer:
       #   _target_: anemoi.models.preprocessing.imputer.ConstantImputer
-      #   config:
+      #   config: 
       #     default: "none"
       #     0: []
-      # When using the imputer, consider including the nan_mask_weights scaler in the
-      # training loss to ensure imputed grid points are not considered in the loss computation
 
 # Values set in the code
 num_features: null # number of features in the forecast state
