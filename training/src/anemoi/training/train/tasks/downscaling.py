@@ -70,7 +70,7 @@ class GraphDownscaler(BaseGraphModule):
             graph_data=graph_data,
             truncation_data=truncation_data,
             statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
+            statistics_tendencies=None,  #statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
