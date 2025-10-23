@@ -26,6 +26,7 @@ __all__ = [
     "LogCoshLoss",
     "MAELoss",
     "MSELoss",
+    "MultiscaleLoss",
     "RMSELoss",
     "WeightedMSELoss",
     "get_loss_function",
