@@ -39,7 +39,7 @@ def _attn_fwd_inner(
         #hi = tl.minimum((block_index_q+1) * BLOCK_SIZE_Q,  q_start + WINDOW_SIZE)
         hi =  tl.minimum(SEQ_LEN, q_end+WINDOW_SIZE)
         #hi = tl.minimum((block_index_q+1) * BLOCK_SIZE_Q, q_start + BLOCK_SIZE_Q +WINDOW_SIZE)
-        
+
     else:
         # Only used for non-causal attention
         lo, hi = 0, SEQ_LEN
@@ -553,7 +553,7 @@ class TritonAttention(torch.autograd.Function):
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
 
         O = torch.empty_like(Q)
-        
+
         # Determine stage: 1 = non-causal, 3 = causal, 5 = sliding window
         if window_size is not None:
             stage = 5
@@ -747,7 +747,7 @@ def test_op(BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM, causal, window_size=None, 
 
     # reference implementation
     P = torch.matmul(Q, K.transpose(2, 3)) * softmax_scale
-    
+
     if window_size is not None:
         # Create sliding window mask
         positions = torch.arange(SEQ_LEN, device="cuda")
@@ -759,7 +759,7 @@ def test_op(BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM, causal, window_size=None, 
         # Causal mask
         MASK = torch.tril(torch.ones((SEQ_LEN, SEQ_LEN), device="cuda"))
         P[:, :, MASK == 0] = float("-inf")
-    
+
     P = torch.softmax(P.float(), dim=-1).half()
     ref_O = torch.matmul(P, V)
     ref_O.backward(dO)
@@ -832,6 +832,9 @@ def generate_benchmark_configs():
     configs=[]
     BATCH, N_HEADS = 1, 8
 
+    #ylabel="TFLOPS"
+    ylabel="MS"
+
     for HEAD_DIM in [64, 128]:
         for mode in ["fwd", "bwd"]:
             for window in [0, 256]:
@@ -840,10 +843,10 @@ def generate_benchmark_configs():
                             x_names=["N_CTX"],
                             x_vals=[2**i for i in range(10, 15)],
                             line_arg="provider",
-                            line_vals=["triton"] + (["flash"] if HAS_FLASH else []),
-                            line_names=["Triton [FP16]"] + (["Flash-2"] if HAS_FLASH else []),
+                            line_vals=["triton"] + ["flex"] + (["flash"] if HAS_FLASH else []),
+                            line_names=["Triton [FP16]"] + ["flex"] + (["Flash-2"] if HAS_FLASH else []),
                             styles=[("red", "-"), ("blue", "-"), ("green", "-")],
-                            ylabel="TFLOPS",
+                            ylabel=ylabel,
                             plot_name=
                             f"fused-attention-batch{BATCH}-head{N_HEADS}-d{HEAD_DIM}-{mode}-window={window}",
                             args={
@@ -852,12 +855,14 @@ def generate_benchmark_configs():
                                 "HEAD_DIM": HEAD_DIM,
                                 "mode": mode,
                                 "window": window,
+                                "ylabel": ylabel,
                             },
                         ))
     return configs
 @triton.testing.perf_report(generate_benchmark_configs())
-def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, window, mode, provider, device="cuda"):
+def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, window, mode, ylabel, provider, device="cuda"):
     assert mode in ["fwd", "bwd"]
+    assert ylabel in ["MS", "TFLOPS"]
     dtype = torch.float16
     causal=False
     sm_scale = 1  / (HEAD_DIM**0.5)
@@ -882,13 +887,55 @@ def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, window, mode, provider, dev
             do = torch.randn_like(o)
             fn = lambda: o.backward(do, retain_graph=True)
         ms = triton.testing.do_bench(fn)
-    flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX * HEAD_DIM
-    total_flops = 2 * flops_per_matmul
-    if window is not None:
-        total_flops *= 1 #TODO fix
-    if mode == "bwd":
-        total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
-    return total_flops * 1e-12 / (ms * 1e-3)
+    if provider == "flex":
+        torch._dynamo.config.cache_size_limit=64
+        import functools
+
+        from torch.nn.attention.flex_attention import create_block_mask
+        from torch.nn.attention.flex_attention import flex_attention
+
+        # create inputs
+        q = torch.randn((BATCH, N_CTX, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        k = torch.randn((BATCH, N_CTX, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+        v = torch.randn((BATCH, N_CTX, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
+
+        #define flex attn
+        _compile=True
+        if window != 0:
+
+            def sliding_window_mask(b, h, q_idx, kv_idx):
+                return abs(q_idx - kv_idx) <= window
+
+            seq_len = q.shape[2]
+            block_mask = create_block_mask(
+                sliding_window_mask, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len, _compile=_compile
+            )
+            flex_attention = functools.partial(flex_attention, block_mask=block_mask)  # Cache the block mask
+        else:
+            flex_attention = flex_attention
+
+        if _compile:
+            flex_attention = torch.compile(flex_attention)
+
+        # run flex attn
+        fn = lambda: flex_attention(q, k, v, scale=sm_scale)
+        if mode == "bwd":
+            o = fn()
+            do = torch.randn_like(o)
+            fn = lambda: o.backward(do, retain_graph=True)
+        ms = triton.testing.do_bench(fn)
+
+    if ylabel == "TFLOPS":
+        flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX * HEAD_DIM
+        total_flops = 2 * flops_per_matmul
+        if window != 0:
+            total_flops *= (window * 2)/N_CTX # overcounting , doesnt count corner cases where window size is less then 2*window
+        if mode == "bwd":
+            total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+        return total_flops * 1e-12 / (ms * 1e-3)
+    else: #ylabel = "MS"
+        return ms
+
 
 if __name__ == "__main__":
     testCorrectness=False
@@ -896,19 +943,19 @@ if __name__ == "__main__":
     if testCorrectness:
         print("Testing standard causal attention...")
         test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=True)
-        
+
         print("Testing non-causal attention...")
         test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False)
-        
+
         print("Testing sliding window attention (window=512)...")
         test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=512)
-        
+
         print("Testing sliding window attention (window=256)...")
         test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=256)
-        
+
         print("Testing sliding window attention (window=1024)...")
         test_op(BATCH_SIZE=4, NUM_HEADS=8, SEQ_LEN=2048, HEAD_DIM=64, causal=False, window_size=1024)
-        
+
         print("ALL TESTS PASSED!")
     if benchmark:
-        bench_flash_attention.run(save_path=".", print_data=True)
+        bench_flash_attention.run(save_path="triton-attn-bm", print_data=True)
