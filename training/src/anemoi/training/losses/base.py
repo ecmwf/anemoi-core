@@ -133,6 +133,8 @@ class BaseLoss(nn.Module, ABC):
         squash_mode: str = "avg",
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+        #TODO: decide on making summing time dimension default or not
+        # adapt docstring accordingly
         """Reduce the out of the loss.
 
         If `squash` is True, the last dimension is averaged.
@@ -176,6 +178,7 @@ class BaseLoss(nn.Module, ABC):
             grid_summed,
             dim=(
                 TensorDim.BATCH_SIZE,
+                TensorDim.TIME,
                 TensorDim.ENSEMBLE_DIM,
             ),
         )
