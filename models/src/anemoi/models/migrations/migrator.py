@@ -623,7 +623,6 @@ class Migrator:
         ckpt = deepcopy(old_ckpt)
         if add_migration_key:
             ckpt[_ckpt_migration_key] = []
-
         if not self.is_compatible_ckpt(ckpt):
             first_incompatible_version = self.get_first_incompatible_version(ckpt)
             raise IncompatibleCheckpointException(
@@ -642,6 +641,8 @@ class Migrator:
             replace_attrs = context.deleted_attributes
         # Force reloading checkpoint without obfuscating import issues.
         ckpt = _load_ckpt(path, replace_attrs)
+        if add_migration_key:
+            ckpt[_ckpt_migration_key] = []
         ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
         for op in ops:
             if isinstance(op, RollbackOp):
