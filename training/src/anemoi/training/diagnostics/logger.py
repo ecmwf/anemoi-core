@@ -120,7 +120,6 @@ def get_wandb_logger(
     run_id: Any,
     paths: Any,
     model: pl.LightningModule,
-    config: Any,
     **kwargs,
 ) -> pl.loggers.WandbLogger | None:
     """Setup Weights & Biases experiment logger.
@@ -166,7 +165,6 @@ def get_wandb_logger(
         log_model=diagnostics_config.log.wandb.log_model,
         resume=run_id is not None,
     )
-    logger.log_hyperparams(OmegaConf.to_container(config, resolve=True))
     if diagnostics_config.log.wandb.gradients or diagnostics_config.log.wandb.parameters:
         if diagnostics_config.log.wandb.gradients and diagnostics_config.log.wandb.parameters:
             log_ = "all"
