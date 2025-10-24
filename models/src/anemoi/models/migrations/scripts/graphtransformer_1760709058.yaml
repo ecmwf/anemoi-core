@@ -1,1 +1,57 @@
-/home/fra7547/anemoi-mf/migrations/graphtransformer/1760709058_graphtransformer.yaml
+prefixes:
+  pre_processors: null
+  encoder: "model.model.encoder.proc"
+  decoder: "model.model.decoder.proc"
+  node_attributes: null
+  post_processors: null
+  processor: "model.model.processor.proc"
+
+old_to_new_mapping:
+  encoder:
+    node_dst_mlp.0: layer_norm_mlp_dst
+    node_dst_mlp.1: node_dst_mlp.0
+    node_dst_mlp.3: node_dst_mlp.2
+    layer_norm1: layer_norm_attention_src
+    layer_norm2: layer_norm_attention_dest
+
+  processor:
+    node_dst_mlp.0: layer_norm_mlp_dst
+    node_dst_mlp.1: node_dst_mlp.0,
+    node_dst_mlp.3: node_dst_mlp.2,
+    layer_norm1: layer_norm_attention
+
+  decoder:
+    node_dst_mlp.0: layer_norm_mlp_dst
+    node_dst_mlp.1: node_dst_mlp.0
+    node_dst_mlp.3: node_dst_mlp.2
+    layer_norm1: layer_norm_attention_src
+    layer_norm2: layer_norm_attention_dest
+
+  pre_processors: {},
+  post_processors: {},
+  node_attributes: {},
+
+add_in_new:
+  encoder:
+    - layer_norm_mlp_src
+    - node_src_mlp
+  processor: {}
+  decoder:
+    - layer_norm_mlp_src
+    - node_src_mlp
+
+  pre_processors: {}
+  post_processors: {}
+  node_attributes: {}
+
+
+repeats:
+  encoder:
+      layer_norm_attention: layer_norm_attention_dest
+
+  processor: {},
+  decoder:
+      layer_norm_attention: layer_norm_attention_dest
+  pre_processors: {}
+  post_processors: {}
+  node_attributes: {}
