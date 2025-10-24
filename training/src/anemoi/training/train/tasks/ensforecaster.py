@@ -12,13 +12,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import einops
 import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_channels
-from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.inicond import EnsembleInitialConditions
@@ -151,47 +148,6 @@ class GraphEnsForecaster(BaseGraphModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
-    def _prepare_for_truncation(
-        self,
-        y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
-        model_comm_group: ProcessGroup,
-    ) -> tuple[torch.Tensor, torch.Tensor, tuple | None]:
-        """Prepare tensors for interpolation/smoothing.
-
-        Args:
-            y_pred_ens: torch.Tensor
-                Ensemble predictions
-            y: torch.Tensor
-                Ground truth
-            model_comm_group: ProcessGroup
-                Model communication group
-
-        Returns
-        -------
-            y_pred_ens_interp: torch.Tensor
-                Predictions for interpolation
-            y_interp: torch.Tensor
-                Ground truth for interpolation
-            shard_info: tuple
-                Shard shapes for later gathering
-        """
-        batch_size, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1]
-        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b e g c -> (b e) g c")
-        shard_shapes = apply_shard_shapes(y_pred_ens_interp, self.grid_dim, self.grid_shard_shapes)
-        y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, model_comm_group)
-        y_pred_ens_interp = einops.rearrange(
-            y_pred_ens_interp,
-            "(b e) g c -> b e g c",
-            b=batch_size,
-            e=ensemble_size,
-        )
-
-        shard_shapes_y = apply_shard_shapes(y, self.grid_dim, self.grid_shard_shapes)
-        y_interp = shard_channels(y, shard_shapes_y, model_comm_group)
-
-        return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
-
     def gather_and_compute_loss(
         self,
         y_pred: torch.Tensor,
@@ -237,7 +193,7 @@ class GraphEnsForecaster(BaseGraphModule):
             mgroup=ens_comm_subgroup,
         )
 
-        loss_inc = loss(
+        loss, loss_inc = loss(
             y_pred_ens,
             y,
             squash=False,
@@ -247,7 +203,7 @@ class GraphEnsForecaster(BaseGraphModule):
 
         #########
 
-        return loss_inc, y_pred_ens if return_pred_ens else None
+        return loss, loss_inc, y_pred_ens if return_pred_ens else None
 
     def advance_input(
         self,
@@ -356,7 +312,7 @@ class GraphEnsForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            mloss, y_pred_ens_group = (
+            loss, mloss, y_pred_ens_group = (
                 checkpoint(
                     self.gather_and_compute_loss,
                     y_pred,
@@ -371,8 +327,6 @@ class GraphEnsForecaster(BaseGraphModule):
                 if training_mode
                 else None
             )
-            loss = torch.stack(mloss).sum()
-            mloss = [x.detach() for x in mloss]
 
             x = self.advance_input(x, y_pred, batch[0], rollout_step)
 
@@ -402,10 +356,10 @@ class GraphEnsForecaster(BaseGraphModule):
 
         loss = torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
 
-        if self.loss.name == "multiscaleloss":
+        if self.loss.name == "MultiscaleLossWrapper":
             # TODO(Helen): Check logic for having either 3 config entries and one of the is None
 
-            LOGGER.debug("Using multiscale loss with %d scales", len(self.config.hardware.files.truncation_loss))
+            LOGGER.debug("Using multiscale loss with %d scales", self.loss.num_scales)
 
             mloss = [
                 torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
@@ -437,7 +391,7 @@ class GraphEnsForecaster(BaseGraphModule):
             for i in range(len(mloss)):
                 mloss[i] *= 1.0 / self.rollout
 
-        return loss, metrics, y_preds, _ens_ic
+        return loss, mloss, metrics, y_preds, _ens_ic
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         batch[0] = super().allgather_batch(batch[0])

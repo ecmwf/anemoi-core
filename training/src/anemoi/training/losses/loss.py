@@ -69,7 +69,7 @@ def get_loss_function(
 
     if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
         internal_loss_config = loss_config.pop("internal_loss")
-        internal_loss = get_loss_function(OmegaConf.create(internal_loss_config), scalers, data_indices, **kwargs)
+        internal_loss = get_loss_function(OmegaConf.create(internal_loss_config), scalers, data_indices)
         return instantiate(loss_config, loss=internal_loss, **kwargs)
 
     if scalers is None:

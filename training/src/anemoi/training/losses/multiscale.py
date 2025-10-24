@@ -36,6 +36,7 @@ class MultiscaleLossWrapper(nn.Module):
         truncation_path: Path | str,
         filenames: Path | str,
         loss: BaseLoss,
+        keep_batch_sharded: bool,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
@@ -51,8 +52,10 @@ class MultiscaleLossWrapper(nn.Module):
         super().__init__()
 
         self.truncation_matrices = self.load_loss_truncation_matrices(truncation_path, filenames)
+        self.num_scales = len(self.truncation_matrices)
         self.loss = loss
         self.scaler = self.loss.scaler
+        self.keep_batch_sharded = keep_batch_sharded
 
     def load_loss_truncation_matrices(
         self,
@@ -115,10 +118,10 @@ class MultiscaleLossWrapper(nn.Module):
         return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
 
     def _interp_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.loss_trunc_matrices[i] is not None:
-            self.loss_trunc_matrices[i] = self.loss_trunc_matrices[i].to(x.device)
-            x = interpolate_batch(x, self.loss_trunc_matrices[i])
-            y = interpolate_batch(y, self.loss_trunc_matrices[i])
+        if self.truncation_matrices[i] is not None:
+            self.truncation_matrices[i] = self.truncation_matrices[i].to(x.device)
+            x = interpolate_batch(x, self.truncation_matrices[i])
+            y = interpolate_batch(y, self.truncation_matrices[i])
         return x, y
 
     def forward(
@@ -126,25 +129,25 @@ class MultiscaleLossWrapper(nn.Module):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
         squash: bool,  # noqa: ARG002
-        grid_shard_slice: tuple | None,  # noqa: ARG002
+        grid_shard_slice: tuple | None,
         model_comm_group: ProcessGroup,
     ) -> list[torch.Tensor]:
 
         shard_shapes, shard_shapes_y = None, None
         if self.keep_batch_sharded and torch.distributed.get_world_size() > 1:
             # go to full sequence dimension for interpolation / smoothing
-            y_pred_ens_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
+            y_pred_ens_for_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
                 y_pred_ens,
                 y,
                 model_comm_group,
             )
         else:
-            y_pred_ens_interp = y_pred_ens
+            y_pred_ens_for_interp = y_pred_ens
             y_for_interp = y
 
         loss_inc = []
         y_preds_ens = []
-        ys = []
+        y_ens = []
         for i, trunc_matrix in enumerate(self.truncation_matrices):
             LOGGER.debug(
                 "Loss: %s %s %s",
@@ -154,7 +157,7 @@ class MultiscaleLossWrapper(nn.Module):
             )
 
             # interpolate / smooth the predictions and the truth for loss computation
-            y_pred_ens_tmp, y_tmp = self._interp_for_loss(y_pred_ens_interp, y_for_interp, i)
+            y_pred_ens_tmp, y_tmp = self._interp_for_loss(y_pred_ens_for_interp, y_for_interp, i)
 
             if self.keep_batch_sharded and torch.distributed.get_world_size() > 1:
                 y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, model_comm_group)
@@ -162,11 +165,11 @@ class MultiscaleLossWrapper(nn.Module):
 
             # save for next loss scale
             y_preds_ens.append(y_pred_ens_tmp)
-            ys.append(y_tmp)
+            y_ens.append(y_tmp)
 
             if i > 0:  # assumption, resol 0 < 1 < 2 < ... < n
                 y_pred_ens_tmp = y_pred_ens_tmp - y_preds_ens[i - 1]
-                y_tmp = y_tmp - ys[i - 1]
+                y_tmp = y_tmp - y_ens[i - 1]
 
             # compute the loss
             loss_inc.append(
@@ -174,9 +177,11 @@ class MultiscaleLossWrapper(nn.Module):
                     y_pred_ens_tmp,
                     y_tmp,
                     squash=True,
-                    grid_shard_slice=self.grid_shard_slice,
+                    grid_shard_slice=grid_shard_slice,
                     group=model_comm_group,
                 ),
             )
 
-        return loss_inc
+        loss = torch.stack(loss_inc).sum()
+        mloss = [x.detach() for x in loss_inc]
+        return loss, mloss
