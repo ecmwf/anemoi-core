@@ -12,7 +12,6 @@ import logging
 import uuid
 from functools import cached_property
 
-from anemoi.utils.config import os
 import netCDF4
 import numpy as np
 import scipy
