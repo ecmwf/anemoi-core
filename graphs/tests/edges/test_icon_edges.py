@@ -15,7 +15,6 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges import ICONTopologicalDecoderEdges
 from anemoi.graphs.edges import ICONTopologicalEncoderEdges
 from anemoi.graphs.edges import ICONTopologicalProcessorEdges
-
 from anemoi.graphs.nodes import ICONCellGridNodes
 from anemoi.graphs.nodes import ICONMultimeshNodes
 
