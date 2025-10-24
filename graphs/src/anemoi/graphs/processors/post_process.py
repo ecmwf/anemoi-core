@@ -406,6 +406,6 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         for mask_attr_name, nodes, i in cases:
             if mask_attr_name:
                 attr_mask = nodes[mask_attr_name].squeeze()
-                edge_mask = attr_mask[edge_index[i]]
+                edge_mask = attr_mask[edge_index[i]].to(mask.device)
                 mask = torch.logical_or(mask, ~edge_mask)
         return mask

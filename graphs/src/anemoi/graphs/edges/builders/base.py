@@ -111,7 +111,7 @@ class BaseEdgeBuilder(ABC):
             edge_index = graph[self.name].edge_index
             edge_builder = instantiate(attr_config)
             graph[self.name][attr_name] = edge_builder(
-                x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
+                x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index.to(self.device)
             )
         return graph
 
