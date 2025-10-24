@@ -166,8 +166,11 @@ class AnemoiTrainer(ABC):
             overwrite=self.config.graph.overwrite,
         )
 
+    @cached_property
     @abstractmethod
-    def profiler(self) -> None: ...
+    def profiler(self) -> None:
+        """Abstract method to be used for AnemoiProfiler."""
+        return None
 
     @cached_property
     def truncation_data(self) -> dict:
