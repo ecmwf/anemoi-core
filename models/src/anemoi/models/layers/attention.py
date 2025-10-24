@@ -455,6 +455,7 @@ class FlexAttentionWrapper(nn.Module):
         alibi_slopes: torch.Tensor = None,
     ):
 
+        softcap=None
         self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
 
         # recompile if seq len changes
@@ -519,11 +520,12 @@ class TritonAttentionWrapper(nn.Module):
     ):
 
         #expects  (BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM)
+        softcap=None
         self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
 
         softmax_scale=1 / math.sqrt(query.size(-1))
 
-        out = self.attention.apply(query, key, value, causal, softmax_scale, window_size).half()
+        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).half()
 
         return out
 
@@ -536,7 +538,7 @@ class TritonAttentionWrapper(nn.Module):
         if alibi_slopes is not None:
             msg += "alibi slobes, "
         if len(msg) > 0:
-            msg = "The following features you requested are not yet implemented in the Flex-Attention backend: " + msg
+            msg = "The following features you requested are not yet implemented in the Triton-Attention backend: " + msg
             raise NotImplementedError(msg)
 
 

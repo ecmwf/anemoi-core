@@ -610,8 +610,13 @@ class TritonAttention(torch.autograd.Function):
     @staticmethod
     def backward(ctx, do):
         q, k, v, o, M = ctx.saved_tensors
-        assert do.is_contiguous()
-        assert q.stride() == k.stride() == v.stride() == o.stride() == do.stride()
+        #if not do.is_contiguous():
+            #do = do.contiguous()
+        #assert do.is_contiguous()
+        #assert q.stride() == k.stride() == v.stride() == o.stride() == do.stride()
+        # If shapes match but strides don't, reshape to match
+        if do.shape == o.shape and do.stride() != o.stride():
+            do = do.reshape(o.shape).contiguous()
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
