@@ -163,12 +163,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         # Each dataset can have its own grid indices configuration
         for dataset_name in self.dataset_names:
-            if dataset_name in self.config.dataloader.grid_indices_per_dataset:
-                grid_config = self.config.dataloader.grid_indices_per_dataset[dataset_name]
-            else:
-                # Fallback to default grid_indices config
-                grid_config = self.config.dataloader.grid_indices
-
+            grid_config = self.config.dataloader.grid_indices[dataset_name]
             grid_indices = instantiate(grid_config, reader_group_size=reader_group_size)
             grid_indices.setup(self.graph_data[dataset_name])
             grid_indices_dict[dataset_name] = grid_indices

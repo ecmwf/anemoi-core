@@ -40,8 +40,9 @@ limit_batches:
 # set a custom mask for grid points.
 # Useful for LAM (dropping unconnected nodes from forcing dataset)
 grid_indices:
-  _target_: anemoi.training.data.grid_indices.FullGrid
-  nodes_name: ${graph.data}
+  data: # user-defined key in data
+    _target_: anemoi.training.data.grid_indices.FullGrid
+    nodes_name: ${graph.data}
 
 # ============
 # Dataloader definitions
@@ -53,24 +54,21 @@ grid_indices:
 dataset: ${hardware.paths.data}/${hardware.files.dataset}
 
 training:
-  dataset: ${dataloader.dataset}
-  start: null
-  end: 2020
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data: # user-defined key in data
+      dataset: ${dataloader.dataset}
+      start: 2000
+      end: 2019
+      frequency: ${data.frequency}
+      drop:  []
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 
 validation:
-  dataset: ${dataloader.dataset}
-  start: 2021
-  end: 2021
-  frequency: ${data.frequency}
-  drop:  []
-
-test:
-  dataset: ${dataloader.dataset}
-  start: 2022
-  end: null
-  frequency: ${data.frequency}
-  drop:  []
+  datasets:
+    data: # user-defined key
+      dataset: ${dataloader.dataset}
+      start: 2021
+      end: 2021
+      frequency: ${data.frequency}
+      drop:  []

@@ -748,7 +748,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Normalized batch
         """
         for dataset_name in batch:
-            batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name]) # normalized in-place
+            batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
         return batch
 
     def _prepare_loss_scalers(self) -> None:

@@ -6,7 +6,6 @@ timestep: 6h
 
 datasets:
   data: # user-defined key
-
     # features that are not part of the forecast state
     # but are used as forcing to generate the forecast state
     forcing:
@@ -72,7 +71,7 @@ datasets:
           - "lsm"
       # const_imputer:
       #   _target_: anemoi.models.preprocessing.imputer.ConstantImputer
-      #   config: 
+      #   config:
       #     default: "none"
       #     0: []
 
