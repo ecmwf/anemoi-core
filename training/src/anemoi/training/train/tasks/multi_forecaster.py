@@ -140,7 +140,6 @@ class GraphMultiForecaster(BaseGraphModule):
                 :,
                 self.data_indices.data.input.forcing,
             ]
-        LOGGER.info(f"Size of advanced x: {x.size()}")
         return x
 
     def rollout_step(
