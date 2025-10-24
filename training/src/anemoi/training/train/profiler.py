@@ -302,25 +302,26 @@ class AnemoiProfiler(AnemoiTrainer):
     @cached_property
     def datamodule(self) -> AnemoiDatasetsDataModule:
         datamodule = super().datamodule
+        if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
         # to generate a model summary with shapes we need a sample input array
-        batch = next(iter(datamodule.train_dataloader()))
-        if type(batch) in [list, tuple]:
-            batch = batch[0]
-        self.example_input_array = batch[
-            :,
-            0 : self.config.training.multistep_input,
-            ...,
-            self.data_indices.data.input.full,
-        ]
-        # If the input batch is sharded, replicate it to its full size
-        if self.config.dataloader.read_group_size > 1:
-            self.example_input_array = self.example_input_array.repeat(
-                1,
-                1,
-                1,
-                self.config.dataloader.read_group_size,
-                1,
-            )
+            batch = next(iter(datamodule.train_dataloader()))
+            if type(batch) in [list, tuple]:
+                batch = batch[0]
+            self.example_input_array = batch[
+                :,
+                0 : self.config.training.multistep_input,
+                ...,
+                self.data_indices.data.input.full,
+            ]
+            # If the input batch is sharded, replicate it to its full size
+            if self.config.dataloader.read_group_size > 1:
+                self.example_input_array = self.example_input_array.repeat(
+                    1,
+                    1,
+                    1,
+                    self.config.dataloader.read_group_size,
+                    1,
+                )
         return datamodule
 
     @cached_property
