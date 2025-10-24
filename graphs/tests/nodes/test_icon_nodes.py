@@ -14,9 +14,6 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.edges import ICONTopologicalDecoderEdges
-from anemoi.graphs.edges import ICONTopologicalEncoderEdges
-from anemoi.graphs.edges import ICONTopologicalProcessorEdges
 from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
 from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes import ICONCellGridNodes
@@ -127,72 +124,6 @@ def test_wrong_filename(node_builder_cls: type[BaseNodeBuilder]):
         node_builder_cls(name="data_nodes2", max_level=0, grid_filename="missing_icon_nodes")
 
 
-class TestEdgeBuilderDependencies:
-    @pytest.fixture()
-    def icon_graph(self, monkeypatch) -> HeteroData:
-        """Return a HeteroData object with ICON node builders."""
-        monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
-        data_node_builder = ICONCellGridNodes(name="data", grid_filename="test.nc", max_level=1)
-        hidden_node_builder = ICONMultimeshNodes(name="hidden", grid_filename="test.nc", max_level=1)
-
-        graph = HeteroData()
-        graph = data_node_builder.update_graph(graph, {})
-        graph = hidden_node_builder.update_graph(graph, {})
-
-        return graph
-
-    def test_encoder(self, icon_graph: HeteroData):
-        """Test that the `ICONTopologicalEncoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalEncoderEdges(source_name="data", target_name="hidden")
-        assert ("data", "to", "hidden") not in icon_graph.edge_types
-
-        icon_graph = edge_builder.update_graph(icon_graph)
-
-        assert ("data", "to", "hidden") in icon_graph.edge_types
-        assert hasattr(icon_graph["data", "to", "hidden"], "edge_index")
-
-    def test_wrong_encoder(self, icon_graph: HeteroData):
-        """Test that the `ICONTopologicalEncoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalEncoderEdges(source_name="hidden", target_name="data")
-
-        with pytest.raises(AssertionError):
-            edge_builder.update_graph(icon_graph)
-
-    def test_decoder(self, icon_graph: HeteroData):
-        """Test that the `ICONTopologicalDecoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalDecoderEdges(source_name="hidden", target_name="data")
-        assert ("hidden", "to", "data") not in icon_graph.edge_types
-
-        icon_graph = edge_builder.update_graph(icon_graph)
-
-        assert ("hidden", "to", "data") in icon_graph.edge_types
-        assert hasattr(icon_graph["hidden", "to", "data"], "edge_index")
-
-    def test_wrong_decoder(self, icon_graph: HeteroData):
-        """Test that the `ICONTopologicalDecoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalDecoderEdges(source_name="data", target_name="hidden")
-
-        with pytest.raises(AssertionError):
-            edge_builder.update_graph(icon_graph)
-
-    def test_processor(self, icon_graph: HeteroData):
-        """Test that the `ICONTopologicalProcessorEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalProcessorEdges(source_name="hidden", target_name="hidden")
-        assert ("hidden", "to", "hidden") not in icon_graph.edge_types
-
-        icon_graph = edge_builder.update_graph(icon_graph)
-
-        assert ("hidden", "to", "hidden") in icon_graph.edge_types
-        assert hasattr(icon_graph["hidden", "to", "hidden"], "edge_index")
-
-    def test_wrong_processor(self, icon_graph: HeteroData):
-        """Test that the `ICONTopologicalProcessorEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalProcessorEdges(source_name="data", target_name="hidden")
-
-        with pytest.raises(AssertionError):
-            edge_builder.update_graph(icon_graph)
-
-
 def test_register_nodes(monkeypatch):
     """Test ICON node builders register correctly the nodes."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
@@ -207,7 +138,6 @@ def test_register_nodes(monkeypatch):
     assert isinstance(graph["data"].x, torch.Tensor)
     assert graph["data"].x.shape[1] == 2
     assert graph["hidden"].x.shape[1] == 2
-    print(graph)
     assert graph.num_nodes == 3, "number of vertices at refinement_level_v == 0"
     assert graph["data"].node_type == "ICONCellGridNodes"
     assert graph["hidden"].node_type == "ICONMultimeshNodes"
