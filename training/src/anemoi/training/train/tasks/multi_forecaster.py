@@ -174,10 +174,10 @@ class GraphMultiForecaster(BaseGraphModule):
 
         """
         ############
-        if rollout is None:
-            rollout = self.rollout
-        assert rollout == 1, "Only rollout_step=1 is currently supported for multi-step output"
-        ### TODO: extend to multi-step output with rollout, then remove above.
+        # if rollout is None:
+        #     rollout = self.rollout
+        # assert rollout == 1, "Only rollout_step=1 is currently supported for multi-step output"
+        # ### TODO: extend to multi-step output with rollout, then remove above.
 
         batch = self.model.pre_processors(batch)  # normalized in-place
 
