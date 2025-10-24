@@ -16,7 +16,7 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 
-def get_shard_shapes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> list:
+def get_shard_shapes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> list[list[int]]:
     """Get shape of tensor shards split along a specific dimension."""
     assert dim < tensor.dim(), f"Error, tensor dimension is {tensor.dim()} which cannot be split along {dim}"
 
@@ -24,12 +24,12 @@ def get_shard_shapes(tensor: Tensor, dim: int, model_comm_group: Optional[Proces
     return [list(x.shape) for x in torch.tensor_split(tensor, comm_size, dim=dim)]
 
 
-def change_channels_in_shape(shape_list: list, channels: int) -> list:
+def change_channels_in_shape(shape_list: list[list[int]], channels: int) -> list[list[int]]:
     """Change the number of channels in the tensor shape definition list."""
     return [x[:-1] + [channels] for x in shape_list] if shape_list else []
 
 
-def apply_shard_shapes(tensor: Tensor, dim: int, shard_shapes_dim: list) -> list:
+def apply_shard_shapes(tensor: Tensor, dim: int, shard_shapes_dim: list[int]) -> list[list[int]]:
     """Generalize shard shapes of a specific dimension to all dimensions of a given tensor."""
     assert dim < tensor.dim(), f"Error, tensor dimension is {tensor.dim()} which cannot be split along {dim}"
 
@@ -40,7 +40,9 @@ def apply_shard_shapes(tensor: Tensor, dim: int, shard_shapes_dim: list) -> list
     return shard_shapes
 
 
-def get_or_apply_shard_shapes(x, dim=0, shard_shapes_dim: int = None, model_comm_group: Optional[ProcessGroup] = None):
+def get_or_apply_shard_shapes(
+    x: Tensor, dim: int = 0, shard_shapes_dim: int = None, model_comm_group: Optional[ProcessGroup] = None
+) -> list[list[int]]:
     if shard_shapes_dim is None:
         return get_shard_shapes(x, dim, model_comm_group)
     else:

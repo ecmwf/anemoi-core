@@ -90,7 +90,7 @@ class BaseMapper(nn.Module, ABC):
         ----------
         x : Tuple[Tensor]
             Data containing source and destination nodes and edges.
-        shard_shapes : Tuple[Tuple[int], Tuple[int]]
+        shard_shapes : Tuple[List[int], List[int]]
             Shapes of the sharded source and destination nodes.
         model_comm_group : ProcessGroup
             Groups which GPUs work together on one model instance
@@ -315,7 +315,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
     def pre_process_edge_sharding_wrapper(
         self,
         x: PairTensor,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
@@ -404,7 +404,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -457,7 +457,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -493,7 +493,7 @@ class GraphTransformerBaseMapper(GraphEdgeMixin, BaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -600,7 +600,7 @@ class GraphTransformerForwardMapper(ForwardMapperPreProcessMixin, GraphTransform
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -822,7 +822,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -856,7 +856,7 @@ class GNNBaseMapper(GraphEdgeMixin, BaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -1074,7 +1074,7 @@ class GNNBackwardMapper(BackwardMapperPostProcessMixin, GNNBaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -1183,7 +1183,7 @@ class TransformerBaseMapper(BaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -1209,7 +1209,7 @@ class TransformerBaseMapper(BaseMapper):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
@@ -1312,7 +1312,7 @@ class TransformerForwardMapper(ForwardMapperPreProcessMixin, TransformerBaseMapp
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int], tuple[int], tuple[int]],
+        shard_shapes: tuple[list[list[int]], list[list[int]], list[list[int]]],
         model_comm_group: Optional[ProcessGroup] = None,
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,

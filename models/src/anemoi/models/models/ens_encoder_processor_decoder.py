@@ -112,7 +112,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[tuple] = None,
+        grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Forward operator.
