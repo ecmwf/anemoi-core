@@ -28,7 +28,7 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
     from ICON grid vertices.
     """
 
-    def compute_edge_index(self, source_nodes: NodeStorage, _target_nodes: NodeStorage) -> torch.Tensor:
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices for the KNN method.
 
         Parameters
@@ -43,6 +43,12 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
+        assert isinstance(
+            source_nodes["_icon_nodes"], ICONMultiMesh
+        ), f"{self.__class__.__name__}: source nodes must be ICONMultiMesh"
+        assert isinstance(
+            target_nodes["_icon_nodes"], ICONMultiMesh
+        ), f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
         edge_index = source_nodes["_icon_nodes"].multi_mesh_edges
         return torch.from_numpy(edge_index.T)
 

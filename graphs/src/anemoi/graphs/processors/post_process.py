@@ -317,9 +317,9 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         """Remove edges based on the mask passed."""
         for attr_name in graph[self.edges_name].edge_attrs():
             if attr_name == "edge_index":
-                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask]
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask.cpu()]
             else:
-                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask, :]
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask.cpu(), :]
 
         return graph
 

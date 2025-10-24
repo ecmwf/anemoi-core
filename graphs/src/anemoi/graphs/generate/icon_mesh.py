@@ -12,6 +12,7 @@ import logging
 import uuid
 from functools import cached_property
 
+from anemoi.utils.config import os
 import netCDF4
 import numpy as np
 import scipy
@@ -80,11 +81,11 @@ class ICONMultiMesh:
     nodeset: NodeSet  # set of ICON grid vertices
 
     def __init__(self, icon_grid_filename: str, max_level: int | None = None):
-        self.icon_grid_filename = icon_grid_filename
+        self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
-        LOGGER.debug(f"{type(self).__name__}: read coordinates from ICON grid file '{icon_grid_filename}'")
-        with netCDF4.Dataset(icon_grid_filename, "r") as ncfile:
+        LOGGER.debug(f"{type(self).__name__}: read coordinates from ICON grid file '{self.grid_filename}'")
+        with netCDF4.Dataset(self.grid_filename, "r") as ncfile:
             # read vertex coordinates
             vlon = read_coordinate_array(ncfile, "vlon", "vertex")
             vlat = read_coordinate_array(ncfile, "vlat", "vertex")
@@ -129,8 +130,8 @@ class ICONMultiMesh:
         return np.concatenate([edges for edges in self.edge_vertices], axis=0)
 
     def _read_vertices_data(self):
-        LOGGER.debug(f"{type(self).__name__}: read vertices data from ICON grid file '{self.icon_grid_filename}'")
-        with netCDF4.Dataset(self.icon_grid_filename, "r") as ncfile:
+        LOGGER.debug(f"{type(self).__name__}: read vertices data from ICON grid file '{self.grid_filename}'")
+        with netCDF4.Dataset(self.grid_filename, "r") as ncfile:
 
             edge_vertices_fine = np.asarray(ncfile.variables["edge_vertices"][:] - 1, dtype=np.int64).transpose()
             assert ncfile.variables["edge_vertices"].dimensions == ("nc", "edge")
@@ -267,9 +268,11 @@ class ICONCellDataGrid:
     select_c: np.ndarray
 
     def __init__(self, icon_grid_filename: str, max_level: int | None = None):
+        self.grid_filename = icon_grid_filename
+
         # open file, representing the finest level
-        LOGGER.debug(f"{type(self).__name__}: read ICON grid file '{icon_grid_filename}'")
-        with netCDF4.Dataset(icon_grid_filename, "r") as ncfile:
+        LOGGER.debug(f"{type(self).__name__}: read ICON grid file '{self.grid_filename}'")
+        with netCDF4.Dataset(self.grid_filename, "r") as ncfile:
             # read cell circumcenter coordinates
             clon = read_coordinate_array(ncfile, "clon", "cell")
             clat = read_coordinate_array(ncfile, "clat", "cell")
