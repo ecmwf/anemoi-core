@@ -10,6 +10,8 @@
 
 import datetime
 import logging
+from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -42,7 +44,7 @@ from anemoi.utils.provenance import gather_provenance_info
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiTrainer:
+class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
     def __init__(self, config: DictConfig) -> None:
@@ -163,6 +165,9 @@ class AnemoiTrainer:
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,
         )
+
+    @abstractmethod
+    def profiler(self) -> None: ...
 
     @cached_property
     def truncation_data(self) -> dict:
@@ -480,6 +485,7 @@ class AnemoiTrainer:
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
             logger=self.loggers,
+            profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,
             # run a fixed no of batches per epoch (helpful when debugging)
             limit_train_batches=self.config.dataloader.limit_batches.training,
