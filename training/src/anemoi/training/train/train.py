@@ -37,6 +37,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import mark_for_compilation
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -503,6 +504,9 @@ class AnemoiTrainer(ABC):
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
+        if hasattr(self.config.model, "compile"):
+            self.model = mark_for_compilation(self.model, self.config.model.compile)
+
         LOGGER.debug("Starting training..")
 
         trainer.fit(
@@ -511,8 +515,8 @@ class AnemoiTrainer(ABC):
             ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
         )
 
-        if self.config.diagnostics.print_memory_summary:
-            LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
+        if self.config.diagnostics.print_memory_summary and rank_zero_only.rank == 0:
+            LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
 
         LOGGER.debug("---- DONE. ----")
 
