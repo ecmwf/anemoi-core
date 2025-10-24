@@ -350,6 +350,7 @@ def interpolator_config(
     use_case_modifications.hardware.files.dataset = rel_paths[0]
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]

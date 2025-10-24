@@ -574,7 +574,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         batch: torch.Tensor,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[torch.Tensor]]:
         pass
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
@@ -624,6 +624,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Ground truth (target).
         rollout_step: int
             Rollout step
+        grid_shard_slice: slice | None
+            Grid shard slice for distributed training
 
         Returns
         -------
