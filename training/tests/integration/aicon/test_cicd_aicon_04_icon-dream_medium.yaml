@@ -315,7 +315,6 @@ diagnostics:
 
   debug:
     anomaly_detection: false
-  profiler: false
   checkpoint:
     every_n_minutes:
       save_frequency: 30

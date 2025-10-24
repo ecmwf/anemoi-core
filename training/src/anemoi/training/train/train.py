@@ -10,6 +10,8 @@
 
 import datetime
 import logging
+from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -41,7 +43,7 @@ from anemoi.utils.provenance import gather_provenance_info
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiTrainer:
+class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
     def __init__(self, config: DictConfig) -> None:
@@ -164,6 +166,12 @@ class AnemoiTrainer:
         )
 
     @cached_property
+    @abstractmethod
+    def profiler(self) -> None:
+        """Abstract method to be used for AnemoiProfiler."""
+        return None
+
+    @cached_property
     def truncation_data(self) -> dict:
         """Truncation data.
 
@@ -243,6 +251,7 @@ class AnemoiTrainer:
     @rank_zero_only
     def _get_mlflow_run_id(self) -> str:
         from anemoi.utils.mlflow.client import AnemoiMlflowClient
+
         client = AnemoiMlflowClient(self.config.diagnostics.log.mlflow.tracking_uri, authentication=True)
         experiment = client.get_experiment_by_name(self.config.diagnostics.log.mlflow.experiment_name)
         experiment_id = (
@@ -250,7 +259,7 @@ class AnemoiTrainer:
             if experiment is not None
             else client.create_experiment(self.config.diagnostics.log.mlflow.experiment_name)
         )
-        run_name= self.config.diagnostics.log.mlflow.run_name if self.config.diagnostics.log.mlflow.run_name else None
+        run_name = self.config.diagnostics.log.mlflow.run_name if self.config.diagnostics.log.mlflow.run_name else None
         run = client.create_run(experiment_id, run_name=run_name)
         run_id = run.info.run_id
         # for resumed runs or offline runs logging this can be useful
@@ -348,9 +357,8 @@ class AnemoiTrainer:
     @cached_property
     def _logger_kwargs(self) -> dict:
         """Shared keyword arguments for all loggers."""
-        print(self.config.training.run_id,self.run_id)
         return {
-            "diagnostics_config":  self.config.diagnostics,
+            "diagnostics_config": self.config.diagnostics,
             "run_id": self.run_id,
             "fork_run_id": self.config.training.fork_run_id,
             "paths": self.config.hardware.paths,
@@ -359,7 +367,7 @@ class AnemoiTrainer:
         }
 
     @cached_property
-    def mlflow_logger(self):
+    def mlflow_logger(self) -> None:
         """Lazily initialize and cache the MLflow logger."""
         LOGGER.info("Initializing MLflow logger lazily...")
         return get_mlflow_logger(**self._logger_kwargs)
@@ -495,6 +503,7 @@ class AnemoiTrainer:
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
             logger=self.loggers,
+            profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,
             # run a fixed no of batches per epoch (helpful when debugging)
             limit_train_batches=self.config.dataloader.limit_batches.training,
@@ -505,7 +514,6 @@ class AnemoiTrainer:
             gradient_clip_algorithm=self.config.training.gradient_clip.algorithm,
             # we have our own DDP-compliant sampler logic baked into the dataset
             use_distributed_sampler=False,
-            profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
