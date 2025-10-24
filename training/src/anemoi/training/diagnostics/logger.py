@@ -108,7 +108,7 @@ def get_mlflow_logger(
     )
 
     if diagnostics_config.log.mlflow.terminal:
-        logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)
+        logger.log_terminal_output(artifact_save_dir=paths.plots)
     if diagnostics_config.log.mlflow.system:
         logger.log_system_metrics()
 

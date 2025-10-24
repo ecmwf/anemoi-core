@@ -345,32 +345,39 @@ class AnemoiTrainer:
     def supporting_arrays(self) -> dict:
         return self.datamodule.supporting_arrays
 
-    # @cached_property
-    # def mlflow_logger(self) -> pl.loggers.MLFlowLogger:
-    #     """Mlflow logger."""
-    #     return get_mlflow_logger(self)
+    @cached_property
+    def _logger_kwargs(self) -> dict:
+        """Shared keyword arguments for all loggers."""
+        print(self.config.training.run_id,self.run_id)
+        return {
+            "diagnostics_config":  self.config.diagnostics,
+            "run_id": self.run_id,
+            "fork_run_id": self.config.training.fork_run_id,
+            "paths": self.config.hardware.paths,
+            "model": self.model,
+            "config": self.config,
+        }
 
+    @cached_property
+    def mlflow_logger(self):
+        """Lazily initialize and cache the MLflow logger."""
+        LOGGER.info("Initializing MLflow logger lazily...")
+        return get_mlflow_logger(**self._logger_kwargs)
 
     @cached_property
     def loggers(self) -> list:
+        """Lazily build all enabled loggers."""
         diagnostics_config = self.config.diagnostics
-        print(self.config.run_id.self.run_id)
-        stop
-        kwargs = {
-            "diagnostics_config": self.diagnostics_config,
-            "run_id": self.config.run_id,
-            "fork_run_id": self.config.fork_run_id,
-            "paths": self.config.hardware.paths,
-            "model": self.model_task,
-            "config": self.config,
-        }
         loggers = []
+
         if diagnostics_config.log.wandb.enabled:
             LOGGER.info("W&B logger enabled")
-            loggers.append(get_wandb_logger(**kwargs))
-        if diagnostics_config.log.mlflow.enabled:
+            loggers.append(get_wandb_logger(**self._logger_kwargs))
+
+        if self.mlflow_logger:
             LOGGER.info("MLFlow logger enabled")
-            loggers.append(get_mlflow_logger(**kwargs))
+            loggers.append(self.mlflow_logger)
+
         return loggers
 
     @cached_property
