@@ -43,10 +43,6 @@ datasets:
       nodes_attribute_name: area_weight
       norm: unit-sum
 
-    # Scalers in the time dimension
-    time_steps:
-      _target_: anemoi.training.losses.scalers.UniformTimeStepScaler
-
   cerra:
     # ERA5_copy uses same configuration as CERRA for debugging
     general_variable:
@@ -84,7 +80,3 @@ datasets:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
       nodes_attribute_name: area_weight
       norm: unit-sum
-
-    # Scalers in the time dimension
-    time_steps:
-      _target_: anemoi.training.losses.scalers.UniformTimeStepScaler

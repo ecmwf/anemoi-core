@@ -3,14 +3,11 @@ defaults:
   - scalers: global
   - optimization: default
 
-# resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
+# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
 load_weights_only: False # only load model weights, do not restore optimiser states etc.
-update_ds_stats_on_ckpt_load:
-  states: False # rebuild state processors from current dataset when loading a checkpoint
-  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -18,8 +15,14 @@ deterministic: False
 # miscellaneous
 precision: 16-mixed
 
+# multistep input
+# 1 = single step scheme, X(t-1) used to predict X(t)
+# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
+# Deepmind use k = 2 in their model
+multistep_input: 2
+
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
-# the effective batch size becomes num-devices * batch_size * K
+# the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
 
 num_sanity_val_steps: 6
@@ -35,6 +38,11 @@ swa:
   enabled: False
   lr: 1.e-4
 
+# Optimizer settings
+optimizer:
+  zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
+  kwargs:
+    betas: [0.9, 0.95]
 
 # select model
 training_method: anemoi.training.train.methods.SingleTraining
@@ -42,7 +50,7 @@ training_method: anemoi.training.train.methods.SingleTraining
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+  num_gpus_per_model: ${hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -62,7 +70,7 @@ training_loss:
       # A selection of available scalers are listed in training/scalers.
       # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
       # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
       ignore_nans: False
 
 # Validation metrics calculation,
@@ -81,7 +89,7 @@ validation_metrics:
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         # Use the `scale_validation_metrics` section to variable scale.
-        scalers: ["node_weights", "time_steps"]
+        scalers: ['node_weights']
         # other kwargs
         ignore_nans: True
 
@@ -118,10 +126,10 @@ variable_groups:
 metrics:
   datasets:
     data: # user-defined key in data
-      - z_500
-      - t_850
-      - u_850
-      - v_850
+    - z_500
+    - t_850
+    - u_850
+    - v_850
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
@@ -134,7 +142,3 @@ max_steps: 150000
 # global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
 
 submodules_to_freeze: []
-
-# if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
-# A higher limit can result in better performance but will increase compilation time and disk space
-recompile_limit: 32

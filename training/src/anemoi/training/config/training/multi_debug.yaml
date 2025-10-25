@@ -1,3 +1,7 @@
+---
+defaults:
+  - scalers: multi
+
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
@@ -78,182 +82,60 @@ lr:
 
 submodules_to_freeze: []
 
-# Dataset-specific scalers configuration
-scalers:
-  # Default scalers inherited by all datasets
-  default:
-    general_variable:
-      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-      weights:
-        default: 1
-        q: 0.6
-        t: 6
-        u: 0.8
-        v: 0.5
-        w: 0.001
-        z: 12
-        sp: 10
-
-    nan_mask_weights:
-      _target_: anemoi.training.losses.scalers.NaNMaskScaler
-
-    pressure_level:
-      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-      group: pl
-      y_intercept: 0.2
-      slope: 0.001
-
-
-    # tendency scalers
-    # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
-    # useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)
-    # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
-    stdev_tendency:
-      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
-
-    var_tendency:
-      _target_: anemoi.training.losses.scalers.VarTendencyScaler
-
-    # Scalers from node attributes
-    node_weights:
-      _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: ${graph.data}
-      nodes_attribute_name: area_weight
-      norm: unit-sum
-
-  # Dataset-specific scalers
+# Dataset-specific loss and metrics configuration
+training_loss:
   datasets:
     era5:
-      # ERA5 inherits from default and adds specific scalers
-      general_variable:
-        _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-        weights:
-          default: 1
-          q: 0.8      # ERA5-specific weight
-          t: 6        # ERA5-specific weight
-          u: 0.8
-          v: 0.5
-          w: 0.001
-          z: 12       # Higher weight for geopotential in ERA5
-          sp: 10
-          10u: 0.1    # ERA5 has 10m winds
-          10v: 0.1
-          2d: 0.5
-          tp: 0.025   # ERA5 has precipitation
-          cp: 0.0025  # ERA5 has convective precipitation
-
-    era5_copy:
-      # ERA5_copy uses same configuration as ERA5 for debugging
-      general_variable:
-        _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-        weights:
-          default: 1
-          q: 1.0      # Same as ERA5
-          t: 8        # Same as ERA5
-          u: 0.8
-          v: 0.5
-          w: 0.001
-          z: 3       # Same as ERA5
-          sp: 10
-          10u: 1    # Same as ERA5
-
-      pressure_level:
-        _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-        group: pl
-        y_intercept: 0.1
-        slope: 0.001
-
-# Dataset-specific loss and metrics configuration
-loss_and_metrics:
-  # Default configuration inherited by all datasets
-  default:
-    training_loss:
+      # ERA5 uses additional scalers
       _target_: anemoi.training.losses.MSELoss
-      scalers: ['general_variable', 'nan_mask_weights']
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+      ignore_nans: false
+    cerra:
+      # CERRA uses additional scalers
+      _target_: anemoi.training.losses.MSELoss
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
       ignore_nans: false
 
-    validation_metrics:
+validation_metrics:
+  datasets:
+    era5:
+      mse:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ['node_weights']
+        ignore_nans: true
+    cerra:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['node_weights']
         ignore_nans: true
 
-    # Variable groupings for organizing different variable types
-    variable_groups:
-      default: sfc
-      pl:
-        param: [q, t, u, v, w, z]
-
-    # Specific metrics to track (variable_level format)
-    metrics:
-      - z_500
-      - t_850
-      - u_850
-      - v_850
-
-  # Dataset-specific loss and metrics configurations
+# ERA5-specific variable groups (extends default with more variables)
+variable_groups:
   datasets:
     era5:
-      # ERA5 uses additional scalers
-      training_loss:
-        _target_: anemoi.training.losses.MSELoss
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        ignore_nans: false
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]  # ERA5 has vorticity and divergence
+      sfc:
+        param: [tp, cp, 10u, 10v, 2d, sp]  # ERA5 surface variables
+    cerra:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]  # CERRA has vorticity and divergence
+      sfc:
+        param: [tp, cp, 10u, 10v, 2d]  # CERRA surface variables
 
-      validation_metrics:
-        mse:
-          _target_: anemoi.training.losses.MSELoss
-          scalers: ['node_weights']
-          ignore_nans: true
-
-      # ERA5-specific variable groups (extends default with more variables)
-      variable_groups:
-        default: sfc
-        pl:
-          param: [q, t, u, v, w, z]  # ERA5 has vorticity and divergence
-        sfc:
-          param: [tp, cp, 10u, 10v, 2d, sp]  # ERA5 surface variables
-
-      # ERA5-specific metrics (more comprehensive set)
-      metrics:
-        - z_500
-        - z_1000
-        - t_850
-        - t_500
-        - u_850
-        - v_850
-        - q_700
-        - tp_sfc  # precipitation at surface
-        - sp_sfc  # surface pressure
-
-    era5_copy:
-      # ERA5_copy uses same configuration as ERA5 for debugging
-      training_loss:
-        _target_: anemoi.training.losses.MSELoss
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        ignore_nans: false
-
-      validation_metrics:
-        mse:
-          _target_: anemoi.training.losses.MSELoss
-          scalers: ['node_weights']
-          ignore_nans: true
-
-      # Same variable groups as ERA5
-      variable_groups:
-        default: sfc
-        pl:
-          param: [q, t, u, v, w, z, vo, d]
-        sfc:
-          param: [tp, cp, 10u, 10v, 2d, sp]
-
-      # Same metrics as ERA5
-      metrics:
-        - z_500
-        - z_1000
-        - t_500
-        - u_850
-        - v_850
-        - q_700
-        - sp_sfc
-        - cp_sfc
+# Same metrics as ERA5
+metrics:
+  datasets:
+    era5:
+    - z_500
+    - z_1000
+    - t_500
+    - u_850
+    - v_850
+    cerra:
+    - z_500
+    - z_1000
+    - t_500
+    - u_850

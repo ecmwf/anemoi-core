@@ -3,9 +3,66 @@ format: zarr
 # Time frequency requested from dataset
 frequency: 6h
 
+# Default data configuration (inherited by all datasets)
+default:
+  # Features that are not part of the forecast state
+  # but are used as forcing to generate the forecast state
+  forcing:
+  - "cos_latitude"
+  - "cos_longitude"
+  - "sin_latitude"
+  - "sin_longitude"
+  - "cos_julian_day"
+  - "cos_local_time"
+  - "sin_julian_day"
+  - "sin_local_time"
+  - "insolation"
+  - "lsm"
+  - "sdor"
+  - "slor"
+  - "z"
+
+  # Features that are only part of the forecast state
+  # but are not used as the input to the model
+  diagnostic:
+  - tp
+  - cp
+
+  normalizer:
+    default: "mean-std"
+
+    # Standardization applied to tp and cp variables
+    std:
+    - "tp"
+
+    min-max:
+    max:
+    - "sdor"
+    - "slor"
+    - "z"
+    none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "insolation"
+    - "lsm"
+
+  # Processors including imputers and normalizers are applied in order of definition
+  processors:
+    normalizer:
+      _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+      config: ${data.default.normalizer}
+
 # Dataset-specific configurations
 datasets:
   era5:
+    # ERA5 inherits from default configuration
+    # Could override specific settings here if needed
     forcing:
     - "cos_latitude"
     - "cos_longitude"
@@ -21,10 +78,10 @@ datasets:
     - "slor"
     - "z"
     diagnostic: [tp, cp]
-    processors:
+    processors: 
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-        config:
+        config: 
           default: "mean-std"
           std:
           - "tp"
@@ -46,6 +103,7 @@ datasets:
           - "lsm"
 
   cerra:
+    # ERA5_copy uses same configuration as ERA5 for debugging
     forcing:
     - "cos_latitude"
     - "cos_longitude"
@@ -56,7 +114,7 @@ datasets:
     - "sin_julian_day"
     - "sin_local_time"
     diagnostic: [tp]
-    processors:
+    processors: 
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
         config:
@@ -74,6 +132,7 @@ datasets:
           - "cos_local_time"
           - "sin_julian_day"
           - "sin_local_time"
+          - "lsm"
       const_imputer:
         _target_: anemoi.models.preprocessing.imputer.InputImputer
         config:
