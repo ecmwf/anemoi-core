@@ -148,6 +148,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             (x_data_latent, x_hidden_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+            graph_provider=self.encoder_graph_provider,
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
@@ -167,6 +168,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent_proc,
             batch_size=bse,
             shard_shapes=shard_shapes_hidden,
+            graph_provider=self.processor_graph_provider,
             model_comm_group=model_comm_group,
             **processor_kwargs,
         )
@@ -177,6 +179,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             (x_latent_proc, x_data_latent),
             batch_size=bse,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            graph_provider=self.decoder_graph_provider,
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
