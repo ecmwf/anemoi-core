@@ -82,7 +82,7 @@ class ICONMeshNodeSchema(BaseModel):
     "Mesh based on ICON grid class implementation from anemoi.graphs.nodes."
     grid_filename: str
     "Name of NetCDF ICON grid file."
-    max_level_multimesh: int
+    max_level: int
     "Maximum refinement level of the multi mesh / cell grid."
 
 
