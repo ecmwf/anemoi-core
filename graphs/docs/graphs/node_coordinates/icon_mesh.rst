@@ -31,28 +31,28 @@ See the following YAML example:
 
 .. code:: yaml
 
-   nodes:
-     # Data nodes
-     data:
-       node_builder:
-         _target_: anemoi.graphs.nodes.ICONCellGridNodes
-         grid_filename: "icon_grid_0026_R03B07_G.nc"
-         max_level: 3
-     # Hidden nodes
-     hidden:
-       node_builder:
-         _target_: anemoi.graphs.nodes.ICONMultiMeshNodes
-         grid_filename: "icon_grid_0026_R03B07_G.nc"
-         max_level: 3
+    nodes:
+      # Data nodes
+      data:
+        node_builder:
+          _target_: anemoi.graphs.nodes.ICONCellGridNodes
+          grid_filename: "icon_grid_0026_R03B07_G.nc"
+          max_level: 3
+      # Hidden nodes
+      hidden:
+        node_builder:
+          _target_: anemoi.graphs.nodes.ICONMultiMeshNodes
+          grid_filename: "icon_grid_0026_R03B07_G.nc"
+          max_level: 3
 
-   edges:
-     # Processor configuration
-    - source_name: "hidden"
-      target_name: "hidden"
-      edge_builders:
-      - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
+    edges:
+      # Processor configuration
+     - source_name: "hidden"
+       target_name: "hidden"
+       edge_builders:
+       - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
 
-  .. note::
+   .. note::
 
-    The `ICONTopologicalEncoderEdges` and `ICONTopologicalDecoderEdges` edge builders produce
-    a set of edges that are structurally identical, but with opposite direction.
+     The `ICONTopologicalEncoderEdges` and `ICONTopologicalDecoderEdges` edge builders produce
+     a set of edges that are structurally identical, but with opposite direction.
