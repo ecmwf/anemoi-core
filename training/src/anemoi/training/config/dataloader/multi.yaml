@@ -35,20 +35,16 @@ limit_batches:
   validation: null
   test: 20
 
-# Default grid indices (used if no dataset-specific config provided)
-grid_indices:
-  _target_: anemoi.training.data.grid_indices.FullGrid
-  nodes_name: ${graph.data}
-
-# Optional: Dataset-specific grid indices configurations
+# Dataset-specific grid indices configurations
 # If not specified, all datasets will use the default grid_indices above
-grid_indices_per_dataset:
-  era5:
-    _target_: anemoi.training.data.grid_indices.FullGrid
-    nodes_name: ${graph.data}
-  gfs:
-    _target_: anemoi.training.data.grid_indices.FullGrid  # Could be different
-    nodes_name: ${graph.data}
+grid_indices:
+  datasets: 
+    era5:
+      _target_: anemoi.training.data.grid_indices.FullGrid
+      nodes_name: ${graph.data}
+    cerra:
+      _target_: anemoi.training.data.grid_indices.FullGrid  # Could be different
+      nodes_name: ${graph.data}
 
 # ============
 # Multi-Dataset Configuration
@@ -60,16 +56,16 @@ training:
   datasets:
     era5:
       dataset: ${hardware.paths.data}/${hardware.files.dataset}
-      start: null
+      start: 1985
       end: 2020
       frequency: ${data.frequency}
       drop: []
-    era5_copy:
+    cerra:
       dataset: ${hardware.paths.data}/${hardware.files.dataset_b}  # Using same dataset as duplicate for testing
-      start: null
+      start: 1985
       end: 2020
       frequency: ${data.frequency}
-      drop: [w_50]
+      drop: []
 
 validation_rollout: 1 # number of rollouts to use for validation
 
@@ -82,12 +78,12 @@ validation:
       end: 2021
       frequency: ${data.frequency}
       drop: []
-    era5_copy:
+    cerra:
       dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
       start: 2021
       end: 2021
       frequency: ${data.frequency}
-      drop: [w_50]
+      drop: []
 
 # Multi-dataset test with same datasets, different time period
 test:
@@ -98,9 +94,9 @@ test:
       end: null
       frequency: ${data.frequency}
       drop: []
-    era5_copy:
+    cerra:
       dataset: ${hardware.paths.data}/${hardware.files.dataset_b}
       start: 2022
       end: null
       frequency: ${data.frequency}
-      drop: [w_50]
+      drop: []

@@ -96,7 +96,7 @@ def get_loss_function(
     return loss_function
 
 
-def _get_metric_ranges(
+def get_metric_ranges(
     extract_variable_group_and_level: ExtractVariableGroupAndLevel,
     output_data_indices: OutputTensorIndex,
     metrics_to_log: list,
@@ -116,20 +116,3 @@ def _get_metric_ranges(
     # Add the full list of output indices
     metric_ranges["all"] = output_data_indices.full.tolist()
     return metric_ranges
-
-
-def get_metric_ranges(
-    config: DictConfig,
-    data_indices: IndexCollection,
-    metadata_extractor: ExtractVariableGroupAndLevel,
-    metrics_to_log: list | None = None,
-) -> tuple[METRIC_RANGE_DTYPE, METRIC_RANGE_DTYPE]:
-
-    if metrics_to_log is None:
-        metrics_to_log = config.training.metrics or []
-
-    return _get_metric_ranges(
-        metadata_extractor,
-        data_indices.model.output,
-        metrics_to_log,
-    )

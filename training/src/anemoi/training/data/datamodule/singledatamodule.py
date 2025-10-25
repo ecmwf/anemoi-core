@@ -25,6 +25,7 @@ from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,20 +47,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         self.config = config
         self.graph_data = graph_data
+        self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
+        self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
 
-        # Validate that we have multiple datasets defined
-        if not hasattr(self.config.dataloader.training, "datasets"):
-            msg = (
-                "Multi-dataset configuration requires 'datasets' section in training config. "
-                "Use datasets: {name_a: {dataset: path_a, ...}, name_b: {dataset: path_b, ...}}"
-            )
-            raise ValueError(msg)
-
-        self.dataset_names = list(self.config.dataloader.training.datasets.keys())
+        self.dataset_names = list(self.train_dataloader_config.keys())
         LOGGER.info("Initializing multi-dataset module with datasets: %s", self.dataset_names)
 
         # Set training end dates if not specified for each dataset
-        for name, dataset_config in self.config.dataloader.training.datasets.items():
+        for name, dataset_config in self.train_dataloader_config.items():
             if dataset_config.end is None:
                 msg = f"No end date specified for training dataset {name}."
                 raise ValueError(msg)
@@ -162,8 +157,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         grid_indices_dict = {}
 
         # Each dataset can have its own grid indices configuration
-        for dataset_name in self.dataset_names:
-            grid_config = self.config.dataloader.grid_indices[dataset_name]
+        grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
+        for dataset_name, grid_config in grid_indices_config.items():
             grid_indices = instantiate(grid_config, reader_group_size=reader_group_size)
             grid_indices.setup(self.graph_data[dataset_name])
             grid_indices_dict[dataset_name] = grid_indices
@@ -202,7 +197,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
         datasets_config = {}
-        for name, dataset_config in self.config.dataloader.training.datasets.items():
+        for name, dataset_config in self.train_dataloader_config.items():
             data_reader = open_dataset(dataset_config)
             data_reader = self.add_trajectory_ids(data_reader)
             datasets_config[name] = data_reader
@@ -220,7 +215,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def ds_valid(self) -> MultiDataset:
         """Create multi-dataset for validation."""
         datasets_config = {}
-        for name, dataset_config in self.config.dataloader.validation.datasets.items():
+        for name, dataset_config in self.valid_dataloader_config.items():
             data_reader = open_dataset(dataset_config)
             data_reader = self.add_trajectory_ids(data_reader)
             datasets_config[name] = data_reader

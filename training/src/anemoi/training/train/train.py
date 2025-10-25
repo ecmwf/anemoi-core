@@ -14,6 +14,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from anemoi.training.train.tasks.base import get_multiple_datasets_config
 import hydra
 import numpy as np
 import pytorch_lightning as pl
@@ -183,12 +184,9 @@ class AnemoiTrainer:
     @cached_property
     def graph_data(self) -> HeteroData | dict[str, HeteroData]:
         """Graph data. Always uses dataset paths from dataloader config."""
-        # Check if multi-dataset
-        assert hasattr(self.config.dataloader, "training") and hasattr(self.config.dataloader.training, "datasets")
-
-        # Multi-dataset case: create graph for each dataset
         graphs = {}
-        for dataset_name, dataset_config in self.config.dataloader.training.datasets.items():
+        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
+        for dataset_name, dataset_config in dataset_configs.items():
             LOGGER.info("Creating graph for dataset '%s'", dataset_name)
             graphs[dataset_name] = self._create_graph_for_dataset(dataset_config, dataset_name)
         return graphs

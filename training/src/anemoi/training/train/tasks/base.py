@@ -15,6 +15,8 @@ from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
+from anemoi.training.losses import scalers
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
@@ -36,6 +38,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from torch_geometric.data import dataset
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -188,6 +191,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             config=convert_to_omegaconf(config),
         )
         self.config = config
+
         self.data_indices = data_indices
 
         self.save_hyperparameters()
@@ -204,51 +208,48 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.loss = torch.nn.ModuleDict()
         self.metrics = torch.nn.ModuleDict()
 
+        dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
+        loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        scalers_configs = get_multiple_datasets_config(config.training.scalers)
+        val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
+        metrics_to_log = get_multiple_datasets_config(config.training.metrics)
         for dataset_name in graph_data:
             self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
 
             # Create dataset-specific metadata extractor
-            from anemoi.training.utils.config_utils import get_dataset_variable_groups
-
-            dataset_variable_groups = get_dataset_variable_groups(config, dataset_name)
-
             metadata_extractor = ExtractVariableGroupAndLevel(
-                variable_groups=dataset_variable_groups,
+                variable_groups=dataset_variable_groups[dataset_name],
                 metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
             )
 
-            dataset_scalers, dataset_updating_scalars = self._build_scalers_for_dataset(
-                config,
-                data_indices[dataset_name],
-                graph_data[dataset_name],
-                statistics[dataset_name],
-                statistics_tendencies[dataset_name] if statistics_tendencies is not None else None,
-                metadata_extractor,
-                self.output_mask[dataset_name],
-                dataset_name,
+            dataset_scalers, dataset_updating_scalars = create_scalers(
+                scalers_configs[dataset_name],
+                data_indices=data_indices[dataset_name],
+                graph_data=graph_data[dataset_name],
+                statistics=statistics[dataset_name],
+                statistics_tendencies=statistics_tendencies[dataset_name] if statistics_tendencies is not None else None,
+                metadata_extractor=metadata_extractor,
+                output_mask=self.output_mask[dataset_name],
             )
             self.scalers[dataset_name] = dataset_scalers
             self.updating_scalars[dataset_name] = dataset_updating_scalars
 
-            self.val_metric_ranges[dataset_name] = self._build_metric_ranges_for_dataset(
-                config,
-                data_indices[dataset_name],
+            self.val_metric_ranges[dataset_name] = get_metric_ranges(
                 metadata_extractor,
-                dataset_name,
+                output_data_indices=data_indices[dataset_name].model.output,
+                metrics_to_log=metrics_to_log[dataset_name],
             )
 
-            self.loss[dataset_name] = self._build_loss_for_dataset(
-                config,
+            self.loss[dataset_name] = get_loss_function(
+                loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                dataset_name,
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
-                config,
-                dataset_scalers,
-                data_indices[dataset_name],
-                dataset_name,
+                val_metrics_configs[dataset_name],
+                scalers=dataset_scalers,
+                data_indices=data_indices[dataset_name],
             )
             print_variable_scaling(self.loss[dataset_name], data_indices[dataset_name])
 
@@ -276,9 +277,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         reader_group_size = self.config.dataloader.read_group_size
 
         self.grid_indices = {}
+        grid_indices_configs = get_multiple_datasets_config(self.config.dataloader.grid_indices)
         for dataset_name in graph_data:
             self.grid_indices[dataset_name] = instantiate(
-                self.config.model_dump(by_alias=True).dataloader.grid_indices,
+                grid_indices_configs[dataset_name],
                 reader_group_size=reader_group_size,
             )
             self.grid_indices[dataset_name].setup(graph_data[dataset_name])
@@ -347,67 +349,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 ", ".join(unsupported_metrics),
             )
 
-    def _build_scalers_for_dataset(  # type: ignore[no-untyped-def]
-        self,
-        config,
-        data_indices,
-        graph_data,
-        statistics,
-        statistics_tendencies,
-        metadata_extractor,
-        output_mask,
-        dataset_name=None,  # type: ignore[misc]
-    ):  # type: ignore[no-untyped-def]
-        from anemoi.training.utils.config_utils import get_dataset_scalers_config
-
-        # Get dataset-specific scalers config
-        scalers_config = get_dataset_scalers_config(config, dataset_name)
-
-        return create_scalers(
-            scalers_config,
-            data_indices=data_indices,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            metadata_extractor=metadata_extractor,
-            output_mask=output_mask,
-        )
-
-    def _build_metric_ranges_for_dataset(self, config, data_indices, metadata_extractor, dataset_name=None):  # type: ignore[no-untyped-def]
-        from anemoi.training.utils.config_utils import get_dataset_metrics
-
-        # Get dataset-specific metrics
-        metrics_to_log = get_dataset_metrics(config, dataset_name)
-
-        return get_metric_ranges(
-            config,
-            data_indices,
-            metadata_extractor=metadata_extractor,
-            metrics_to_log=metrics_to_log,
-        )
-
-    def _build_loss_for_dataset(self, config, scalers, data_indices, dataset_name=None):
-        from anemoi.training.utils.config_utils import get_dataset_loss_and_metrics_config
-
-        # Get dataset-specific loss and metrics config
-        loss_metrics_config = get_dataset_loss_and_metrics_config(config, dataset_name)
-
-        return get_loss_function(
-            loss_metrics_config.training_loss,
-            scalers=scalers,
-            data_indices=data_indices,
-        )
-
-    def _build_metrics_for_dataset(self, config, scalers, data_indices, dataset_name=None):
-        from anemoi.training.utils.config_utils import get_dataset_loss_and_metrics_config
-
-        # Get dataset-specific loss and metrics config
-        loss_metrics_config = get_dataset_loss_and_metrics_config(config, dataset_name)
-
+    def _build_metrics_for_dataset(self, validation_metrics_configs, scalers, data_indices) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
                 metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
-                for metric_name, val_metric_config in loss_metrics_config.validation_metrics.items()
+                for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
 
