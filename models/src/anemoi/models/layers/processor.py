@@ -22,10 +22,10 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.chunk import GNNProcessorChunk
-from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
-from anemoi.models.layers.chunk import PointWiseMLPProcessorChunk
-from anemoi.models.layers.chunk import TransformerProcessorChunk
+from anemoi.models.layers.block import GraphConvProcessorBlock
+from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.block import PointWiseMLPProcessorBlock
+from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mapper import GraphEdgeMixin
 from anemoi.models.layers.utils import load_layer_kernels
@@ -48,10 +48,10 @@ class BaseProcessor(nn.Module, ABC):
         """Initialize BaseProcessor."""
         super().__init__()
 
-        # Each Processor divides the layers into chunks that get assigned to each ProcessorChunk
+        self.num_layers = num_layers
         self.num_chunks = num_chunks
-        self.num_channels = num_channels
         self.chunk_size = num_layers // num_chunks
+        self.num_channels = num_channels
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
@@ -63,22 +63,29 @@ class BaseProcessor(nn.Module, ABC):
         if cpu_offload:
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
 
-    def build_layers(self, processor_chunk_class, *args, **kwargs) -> None:
+    def build_layers(self, layer_class, *args, **kwargs) -> None:
         """Build Layers."""
         self.proc = nn.ModuleList(
             [
-                processor_chunk_class(
+                layer_class(
                     *args,
                     **kwargs,
                 )
-                for _ in range(self.num_chunks)
+                for _ in range(self.num_layers)
             ],
         )
 
+    def run_layer_chunk(self, chunk_start: int, data: tuple, *args, **kwargs) -> tuple:
+        for layer_id in range(chunk_start, chunk_start + self.chunk_size):
+            data = self.proc[layer_id](*data, *args, **kwargs)
+
+        return data
+
     def run_layers(self, data: tuple, *args, **kwargs) -> Tensor:
-        """Run Layers with checkpoint."""
-        for layer in self.proc:
-            data = checkpoint(layer, *data, *args, **kwargs, use_reentrant=False)
+        """Run Layers with checkpoints around chunks."""
+        for chunk_start in range(0, self.num_layers, self.chunk_size):
+            data = checkpoint(self.run_layer_chunk, chunk_start, data, *args, **kwargs, use_reentrant=False)
+
         return data
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
@@ -111,11 +118,10 @@ class PointWiseMLPProcessor(BaseProcessor):
         )
 
         self.build_layers(
-            PointWiseMLPProcessorChunk,
+            PointWiseMLPProcessorBlock,
             num_channels=num_channels,
-            num_layers=self.chunk_size,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
             layer_kernels=self.layer_factory,
-            mlp_hidden_ratio=mlp_hidden_ratio,
             dropout_p=dropout_p,
         )
 
@@ -213,14 +219,13 @@ class TransformerProcessor(BaseProcessor):
         )
 
         self.build_layers(
-            TransformerProcessorChunk,
+            TransformerProcessorBlock,
             num_channels=num_channels,
-            num_layers=self.chunk_size,
-            layer_kernels=self.layer_factory,
-            mlp_hidden_ratio=mlp_hidden_ratio,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
             num_heads=num_heads,
-            window_size=window_size,
             qk_norm=qk_norm,
+            window_size=window_size,
+            layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
             softcap=softcap,
@@ -244,7 +249,7 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return x
 
@@ -316,10 +321,21 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
             "edge_dim": None,
         }
 
-        self.build_layers(GNNProcessorChunk, num_channels, self.chunk_size, **kwargs)
+        self.build_layers(
+            GraphConvProcessorBlock,
+            in_channels=num_channels,
+            out_channels=num_channels,
+            num_chunks=1,
+            **kwargs,
+        )
 
         kwargs["edge_dim"] = self.edge_dim  # Edge dim for first layer
-        self.proc[0] = GNNProcessorChunk(num_channels, self.chunk_size, **kwargs)
+        self.proc[0] = GraphConvProcessorBlock(
+            in_channels=num_channels,
+            out_channels=num_channels,
+            num_chunks=1,
+            **kwargs,
+        )
 
         self.offload_layers(cpu_offload)
 
@@ -420,14 +436,15 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=self.edge_attr.shape[0])
 
         self.build_layers(
-            GraphTransformerProcessorChunk,
-            num_channels=num_channels,
-            num_layers=self.chunk_size,
-            layer_kernels=self.layer_factory,
+            GraphTransformerProcessorBlock,
+            in_channels=num_channels,
+            hidden_dim=(mlp_hidden_ratio * num_channels),
+            out_channels=num_channels,
             num_heads=num_heads,
-            mlp_hidden_ratio=mlp_hidden_ratio,
-            qk_norm=qk_norm,
+            num_chunks=1,
             edge_dim=self.edge_dim,
+            layer_kernels=self.layer_factory,
+            qk_norm=qk_norm,
         )
 
         self.offload_layers(cpu_offload)
