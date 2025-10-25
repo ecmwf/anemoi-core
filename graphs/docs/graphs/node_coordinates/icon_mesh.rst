@@ -47,7 +47,12 @@ See the following YAML example:
 
    edges:
      # Processor configuration
-     - source_name: "hidden"
-       target_name: "hidden"
-       edge_builders:
-       - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
+    - source_name: "hidden"
+      target_name: "hidden"
+      edge_builders:
+      - _target_: anemoi.graphs.edges.ICONTopologicalProcessorEdges
+
+  .. note::
+
+    The `ICONTopologicalEncoderEdges` and `ICONTopologicalDecoderEdges` edge builders produce
+    a set of edges that are structurally identical, but with opposite direction.
