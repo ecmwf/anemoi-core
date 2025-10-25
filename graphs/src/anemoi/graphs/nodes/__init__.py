@@ -15,7 +15,7 @@ from .builders.from_file import XArrayNodes
 from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_icon import ICONCellGridNodes
-from .builders.from_icon import ICONMultimeshNodes
+from .builders.from_icon import ICONMultiMeshNodes
 from .builders.from_reduced_gaussian import ReducedGaussianGridNodes
 from .builders.from_refined_icosahedron import HexNodes
 from .builders.from_refined_icosahedron import LimitedAreaHexNodes
@@ -37,7 +37,7 @@ __all__ = [
     "LimitedAreaHexNodes",
     "ReducedGaussianGridNodes",
     "StretchedTriNodes",
-    "ICONMultimeshNodes",
+    "ICONMultiMeshNodes",
     "ICONCellGridNodes",
     "TextNodes",
     "XArrayNodes",

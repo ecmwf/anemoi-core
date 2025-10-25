@@ -62,7 +62,7 @@ graph:
     # Hidden nodes
     hidden:
       node_builder:
-        _target_: anemoi.graphs.nodes.ICONMultimeshNodes
+        _target_: anemoi.graphs.nodes.ICONMultiMeshNodes
         max_level: 3
         grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
   edges:

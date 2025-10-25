@@ -30,7 +30,7 @@ class BaseICONNodeBuilder(BaseNodeBuilder):
         return torch.from_numpy(self.icon_nodes.nodeset.gc_vertices.astype(np.float32)).fliplr()
 
 
-class ICONMultimeshNodes(BaseICONNodeBuilder):
+class ICONMultiMeshNodes(BaseICONNodeBuilder):
     """Processor mesh based on an ICON grid."""
 
     icon_node_class = ICONMultiMesh

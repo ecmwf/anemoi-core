@@ -73,7 +73,7 @@ class ReducedGaussianGridNodeSchema(BaseModel):
 
 class ICONMeshNodeSchema(BaseModel):
     target_: Literal[
-        "anemoi.graphs.nodes.ICONMultimeshNodes",
+        "anemoi.graphs.nodes.ICONMultiMeshNodes",
         "anemoi.graphs.nodes.ICONCellGridNodes",
     ] = Field(
         ...,

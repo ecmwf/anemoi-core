@@ -16,7 +16,7 @@ from anemoi.graphs.edges import ICONTopologicalDecoderEdges
 from anemoi.graphs.edges import ICONTopologicalEncoderEdges
 from anemoi.graphs.edges import ICONTopologicalProcessorEdges
 from anemoi.graphs.nodes import ICONCellGridNodes
-from anemoi.graphs.nodes import ICONMultimeshNodes
+from anemoi.graphs.nodes import ICONMultiMeshNodes
 
 
 class TestEdgeBuilderDependencies:
@@ -27,7 +27,7 @@ class TestEdgeBuilderDependencies:
         """Return a HeteroData object with ICON node builders."""
         monkeypatch.setattr(netCDF4, "Dataset", icon_dataset_mock)
         data_node_builder = ICONCellGridNodes(name="data", grid_filename="test.nc", max_level=1)
-        hidden_node_builder = ICONMultimeshNodes(name="hidden", grid_filename="test.nc", max_level=1)
+        hidden_node_builder = ICONMultiMeshNodes(name="hidden", grid_filename="test.nc", max_level=1)
 
         graph = HeteroData()
         graph = data_node_builder.update_graph(graph, {})

@@ -2,11 +2,11 @@
  Triangular Mesh with ICON Topology
 ####################################
 
-The classes `ICONMultimeshNodes` and `ICONCellGridNodes` define node
+The classes `ICONMultiMeshNodes` and `ICONCellGridNodes` define node
 sets based on an ICON icosahedral mesh:
 
 -  class `ICONCellGridNodes`: data grid, representing cell circumcenters
--  class `ICONMultimeshNodes`: hidden mesh, representing the vertices of
+-  class `ICONMultiMeshNodes`: hidden mesh, representing the vertices of
    a grid hierarchy
 
 Both classes, together with the corresponding edge builders
@@ -41,7 +41,7 @@ See the following YAML example:
      # Hidden nodes
      hidden:
        node_builder:
-         _target_: anemoi.graphs.nodes.ICONMultimeshNodes
+         _target_: anemoi.graphs.nodes.ICONMultiMeshNodes
          grid_filename: "icon_grid_0026_R03B07_G.nc"
          max_level: 3
 
