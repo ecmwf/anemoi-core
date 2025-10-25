@@ -12,7 +12,7 @@ import pytest
 import torch
 import xarray as xr
 import yaml
-from nodes.test_icon import DatasetMock
+from nodes.test_icon_nodes import DatasetMock
 from torch_geometric.data import HeteroData
 
 lats = [-0.15, 0, 0.15]
