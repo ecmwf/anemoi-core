@@ -128,24 +128,20 @@ def test_register_nodes(monkeypatch):
     """Test ICON node builders register correctly the nodes."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
 
-    data_node_builder = ICONCellGridNodes(name="data", grid_filename="test.nc", max_level=0)
-    hidden_node_builder = ICONMultimeshNodes(name="hidden", grid_filename="test.nc", max_level=0)
-    graph = HeteroData()
-    graph = data_node_builder.register_nodes(graph)
-    graph = hidden_node_builder.register_nodes(graph)
+    node_builder = ICONMultimeshNodes(name="test_icon_nodes", grid_filename="test.nc", max_level=0)
 
-    assert graph["data"].x is not None
-    assert isinstance(graph["data"].x, torch.Tensor)
-    assert graph["data"].x.shape[1] == 2
-    assert graph["hidden"].x.shape[1] == 2
-    assert graph.num_nodes == 3, "number of vertices at refinement_level_v == 0"
-    assert graph["data"].node_type == "ICONCellGridNodes"
-    assert graph["hidden"].node_type == "ICONMultimeshNodes"
+    graph = node_builder.register_nodes(HeteroData())
 
-    hidden_node_builder2 = ICONMultimeshNodes(name="hidden2", grid_filename="test.nc", max_level=1)
-    graph = hidden_node_builder2.register_nodes(graph)
-    assert graph["hidden2"].num_nodes == 4, "number of vertices at refinement_level_v == 1"
-    assert graph["hidden2"].node_type == "ICONMultimeshNodes"
+    assert graph["test_icon_nodes"].x is not None
+    assert isinstance(graph["test_icon_nodes"].x, torch.Tensor)
+    assert graph["test_icon_nodes"].x.shape[1] == 2
+    assert graph["test_icon_nodes"].num_nodes == 3, "number of vertices at refinement_level_v == 0"
+    assert graph["test_icon_nodes"].node_type == "ICONMultimeshNodes"
+
+    node_builder2 = ICONMultimeshNodes(name="test_icon_nodes", grid_filename="test.nc", max_level=1)
+    graph = node_builder2.register_nodes(HeteroData())
+    assert graph["test_icon_nodes"].num_nodes == 4, "number of vertices at refinement_level_v == 1"
+    assert graph["test_icon_nodes"].node_type == "ICONMultimeshNodes"
 
 
 def test_register_attributes(

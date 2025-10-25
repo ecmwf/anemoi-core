@@ -100,7 +100,7 @@ class ICONMultiMesh:
 
         # restrict edge-vertex list to multi_mesh level "max_level":
         if self.max_level < self.reflvl_vertex.max():
-            self.nodeset = self.nodeset[self.reflvl_vertex < self.max_level]
+            self.nodeset = self.nodeset[self.reflvl_vertex <= self.max_level]
 
     @cached_property
     def _vertices(self) -> tuple[list[np.ndarray], np.ndarray]:
