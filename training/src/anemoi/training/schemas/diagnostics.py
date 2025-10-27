@@ -360,8 +360,6 @@ class DiagnosticsSchema(BaseModel):
     "Benchmark profiler schema for `profile` command."
     debug: Debug
     "Debug schema."
-    profiler: bool
-    "Activate the pytorch profiler and tensorboard logger."
     log: LoggingSchema
     "Log schema."
     enable_progress_bar: bool

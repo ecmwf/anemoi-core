@@ -12,29 +12,23 @@ import logging
 from typing import Optional
 
 import einops
-import numpy as np
 import torch
 from hydra.utils import instantiate
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import gather_channels
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.models import BaseGraphModel
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelEncProcDec(nn.Module):
+class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
     def __init__(
@@ -57,44 +51,17 @@ class AnemoiModelEncProcDec(nn.Module):
         graph_data : HeteroData
             Graph definition
         """
-        super().__init__()
-        self._graph_data = graph_data
-        self.data_indices = data_indices
-        self.statistics = statistics
-        self._truncation_data = truncation_data  # todo needs to be a dict as well ; we leave it for now
 
-        model_config = DotDict(model_config)
-        self._graph_name_data = (
-            model_config.graph.data
-        )  # assumed to be all the same because this is how we construct the graphs
-        self._graph_name_hidden = (
-            model_config.graph.hidden
-        )  # assumed to be all the same because this is how we construct the graphs
-        self.multi_step = model_config.training.multistep_input
-        self.num_channels = model_config.model.num_channels
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+            truncation_data=truncation_data,
+        )
 
-        self.node_attributes = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.node_attributes[dataset_name] = NamedNodesAttributes(
-                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
-            )
-
-        self._calculate_shapes_and_indices(data_indices)
-        self._assert_matching_indices(data_indices)
-        self._assert_consistent_hidden_graphs()
-
-        self.input_dim = self._calculate_input_dim(model_config)
-        self.input_dim_latent = self._calculate_input_dim_latent(model_config)
-
-        # we can't register these as buffers because DDP does not support sparse tensors
-        # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
-        self.A_down, self.A_up = None, None
-        if "down" in self._truncation_data:
-            self.A_down = self._make_truncation_matrix(self._truncation_data["down"])
-            LOGGER.info("Truncation: A_down %s", self.A_down.shape)
-        if "up" in self._truncation_data:
-            self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
-            LOGGER.info("Truncation: A_up %s", self.A_up.shape)
+    def _build_networks(self, model_config: DotDict) -> None:
+        """Builds the model components."""
 
         # Encoder data -> hidden
         self.encoder = torch.nn.ModuleDict()
@@ -138,43 +105,6 @@ class AnemoiModelEncProcDec(nn.Module):
                 src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
                 dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
             )
-
-        # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
-        # Multi-dataset: create ModuleDict with ModuleList per dataset
-        self.boundings = nn.ModuleDict()
-        for dataset_name, dataset_indices in self.data_indices.items():
-            self.boundings[dataset_name] = self._build_bounding_modules(
-                model_config, dataset_indices, self.statistics[dataset_name]
-            )
-
-    def _build_bounding_modules(self, model_config, data_indices, statistics) -> nn.ModuleList:
-        """Build bounding modules for a dataset.
-
-        Parameters
-        ----------
-        model_config : DotDict
-            Model configuration
-        data_indices : dict
-            Data indices for the dataset
-        statistics : dict
-            Statistics for the dataset
-
-        Returns
-        -------
-        nn.ModuleList
-            List of bounding modules
-        """
-        return nn.ModuleList(
-            [
-                instantiate(
-                    cfg,
-                    name_to_index=data_indices.model.output.name_to_index,
-                    statistics=statistics,
-                    name_to_index_stats=data_indices.data.input.name_to_index,
-                )
-                for cfg in getattr(model_config.model, "bounding", [])
-            ]
-        )
 
     def _make_truncation_matrix(self, A, data_type=torch.float32):
         A_ = torch.sparse_coo_tensor(
@@ -227,7 +157,7 @@ class AnemoiModelEncProcDec(nn.Module):
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         x_skip = x[:, -1, ...]
         x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_skip = self._apply_truncation(x_skip, grid_shard_shapes, model_comm_group)
+        x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
         x_skip = einops.rearrange(x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size)
 
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
@@ -235,7 +165,9 @@ class AnemoiModelEncProcDec(nn.Module):
         grid_shard_shapes = grid_shard_shapes[dataset_name]
 
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -246,7 +178,9 @@ class AnemoiModelEncProcDec(nn.Module):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
 
         return x_data_latent, x_skip, shard_shapes_data
 
@@ -275,92 +209,6 @@ class AnemoiModelEncProcDec(nn.Module):
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
         return x_out
-
-    def _calculate_input_dim(self, model_config):
-        # Multi-dataset: create dictionary for input_dim
-        input_dim = {}
-        for dataset_name in self.num_input_channels.keys():
-            input_dim[dataset_name] = (
-                self.multi_step * self.num_input_channels[dataset_name]
-                + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
-            )
-        return input_dim
-
-    def _calculate_input_dim_latent(self, model_config):
-        # Multi-dataset: create dictionary for input_dim_latent
-        input_dim_latent = {}
-        for dataset_name in self.node_attributes.keys():
-            input_dim_latent[dataset_name] = self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
-        return input_dim_latent
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        # Multi-dataset: create dictionaries for each property
-        self.num_input_channels = {}
-        self.num_output_channels = {}
-        self.num_input_channels_prognostic = {}
-        self._internal_input_idx = {}
-        self._internal_output_idx = {}
-
-        for dataset_name, dataset_indices in data_indices.items():
-            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
-            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-            self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
-            self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
-
-    def _assert_matching_indices(self, data_indices: dict) -> None:
-        # Multi-dataset: check assertions for each dataset
-        for dataset_name, dataset_indices in data_indices.items():
-            dataset_internal_output_idx = self._internal_output_idx[dataset_name]
-            dataset_internal_input_idx = self._internal_input_idx[dataset_name]
-
-            assert len(dataset_internal_output_idx) == len(dataset_indices.model.output.full) - len(
-                dataset_indices.model.output.diagnostic
-            ), (
-                f"Dataset '{dataset_name}': Mismatch between the internal data indices ({len(dataset_internal_output_idx)}) and "
-                f"the output indices excluding diagnostic variables "
-                f"({len(dataset_indices.model.output.full) - len(dataset_indices.model.output.diagnostic)})",
-            )
-            assert len(dataset_internal_input_idx) == len(
-                dataset_internal_output_idx,
-            ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
-
-    def _assert_consistent_hidden_graphs(self) -> None:
-        """Assert that all datasets have identical hidden-to-hidden graph structures.
-
-        This is required because the processor is shared between datasets and operates
-        on the hidden state, so all datasets must have the same hidden graph topology.
-        """
-        if isinstance(self._graph_data, dict) and len(self._graph_data) > 1:
-            dataset_names = list(self._graph_data.keys())
-            reference_dataset = dataset_names[0]
-            reference_graph = self._graph_data[reference_dataset]
-            reference_hidden_graph = reference_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
-
-            # Check hidden graph structure consistency across all datasets
-            for dataset_name in dataset_names[1:]:
-                dataset_graph = self._graph_data[dataset_name]
-                dataset_hidden_graph = dataset_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
-
-                # Compare edge indices
-                assert torch.equal(reference_hidden_graph.edge_index, dataset_hidden_graph.edge_index), (
-                    f"Hidden-to-hidden graph edge structure mismatch between reference dataset '{reference_dataset}' "
-                    f"and dataset '{dataset_name}'. All datasets must have identical hidden graph topology "
-                    f"for the shared processor to work correctly."
-                )
-
-                # Compare number of nodes (should be same for hidden graphs)
-                ref_num_hidden_nodes = self.node_attributes[reference_dataset].num_nodes[self._graph_name_hidden]
-                dataset_num_hidden_nodes = self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden]
-                assert ref_num_hidden_nodes == dataset_num_hidden_nodes, (
-                    f"Hidden node count mismatch between reference dataset '{reference_dataset}' ({ref_num_hidden_nodes} nodes) "
-                    f"and dataset '{dataset_name}' ({dataset_num_hidden_nodes} nodes). "
-                    f"All datasets must have the same number of hidden nodes for the shared processor."
-                )
-
-            LOGGER.info(
-                "All datasets have consistent hidden-to-hidden graph structures (required for shared processor)"
-            )
 
     def _assert_valid_sharding(
         self,

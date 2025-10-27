@@ -15,11 +15,11 @@ from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-from anemoi.training.losses import scalers
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 
@@ -38,7 +38,6 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from torch_geometric.data import dataset
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -205,6 +204,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.scalers = {}  # dict of dict of tensors
         self.updating_scalars = {}  # dict of dict of objects
         self.val_metric_ranges = {}  # dict of dict of lists
+        self._scaling_values_log = {}  # dict of dict[str, float]
         self.loss = torch.nn.ModuleDict()
         self.metrics = torch.nn.ModuleDict()
 
@@ -251,7 +251,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
             )
-            print_variable_scaling(self.loss[dataset_name], data_indices[dataset_name])
+            self._scaling_values_log[dataset_name] = print_variable_scaling(self.loss[dataset_name], data_indices[dataset_name])
 
         if config.training.loss_gradient_scaling:
             # Multi-dataset: register hook for each loss
@@ -924,3 +924,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+
+    def setup(self, stage: str) -> None:
+        """Lightning hook that is called after model is initialized but before training starts."""
+        # The conditions should be separate, but are combined due to pre-commit hook
+        if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
+            # Log hyperparameters on rank 0
+            hyper_params = OmegaConf.to_container(convert_to_omegaconf(self.config), resolve=True)
+            hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
+            # Expand keys for better visibility
+            expand_keys = OmegaConf.select(
+                convert_to_omegaconf(self.config),
+                "diagnostics.log.mlflow.expand_hyperparams",
+                default=["config"],
+            )
+            # Log hyperparameters
+            self.logger.log_hyperparams(
+                hyper_params,
+                expand_keys=expand_keys,
+            )

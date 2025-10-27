@@ -8,17 +8,18 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
+
+if TYPE_CHECKING:
+    from anemoi.training.data.dataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
 
 
 class CheckVariableOrder(pl.callbacks.Callback):
     """Check the order of the variables in a pre-trained / fine-tuning model."""
-
-    def __init__(self) -> None:
-        super().__init__()
 
     def _get_model_name_to_index(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Get the model name to index mapping, handling both checkpoint and data indices."""
@@ -43,7 +44,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
+        _ : pl.LightningModule
             Not used
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
@@ -57,7 +58,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
+        _ : pl.LightningModule
             Not used
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
@@ -71,7 +72,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         ----------
         trainer : pl.Trainer
             Pytorch Lightning trainer
-        pl_module : pl.LightningModule
+        _ : pl.LightningModule
             Not used
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
