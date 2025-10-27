@@ -38,7 +38,7 @@ limit_batches:
 # Dataset-specific grid indices configurations
 # If not specified, all datasets will use the default grid_indices above
 grid_indices:
-  datasets: 
+  datasets:
     era5:
       _target_: anemoi.training.data.grid_indices.FullGrid
       nodes_name: ${graph.data}

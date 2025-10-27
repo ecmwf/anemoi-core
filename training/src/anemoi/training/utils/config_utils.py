@@ -7,7 +7,7 @@ from omegaconf import OmegaConf
 def get_multiple_datasets_config(config: DictConfig) -> dict:
     """Get multiple datasets configuration for old configs.
 
-    Use /'data/' as the default dataset name. 
+    Use /'data/' as the default dataset name.
     """
     if "datasets" in config:
         return config.datasets
