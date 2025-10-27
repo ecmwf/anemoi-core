@@ -26,14 +26,14 @@ from torch_geometric.typing import Size
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
-from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
-from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.triton.gt import GraphTransformerFunction
+from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -442,7 +442,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
-        self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+        # self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
         self.projection = Linear(out_channels, out_channels)
 
@@ -527,26 +527,19 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
 
-        if num_chunks > 1:
-            # split 1-hop edges into chunks, compute self.conv chunk-wise
-            edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
-                num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
-            )
-            # shape: (num_nodes, num_heads, out_channels_conv)
-            out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
-            for i in range(num_chunks):
-                out += self.conv(
-                    query=query,
-                    key=key,
-                    value=value,
-                    edge_attr=edge_attr_list[i],
-                    edge_index=edge_index_list[i],
-                    size=conv_size,
-                )
-        else:
-            out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=conv_size)
+        # TODO(Jan): precompute graph conversions and chunking operations (separate PR)
+        csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
 
-        return out
+        edges_csc = edges.index_select(0, perm)
+
+        return GraphTransformerFunction.apply(
+            query,
+            key,
+            value,
+            edges_csc,
+            csc,
+            reverse,
+        )
 
     def shard_output_seq(
         self,
