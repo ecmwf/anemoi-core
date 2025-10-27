@@ -15,7 +15,6 @@ from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-from anemoi.training.utils.config_utils import get_multiple_datasets_config
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
@@ -36,6 +35,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -227,7 +227,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data[dataset_name],
                 statistics=statistics[dataset_name],
-                statistics_tendencies=statistics_tendencies[dataset_name] if statistics_tendencies is not None else None,
+                statistics_tendencies=(
+                    statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
+                ),
                 metadata_extractor=metadata_extractor,
                 output_mask=self.output_mask[dataset_name],
             )
@@ -251,7 +253,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
             )
-            self._scaling_values_log[dataset_name] = print_variable_scaling(self.loss[dataset_name], data_indices[dataset_name])
+            self._scaling_values_log[dataset_name] = print_variable_scaling(
+                self.loss[dataset_name], data_indices[dataset_name],
+            )
 
         if config.training.loss_gradient_scaling:
             # Multi-dataset: register hook for each loss

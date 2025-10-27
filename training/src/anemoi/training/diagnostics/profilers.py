@@ -505,7 +505,7 @@ class BenchmarkProfiler(Profiler):
 
         # when using flash attention model, we need to convert the input and model to float16 and cuda
         # since FlashAttention only supports fp16 and bf16 data type
-        for dataset_name in example_input_array.keys():
+        for dataset_name in example_input_array:
             example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
             example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")
         model.half()

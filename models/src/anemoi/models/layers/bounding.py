@@ -374,7 +374,7 @@ def build_boundings(
         Object with a ``model`` attribute containing an iterable ``bounding``
         (e.g. a list of Hydra configs). If absent or empty, an empty
         ``nn.ModuleDict`` is returned.
-    data_indices : Any  
+    data_indices : Any
         Dictionary mapping dataset names to data indices objects. Each
         data indices object must provide the mappings:
         ``data_indices.model.output.name_to_index`` and
@@ -382,7 +382,7 @@ def build_boundings(
         instantiated bounding module as ``name_to_index`` and
         ``name_to_index_stats`` respectively.
     statistics : dict | None
-        Dictionary mapping dataset names to optional dataset/model statistics           
+        Dictionary mapping dataset names to optional dataset/model statistics
         passed to each bounding module. Use ``None`` if not required by the
         configured classes.
     """

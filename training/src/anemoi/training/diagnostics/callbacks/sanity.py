@@ -8,12 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
 
-if TYPE_CHECKING:
-    from anemoi.training.data.dataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
 

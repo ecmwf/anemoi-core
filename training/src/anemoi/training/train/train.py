@@ -16,7 +16,6 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-from anemoi.training.train.tasks.base import get_multiple_datasets_config
 import hydra
 import numpy as np
 import pytorch_lightning as pl
@@ -36,6 +35,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.train.tasks.base import get_multiple_datasets_config
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -265,7 +265,8 @@ class AnemoiTrainer(ABC):
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
             self.data_indices.compare_variables(
-                model._ckpt_model_name_to_index, self.data_indices.name_to_index,
+                model._ckpt_model_name_to_index,
+                self.data_indices.name_to_index,
             )  # TODO for multi dataset
 
         if hasattr(self.config.training, "submodules_to_freeze"):

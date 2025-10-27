@@ -80,10 +80,10 @@ datasets:
     - "slor"
     - "z"
     diagnostic: [tp, cp]
-    processors: 
+    processors:
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-        config: 
+        config:
           default: "mean-std"
           std:
           - "tp"
@@ -116,7 +116,7 @@ datasets:
     - "sin_julian_day"
     - "sin_local_time"
     diagnostic: [tp]
-    processors: 
+    processors:
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
         config:
