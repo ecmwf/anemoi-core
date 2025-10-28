@@ -36,6 +36,7 @@ system:
 
   input:
     truncation: null
+    truncation_inv: null
 
 graph:
   overwrite: True
