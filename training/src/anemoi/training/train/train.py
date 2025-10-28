@@ -36,7 +36,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.training.utils.compile import mark_for_compilation
+from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
