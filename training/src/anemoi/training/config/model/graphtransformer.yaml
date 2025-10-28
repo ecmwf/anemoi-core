@@ -15,10 +15,12 @@ layer_kernels:
   Activation:
     _target_: torch.nn.GELU
   QueryNorm:
-    _target_: anemoi.models.layers.normalization.CompiledAutocastLayerNorm
+    #_target_: anemoi.models.layers.normalization.CompiledAutocastLayerNorm
+    _target_: anemoi.models.layers.normalization.CompiledLayerNorm
     bias: False
   KeyNorm:
-    _target_: anemoi.models.layers.normalization.CompiledAutocastLayerNorm
+    #_target_: anemoi.models.layers.normalization.CompiledAutocastLayerNorm
+    _target_: anemoi.models.layers.normalization.CompiledLayerNorm
     bias: False
 
 processor:
