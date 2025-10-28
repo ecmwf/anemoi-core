@@ -625,8 +625,9 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
         super().finalize(status)
 
-    @staticmethod
+    @classmethod
     def log_hyperparams_in_mlflow(
+        cls,
         client: MlflowClient,
         run_id: str,
         params: dict[str, Any] | Namespace,
@@ -674,7 +675,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
                 truncation_length = 250  # Historical default value
 
-            AnemoiMLflowLogger.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
+            cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
 
             expanded_params = {}
             params = params.copy()

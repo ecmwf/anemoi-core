@@ -1,5 +1,8 @@
 from unittest.mock import Mock
 
+from pathlib import Path
+import mlflow
+from mlflow import MlflowClient
 import pytest
 
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
@@ -12,18 +15,22 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.fixture
-def default_logger(tmp_path: str) -> AnemoiMLflowLogger:
+def tmp_uri(monkeypatch, tmp_path):
+    uri = (Path(tmp_path) / "mlruns").as_uri()
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    return uri
+
+
+@pytest.fixture
+def default_logger(tmp_path, tmp_uri) -> AnemoiMLflowLogger:
     logger = AnemoiMLflowLogger(
         experiment_name="test_experiment",
         run_name="test_run",
         offline=True,
-        tracking_uri=None,
+        tracking_uri=tmp_uri,
         authentication=False,
         save_dir=tmp_path,
     )
-    mock_client = Mock()
-    logger._mlflow_client = mock_client
-
     return logger
 
 

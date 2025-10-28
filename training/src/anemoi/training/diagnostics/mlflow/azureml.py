@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
+from pytorch_lightning.loggers.mlflow import _convert_params
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -42,7 +43,6 @@ except ModuleNotFoundError as e:
     )
     raise ModuleNotFoundError(msg) from e
 
-from pytorch_lightning.loggers.mlflow import _convert_params
 
 from anemoi.training.diagnostics.mlflow import LOG_MODEL
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
@@ -222,8 +222,9 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
         """No need to authenticate with Azure ML flavor of MLFlow logger"""
         self.auth = NoAuth()
 
-    @staticmethod
+    @classmethod
     def log_hyperparams_in_mlflow(
+        cls,
         client: MlflowClient,
         run_id: str,
         params: dict[str, Any] | Namespace,
@@ -235,26 +236,9 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
     ) -> None:
         """Log hyperparameters to MLflow server.
 
-        - flatten config params using '.'.
-        - expand keys within params to avoid truncation.
-        - log hyperparameters as an artifact.
-
-        Parameters
-        ----------
-        client : MlflowClient
-            MLflow client.
-        run_id : str
-            Run ID.
-        params : dict[str, Any] | Namespace
-            params to log.
-        expand_keys : list[str] | None, optional
-            keys to expand within params. Any key being expanded will
-            have lists converted according to `expand_iterables`,
-            by default None.
-        log_hyperparams : bool | None, optional
-            Whether to log hyperparameters, by default True.
-        max_params_length: int | None, optional
-            Maximum number of params to be logged to Mlflow
+        Updated version of BaseAnemoiMLflowLogger's method to not log
+        hyperparameters -- they will just be written out to .json in
+        log_hyperparams_as_mlflow_artifact.
         """
         if log_hyperparams:
             params = _convert_params(params)
@@ -270,7 +254,9 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
                 truncation_length = 250  # Historical default value
 
-            AnemoiAzureMLflowLogger.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
+            cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
+
+
 
     @staticmethod
     def log_hyperparams_as_mlflow_artifact(
@@ -294,3 +280,5 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             with Path.open(path, "w") as f:
                 json.dump(params, f, cls=StrEncoder)
             client.log_artifact(run_id=run_id, local_path=path)
+
+    
