@@ -231,61 +231,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
-    def _run_mapper(
-        self,
-        mapper: nn.Module,
-        data: tuple[Tensor],
-        batch_size: int,
-        shard_shapes: tuple[tuple[int, int], tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
-        keep_x_dst_sharded: bool = False,
-        use_reentrant: bool = False,
-        **kwargs,
-    ) -> Tensor:
-        """Run mapper with activation checkpoint.
-
-        Parameters
-        ----------
-        mapper : nn.Module
-            Which processor to use
-        data : tuple[Tensor]
-            tuple of data to pass in
-        batch_size: int,
-            Batch size
-        shard_shapes : tuple[tuple[int, int], tuple[int, int]]
-            Shard shapes for the data
-        model_comm_group : ProcessGroup
-            model communication group, specifies which GPUs work together
-            in one model instance
-        x_src_is_sharded : bool, optional
-            Source data is sharded, by default False
-        x_dst_is_sharded : bool, optional
-            Destination data is sharded, by default False
-        keep_x_dst_sharded : bool, optional
-            Keep destination data sharded, by default False
-        use_reentrant : bool, optional
-            Use reentrant, by default False
-
-        Returns
-        -------
-        Tensor
-            Mapped data
-        """
-        mapper_args = {
-            "batch_size": batch_size,
-            "shard_shapes": shard_shapes,
-            "model_comm_group": model_comm_group,
-            "x_src_is_sharded": x_src_is_sharded,
-            "x_dst_is_sharded": x_dst_is_sharded,
-            "keep_x_dst_sharded": keep_x_dst_sharded,
-            **kwargs,
-        }
-        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
-            return mapper(data, **mapper_args)  # finer grained checkpointing inside GTM with edge sharding
-        return checkpoint(mapper, data, **mapper_args, use_reentrant=use_reentrant)
-
     def forward(
         self,
         x: Tensor,
@@ -349,8 +294,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
             # Encoder for this dataset
-            x_data_latent, x_latent = self._run_mapper(
-                self.encoder[dataset_name],
+            x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
@@ -383,8 +327,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Multi-dataset case: decode for each dataset
         x_out_dict = {}
         for dataset_name in dataset_names:
-            x_out = self._run_mapper(
-                self.decoder[dataset_name],
+            x_out = self.decoder[dataset_name](
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hidden_dict[dataset_name], shard_shapes_data_dict[dataset_name]),
