@@ -8,6 +8,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.7.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.0...graphs-0.7.1) (2025-10-20)
+
+
+### Bug Fixes
+
+* **graphs:** Skip expensive graph creation when target exists without overwrite ([#607](https://github.com/ecmwf/anemoi-core/issues/607)) ([5ce1c6a](https://github.com/ecmwf/anemoi-core/commit/5ce1c6a5948bda6bf3c194098f306b6b4c818ead))
+* Set default value for scale_resolutions parameter ([#592](https://github.com/ecmwf/anemoi-core/issues/592)) ([3b9470d](https://github.com/ecmwf/anemoi-core/commit/3b9470d50e609837b3c12372df165e508ded4052))
+* **training:** Allow for string in AnemoiDatasetsMask.get_grid_size  ([#604](https://github.com/ecmwf/anemoi-core/issues/604)) ([30cff57](https://github.com/ecmwf/anemoi-core/commit/30cff5712abbedd1cbf36a2a720867edd1f029f6))
+
+## [0.7.0](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.6...graphs-0.7.0) (2025-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **graphs:** remove legacy code supporting deprecated features ([#579](https://github.com/ecmwf/anemoi-core/issues/579))
+
+### Features
+
+* **graphs:** Add NonzeroAnemoiDatasetVariable class ([#554](https://github.com/ecmwf/anemoi-core/issues/554)) ([da7a5b5](https://github.com/ecmwf/anemoi-core/commit/da7a5b5d3349228d7c7b590a4a6f3448fe3574d2))
+
+
+### Bug Fixes
+
+* **graphs:** Remove legacy code supporting deprecated features ([#579](https://github.com/ecmwf/anemoi-core/issues/579)) ([aec70b5](https://github.com/ecmwf/anemoi-core/commit/aec70b56e1fbded9cc8391a216b65d9c6e84d03b))
+
+## [0.6.6](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.5...graphs-0.6.6) (2025-09-09)
+
+
+### Features
+
+* **graphs:** Support area positional argument in GraphInspector ([#415](https://github.com/ecmwf/anemoi-core/issues/415)) ([2ea988a](https://github.com/ecmwf/anemoi-core/commit/2ea988a308cdb83c3d8065823ae982b9c468fe20))
+
+
+### Bug Fixes
+
+* **graphs:** Move edge_indinces to cpu for post processors ([#529](https://github.com/ecmwf/anemoi-core/issues/529)) ([709687e](https://github.com/ecmwf/anemoi-core/commit/709687e706b5d451a4220807f06ac1ff9d86df47))
+
+## [0.6.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.4...graphs-0.6.5) (2025-09-02)
+
+
+### Bug Fixes
+
+* **graph:** Update RestrictEdgeLength schema ([#471](https://github.com/ecmwf/anemoi-core/issues/471)) ([24a479a](https://github.com/ecmwf/anemoi-core/commit/24a479a16d7e307c12f71d3864cd0be902bb7f66))
+
 ## [0.6.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.6.3...graphs-0.6.4) (2025-08-08)
 
 

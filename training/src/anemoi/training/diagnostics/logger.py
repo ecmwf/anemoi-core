@@ -34,11 +34,6 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         run_id=config.training.run_id,
         fork_run_id=config.training.fork_run_id,
     )
-    config_params = OmegaConf.to_container(convert_to_omegaconf(config), resolve=True)
-    logger.log_hyperparams(
-        config_params,
-        expand_keys=logger.expand_hyperparams,
-    )
 
     if logger.log_terminal:
         logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)

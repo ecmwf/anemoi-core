@@ -8,6 +8,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/models-0.9.6...models-0.9.7) (2025-10-20)
+
+
+### Features
+
+* **models:** Point-mlp proccesor ([#367](https://github.com/ecmwf/anemoi-core/issues/367)) ([ee2a067](https://github.com/ecmwf/anemoi-core/commit/ee2a067689b6efe18acb13ceac8ed0be512633d5))
+
+
+### Bug Fixes
+
+* **models:** Replace placeholder of migration script anemoi-models version in main ([#600](https://github.com/ecmwf/anemoi-core/issues/600)) ([9c18580](https://github.com/ecmwf/anemoi-core/commit/9c18580eda64b0eb53cf17652ea6b6675fbee77a))
+
+## [0.9.6](https://github.com/ecmwf/anemoi-core/compare/models-0.9.5...models-0.9.6) (2025-10-09)
+
+
+### Features
+
+* Introducing AnemoiBaseModel ([#440](https://github.com/ecmwf/anemoi-core/issues/440)) ([eb3edc5](https://github.com/ecmwf/anemoi-core/commit/eb3edc59696a5a01a9de77aec72a68dc40928f92))
+* Target indices ([#426](https://github.com/ecmwf/anemoi-core/issues/426)) ([d8db2a6](https://github.com/ecmwf/anemoi-core/commit/d8db2a6fc192bc49107df6c137ce4f56866ae4d4))
+
+## [0.9.5](https://github.com/ecmwf/anemoi-core/compare/models-0.9.4...models-0.9.5) (2025-09-09)
+
+
+### Features
+
+* Flash attention v3 ([#479](https://github.com/ecmwf/anemoi-core/issues/479)) ([00f52df](https://github.com/ecmwf/anemoi-core/commit/00f52df292f8fb8dc0a865f6d288fa151c630a2c))
+
+
+### Bug Fixes
+
+* Set correct base package for migrations imports ([#531](https://github.com/ecmwf/anemoi-core/issues/531)) ([cfb80fe](https://github.com/ecmwf/anemoi-core/commit/cfb80fe6d5105873e89f20a9213f782b55aa57dd))
+* Test dependencies ([#524](https://github.com/ecmwf/anemoi-core/issues/524)) ([3ac7d4f](https://github.com/ecmwf/anemoi-core/commit/3ac7d4fbc35e0ef0f54566454e235aeaf7f6da67))
+* Truncation shard shapes ([#536](https://github.com/ecmwf/anemoi-core/issues/536)) ([507b441](https://github.com/ecmwf/anemoi-core/commit/507b44143fc35acc1d3b927cea95e9e1be120407))
+
+## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/models-0.9.3...models-0.9.4) (2025-09-02)
+
+
+### Features
+
+* Checkpoint migrations ([#386](https://github.com/ecmwf/anemoi-core/issues/386)) ([028f6eb](https://github.com/ecmwf/anemoi-core/commit/028f6eb6426c5ada0c5d95e6492accc99083b46f))
+
+## [0.9.3](https://github.com/ecmwf/anemoi-core/compare/models-0.9.2...models-0.9.3) (2025-08-22)
+
+
+### Bug Fixes
+
+* Convert pre_processors from attribute to variable in models/encoder_processor_decoder ([#503](https://github.com/ecmwf/anemoi-core/issues/503)) ([60eb52b](https://github.com/ecmwf/anemoi-core/commit/60eb52b465ba260573566223966dede67cd44913))
+
+## [0.9.2](https://github.com/ecmwf/anemoi-core/compare/models-0.9.1...models-0.9.2) (2025-08-20)
+
+
+### Features
+
+* Diffusion training ([#401](https://github.com/ecmwf/anemoi-core/issues/401)) ([f35ad67](https://github.com/ecmwf/anemoi-core/commit/f35ad673f680ba64acb5c6770a3114262b3b97fd))
+
 ## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/models-0.9.0...models-0.9.1) (2025-08-08)
 
 

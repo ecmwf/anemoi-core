@@ -67,7 +67,7 @@ class NoiseInjector(nn.Module):
         self,
         x: Tensor,
         noise_ref: Tensor,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: list[list[int], list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Tensor]:
 
@@ -118,7 +118,7 @@ class NoiseConditioning(NoiseInjector):
         self,
         x: Tensor,
         noise_ref: Tensor,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: list[list[int], list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Tensor]:
 
