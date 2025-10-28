@@ -485,6 +485,15 @@ class AnemoiTrainer:
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
+
+    def prepare_compilation(self) -> None:
+        if hasattr(self.config.model, "compile"):
+            self.model = mark_for_compilation(self.model, self.config.model.compile)
+        if  hasattr(self.config.training, "recompile_limit"):
+            torch._dynamo.config.cache_size_limit=int(self.config.training.recompile_limit)
+            torch._dynamo.config.accumulated_cache_size_limit= max(8 * int(self.config.training.recompile_limit), 256)
+            LOGGER.info(f"Recompile limit set to {torch._dynamo.config.cache_size_limit}.")
+
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
@@ -523,12 +532,7 @@ class AnemoiTrainer:
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
-        if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model.compile)
-        if  hasattr(self.config.training, "recompile_limit"):
-            torch._dynamo.config.cache_size_limit=int(self.config.training.recompile_limit)
-            torch._dynamo.config.accumulated_cache_size_limit= max(8 * int(self.config.training.recompile_limit), 256)
-            LOGGER.info(f"Recompile limit set to {torch._dynamo.config.cache_size_limit}.")
+        self.prepare_compilation()
 
         LOGGER.debug("Starting training..")
 
