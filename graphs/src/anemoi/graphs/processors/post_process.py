@@ -317,9 +317,9 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         """Remove edges based on the mask passed."""
         for attr_name in graph[self.edges_name].edge_attrs():
             if attr_name == "edge_index":
-                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask]
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask.cpu()]
             else:
-                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask, :]
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask.cpu(), :]
 
         return graph
 
@@ -406,6 +406,6 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         for mask_attr_name, nodes, i in cases:
             if mask_attr_name:
                 attr_mask = nodes[mask_attr_name].squeeze()
-                edge_mask = attr_mask[edge_index[i]]
+                edge_mask = attr_mask[edge_index[i]].to(mask.device)
                 mask = torch.logical_or(mask, ~edge_mask)
         return mask
