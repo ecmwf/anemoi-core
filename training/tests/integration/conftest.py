@@ -124,8 +124,7 @@ def stretched_config(
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
     dataset, forcing_dataset = rel_paths
     use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
-    use_case_modifications.system.input.forcing_dataset = str(Path(tmp_dir,forcing_dataset))
-
+    use_case_modifications.system.input.forcing_dataset = str(Path(tmp_dir, forcing_dataset))
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -147,7 +146,7 @@ def lam_config(
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset", "forcing_dataset"])
     dataset, forcing_dataset = rel_paths
     use_case_modifications.system.input.dataset = str(Path(tmp_dir, dataset))
-    use_case_modifications.system.input.forcing_dataset = str(Path(tmp_dir,forcing_dataset))
+    use_case_modifications.system.input.forcing_dataset = str(Path(tmp_dir, forcing_dataset))
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
@@ -166,7 +165,7 @@ def lam_config_with_graph(
 
     url_graph = cfg.system.input.graph
     tmp_path_graph = get_test_data(url_graph)
-    cfg.system.input.graph=Path(tmp_path_graph)
+    cfg.system.input.graph = Path(tmp_path_graph)
     return cfg, urls
 
 
@@ -206,7 +205,6 @@ def hierarchical_config(
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
-
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
@@ -223,7 +221,6 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
 
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
-
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)

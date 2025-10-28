@@ -11,6 +11,7 @@
 from functools import partial
 from pathlib import Path
 from typing import Annotated
+from typing import Any
 
 from pydantic import AfterValidator
 from pydantic import BaseModel as PydanticBaseModel
@@ -62,7 +63,7 @@ class CheckpointsSchema(BaseModel):
     every_n_minutes: str = "anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}"
     "File name pattern for checkpoint files saved by time frequency (minutes)."
 
-    def model_post_init(self, _):
+    def model_post_init(self, _: Any) -> None:
         self.expand_paths()
 
     def expand_paths(self) -> None:
@@ -80,7 +81,7 @@ class Logs(PydanticBaseModel):
     tensorboard: Path | None = None
     "Path to output tensorboard logs."
 
-    def model_post_init(self, _):
+    def model_post_init(self, _: Any) -> None:
         self.expand_paths()
 
     def expand_paths(self) -> None:
@@ -105,7 +106,7 @@ class OutputSchema(BaseModel):
     profiler: Path | None
     "Path to the profiler directory."
 
-    def model_post_init(self, _):
+    def model_post_init(self, _: Any) -> None:
         self.expand_paths()
 
     def expand_paths(self) -> None:

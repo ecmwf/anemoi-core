@@ -30,6 +30,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import GetTestData
+from pathlib import Path
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
 os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
@@ -47,9 +48,8 @@ def aicon_config_with_tmp_dir(get_tmp_paths: GetTmpPaths, get_test_archive: GetT
     config.system.output.root = tmp_dir
     config.system.input.graph = tmp_dir
     dataset, forcing_dataset = rel_paths
-    config.system.input.data = tmp_dir
-    config.system.input.dataset = dataset
-    config.system.input.forcing_dataset = forcing_dataset
+    config.system.input.dataset = str(Path(tmp_dir,dataset))
+    config.system.input.forcing_dataset = str(Path(tmp_dir,forcing_dataset))
 
     for url in dataset_urls:
         get_test_archive(url)
