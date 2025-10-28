@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.8](https://github.com/ecmwf/anemoi-core/compare/models-0.9.7...models-0.9.8) (2025-10-28)
+
+
+### Bug Fixes
+
+* Shard shape type hints ([#625](https://github.com/ecmwf/anemoi-core/issues/625)) ([fb201fd](https://github.com/ecmwf/anemoi-core/commit/fb201fd4c832fb90e7bb06dbc18371af1f214d03))
+
 ## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/models-0.9.6...models-0.9.7) (2025-10-20)
 
 

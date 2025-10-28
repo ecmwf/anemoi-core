@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.6.8](https://github.com/ecmwf/anemoi-core/compare/training-0.6.7...training-0.6.8) (2025-10-28)
+
+
+### Features
+
+* Callbacks for GraphEnsForecaster. ([#449](https://github.com/ecmwf/anemoi-core/issues/449)) ([39c2bfc](https://github.com/ecmwf/anemoi-core/commit/39c2bfc7d0c840d92516b139cc5f497bbe1296a0))
+
+
+### Bug Fixes
+
+* Anemoi-datasets import ([#626](https://github.com/ecmwf/anemoi-core/issues/626)) ([65c8901](https://github.com/ecmwf/anemoi-core/commit/65c89017fbc38cfe84ce61f4cd6f5aeb59b91224))
+* Bug in sample plots. ([#632](https://github.com/ecmwf/anemoi-core/issues/632)) ([9e024f3](https://github.com/ecmwf/anemoi-core/commit/9e024f37510780c12980d280a8247553b6e18225))
+* Integration tests and drop missed reference for  profiler ([#630](https://github.com/ecmwf/anemoi-core/issues/630)) ([f352e17](https://github.com/ecmwf/anemoi-core/commit/f352e17eca68c0cd797fdb5bf5fcf9bd4a2b505d))
+
 ## [0.6.7](https://github.com/ecmwf/anemoi-core/compare/training-0.6.6...training-0.6.7) (2025-10-20)
 
 
