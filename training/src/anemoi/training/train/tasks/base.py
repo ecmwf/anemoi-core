@@ -254,7 +254,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 data_indices=data_indices[dataset_name],
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
-                self.loss[dataset_name], data_indices[dataset_name],
+                self.loss[dataset_name],
+                data_indices[dataset_name],
             )
 
         if config.training.loss_gradient_scaling:
