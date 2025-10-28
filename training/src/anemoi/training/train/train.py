@@ -524,7 +524,7 @@ class AnemoiTrainer:
         )
 
         if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model.compile)
+            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
 
         LOGGER.debug("Starting training..")
 
