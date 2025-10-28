@@ -90,8 +90,8 @@ class PointWiseMLPProcessorBlock(BaseBlock):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
-    ) -> Tensor:
-        return self.mlp(x)
+    ) -> tuple[Tensor]:
+        return (self.mlp(x),)
 
 
 class TransformerProcessorBlock(BaseBlock):
@@ -146,7 +146,7 @@ class TransformerProcessorBlock(BaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         **layer_kwargs,
-    ) -> Tensor:
+    ) -> tuple[Tensor]:
 
         # In case we have conditionings we pass these to the layer norm
         cond_kwargs = {"cond": cond} if cond is not None else {}
@@ -160,7 +160,7 @@ class TransformerProcessorBlock(BaseBlock):
                 **cond_kwargs,
             )
         )
-        return x
+        return (x,)
 
 
 class TransformerMapperBlock(TransformerProcessorBlock):
@@ -242,6 +242,7 @@ class GraphConvBaseBlock(BaseBlock):
         mlp_extra_layers: int = 0,
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
+        edge_dim: Optional[int] = None,
         **kwargs,
     ) -> None:
         """Initialize GNNBlock.
@@ -263,6 +264,17 @@ class GraphConvBaseBlock(BaseBlock):
             Defined in config/models/<model>.yaml
         """
         super().__init__(**kwargs)
+
+        if edge_dim:
+            self.emb_edges = MLP(
+                in_features=edge_dim,
+                hidden_dim=out_channels,
+                out_features=out_channels,
+                layer_kernels=layer_kernels,
+                n_extra_layers=mlp_extra_layers,
+            )
+        else:
+            self.emb_edges = None
 
         self.update_src_nodes = update_src_nodes
         self.num_chunks = num_chunks
@@ -306,6 +318,8 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         size: Optional[Size] = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
+        if self.emb_edges is not None:
+            edge_attr = self.emb_edges(edge_attr)
 
         x_in = sync_tensor(x, 0, shapes[1], model_comm_group)
 
