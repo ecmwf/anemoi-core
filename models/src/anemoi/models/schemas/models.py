@@ -12,7 +12,9 @@ from __future__ import annotations
 import logging
 from enum import Enum
 from typing import Annotated
+from typing import Any
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -226,6 +228,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN decoder schema."
+    compile: Optional[list[dict[str, Any]]] = Field(None)
+    "Modules to be compiled"
 
 
 class NoiseInjectorSchema(BaseModel):
