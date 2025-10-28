@@ -27,6 +27,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
 
+from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
@@ -36,7 +37,6 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -485,14 +485,13 @@ class AnemoiTrainer:
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
-
     def prepare_compilation(self) -> None:
         if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model.compile)
-        if  hasattr(self.config.training, "recompile_limit"):
-            torch._dynamo.config.cache_size_limit=int(self.config.training.recompile_limit)
-            torch._dynamo.config.accumulated_cache_size_limit= max(8 * int(self.config.training.recompile_limit), 256)
-            LOGGER.info(f"Recompile limit set to {torch._dynamo.config.cache_size_limit}.")
+            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
+        if hasattr(self.config.training, "recompile_limit"):
+            torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
+            LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
 
     @cached_property
     def strategy(self) -> Any:
