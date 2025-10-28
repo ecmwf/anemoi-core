@@ -11,7 +11,6 @@ import logging
 
 import pytorch_lightning as pl
 
-
 LOGGER = logging.getLogger(__name__)
 
 
