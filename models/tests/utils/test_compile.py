@@ -9,22 +9,46 @@
 
 import logging
 from pathlib import Path
+from functools import cached_property
 
 import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.layers.normalization import ConditionalLayerNorm
-from anemoi.training.utils.compile import _get_compile_entry
-from anemoi.training.utils.compile import _meets_library_versions_for_compile
-from anemoi.training.utils.compile import mark_for_compilation
+from anemoi.models.utils.compile import _get_compile_entry
+from anemoi.models.utils.compile import _meets_library_versions_for_compile
+from anemoi.models.utils.compile import mark_for_compilation
 
 LOGGER = logging.getLogger(__name__)
 
+def graphtransformer_compile_config() -> None:
+    return OmegaConf.create({
+            "compile": [
+                {
+                    "module": "anemoi.models.layers.conv.GraphTransformerConv",
+                },
+            ],
+        })
+
+def graphtransformer_ens_compile_config() -> None:
+    return OmegaConf.create({
+            "compile": [
+                {
+                    "module": "anemoi.models.layers.conv.GraphTransformerConv",
+                },
+                {
+                    "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+                    "options": {
+                        "dynamic": False,
+                    },
+                },
+            ],
+        })
 
 def test_compile_config_no_match() -> None:
     """Tests that _get_compile_entry() returns None when no match is found."""
-    cfg = OmegaConf.load(Path(__file__).parent / "../../../src/anemoi/training/config/model/graphtransformer.yaml")
+    cfg = graphtransformer_compile_config()
 
     num_channels = 64
     cond_shape = 16
@@ -36,7 +60,7 @@ def test_compile_config_no_match() -> None:
 
 def test_compile_config_match() -> None:
     """Tests that _get_compile_entry() returns a dict when a match is found."""
-    cfg = OmegaConf.load(Path(__file__).parent / "../../../src/anemoi/training/config/model/graphtransformer_ens.yaml")
+    cfg = graphtransformer_ens_compile_config()
 
     num_channels = 64
     cond_shape = 16
@@ -60,7 +84,7 @@ def test_compile() -> None:
     cond = torch.randn(cond_shape)
     result = ln.forward(x_in, cond)
 
-    cfg = OmegaConf.load(Path(__file__).parent / "../../../src/anemoi/training/config/model/graphtransformer_ens.yaml")
+    cfg =  graphtransformer_ens_compile_config()
     ln_compiled = mark_for_compilation(ln, cfg.compile)
 
     result_compiled = ln_compiled.forward(x_in, cond)
