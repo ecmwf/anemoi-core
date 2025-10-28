@@ -55,9 +55,6 @@ debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
   anomaly_detection: False
 
-# activate the pytorch profiler (disable this in production)
-# remember to also activate the tensorboard logger (below)
-profiler: False
 
 enable_checkpointing: True
 checkpoint:

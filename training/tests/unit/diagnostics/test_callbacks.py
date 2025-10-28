@@ -39,8 +39,6 @@ diagnostics:
     # this will detect and trace back NaNs / Infs etc. but will slow down training
     anomaly_detection: False
 
-  profiler: False
-
   enable_checkpointing: False
   checkpoint:
 

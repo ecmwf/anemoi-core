@@ -10,6 +10,8 @@
 
 import datetime
 import logging
+from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -22,7 +24,6 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
@@ -43,7 +44,7 @@ from anemoi.utils.provenance import gather_provenance_info
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiTrainer:
+class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
     def __init__(self, config: DictConfig) -> None:
@@ -159,6 +160,12 @@ class AnemoiTrainer:
             save_path=graph_filename,
             overwrite=self.config.graph.overwrite,
         )
+
+    @cached_property
+    @abstractmethod
+    def profiler(self) -> None:
+        """Abstract method to be used for AnemoiProfiler."""
+        return None
 
     @cached_property
     def truncation_data(self) -> dict:
@@ -335,32 +342,6 @@ class AnemoiTrainer:
         return self.datamodule.supporting_arrays
 
     @cached_property
-    def profiler(self) -> PyTorchProfiler | None:
-        """Returns a pytorch profiler object, if profiling is enabled."""
-        if self.config.diagnostics.profiler:
-            assert (
-                self.config.diagnostics.log.tensorboard.enabled
-            ), "Tensorboard logging must be enabled when profiling! Check your job config."
-            return PyTorchProfiler(
-                dirpath=self.config.system.output.logs.tensorboard,
-                filename="anemoi-profiler",
-                export_to_chrome=False,
-                # profiler-specific keywords
-                activities=[
-                    # torch.profiler.ProfilerActivity.CPU,  # this is memory-hungry
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
-                schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    dir_name=self.config.system.output.logs.tensorboard,
-                ),
-                profile_memory=True,
-                record_shapes=True,
-                with_stack=True,
-            )
-        return None
-
-    @cached_property
     def loggers(self) -> list:
         loggers = []
         if self.config.diagnostics.log.wandb.enabled:
@@ -493,6 +474,7 @@ class AnemoiTrainer:
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
             logger=self.loggers,
+            profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,
             # run a fixed no of batches per epoch (helpful when debugging)
             limit_train_batches=self.config.dataloader.limit_batches.training,
@@ -503,7 +485,6 @@ class AnemoiTrainer:
             gradient_clip_algorithm=self.config.training.gradient_clip.algorithm,
             # we have our own DDP-compliant sampler logic baked into the dataset
             use_distributed_sampler=False,
-            profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
