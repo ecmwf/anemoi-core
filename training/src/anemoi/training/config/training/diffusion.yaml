@@ -80,7 +80,9 @@ training_loss:
 validation_metrics:
   # loss class to initialise
   mse:
-    _target_: anemoi.training.losses.MSELoss
+    _target_: anemoi.training.losses.TorchLoss
+    loss:
+      _target_: torch.nn.MSELoss
     # Scalers to include in loss calculation
     # Cannot scale over the variable dimension due to possible remappings.
     # Available scalers include:
