@@ -116,9 +116,7 @@ class CheckpointNotFoundError(CheckpointError):
         suggestions = []
         if path.parent.exists():
             # Look for similar files in the directory
-            similar_files = [
-                f for f in path.parent.glob("*") if f.suffix in [".ckpt", ".pt", ".pth", ".bin", ".safetensors"]
-            ]
+            similar_files = [f for f in path.parent.glob("*") if f.suffix in [".ckpt", ".pt", ".pth", ".bin"]]
             if similar_files:
                 suggestions.append(
                     f"Found similar files in {path.parent}: {[f.name for f in similar_files[:3]]}",

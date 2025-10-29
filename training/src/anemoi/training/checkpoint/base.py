@@ -88,7 +88,7 @@ class CheckpointContext:
     config : DictConfig, optional
         Hydra configuration object containing pipeline settings
     checkpoint_format : str, optional
-        Format of the checkpoint: 'lightning', 'pytorch', 'safetensors', or 'state_dict'
+        Format of the checkpoint: 'lightning', 'pytorch', or 'state_dict'
     pl_module : pl.LightningModule, optional
         Lightning module (GraphForecaster) if loading from Lightning checkpoint.
         This preserves the full Lightning context for training resumption
@@ -118,7 +118,7 @@ class CheckpointContext:
     scheduler: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     config: DictConfig | None = None
-    checkpoint_format: Literal["lightning", "pytorch", "safetensors", "state_dict"] | None = None
+    checkpoint_format: Literal["lightning", "pytorch", "state_dict"] | None = None
     pl_module: Any | None = None  # Type hint as Any to avoid circular imports
 
     def __post_init__(self):
