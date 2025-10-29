@@ -36,6 +36,6 @@ model:
     nodes_name: ${graph.data}
     attribute_name: cutout_mask
 system:
-  files:
+  input:
     dataset: ???
     forcing_dataset: ???

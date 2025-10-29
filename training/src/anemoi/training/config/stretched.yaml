@@ -31,6 +31,6 @@ training:
     node_weights:
       weight_frac_of_total: ???
 system:
-  files:
+  input:
     dataset: ???
     forcing_dataset: ???
