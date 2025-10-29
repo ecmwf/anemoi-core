@@ -29,7 +29,16 @@ def migrate_setup(context: MigrationContext) -> None:
     context : MigrationContext
        A MigrationContext instance
     """
-    context.move_module("aanemoi.training.schemas.hardware", "anemoi.training.schemas.system")
+    context.move_attribute(
+        "anemoi.training.schemas.hardware.HardwareSchema", "anemoi.training.schemas.system.HardwareSchema"
+    )
+    context.move_attribute(
+        "anemoi.training.schemas.hardware.FilesSchema", "anemoi.training.schemas.system.InputSchema"
+    )
+    context.move_attribute(
+        "anemoi.training.schemas.hardware.PathsSchema", "anemoi.training.schemas.system.OutputSchema"
+    )
+    context.move_module("anemoi.training.schemas.hardware", "anemoi.training.schemas.system")
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
