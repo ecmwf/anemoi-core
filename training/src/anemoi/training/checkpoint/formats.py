@@ -10,7 +10,7 @@
 """Checkpoint format detection and conversion utilities.
 
 This module provides utilities for detecting checkpoint formats and converting
-between different checkpoint types (Lightning, PyTorch, safetensors, state_dict).
+between different checkpoint types (Lightning, PyTorch, state_dict).
 """
 
 from __future__ import annotations
@@ -23,20 +23,12 @@ from typing import Literal
 
 import torch
 
-# Optional import for safetensors
-try:
-    import safetensors.torch
-
-    HAS_SAFETENSORS = True
-except ImportError:
-    HAS_SAFETENSORS = False
-
 LOGGER = logging.getLogger(__name__)
 
 
 def detect_checkpoint_format(
     checkpoint_path: Path | str,
-) -> Literal["lightning", "pytorch", "safetensors", "state_dict"]:
+) -> Literal["lightning", "pytorch", "state_dict"]:
     """Detect the format of a checkpoint file.
 
     Uses file extension and structure inspection to determine format.
@@ -49,17 +41,14 @@ def detect_checkpoint_format(
     Returns
     -------
     str
-        Format of the checkpoint: "lightning", "pytorch", "safetensors", or "state_dict"
+        Format of the checkpoint: "lightning", "pytorch", or "state_dict"
     """
     path = Path(checkpoint_path)
 
     # Check file extension first
     extension = path.suffix.lower()
 
-    if extension == ".safetensors":
-        return "safetensors"
-
-    # For other extensions, load and inspect structure
+    # For .ckpt, .pt, .pth, .bin extensions, load and inspect structure
     if extension in [".ckpt", ".pt", ".pth", ".bin"]:
         try:
             checkpoint = torch.load(path, map_location="cpu", weights_only=False)
@@ -119,7 +108,7 @@ def detect_checkpoint_format(
     logger.info(
         "Unknown checkpoint file extension '%s' for %s. "
         "Defaulting to 'lightning' format. "
-        "Supported extensions: .ckpt, .pt, .pth, .bin, .safetensors",
+        "Supported extensions: .ckpt, .pt, .pth, .bin",
         extension,
         path,
     )
@@ -128,7 +117,7 @@ def detect_checkpoint_format(
 
 def load_checkpoint(
     checkpoint_path: Path | str,
-    checkpoint_format: Literal["lightning", "pytorch", "safetensors", "state_dict"] | None = None,
+    checkpoint_format: Literal["lightning", "pytorch", "state_dict"] | None = None,
 ) -> dict[str, Any]:
     """Load a checkpoint file in any supported format.
 
@@ -150,15 +139,6 @@ def load_checkpoint(
         checkpoint_format = detect_checkpoint_format(path)
 
     try:
-        if checkpoint_format == "safetensors":
-            if not HAS_SAFETENSORS:
-                msg = (
-                    f"Cannot load safetensors checkpoint '{path}': safetensors library not available.\n"
-                    "Install with: pip install safetensors\n"
-                    "Or use a different checkpoint format (.ckpt, .pt, .pth)"
-                )
-                raise ImportError(msg)
-            return safetensors.torch.load_file(str(path))
         return torch.load(path, map_location="cpu", weights_only=False)
 
     except FileNotFoundError:
@@ -240,7 +220,7 @@ def extract_state_dict(checkpoint_data: dict[str, Any]) -> dict[str, Any]:
 def save_checkpoint(
     checkpoint_data: dict[str, Any],
     checkpoint_path: Path | str,
-    checkpoint_format: Literal["lightning", "pytorch", "safetensors", "state_dict"] = "pytorch",
+    checkpoint_format: Literal["lightning", "pytorch", "state_dict"] = "pytorch",
     anemoi_metadata: dict[str, Any] | None = None,
     supporting_arrays: dict[str, Any] | None = None,
 ) -> None:
@@ -253,7 +233,7 @@ def save_checkpoint(
     checkpoint_path : Path or str
         Path where to save the checkpoint
     checkpoint_format : str
-        Format to save in: "lightning", "pytorch", "safetensors", or "state_dict"
+        Format to save in: "lightning", "pytorch", or "state_dict"
     anemoi_metadata : dict, optional
         Anemoi-specific metadata to save alongside the checkpoint.
         Will be saved using anemoi.utils.checkpoints.save_metadata.
@@ -336,7 +316,7 @@ def _build_directory_error_message(directory: Path, error: OSError) -> str:
 def _save_checkpoint_file(
     checkpoint_data: dict[str, Any],
     path: Path,
-    checkpoint_format: str,
+    checkpoint_format: str,  # noqa: ARG001
 ) -> None:
     """Save checkpoint file in the specified format.
 
@@ -351,16 +331,11 @@ def _save_checkpoint_file(
 
     Raises
     ------
-    ImportError
-        If safetensors format requested but not available
     OSError
         If file cannot be saved
     """
     try:
-        if checkpoint_format == "safetensors":
-            _save_safetensors_format(checkpoint_data, path)
-        else:
-            torch.save(checkpoint_data, path)
+        torch.save(checkpoint_data, path)
     except OSError as e:
         msg = _build_save_error_message(path, e)
         raise OSError(msg) from e
@@ -372,33 +347,6 @@ def _save_checkpoint_file(
             "This might indicate incompatible data types in the checkpoint."
         )
         raise RuntimeError(msg) from e
-
-
-def _save_safetensors_format(checkpoint_data: dict[str, Any], path: Path) -> None:
-    """Save checkpoint in safetensors format.
-
-    Parameters
-    ----------
-    checkpoint_data : dict
-        Checkpoint data to save
-    path : Path
-        File path to save to
-
-    Raises
-    ------
-    ImportError
-        If safetensors library not available
-    """
-    if not HAS_SAFETENSORS:
-        msg = (
-            "Cannot save checkpoint in safetensors format: safetensors library not available.\n"
-            "Install with: pip install safetensors\n"
-            "Or use a different format: 'pytorch', 'lightning', or 'state_dict'"
-        )
-        raise ImportError(msg)
-    # Extract just the state dict for safetensors
-    state_dict = extract_state_dict(checkpoint_data)
-    safetensors.torch.save_file(state_dict, str(path))
 
 
 def _build_save_error_message(path: Path, error: OSError) -> str:
@@ -565,19 +513,17 @@ def convert_lightning_to_pytorch(
     return pytorch_checkpoint
 
 
-def is_format_available(checkpoint_format: Literal["lightning", "pytorch", "safetensors", "state_dict"]) -> bool:
+def is_format_available(checkpoint_format: Literal["lightning", "pytorch", "state_dict"]) -> bool:  # noqa: ARG001
     """Check if a checkpoint format is available for use.
 
     Parameters
     ----------
     checkpoint_format : str
-        Format to check: "lightning", "pytorch", "safetensors", or "state_dict"
+        Format to check: "lightning", "pytorch", or "state_dict"
 
     Returns
     -------
     bool
         True if the format is available
     """
-    if checkpoint_format == "safetensors":
-        return HAS_SAFETENSORS
-    return True  # All other formats are always available
+    return True  # All formats are always available

@@ -34,6 +34,26 @@ class CheckpointNotFoundError(CheckpointError):
         path = Path(path) if not isinstance(path, Path) else path
         message = f"Checkpoint not found: {path}"
 
+        # Add helpful suggestions
+        suggestions = []
+        if path.parent.exists():
+            # Look for similar files in the directory
+            similar_files = [f for f in path.parent.glob("*") if f.suffix in [".ckpt", ".pt", ".pth", ".bin"]]
+            if similar_files:
+                suggestions.append(
+                    f"Found similar files in {path.parent}: {[f.name for f in similar_files[:3]]}",
+                )
+        else:
+            suggestions.append(f"Directory does not exist: {path.parent}")
+
+        if suggestions:
+            message += "\nSuggestions:\n  • " + "\n  • ".join(suggestions)
+
+        # Add context about which pipeline stage failed if available
+        stage_context = details.get("pipeline_stage") if details else None
+        if stage_context:
+            message = f"Pipeline stage '{stage_context}' failed: {message}"
+
         error_details = {"path": str(path)}
         if details:
             error_details.update(details)
