@@ -1,7 +1,8 @@
 from pathlib import Path
+
 import mlflow
-from mlflow import MlflowClient
 import pytest
+from mlflow import MlflowClient
 
 from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger
 from anemoi.training.diagnostics.mlflow.azureml import AzureIdentity
@@ -61,20 +62,20 @@ def test_azure_mlflowlogger_metric_deduplication(default_logger):
 
 def test_azure_mlflow_schema():
     config = {
-    '_target_':"anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger",
-    "enabled": False,
-    "offline": False,
-    "authentication": False,
-    "tracking_uri": None,  # You had ??? — using None as placeholder
-    "experiment_name": "anemoi-debug",
-    "project_name": "Anemoi",
-    "system": False,
-    "terminal": False,
-    "run_name": None,  # If set to null, the run name will be a random UUID
-    "on_resume_create_child": True,
-    "expand_hyperparams": ["config"],  # Which keys in hyperparams to expand
-    "http_max_retries": 35,
-    "max_params_length": 2000,
+        "_target_": "anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger",
+        "enabled": False,
+        "offline": False,
+        "authentication": False,
+        "tracking_uri": None,  # You had ??? — using None as placeholder
+        "experiment_name": "anemoi-debug",
+        "project_name": "Anemoi",
+        "system": False,
+        "terminal": False,
+        "run_name": None,  # If set to null, the run name will be a random UUID
+        "on_resume_create_child": True,
+        "expand_hyperparams": ["config"],  # Which keys in hyperparams to expand
+        "http_max_retries": 35,
+        "max_params_length": 2000,
     }
     schema = AzureMlflowSchema(**config)
 

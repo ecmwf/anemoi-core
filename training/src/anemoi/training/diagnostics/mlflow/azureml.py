@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
+
 from pytorch_lightning.loggers.mlflow import _convert_params
 
 if TYPE_CHECKING:
@@ -256,8 +257,6 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
 
             cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
 
-
-
     @staticmethod
     def log_hyperparams_as_mlflow_artifact(
         client: MlflowClient,
@@ -280,5 +279,3 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             with Path.open(path, "w") as f:
                 json.dump(params, f, cls=StrEncoder)
             client.log_artifact(run_id=run_id, local_path=path)
-
-    

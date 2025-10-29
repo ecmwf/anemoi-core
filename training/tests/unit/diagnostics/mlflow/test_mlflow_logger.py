@@ -1,8 +1,5 @@
-from unittest.mock import Mock
-
 from pathlib import Path
-import mlflow
-from mlflow import MlflowClient
+
 import pytest
 
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
