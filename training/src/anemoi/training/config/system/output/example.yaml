@@ -11,3 +11,4 @@ checkpoints:
   every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
 plots: plots
 profiler: profiler
+graph: graphs

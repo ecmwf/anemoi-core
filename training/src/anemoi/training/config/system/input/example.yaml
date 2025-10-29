@@ -1,5 +1,5 @@
 dataset: ???
-graph: ???
+graph: ${system.output.graph}/graph.pt
 truncation: null
 truncation_inv: null
 warm_start: null

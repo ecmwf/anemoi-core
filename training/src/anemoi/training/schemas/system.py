@@ -105,6 +105,8 @@ class OutputSchema(BaseModel):
     "Path to the plots directory."
     profiler: Path | None
     "Path to the profiler directory."
+    graph: Path | None = Path("graphs")
+    "Path to the graph directory."
 
     def model_post_init(self, _: Any) -> None:
         self.expand_paths()
@@ -115,6 +117,8 @@ class OutputSchema(BaseModel):
             self.plots = self.root / self.plots
         if self.profiler:
             self.profiler = self.root / self.profiler
+        if self.graph:
+            self.graph = self.root / self.graph
         if self.logs:
             self.logs.root = self.root / self.logs.root
             self.logs.expand_paths()
