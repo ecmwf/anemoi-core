@@ -16,20 +16,20 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.fixture
-def tmp_uri(monkeypatch, tmp_path):
+def tmp_uri(monkeypatch: pytest.MonkeyPatch, tmp_path: str) -> Path:
     uri = (Path(tmp_path) / "mlruns").as_uri()
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     return uri
 
 
 @pytest.fixture
-def tmp_client(tmp_uri):
+def tmp_client(tmp_uri: Path) -> MlflowClient:
     return MlflowClient(tmp_uri)
 
 
 @pytest.fixture
-def default_logger(tmp_path, tmp_uri) -> AnemoiAzureMLflowLogger:
-    logger = AnemoiAzureMLflowLogger(
+def default_logger(tmp_path: str, tmp_uri: Path) -> AnemoiAzureMLflowLogger:
+    return AnemoiAzureMLflowLogger(
         identity=AzureIdentity("managed"),
         experiment_name="test_experiment",
         run_name="test_run",
@@ -38,10 +38,9 @@ def default_logger(tmp_path, tmp_uri) -> AnemoiAzureMLflowLogger:
         authentication=False,
         save_dir=tmp_path,
     )
-    return logger
 
 
-def test_azure_mlflowlogger_no_log_params(default_logger, tmp_client):
+def test_azure_mlflowlogger_no_log_params(default_logger: AnemoiAzureMLflowLogger, tmp_client: MlflowClient) -> None:
     mlflow.set_experiment("ci-test")
     exp = tmp_client.get_experiment_by_name("ci-test")
     params = {"lr": 0.001, "path": "era5", "anemoi.version": 1.5, "bounding": True}
@@ -51,7 +50,7 @@ def test_azure_mlflowlogger_no_log_params(default_logger, tmp_client):
     assert not any(bool(run.data.metrics) for run in runs)
 
 
-def test_azure_mlflowlogger_metric_deduplication(default_logger):
+def test_azure_mlflowlogger_metric_deduplication(default_logger: AnemoiAzureMLflowLogger) -> None:
     default_logger.log_metrics({"foo": 1.0}, step=5)
     default_logger.log_metrics({"foo": 1.0}, step=5)  # duplicate
     # Only the first metric should be logged
@@ -60,7 +59,7 @@ def test_azure_mlflowlogger_metric_deduplication(default_logger):
     assert next(iter(default_logger._logged_metrics))[1] == 5  # step
 
 
-def test_azure_mlflow_schema():
+def test_azure_mlflow_schema() -> None:
     config = {
         "_target_": "anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger",
         "enabled": False,

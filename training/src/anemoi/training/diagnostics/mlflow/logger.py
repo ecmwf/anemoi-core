@@ -26,6 +26,7 @@ from weakref import WeakValueDictionary
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from pytorch_lightning.callbacks import Checkpoint
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.loggers.mlflow import _flatten_dict
@@ -300,7 +301,8 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         log_hyperparams : bool | None, optional
             Whether to log hyperparameters, by default True
         expand_hyperparams: list[str] | None, optional
-            keys to expand within params. Any key being expanded will have lists converted according to `expand_iterables`. By default ['config']
+            keys to expand within params. Any key being expanded will have lists converted
+            according to `expand_iterables`. By default ['config']
         on_resume_create_child: bool | None, optional
             Whether to create a child run when resuming a run, by default False
         max_params_length: int | None, optional
@@ -396,7 +398,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         authentication: bool | None,
         offline: bool,
     ) -> None:
-        """Initialize authentication specific to each logger"""
+        """Initialize authentication specific to each logger."""
 
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
         """Check if the parent run is a dry run.
@@ -731,7 +733,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
     @override
     @rank_zero_only
-    def after_save_checkpoint(self, checkpoint_callback: "pl.callbacks.Checkpoint") -> None:
+    def after_save_checkpoint(self, checkpoint_callback: Checkpoint) -> None:
         """Logs model checkpoint as an artifact, sanitizing the path correctly."""
         if not self._log_model:
             return
@@ -741,7 +743,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
         # Get the path to the checkpoint file saved by the callback
         model_path = checkpoint_callback.last_model_path or checkpoint_callback.best_model_path
-        if not model_path or not os.path.exists(model_path):
+        if not model_path or not Path.exists(model_path):
             LOGGER.warning("after_save_checkpoint failed: Checkpoint path not found.")
             return
 
@@ -751,7 +753,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             safe_filename = Path(model_path).name.replace(":", "-")
 
             # 2. Create the full path for the temporary, sanitized file
-            tmp_model_path = os.path.join(tmpdir, safe_filename)
+            tmp_model_path = tmpdir / safe_filename
 
             # 3. Copy the original checkpoint to this new temporary path
             shutil.copy2(model_path, tmp_model_path)
@@ -760,13 +762,13 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             artifact_subdir = "checkpoints"
 
             # 5. Log the sanitized temporary file into the 'checkpoints' directory
-            LOGGER.info(
-                f"Logging checkpoint '{model_path}' to MLflow artifact path '{artifact_subdir}/{safe_filename}'",
-            )
+            msg = f"Logging checkpoint '{model_path}' to MLflow artifact path '{artifact_subdir}/{safe_filename}'"
+            LOGGER.info(msg)
             try:
                 self.experiment.log_artifact(self.run_id, tmp_model_path, artifact_subdir)
-            except Exception as e:
-                LOGGER.error(f"Failed to log checkpoint artifact: {e}")
+            except Exception:
+                LOGGER.exception()
+                raise
 
 
 class AnemoiMLflowLogger(BaseAnemoiMLflowLogger):
@@ -776,7 +778,7 @@ class AnemoiMLflowLogger(BaseAnemoiMLflowLogger):
         authentication: bool | None,
         offline: bool,
     ) -> None:
-        """Authentication for a standard MLFlow server"""
+        """Authentication for a standard MLFlow server."""
         enabled = authentication and not offline
         self.auth = TokenAuth(tracking_uri, enabled=enabled)
 

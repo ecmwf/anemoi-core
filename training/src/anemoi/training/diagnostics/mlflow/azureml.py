@@ -172,8 +172,9 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
         azure_logger = logging.getLogger("azure")
         numeric_level = getattr(logging, azure_log_level.upper(), None)
         if not isinstance(numeric_level, int):
-            LOGGER.exception(f"AnemoiAzureMLflowLogger received invalid azure_log_level: {azure_log_level}")
-            raise ValueError
+            msg = f"AnemoiAzureMLflowLogger received invalid azure_log_level: {azure_log_level}"
+            LOGGER.exception(msg)
+            raise TypeError
         azure_logger.setLevel(numeric_level)
 
         # Azure ML jobs (should) set this for us:
@@ -248,13 +249,6 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
                 params["config"] = config.model_dump(by_alias=True)
-
-            import mlflow
-
-            try:  # Check maximum param value length is available and use it
-                truncation_length = mlflow.utils.validation.MAX_PARAM_VAL_LENGTH
-            except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
-                truncation_length = 250  # Historical default value
 
             cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
 

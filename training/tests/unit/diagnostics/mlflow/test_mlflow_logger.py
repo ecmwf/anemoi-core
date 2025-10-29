@@ -12,15 +12,15 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.fixture
-def tmp_uri(monkeypatch, tmp_path):
+def tmp_uri(monkeypatch: pytest.MonkeyPatch, tmp_path: str) -> Path:
     uri = (Path(tmp_path) / "mlruns").as_uri()
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     return uri
 
 
 @pytest.fixture
-def default_logger(tmp_path, tmp_uri) -> AnemoiMLflowLogger:
-    logger = AnemoiMLflowLogger(
+def default_logger(tmp_path: str, tmp_uri: str) -> AnemoiMLflowLogger:
+    return AnemoiMLflowLogger(
         experiment_name="test_experiment",
         run_name="test_run",
         offline=True,
@@ -28,7 +28,6 @@ def default_logger(tmp_path, tmp_uri) -> AnemoiMLflowLogger:
         authentication=False,
         save_dir=tmp_path,
     )
-    return logger
 
 
 def test_mlflowlogger_params_limit(default_logger: AnemoiMLflowLogger) -> None:
