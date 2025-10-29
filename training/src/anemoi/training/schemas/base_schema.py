@@ -108,6 +108,18 @@ class BaseSchema(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def run_cross_subschema_validations(self) -> Self:
+        """Runs validations that require access to multiple subschemas (e.g., model-data consistency)."""
+        if not self.config_validation:
+            return self
+
+        for value in self.__dict__.values():
+            if hasattr(value, "validate_across_subschemas"):
+                value.validate_across_subschemas(self)
+
+        return self
+
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)

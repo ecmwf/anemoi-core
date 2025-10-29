@@ -88,7 +88,7 @@ class GraphInterpolator(BaseGraphModule):
         self,
         batch: torch.Tensor,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[torch.Tensor]]:
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -108,7 +108,17 @@ class GraphInterpolator(BaseGraphModule):
             device=self.device,
             dtype=batch.dtype,
         )
-        for interp_step in self.interp_times:
+
+        target_shape = (
+            batch.shape[0],
+            len(self.interp_times),
+            batch.shape[2],
+            batch.shape[3],
+            len(self.data_indices.model.output.name_to_index),
+        )
+        y_preds = batch.new_zeros(target_shape)
+
+        for idx, interp_step in enumerate(self.interp_times):
             # get the forcing information for the target interpolation time:
             if num_tfi >= 1:
                 target_forcing[..., :num_tfi] = batch[:, self.imap[interp_step], :, :, self.target_forcing_indices]
@@ -118,23 +128,31 @@ class GraphInterpolator(BaseGraphModule):
                 )
 
             y_pred = self(x_bound, target_forcing)
-            y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
+            y_preds[:, idx] = y_pred
+
+        if self.model.model.map_accum_indices is not None:
+            y_preds = self.model.model.resolve_mass_conservations(y_preds, x_bound)
+
+        for idx, interp_step in enumerate(self.interp_times):
+            y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full].clone()
+            y_pred = y_preds[:, idx]
 
             loss_step, metrics_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                interp_step - 1,
+                interp_step,
+                training_mode=True,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
 
             loss += loss_step
             metrics.update(metrics_next)
-            y_preds.append(y_pred)
 
         loss *= 1.0 / len(self.interp_times)
-        return loss, metrics, y_preds
+        y_preds_list = list(y_preds.unbind(dim=1))
+        return loss, metrics, y_preds_list
 
     def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
         return self.model(
