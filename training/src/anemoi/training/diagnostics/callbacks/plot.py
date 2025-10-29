@@ -120,7 +120,7 @@ class BasePlotCallback(Callback, ABC):
                     logger.experiment.log_artifact(run_id, str(save_path))
                 except Exception as e:
                     if not ("Resource Conflict" in str(e) and isinstance(logger, AnemoiAzureMLflowLogger)):
-                        LOGGER.error(str(e))
+                        LOGGER.exception(str(e))
                         raise
 
         plt.close(fig)  # cleanup
@@ -154,7 +154,7 @@ class BasePlotCallback(Callback, ABC):
                     logger.experiment.log_artifact(run_id, str(save_path))
                 except Exception as e:
                     if not ("Resource Conflict" in str(e) and isinstance(logger, AnemoiAzureMLflowLogger)):
-                        LOGGER.error(str(e))
+                        LOGGER.exception(str(e))
                         raise
 
         plt.close(fig)  # cleanup

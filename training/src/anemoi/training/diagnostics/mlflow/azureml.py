@@ -162,7 +162,8 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             Log level for all azure packages (azure-identity, azure-core, etc)
         """
         if offline:
-            raise ValueError("Cannot run AnemoiAzureMLflowLogger offline")
+            LOGGER.exception("Cannot run AnemoiAzureMLflowLogger with offline=True")
+            raise ValueError
 
         if terminal:
             LOGGER.warning("Cannot log terminal output with AzureML version of MLFlow logger, will set terminal=False")
@@ -171,7 +172,8 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
         azure_logger = logging.getLogger("azure")
         numeric_level = getattr(logging, azure_log_level.upper(), None)
         if not isinstance(numeric_level, int):
-            raise ValueError(f"Invalid log level: {azure_log_level.upper()}")
+            LOGGER.exception(f"AnemoiAzureMLflowLogger received invalid azure_log_level: {azure_log_level}")
+            raise ValueError
         azure_logger.setLevel(numeric_level)
 
         # Azure ML jobs (should) set this for us:
@@ -220,7 +222,6 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
         authentication: bool | None,
         offline: bool,
     ) -> None:
-        """No need to authenticate with Azure ML flavor of MLFlow logger"""
         self.auth = NoAuth()
 
     @classmethod
@@ -273,7 +274,8 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             def default(self, o: Any) -> str:
                 return str(o)
 
-        now = str(datetime.datetime.now()).replace(" ", "T")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        now = str(now).replace(" ", "T")
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / f"config.{now}.json"
             with Path.open(path, "w") as f:
