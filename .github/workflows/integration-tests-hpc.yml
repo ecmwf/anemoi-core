@@ -43,10 +43,7 @@ jobs:
             source .venv/bin/activate
             uv pip install --upgrade pip
             uv pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
-            git clone https://github.com/cathalobrien/get-flash-attn.git
-            ./get-flash-attn/get-flash-attn
-            rm -rf ./get-flash-attn
-            ./.github/workflows/scripts/get-torch-cluster
+            /perm/naco/scripts/get-flash-attn -v 2.7.4.post1
             python3 -m pytest -v training/tests/integration --slow
             deactivate
             rm -rf $REPO_NAME
@@ -80,10 +77,7 @@ jobs:
             source .venv/bin/activate
             uv pip install --upgrade pip
             uv pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
-            git clone https://github.com/cathalobrien/get-flash-attn.git
-            ./get-flash-attn/get-flash-attn
-            rm -rf ./get-flash-attn
-            ./.github/workflows/scripts/get-torch-cluster
+            /perm/naco/scripts/get-flash-attn -v 2.7.4.post1
             srun python -m pytest -v training/tests/integration --slow --multigpu -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME
