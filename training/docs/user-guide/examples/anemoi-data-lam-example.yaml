@@ -1,0 +1,134 @@
+# Example Hydra configuration for creating a limited-area / regional dataset
+# with `anemoi-data create`. Fields marked with `???` are user-specific and
+# must be replaced before running the command.
+
+dataset:
+  name: north-america-25km-2018-2020-6h
+  description: >
+    Example limited-area dataset combining a regional reanalysis (CERra-like)
+    with ERA5 global boundary forcing on a 0.25° grid. Designed for training a
+    regional AI weather model with Anemoi.
+  frequency: 6h                         # Target time step of the output dataset
+  timestep: 6h                          # Model time step; must be a multiple of frequency
+
+  # Spatial domain selection for the limited-area (Lambert conformal or lat/lon)
+  domain:
+    grid: latlon
+    lat:
+      min: 15.0
+      max: 72.0
+    lon:
+      min: -140.0
+      max: -40.0
+    # Optional buffer appended when sampling from the global forcing dataset to capture boundary cells
+    boundary_buffer_deg:
+      lat: 3.0
+      lon: 3.0
+
+time:
+  coverage:
+    start: "2018-01-01T00:00:00"
+    end: "2020-12-31T18:00:00"
+  splits:
+    train:
+      start: "2018-01-01T00:00:00"
+      end: "2019-12-31T18:00:00"
+    validation:
+      start: "2020-01-01T00:00:00"
+      end: "2020-06-30T18:00:00"
+    test:
+      start: "2020-07-01T00:00:00"
+      end: "2020-12-31T18:00:00"
+
+storage:
+  path: ${oc.env:ANEMOI_DATA_ROOT,./data}/${dataset.name}.zarr
+  chunking:
+    time: 4
+    node: 4096
+    variable: 16
+  compressor:
+    cname: zstd
+    clevel: 7
+    shuffle: bitshuffle
+
+sources:
+  regional_core:
+    kind: zarr
+    dataset: ???                        # Path/URL to the limited-area reanalysis (e.g. CERra cutout)
+    variables:
+      state:
+        - "t"
+        - "u"
+        - "v"
+        - "q"
+      surface:
+        - "2t"
+        - "10u"
+        - "10v"
+        - "msl"
+      diagnostics:
+        - "tp"
+    grid:
+      projection: latlon
+      resolution_deg: 0.05               # Native horizontal resolution of the regional product
+
+  global_boundary:
+    kind: zarr
+    dataset: ???                        # Path/URL to the lower-resolution global dataset (ERA5, AIFS, …)
+    purpose: boundary_forcing
+    regrid:
+      method: bilinear
+      destination_grid: ${dataset.domain}
+    sampling:
+      # Limit sampling to a margin around the regional box to keep boundary context only
+      mode: cutout
+      buffer_deg:
+        lat: ${dataset.domain.boundary_buffer_deg.lat}
+        lon: ${dataset.domain.boundary_buffer_deg.lon}
+
+recipe:
+  cutout:
+    # First entry is the high-resolution limited-area dataset
+    - dataset: ${sources.regional_core.dataset}
+      thinning: 1                        # Optional sub-sampling factor for dev runs; set to 1 for full resolution
+      role: core
+    # Second entry supplies lateral boundary values from the global dataset
+    - dataset: ${sources.global_boundary.dataset}
+      role: boundary
+  adjust: all                            # Align calendars/metadata between the two sources
+  min_distance_km: 0                     # Keeps every grid point from the regional core
+  write_cutout_mask: true                # Persist mask to identify which nodes belong to the regional vs boundary source
+
+features:
+  forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "sin_julian_day"
+    - "lsm"
+    - "z"
+  diagnostics:
+    - "tp"
+
+normalizer:
+  default: mean-std
+  std:
+    - "tp"
+  none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "sin_julian_day"
+    - "lsm"
+    - "z"
+
+outputs:
+  metadata:
+    created_by: anemoi-data example
+    notes:
+      - "Regional nodes flagged via cutout_mask attribute"
+      - "Global boundary nodes retained for inflow/outflow conditioning"
