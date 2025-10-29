@@ -1,0 +1,133 @@
+# Example Hydra configuration for creating a CONUS RRFS-derived dataset
+# with `anemoi-data create`. This variant ingests RRFS pressure-level GRIB2
+# files directly and uses them both for the interior domain and the lateral
+# boundaries (no external global forcing). Replace every `???` with settings
+# that match your archive.
+
+dataset:
+  name: rrfs-conus-3km-202405-6h
+  description: >
+    Limited-area dataset built from RRFS CONUS GRIB2 forecasts. The same
+    fields supply both the core domain and the lateral boundaries, making this
+    suitable for experiments that do not rely on external global forcing.
+  frequency: 6h
+  timestep: 6h
+
+  domain:
+    grid: lambert
+    lat:
+      min: 20.0
+      max: 55.0
+    lon:
+      min: -130.0
+      max: -60.0
+
+time:
+  coverage:
+    start: "2024-05-01T00:00:00"
+    end: "2024-05-31T18:00:00"
+  splits:
+    train:
+      start: "2024-05-01T00:00:00"
+      end: "2024-05-24T18:00:00"
+    validation:
+      start: "2024-05-25T00:00:00"
+      end: "2024-05-28T18:00:00"
+    test:
+      start: "2024-05-29T00:00:00"
+      end: "2024-05-31T18:00:00"
+
+storage:
+  path: ${oc.env:ANEMOI_DATA_ROOT,./data}/${dataset.name}.zarr
+  chunking:
+    time: 2
+    node: 4096
+    variable: 16
+  compressor:
+    cname: zstd
+    clevel: 7
+    shuffle: bitshuffle
+
+sources:
+  regional_core:
+    kind: grib_sequence
+    path_template: /rrfs/na/prod/rrfs.{date:%Y%m%d}/{cycle:02d}/rrfs.t{cycle:02d}z.prslev.f{lead:03d}.conus.grib2
+    iterator:
+      dates:
+        start: "2024-05-01"
+        end: "2024-05-31"
+      cycles: [0, 6, 12, 18]          # Adjust to the RRFS cycles you actually have archived
+      lead_hours: range(0, 49, 1)     # 0–48 h forecasts; trim or extend as needed
+    loader:
+      engine: cfgrib
+      backend_kwargs:
+        filter_by_keys:
+          typeOfLevel: isobaricInhPa
+        encoding: {}
+      chunks:
+        time: 1
+    variables:
+      state:
+        - "t"                         # Map GRIB shortnames via loader renaming if necessary
+        - "u"
+        - "v"
+        - "q"
+      surface:
+        - "2t"
+        - "10u"
+        - "10v"
+        - "msl"
+      diagnostics:
+        - "tp"
+    grid:
+      projection: lambert
+      nx: 1799                        # Replace with RRFS grid dimensions from the GRIB metadata
+      ny: 1059
+      dx_km: 3.0
+      dy_km: 3.0
+      lat_0: 38.5
+      lon_0: -97.5
+      lat_1: 38.5
+      lat_2: 38.5
+
+recipe:
+  cutout:
+    - dataset: ${sources.regional_core.path_template}
+      thinning: 1
+      role: core
+  adjust: calendar
+  min_distance_km: 0
+  write_cutout_mask: false
+
+features:
+  forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "sin_julian_day"
+    - "lsm"
+    - "z"
+  diagnostics:
+    - "tp"
+
+normalizer:
+  default: mean-std
+  std:
+    - "tp"
+  none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "sin_julian_day"
+    - "lsm"
+    - "z"
+
+outputs:
+  metadata:
+    created_by: anemoi-data example
+    notes:
+      - "RRFS GRIB2 provides both core domain and lateral boundary data."
