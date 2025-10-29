@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import MigrationMetadata
 from anemoi.models.migrations import MigrationContext
+from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -20,9 +20,9 @@ metadata = MigrationMetadata(
 )
 # <-- END DO NOT CHANGE
 
+
 def migrate_setup(context: MigrationContext) -> None:
-    """
-    Migrate setup callback to be run before loading the checkpoint.
+    """Migrate setup callback to be run before loading the checkpoint.
 
     Parameters
     ----------
@@ -32,17 +32,15 @@ def migrate_setup(context: MigrationContext) -> None:
     context.move_attribute(
         "anemoi.training.schemas.hardware.HardwareSchema", "anemoi.training.schemas.system.HardwareSchema"
     )
-    context.move_attribute(
-        "anemoi.training.schemas.hardware.FilesSchema", "anemoi.training.schemas.system.InputSchema"
-    )
+    context.move_attribute("anemoi.training.schemas.hardware.FilesSchema", "anemoi.training.schemas.system.InputSchema")
     context.move_attribute(
         "anemoi.training.schemas.hardware.PathsSchema", "anemoi.training.schemas.system.OutputSchema"
     )
     context.move_module("anemoi.training.schemas.hardware", "anemoi.training.schemas.system")
 
+
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
-
 
     Parameters
     ----------
@@ -59,7 +57,6 @@ def migrate(ckpt: CkptType) -> CkptType:
 
 def rollback(ckpt: CkptType) -> CkptType:
     """Rollback the checkpoint.
-
 
     Parameters
     ----------
