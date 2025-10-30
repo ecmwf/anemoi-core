@@ -91,7 +91,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             in_channels_src=self.num_channels,
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
+            out_channels_dst=self.output_dim,
             sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -128,15 +128,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_out = (
             einops.rearrange(
                 x_out,
-                "(batch ensemble grid) vars -> batch ensemble grid vars",
+                "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
+                time=self.multi_out,
             )
             .to(dtype=dtype)
             .clone()
         )
 
-        # residual connection (just for the prognostic variables)
+        # residual connection 
+        # add time dimension and extend along output steps
+        x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
+        # unly use for the prognostic variables)
         x_out[..., self._internal_output_idx] += x_skip[..., self._internal_input_idx]
 
         for bounding in self.boundings:

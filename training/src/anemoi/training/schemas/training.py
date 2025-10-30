@@ -181,6 +181,12 @@ class GraphNodeAttributeScalerSchema(BaseModel):
     norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
+class OutputStepScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.OutputStepScaler"] = Field(..., alias="_target_")
+    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
+    "Normalisation method applied to the weights."
+    weights: list[float] = Field(example=[1.0, 1.0])
+    "Weights for each output step"
 
 class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler"] = Field(
@@ -207,6 +213,7 @@ ScalerSchema = (
     | TendencyScalerSchema
     | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
+    | OutputStepScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
 )
 
@@ -324,8 +331,11 @@ class BaseTrainingSchema(BaseModel):
     precision: str = Field(default="16-mixed")
     "Precision"
     multistep_input: PositiveInt = Field(example=2)
-    """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""
+    """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
+    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
+    multistep_output: PositiveInt = Field(example=1)
+    """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
+    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)]."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""

@@ -104,7 +104,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = max(rollout_value, val_rollout)
 
         multi_step = self.config.training.multistep_input
-        return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
+        multi_out = self.config.training.multistep_output
+        time_range = multi_step + rollout * multi_out
+        
+        return [self.timeincrement * mstep for mstep in range(time_range)]
 
     def add_trajectory_ids(self, data_reader: Callable) -> Callable:
         """Determine an index of forecast trajectories associated with the time index and add to a data_reader object.

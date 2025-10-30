@@ -62,6 +62,7 @@ class BaseGraphModel(nn.Module):
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
         self.multi_step = model_config.training.multistep_input
+        self.multi_out = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
@@ -85,6 +86,7 @@ class BaseGraphModel(nn.Module):
         self._internal_input_idx = data_indices.model.input.prognostic
         self._internal_output_idx = data_indices.model.output.prognostic
         self.input_dim = self._calculate_input_dim()
+        self.output_dim = self._calculate_output_dim()
         self.input_dim_latent = self._calculate_input_dim_latent()
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
@@ -121,6 +123,9 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim(self):
         return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+
+    def _calculate_output_dim(self, model_config):
+        return self.multi_out * self.num_output_channels
 
     def _calculate_input_dim_latent(self):
         return self.node_attributes.attr_ndims[self._graph_name_hidden]

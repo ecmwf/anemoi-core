@@ -232,6 +232,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.is_first_step = True
         self.multi_step = config.training.multistep_input
+        self.multi_out = config.training.multistep_output
         self.lr = (
             config.hardware.num_nodes
             * config.hardware.num_gpus_per_node
