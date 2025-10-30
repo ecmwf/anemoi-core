@@ -124,7 +124,7 @@ class BaseGraphModel(nn.Module):
     def _calculate_input_dim(self):
         return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
-    def _calculate_output_dim(self, model_config):
+    def _calculate_output_dim(self):
         return self.multi_out * self.num_output_channels
 
     def _calculate_input_dim_latent(self):
