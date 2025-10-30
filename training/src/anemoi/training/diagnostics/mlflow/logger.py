@@ -577,8 +577,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
     def log_hyperparams(
         self,
         params: dict[str, Any] | Namespace,
-        *,
-        expand_keys: list[str] | None = None,
     ) -> None:
         """Overwrite the log_hyperparams method.
 
@@ -590,19 +588,27 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         ----------
         params : dict[str, Any] | Namespace
             params to log
-        expand_keys : list[str] | None, optional
-            keys to expand within params. Any key being expanded will
-            have lists converted according to `expand_iterables`,
-            by default None.
         """
-        self.log_hyperparams_in_mlflow(
-            self.experiment,
-            self.run_id,
-            params,
-            expand_keys=expand_keys,
-            log_hyperparams=self._flag_log_hparams,
-            max_params_length=self._max_params_length,
-        )
+        if self._flag_log_hparams:
+            params = _convert_params(params)
+
+            # this is needed to resolve optional missing config values to a string, instead of raising a missing error
+            if config := params.get("config"):
+                params["config"] = config.model_dump(by_alias=True)
+
+            self.log_hyperparams_as_mlflow_artifact(
+                client=self.experiment,
+                run_id=self.run_id,
+                params=params,
+            )
+            self.log_hyperparams_in_mlflow(
+                self.experiment,
+                self.run_id,
+                params,
+                expand_keys=self.expand_hyperparams,
+                max_params_length=self._max_params_length,
+            )
+
 
     @rank_zero_only
     def finalize(self, status: str = "success") -> None:
@@ -625,7 +631,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         params: dict[str, Any] | Namespace,
         *,
         expand_keys: list[str] | None = None,
-        log_hyperparams: bool | None = True,
         clean_params: bool = True,
         max_params_length: int | None = MAX_PARAMS_LENGTH,
     ) -> None:
@@ -647,58 +652,49 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             keys to expand within params. Any key being expanded will
             have lists converted according to `expand_iterables`,
             by default None.
-        log_hyperparams : bool | None, optional
-            Whether to log hyperparameters, by default True.
         max_params_length: int | None, optional
             Maximum number of params to be logged to Mlflow
         """
-        if log_hyperparams:
-            params = _convert_params(params)
+        import mlflow
+        from mlflow.entities import Param
 
-            # this is needed to resolve optional missing config values to a string, instead of raising a missing error
-            if config := params.get("config"):
-                params["config"] = config.model_dump(by_alias=True)
+        try:  # Check maximum param value length is available and use it
+            truncation_length = mlflow.utils.validation.MAX_PARAM_VAL_LENGTH
+        except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
+            truncation_length = 250  # Historical default value
 
-            import mlflow
-            from mlflow.entities import Param
+        cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
 
-            try:  # Check maximum param value length is available and use it
-                truncation_length = mlflow.utils.validation.MAX_PARAM_VAL_LENGTH
-            except AttributeError:  # Fallback (in case of MAX_PARAM_VAL_LENGTH not available)
-                truncation_length = 250  # Historical default value
+        expanded_params = {}
+        params = params.copy()
 
-            cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
-
-            expanded_params = {}
-            params = params.copy()
-
-            for key in expand_keys or []:
-                if key in params:
-                    expanded_params.update(
-                        expand_iterables(params.pop(key), size_threshold=None, delimiter="."),
-                    )
-            expanded_params.update(params)
-
-            expanded_params = _flatten_dict(
-                expanded_params,
-                delimiter=".",
-            )  # Flatten dict with '.' to not break API queries
-            if clean_params:
-                expanded_params = clean_config_params(expanded_params)
-
-            LOGGER.info("Logging %s parameters", len(expanded_params))
-            if len(expanded_params) > max_params_length:
-                msg = (
-                    f"Too many params: {len(expanded_params)} > {max_params_length}",
-                    "Please revisit the fields being logged and add redundant or irrelevant "
-                    "ones to the clean_config_params function.",
+        for key in expand_keys or []:
+            if key in params:
+                expanded_params.update(
+                    expand_iterables(params.pop(key), size_threshold=None, delimiter="."),
                 )
-                raise ValueError(msg)
+        expanded_params.update(params)
 
-            # Truncate parameter values.
-            params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
-            for idx in range(0, len(params_list), 100):
-                client.log_batch(run_id=run_id, params=params_list[idx : idx + 100])
+        expanded_params = _flatten_dict(
+            expanded_params,
+            delimiter=".",
+        )  # Flatten dict with '.' to not break API queries
+        if clean_params:
+            expanded_params = clean_config_params(expanded_params)
+
+        LOGGER.info("Logging %s parameters", len(expanded_params))
+        if len(expanded_params) > max_params_length:
+            msg = (
+                f"Too many params: {len(expanded_params)} > {max_params_length}",
+                "Please revisit the fields being logged and add redundant or irrelevant "
+                "ones to the clean_config_params function.",
+            )
+            raise ValueError(msg)
+
+        # Truncate parameter values.
+        params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]
+        for idx in range(0, len(params_list), 100):
+            client.log_batch(run_id=run_id, params=params_list[idx : idx + 100])
 
     @staticmethod
     def log_hyperparams_as_mlflow_artifact(

@@ -18,6 +18,7 @@ from typing import Any
 from typing import Literal
 
 from pytorch_lightning.loggers.mlflow import _convert_params
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -220,32 +221,36 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
     def _init_authentication(self) -> None:
         self.auth = NoAuth()
 
-    @classmethod
-    def log_hyperparams_in_mlflow(
-        cls,
-        client: MlflowClient,
-        run_id: str,
+    @rank_zero_only
+    def log_hyperparams(
+        self,
         params: dict[str, Any] | Namespace,
-        *,
-        expand_keys: list[str] | None = None,
-        log_hyperparams: bool | None = True,
-        clean_params: bool = True,
-        max_params_length: int | None = MAX_PARAMS_LENGTH,
     ) -> None:
-        """Log hyperparameters to MLflow server.
+        """Overwrite the log_hyperparams method.
 
-        Updated version of BaseAnemoiMLflowLogger's method to not log
-        hyperparameters -- they will just be written out to .json in
-        log_hyperparams_as_mlflow_artifact.
+        Note:
+            AzureML has a strict 200 parameter limit. Since there is no easy
+            way for users to limit the number of parameters they are logging,
+            this method does not log each individual parameter. It only logs
+            all hyperparameters together in a single .json artifact.
+
+        Parameters
+        ----------
+        params : dict[str, Any] | Namespace
+            params to log
         """
-        if log_hyperparams:
+        if self._flag_log_hparams:
             params = _convert_params(params)
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
                 params["config"] = config.model_dump(by_alias=True)
 
-            cls.log_hyperparams_as_mlflow_artifact(client=client, run_id=run_id, params=params)
+            self.log_hyperparams_as_mlflow_artifact(
+                client=self.experiment,
+                run_id=self.run_id,
+                params=params,
+            )
 
     @staticmethod
     def log_hyperparams_as_mlflow_artifact(
