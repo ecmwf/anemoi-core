@@ -353,6 +353,9 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         if self.offline:
             # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
             self.tracking_uri = None
+            if save_dir is None:
+                # otherwise, by default we create a dir called "None"... not ideal
+                save_dir = "./mlruns"
 
         else:
             # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
