@@ -137,7 +137,7 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
         run_id: str | None = None,
         fork_run_id: str | None = None,
         offline: bool | None = False,
-        authentication: bool | None = None,
+        authentication: bool | None = False,
         system: bool | None = True,
         terminal: bool | None = False,
         log_hyperparams: bool | None = True,
@@ -201,15 +201,15 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             project_name=project_name,
             run_name=run_name,
             tracking_uri=tracking_uri,
-            save_dir=None,
+            save_dir=save_dir,
             log_model=log_model,
             prefix=prefix,
             run_id=run_id,
             fork_run_id=fork_run_id,
-            offline=False,
-            authentication=False,
+            offline=offline,
+            authentication=authentication,
             system=system,
-            terminal=False,
+            terminal=terminal,
             log_hyperparams=log_hyperparams,
             expand_hyperparams=expand_hyperparams,
             on_resume_create_child=on_resume_create_child,
@@ -217,12 +217,7 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             http_max_retries=http_max_retries,
         )
 
-    def _init_authentication(
-        self,
-        tracking_uri: str,
-        authentication: bool | None,
-        offline: bool,
-    ) -> None:
+    def _init_authentication(self) -> None:
         self.auth = NoAuth()
 
     @classmethod

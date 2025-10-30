@@ -310,6 +310,8 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         http_max_retries: int | None, optional
             Maximum number of retries for MLflow HTTP requests, default 35
         """
+        self.authentication = authentication
+        self.offline = offline
         self.log_system = system
         self.log_terminal = terminal
         self.expand_hyperparams = expand_hyperparams if expand_hyperparams else ["config"]
@@ -343,43 +345,37 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         # Report max parameters length
         LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
 
-        self._init_authentication(
-            tracking_uri=tracking_uri,
-            authentication=authentication,
-            offline=offline,
-        )
+        self.tracking_uri = tracking_uri
+        if (self._resumed or self._forked) and self.offline:
+            self.tracking_uri = save_dir
+
+        # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
+        if self.offline:
+            # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
+            self.tracking_uri = None
+
+        else:
+            # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
+            # saving dir and save all artifacts/metrics to the remote server database
+            LOGGER.info("AnemoiMLFlow logging to %s", self.tracking_uri)
+            save_dir = None
+
         if save_dir is not None:
             Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-        # Set a temporary working tracking_uri just for the get_mlflow_run_params
-        # for this special case
-        tracking_uri_for_mlflow = tracking_uri
-        if (self._resumed or self._forked) and offline:
-            tracking_uri_for_mlflow = save_dir
-
+        self._init_authentication()
         run_id, run_name, tags = self._get_mlflow_run_params(
             project_name=project_name,
             run_name=run_name,
             config_run_id=run_id,
             fork_run_id=fork_run_id,
-            tracking_uri=tracking_uri_for_mlflow,
             on_resume_create_child=on_resume_create_child,
         )
-        # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
-        if offline:
-            # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
-            tracking_uri = None
-
-        else:
-            # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
-            # saving dir and save all artifacts/metrics to the remote server database
-            LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
-            save_dir = None
 
         super().__init__(
             experiment_name=experiment_name,
             run_name=run_name,
-            tracking_uri=tracking_uri,
+            tracking_uri=self.tracking_uri,
             tags=tags,
             save_dir=save_dir,
             log_model=log_model,
@@ -392,12 +388,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         self._logged_metrics = FixedLengthSet(maxlen=2000)  # Track (key, step)
 
     @abstractmethod
-    def _init_authentication(
-        self,
-        tracking_uri: str,
-        authentication: bool | None,
-        offline: bool,
-    ) -> None:
+    def _init_authentication(self) -> None:
         """Initialize authentication specific to each logger."""
 
     def _check_dry_run(self, run: mlflow.entities.Run) -> None:
@@ -435,7 +426,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         run_name: str,
         config_run_id: str,
         fork_run_id: str,
-        tracking_uri: str,
         on_resume_create_child: bool,
     ) -> tuple[str | None, str, dict[str, Any]]:
         run_id = None
@@ -454,7 +444,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             import mlflow
 
             self.auth.authenticate()
-            mlflow_client = mlflow.MlflowClient(tracking_uri)
+            mlflow_client = mlflow.MlflowClient(self.tracking_uri)
 
             # This block is used when a run ID is specified with child runs option activated
             if config_run_id and on_resume_create_child and not fork_run_id:
@@ -772,24 +762,19 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
 
 class AnemoiMLflowLogger(BaseAnemoiMLflowLogger):
-    def _init_authentication(
-        self,
-        tracking_uri: str,
-        authentication: bool | None,
-        offline: bool,
-    ) -> None:
+    def _init_authentication(self) -> None:
         """Authentication for a standard MLFlow server."""
-        enabled = authentication and not offline
-        self.auth = TokenAuth(tracking_uri, enabled=enabled)
+        enabled = self.authentication and not self.offline
+        self.auth = TokenAuth(self.tracking_uri, enabled=enabled)
 
         if rank_zero_only.rank == 0:
-            if offline:
+            if self.offline:
                 LOGGER.info("MLflow is logging offline.")
             else:
                 LOGGER.info(
                     "MLflow token authentication %s for %s",
                     "enabled" if enabled else "disabled",
-                    tracking_uri,
+                    self.tracking_uri,
                 )
                 self.auth.authenticate()
-                health_check(tracking_uri)
+                health_check(self.tracking_uri)
