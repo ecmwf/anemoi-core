@@ -20,7 +20,6 @@ noise_injector:
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
-    #_target_: anemoi.models.layers.normalization.CompiledLayerNorm
     _target_: torch.nn.LayerNorm
   Linear:
     #_target_: anemoi.models.layers.normalization.CompiledLinear
@@ -59,6 +58,12 @@ processor:
       _target_: torch.nn.Linear # These reflect the defaults, but are shown here for clarity
     Activation:
       _target_: torch.nn.GELU
+    QueryNorm:
+      _target_: ${model.layer_kernels.QueryNorm._target_}
+      bias: False
+    KeyNorm:
+      _target_:  ${model.layer_kernels.KeyNorm._target_}
+      bias: False
 
 
 encoder:
