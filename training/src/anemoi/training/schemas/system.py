@@ -130,3 +130,8 @@ class SystemSchema(BaseModel):
     "Definitions of specific input and output artifacts used relative to the directories defined in `output`."
     output: OutputSchema
     "High-level directory structure describing where data is read from."
+
+    def model_post_init(self, _: Any) -> None:
+        """Set default paths for input artifacts based on output configuration."""
+        if self.input.graph is None:
+            self.input.graph = self.output.root / "graph.pt"
