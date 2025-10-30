@@ -32,7 +32,7 @@ log:
     offline: False
     log_model: False
     project: 'Anemoi'
-    entity: ???
+    entity: example
     # logger options (these probably come with some overhead)
     gradients: False
     parameters: False
@@ -52,7 +52,7 @@ log:
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
     http_max_retries: 35
-    max_params_length: 2000
+    max_params_length: 10000
   interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True

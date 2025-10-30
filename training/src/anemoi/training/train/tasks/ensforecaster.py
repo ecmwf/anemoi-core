@@ -367,10 +367,10 @@ class GraphEnsForecaster(BaseGraphModule):
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic
 
-    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
-        batch[0] = super().allgather_batch(batch[0])
+    def allgather_batch(self, batch: torch.Tensor, grid_indices, grid_dim: int) -> torch.Tensor:
+        batch[0] = super().allgather_batch(batch[0], grid_indices, grid_dim)
         if len(batch) == 2:
-            batch[1] = super().allgather_batch(batch[1])
+            batch[1] = super().allgather_batch(batch[1], grid_indices, grid_dim)
         return batch
 
     def training_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> torch.Tensor | dict:
