@@ -55,7 +55,7 @@ class WeightedAreaRelatetSortedIntensityLoss(BaseWeightedLoss):
             if key in kwargs: setattr(self, key, kwargs[key]) 
 
         #INFO:mask currently hard coded 
-        self.register_buffer("neighbor_index", self._generate_index_tensor(5), persistent=True)
+        self.register_buffer("neighbor_index", self._generate_index_tensor(7), persistent=True)
 
         self.register_buffer("original_node_weights", node_weights, persistent=True)
 
