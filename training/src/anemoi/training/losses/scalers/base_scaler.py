@@ -12,11 +12,12 @@ import logging
 import sys
 from abc import ABC
 from abc import abstractmethod
-from typing import TYPE_CHECKING
-from typing import Optional
 
-import torch
 import numpy as np
+import torch
+
+from anemoi.models.interface import AnemoiModelInterface
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.utils.enums import OutputTensorDim
 from anemoi.training.utils.enums import TensorDim
 
@@ -165,12 +166,13 @@ class BaseUpdatingScaler(BaseScaler):
         scale_dims = tuple(x.value for x in self.scale_dims)
         return scale_dims, scalar_values
 
+
 class TimeVaryingScaler(BaseScaler):
 
     @abstractmethod
-    def get_scaling_values(self, lead_time: Optional[int] = None, **kwargs) -> np.ndarray: ...
+    def get_scaling_values(self, lead_time: int | None = None, **kwargs) -> np.ndarray: ...
 
-    def get_time_varying_scaler(self, lead_time: Optional[int] = None, **kwargs) -> SCALER_DTYPE:
+    def get_time_varying_scaler(self, lead_time: int | None = None, **kwargs) -> TENSOR_SPEC:
         scaler_values = self.get_scaling_values(lead_time, **kwargs)
         scaler_values = self.normalise(scaler_values)
         scale_dims = tuple(x.value for x in self.scale_dims)

@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import torch
 
@@ -76,7 +75,7 @@ class LeadTimeScaler(TimeVaryingScaler):
         msg = f"decay_type {self.decay_type} not supported"
         raise NotImplementedError(msg)
 
-    def get_scaling_values(self, lead_time: Optional[int] = None) -> torch.Tensor:
+    def get_scaling_values(self, lead_time: int | None = None) -> torch.Tensor:
         if lead_time is None:
             return torch.tensor([1])
         if self.inverse:

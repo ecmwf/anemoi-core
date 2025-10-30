@@ -80,7 +80,7 @@ def get_loss_function(
     scalers = scalers or {}
     found_scalers = set(scalers_to_include).intersection(scalers.keys())
     for key in found_scalers:
-        warning_msg = f"Initializing non-delayed or time-varying scalers {list(found_scalers)}. "
+        warning_msg = f"Initializing non-updating or time-varying scalers {list(found_scalers)}. "
         LOGGER.warning(warning_msg)
         if key in ["stdev_tendency", "var_tendency"]:
             for var_key, idx in data_indices.model.output.name_to_index.items():
