@@ -612,7 +612,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
                 max_params_length=self._max_params_length,
             )
 
-
     @rank_zero_only
     def finalize(self, status: str = "success") -> None:
         # save the last obtained refresh token to disk
