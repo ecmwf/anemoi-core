@@ -398,7 +398,7 @@ def test_lead_time_decay_loss_scaling(
     ):
         for name, scaler_builder in time_scalers.items():
             scalers[name] = scaler_builder.get_time_varying_scaler(lead_time=lead_time)
-            if loss.scaler.has_scaler(name):
+            if name in loss.scaler:
                 loss.update_scaler(scaler=scalers[name][1], name=name)
             else:
                 loss.add_scaler(*scalers[name], name=name)
