@@ -185,6 +185,7 @@ class BaseLoss(nn.Module, ABC):
             space_time_summed,
             dim=(
                 TensorDim.BATCH_SIZE,
+                TensorDim.TIME,
                 TensorDim.ENSEMBLE_DIM,
             ),
         ).squeeze()

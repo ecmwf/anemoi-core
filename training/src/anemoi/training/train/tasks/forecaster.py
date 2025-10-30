@@ -16,6 +16,8 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.base import BaseGraphModule
 
+from anemoi.training.utils.masks import NoOutputMask #TODO: remove when boundary handling for multi-step output is implemented
+
 if TYPE_CHECKING:
     from collections.abc import Generator
     from collections.abc import Mapping
