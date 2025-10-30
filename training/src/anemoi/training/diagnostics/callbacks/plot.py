@@ -254,12 +254,26 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
-
-            # TODO fix this and add back in
-            # # gather tensors if necessary
-            # batch = pl_module.allgather_batch(batch)
-            # # output: [loss, [pred1, pred2, ...]], gather predictions for plotting
-            # output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
+            # gather tensors if necessary
+            batch = {
+                dataset: pl_module.allgather_batch(batch[dataset], pl_module.grid_indices[dataset], pl_module.grid_dim)
+                for dataset in batch
+            }
+            # output: [loss, [pred_dict1, pred_dict2, ...]], gather predictions for plotting
+            output = [
+                output[0],
+                [
+                    {
+                        dataset: pl_module.allgather_batch(
+                            pred[dataset],
+                            pl_module.grid_indices[dataset],
+                            pl_module.grid_dim,
+                        )
+                        for dataset in pred
+                    }
+                    for pred in output[1]
+                ],
+            ]
 
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
