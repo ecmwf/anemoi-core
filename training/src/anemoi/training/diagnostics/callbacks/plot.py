@@ -65,6 +65,7 @@ class BasePlotCallback(Callback, ABC):
         super().__init__()
         self.config = config
         self.save_basedir = config.hardware.paths.plots
+        self.dataset_name = None
 
         self.post_processors = None
         self.latlons = None
@@ -186,6 +187,7 @@ class BasePlotCallback(Callback, ABC):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -252,23 +254,27 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
-            # gather tensors if necessary
-            batch = pl_module.allgather_batch(batch)
-            # output: [loss, [pred1, pred2, ...]], gather predictions for plotting
-            output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
+
+            # TODO fix this and add back in
+            # # gather tensors if necessary
+            # batch = pl_module.allgather_batch(batch)
+            # # output: [loss, [pred1, pred2, ...]], gather predictions for plotting
+            # output = [output[0], [pl_module.allgather_batch(pred) for pred in output[1]]]
 
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for post_processor in self.post_processors.processors.values():
-                if hasattr(post_processor, "nan_locations"):
-                    post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
-            self.post_processors = self.post_processors.cpu()
+            for dataset_name in self.post_processors:
+                for post_processor in self.post_processors[dataset_name].processors.values():
+                    if hasattr(post_processor, "nan_locations"):
+                        post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
+                self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             self.plot(
                 trainer,
                 pl_module,
+                dataset_name,
                 output,
                 batch,
                 batch_idx,
@@ -299,6 +305,7 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        # dataset_name: str,
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
@@ -732,6 +739,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         config: OmegaConf,
         parameter_groups: dict[dict[str, list[str]]],
         every_n_batches: int | None = None,
+        dataset_name: str = "data",
     ) -> None:
         """Initialise the PlotLoss callback.
 
@@ -748,6 +756,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         super().__init__(config, every_n_batches=every_n_batches)
         self.parameter_names = None
         self.parameter_groups = parameter_groups
+        self.dataset_name = dataset_name
         if self.parameter_groups is None:
             self.parameter_groups = {}
 
@@ -854,6 +863,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
@@ -862,8 +872,9 @@ class PlotLoss(BasePerBatchPlotCallback):
         logger = trainer.logger
         _ = batch_idx
 
-        parameter_names = list(pl_module.data_indices.model.output.name_to_index.keys())
-        parameter_positions = list(pl_module.data_indices.model.output.name_to_index.values())
+        data_indices = pl_module.data_indices[dataset_name]
+        parameter_names = list(data_indices.model.output.name_to_index.keys())
+        parameter_positions = list(data_indices.model.output.name_to_index.values())
         # reorder parameter_names by position
         self.parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
         self.metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
@@ -874,7 +885,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             metadata_variables=self.metadata_variables,
         )
         self.parameter_names = [self.parameter_names[i] for i in argsort_indices]
-        if not isinstance(self.loss, BaseLoss):
+        if not isinstance(self.loss[dataset_name], BaseLoss):
             LOGGER.warning(
                 "Loss function must be a subclass of BaseLoss, or provide `squash`.",
                 RuntimeWarning,
@@ -883,14 +894,14 @@ class PlotLoss(BasePerBatchPlotCallback):
         rollout = getattr(pl_module, "rollout", 0)
 
         for rollout_step in range(rollout):
-            y_hat = outputs[1][rollout_step]
-            y_true = batch[
+            y_hat = outputs[1][rollout_step][dataset_name]
+            y_true = batch[dataset_name][
                 :,
                 pl_module.multi_step + rollout_step,
                 ...,
-                pl_module.data_indices.data.output.full,
+                data_indices.data.output.full,
             ]
-            loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
+            loss = self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
@@ -918,11 +929,14 @@ class PlotLoss(BasePerBatchPlotCallback):
             self.loss = copy.deepcopy(pl_module.loss)
 
             # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
-            if (
-                hasattr(self.loss.scaler, "nan_mask_weights")
-                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-            ):
-                self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
+            for dataset in self.loss:
+                if (
+                    hasattr(self.loss[dataset].scaler, "nan_mask_weights")
+                    and self.loss[dataset].scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+                ):
+                    self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
+                        self.loss.scaler.nan_mask_weights,
+                    )
 
             super().on_validation_batch_end(
                 trainer,
@@ -939,32 +953,35 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     def process(
         self,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         outputs: list,
         batch: torch.Tensor,
     ) -> tuple[np.ndarray, np.ndarray]:
 
         if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
+            self.latlons = np.rad2deg(pl_module.latlons_data[dataset_name].clone().detach().cpu().numpy())
 
         input_tensor = (
-            batch[
+            batch[dataset_name][
                 :,
                 pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
                 ...,
-                pl_module.data_indices.data.output.full,
+                pl_module.data_indices[dataset_name].data.output.full,
             ]
             .detach()
             .cpu()
         )
-        data = self.post_processors(input_tensor)[self.sample_idx]
+        data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
+                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                    self.sample_idx : self.sample_idx + 1
+                ]
                 for x in outputs[1]
             ),
         )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
+        output_tensor = pl_module.output_mask[dataset_name].apply(output_tensor, dim=2, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask[dataset_name].apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
         return data, output_tensor
@@ -983,6 +1000,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
+        dataset_name: str = "data",
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -1016,6 +1034,8 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.per_sample = per_sample
         self.colormaps = colormaps
 
+        self.dataset_name = dataset_name
+
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
             self.precip_and_related_fields,
@@ -1026,6 +1046,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
@@ -1034,16 +1055,20 @@ class PlotSample(BasePlotAdditionalMetrics):
         logger = trainer.logger
 
         # Build dictionary of indices and parameters to be plotted
-        diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
+        diagnostics = (
+            []
+            if self.config.data.datasets[dataset_name].diagnostic is None
+            else self.config.data.datasets[dataset_name].diagnostic
+        )
         plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (
+            pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                 name,
                 name not in diagnostics,
             )
             for name in self.parameters
         }
 
-        data, output_tensor = self.process(pl_module, outputs, batch)
+        data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
         local_rank = pl_module.local_rank
         rollout = getattr(pl_module, "rollout", 0)
