@@ -731,17 +731,17 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
         # Get the path to the checkpoint file saved by the callback
         model_path = checkpoint_callback.last_model_path or checkpoint_callback.best_model_path
-        if not model_path or not Path.exists(model_path):
+        if not model_path or not Path(model_path).exists():
             LOGGER.warning("after_save_checkpoint failed: Checkpoint path not found.")
             return
 
         # Use a temporary directory to handle the sanitized file
         with tempfile.TemporaryDirectory() as tmpdir:
             # 1. Create a safe filename by replacing the colon
-            safe_filename = Path(model_path).name.replace(":", "-")
+            safe_filename = Path(Path(model_path).name.replace(":", "-"))
 
             # 2. Create the full path for the temporary, sanitized file
-            tmp_model_path = tmpdir / safe_filename
+            tmp_model_path = Path(tmpdir) / safe_filename
 
             # 3. Copy the original checkpoint to this new temporary path
             shutil.copy2(model_path, tmp_model_path)
