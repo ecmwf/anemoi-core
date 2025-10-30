@@ -139,8 +139,8 @@ class MultiHeadSelfAttention(nn.Module):
         self.projection = linear(embed_dim, embed_dim, bias=True)
 
         if self.qk_norm:
-            self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
-            self.k_norm = layer_kernels["KeyNorm"](self.head_dim)
+            self.q_norm = layer_kernels.QueryNorm(self.head_dim)
+            self.k_norm = layer_kernels.KeyNorm(self.head_dim)
 
     def set_attention_function(self):
         attn_funcs = {

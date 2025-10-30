@@ -53,19 +53,21 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
         Container with layer factories.
     """
     # If self.layer_kernels entry is missing from the config, use torch.nn kernels
+
+    #changing default kernels to torch.nn.LayerNorm because the default precision for this branch is explicit bf16 precision
     default_kernels = {
         "Linear": {"_target_": "torch.nn.Linear"},
         "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
-        #"Linear": {"_target_": "anemoi.models.layers.normalization.CompiledLinear"},
-        #"LayerNorm": {"_target_": "anemoi.models.layers.normalization.CompiledLayerNorm"},
         "Activation": {"_target_": "torch.nn.GELU"},
         "QueryNorm": {
-            "_target_": "anemoi.models.layers.normalization.CompiledLayerNorm",
+            #"_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+            "_target_": "torch.nn.LayerNorm",
             "_partial_": True,
             "bias": False,
         },
         "KeyNorm": {
-            "_target_": "anemoi.models.layers.normalization.CompiledLayerNorm",
+            #"_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+            "_target_": "torch.nn.LayerNorm",
             "_partial_": True,
             "bias": False,
         },
