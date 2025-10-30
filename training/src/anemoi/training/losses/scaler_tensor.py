@@ -304,7 +304,6 @@ class ScaleTensor(nn.Module):
 
         return FrozenStateRecord()
 
-
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         """Update an existing scaler maintaining original dimensions.
 
