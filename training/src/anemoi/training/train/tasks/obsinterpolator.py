@@ -25,8 +25,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ObsGraphInterpolator(BaseGraphModule):
-    """ObsInterpolator: A graph neural network that leverages surface observations to inform interpolation between NWP states for fine-scale, high-frequency nowcasts of atmospheric variables (see https://arxiv.org/abs/2509.00017)
-    """
+    """ObsInterpolator: A graph neural network that leverages surface observations to inform interpolation between NWP states for fine-scale, high-frequency nowcasts of atmospheric variables (see https://arxiv.org/abs/2509.00017)"""
 
     def __init__(
         self,
@@ -68,9 +67,15 @@ class ObsGraphInterpolator(BaseGraphModule):
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
-        self.known_future_variables = list(itemgetter(*config.training.known_future_variables)(
-            data_indices.data.input.name_to_index,
-        )) if len(config.training.known_future_variables) else []
+        self.known_future_variables = (
+            list(
+                itemgetter(*config.training.known_future_variables)(
+                    data_indices.data.input.name_to_index,
+                ),
+            )
+            if len(config.training.known_future_variables)
+            else []
+        )
         if isinstance(self.known_future_variables, int):
             self.known_future_variables = [self.known_future_variables]
         self.multi_step = getattr(self.config["training"], "multistep_input", 1)
@@ -101,7 +106,7 @@ class ObsGraphInterpolator(BaseGraphModule):
         batch = self.model.pre_processors(batch)
         present, future = itemgetter(*self.boundary_times)(self.imap)
         obs = set([var.item() for var in self.data_indices.data.input.full]).difference(
-            set(self.known_future_variables)
+            set(self.known_future_variables),
         )
         x_init = batch[:, : self.multi_step][..., list(obs)]
         x_init_nwp = batch[:, 1][..., self.known_future_variables]
@@ -119,7 +124,7 @@ class ObsGraphInterpolator(BaseGraphModule):
         for interp_step in self.interp_times:
             # get the forcing information for the target interpolation time:
             target_forcing[..., : len(self.known_future_variables)] = batch[
-                :, self.imap[interp_step], :, :, self.known_future_variables
+                :, self.imap[interp_step], :, :, self.known_future_variables,
             ]
             target_forcing[..., -1] = (interp_step - future) / (future - present)
             x_with_intermediate_forcings = torch.cat([x_bound, target_forcing], dim=-1).unsqueeze(dim=1)

@@ -1,5 +1,5 @@
 import pytest
-import pytorch_lightning as pl 
+import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
@@ -11,17 +11,19 @@ from anemoi.training.train.tasks.obsinterpolator import ObsGraphInterpolator
 
 class DummyLoss(torch.nn.Module):
     """Minimal loss used via torch.utils.checkpoint in _step."""
+
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         return torch.mean((y_pred.squeeze() - y) ** 2)
 
 
 class SimpleObsModel:
     """Shape-aware minimal model used in _step test."""
+
     def __init__(self, num_output_vars: int):
         self.num_output_vars = num_output_vars
 
     def pre_processors(self, x: torch.Tensor) -> torch.Tensor:
-        return x  
+        return x
 
     def __call__(self, x: torch.Tensor, model_comm_group=None, grid_shard_shapes=None) -> torch.Tensor:
         B, _, E, G, _ = x.shape
@@ -36,6 +38,7 @@ def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollec
 
 class DummyModel:
     """Minimal stub for AnemoiModelInterface used by the task."""
+
     def __init__(self):
         self.called_with = None
 
@@ -72,8 +75,18 @@ def test_obsinterpolator_forward_pass_minimal():
 
 def test_obsinterpolator_init_logic(monkeypatch: pytest.MonkeyPatch):
     # Monkeypatch BaseGraphModule.__init__ to avoid heavy initialisation
-    def _stub_bgm_init(self, *, config, graph_data, truncation_data, statistics, statistics_tendencies,
-                       data_indices, metadata, supporting_arrays):
+    def _stub_bgm_init(
+        self,
+        *,
+        config,
+        graph_data,
+        truncation_data,
+        statistics,
+        statistics_tendencies,
+        data_indices,
+        metadata,
+        supporting_arrays,
+    ):
         # ensure Module internals are ready before assigning nn.Modules
         pl.LightningModule.__init__(self)
         self.config = config
@@ -89,8 +102,8 @@ def test_obsinterpolator_init_logic(monkeypatch: pytest.MonkeyPatch):
                 "multistep_input": 6,
                 "explicit_times": {"input": [0, 36], "target": [1, 2, 3, 4, 5, 6, 8, 10, 12, 18, 24, 30]},
                 "known_future_variables": ["U_10M_NWP", "V_10M_NWP", "TD_2M_NWP", "T_2M_NWP", "TOT_PREC_NWP"],
-            }
-        }
+            },
+        },
     )
 
     # Minimal variable space: 2 obs + 5 known-future
@@ -125,15 +138,25 @@ def test_obsinterpolator_init_logic(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_obsinterpolator_step_runs(monkeypatch: pytest.MonkeyPatch):
-    def _stub_bgm_init(self, *, config, graph_data, truncation_data, statistics, statistics_tendencies,
-                       data_indices, metadata, supporting_arrays):
+    def _stub_bgm_init(
+        self,
+        *,
+        config,
+        graph_data,
+        truncation_data,
+        statistics,
+        statistics_tendencies,
+        data_indices,
+        metadata,
+        supporting_arrays,
+    ):
         pl.LightningModule.__init__(self)
         self.config = config
         self.data_indices = data_indices
         self.model_comm_group = None
         self.grid_shard_shapes = None
         self.model = SimpleObsModel(num_output_vars=len(data_indices.data.input.name_to_index))
-        self.loss = DummyLoss() 
+        self.loss = DummyLoss()
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_bgm_init, raising=True)
 
@@ -143,8 +166,8 @@ def test_obsinterpolator_step_runs(monkeypatch: pytest.MonkeyPatch):
                 "multistep_input": 6,
                 "explicit_times": {"input": [0, 36], "target": [1, 2, 3]},
                 "known_future_variables": ["U_10M_NWP", "V_10M_NWP"],
-            }
-        }
+            },
+        },
     )
     name_to_index = {
         "U_10M_NWP": 0,
@@ -172,7 +195,7 @@ def test_obsinterpolator_step_runs(monkeypatch: pytest.MonkeyPatch):
 
     loss, metrics, y_preds = itp._step(batch=batch, batch_idx=0, validation_mode=False)
 
-    assert isinstance(loss, torch.Tensor) 
+    assert isinstance(loss, torch.Tensor)
     assert metrics == {}
     # y_pred is extended per batch element per interpolation step
     assert len(y_preds) == B * len(itp.interp_times)
