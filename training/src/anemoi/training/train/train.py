@@ -143,7 +143,8 @@ class AnemoiTrainer(ABC):
 
         Creates the graph in all workers.
         """
-        if (graph_filename := self.config.system.input.graph) is not None:
+        if (graph_filename := Path(self.config.system.input.graph)) is not None:
+            print(graph_filename)
             if graph_filename.exists() and not self.config.graph.overwrite:
                 from anemoi.graphs.utils import get_distributed_device
 
