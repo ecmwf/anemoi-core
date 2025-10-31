@@ -169,4 +169,3 @@ class ObsGraphInterpolator(BaseGraphModule):
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
         )
-

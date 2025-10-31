@@ -2,7 +2,6 @@ from typing import Any
 
 import pytest
 import pytorch_lightning as pl
-import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
