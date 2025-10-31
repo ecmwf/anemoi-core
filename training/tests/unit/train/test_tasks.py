@@ -14,14 +14,12 @@ from anemoi.training.train.tasks.obsinterpolator import ObsGraphInterpolator
 class DummyLoss(torch.nn.Module):
     """Minimal loss used via torch.utils.checkpoint in _step."""
 
-
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         return torch.mean((y_pred.squeeze() - y) ** 2)
 
 
 class SimpleObsModel:
     """Shape-aware minimal model used in _step test."""
-
 
     def __init__(self, num_output_vars: int):
         self.num_output_vars = num_output_vars
@@ -119,8 +117,6 @@ def test_obsinterpolator_init_logic(monkeypatch: pytest.MonkeyPatch) -> None:
                 "known_future_variables": ["U_10M_NWP", "V_10M_NWP", "TD_2M_NWP", "T_2M_NWP", "TOT_PREC_NWP"],
             },
         },
-            },
-        },
     )
 
     # Minimal variable space: 2 obs + 5 known-future
@@ -187,8 +183,6 @@ def test_obsinterpolator_step_runs(monkeypatch: pytest.MonkeyPatch) -> None:
                 "known_future_variables": ["U_10M_NWP", "V_10M_NWP"],
             },
         },
-            },
-        },
     )
     name_to_index = {
         "U_10M_NWP": 0,
@@ -215,7 +209,6 @@ def test_obsinterpolator_step_runs(monkeypatch: pytest.MonkeyPatch) -> None:
 
     loss, metrics, y_preds = itp._step(batch=batch, batch_idx=0, validation_mode=False)
 
-    assert isinstance(loss, torch.Tensor)
     assert isinstance(loss, torch.Tensor)
     assert metrics == {}
     # y_pred is extended per batch element per interpolation step
