@@ -54,7 +54,7 @@ class InputSchema(PydanticBaseModel):
 
 
 class CheckpointsSchema(BaseModel):
-    root: Path = Path("checkpoints")
+    root: Path
     "Root directory for saving checkpoint files."
     every_n_epochs: str = "anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}"
     "File name pattern for checkpoint files saved by epoch frequency."
@@ -63,17 +63,9 @@ class CheckpointsSchema(BaseModel):
     every_n_minutes: str = "anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}"
     "File name pattern for checkpoint files saved by time frequency (minutes)."
 
-    def model_post_init(self, _: Any) -> None:
-        self.expand_paths()
-
-    def expand_paths(self) -> None:
-        self.every_n_epochs = str(self.root / self.every_n_epochs)
-        self.every_n_train_steps = str(self.root / self.every_n_train_steps)
-        self.every_n_minutes = str(self.root / self.every_n_minutes)
-
 
 class Logs(PydanticBaseModel):
-    root: Path = Path("logs")
+    root: Path
     wandb: Path | None = None
     "Path to output wandb logs."
     mlflow: Path | None = None
@@ -81,21 +73,8 @@ class Logs(PydanticBaseModel):
     tensorboard: Path | None = None
     "Path to output tensorboard logs."
 
-    def model_post_init(self, _: Any) -> None:
-        self.expand_paths()
-
-    def expand_paths(self) -> None:
-        base = self.root
-        if self.wandb is None:
-            self.wandb = base / "wandb"
-        if self.mlflow is None:
-            self.mlflow = base / "mlflow"
-        if self.tensorboard is None:
-            self.tensorboard = base / "tensorboard"
-
-
 class OutputSchema(BaseModel):
-    root: Path = Path("output")
+    root: Path
     "Path to the output directory."
     logs: Logs | None = None
     "Logging directories."
@@ -105,22 +84,6 @@ class OutputSchema(BaseModel):
     "Path to the plots directory."
     profiler: Path | None
     "Path to the profiler directory."
-
-    def model_post_init(self, _: Any) -> None:
-        self.expand_paths()
-
-    def expand_paths(self) -> None:
-
-        if self.plots:
-            self.plots = self.root / self.plots
-        if self.profiler:
-            self.profiler = self.root / self.profiler
-        if self.logs:
-            self.logs.root = self.root / self.logs.root
-            self.logs.expand_paths()
-
-        self.checkpoints.root = self.root / self.checkpoints.root
-        self.checkpoints.expand_paths()
 
 
 class SystemSchema(BaseModel):

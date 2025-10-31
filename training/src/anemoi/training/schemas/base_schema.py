@@ -36,11 +36,39 @@ from .datamodule import DataModuleSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
 from .training import TrainingSchema
-
+from pathlib import Path
 _object_setattr = _model_construction.object_setattr
 
 LOGGER = logging.getLogger(__name__)
 
+
+def expand_paths(config):
+    output_config = config.system.output
+    root_output_path = Path(output_config.root)
+    # OutputSchema
+    if output_config.plots:
+        config.system.output.plots = root_output_path / output_config.plots
+    if output_config.profiler:
+        config.system.output.profiler = root_output_path / output_config.profiler
+    if output_config.logs:
+        config.system.output.logs.root = root_output_path / output_config.logs.root
+
+        base = root_output_path / output_config.logs.root
+
+        # LogsSchema
+        if output_config.logs.wandb is None:
+            output_config.logs.wandb = base / "wandb"
+        if output_config.logs.mlflow is None:
+            output_config.logs.mlflow = base/ "mlflow"
+        if output_config.logs.tensorboard is None:
+            output_config.logs.tensorboard = base/ "tensorboard"
+
+    # CheckPointSchema
+    output_config.checkpoints.root = root_output_path / output_config.checkpoints.root
+
+    output_config.checkpoints.every_n_epochs = str(root_output_path / output_config.checkpoints.every_n_epochs)
+    output_config.checkpoints.every_n_train_steps = str(root_output_path / output_config.checkpoints.every_n_train_steps)
+    output_config.checkpoints.every_n_minutes = str(root_output_path / output_config.checkpoints.every_n_minutes)
 
 class BaseSchema(BaseModel):
     """Top-level schema for the training configuration."""
@@ -110,6 +138,9 @@ class BaseSchema(BaseModel):
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
 
+    def model_post_init(self, _: Any) -> None:
+        expand_paths(self)
+
 
 class UnvalidatedBaseSchema(PydanticBaseModel):
     data: Any
@@ -134,6 +165,10 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
+
+    def model_post_init(self, _: Any) -> None:
+        expand_paths(self)
+
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
