@@ -10,7 +10,9 @@
 
 import logging
 import sys
+from pathlib import Path
 from typing import Any
+from typing import Union
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -34,12 +36,43 @@ from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .datamodule import DataModuleSchema
 from .diagnostics import DiagnosticsSchema
-from .hardware import HardwareSchema
+from .system import SystemSchema
 from .training import TrainingSchema
 
 _object_setattr = _model_construction.object_setattr
 
 LOGGER = logging.getLogger(__name__)
+
+
+def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> None:
+    output_config = config_system.output
+    root_output_path = Path(output_config.root)
+    # OutputSchema
+    if output_config.plots:
+        config_system.output.plots = root_output_path / output_config.plots
+    if output_config.profiler:
+        config_system.output.profiler = root_output_path / output_config.profiler
+    if output_config.logs:
+        config_system.output.logs.root = root_output_path / output_config.logs.root
+
+        base = root_output_path / output_config.logs.root
+
+        # LogsSchema
+        if output_config.logs.wandb is None:
+            output_config.logs.wandb = base / "wandb"
+        if output_config.logs.mlflow is None:
+            output_config.logs.mlflow = base / "mlflow"
+        if output_config.logs.tensorboard is None:
+            output_config.logs.tensorboard = base / "tensorboard"
+
+    # CheckPointSchema
+    output_config.checkpoints.root = root_output_path / output_config.checkpoints.root
+
+    output_config.checkpoints.every_n_epochs = str(root_output_path / output_config.checkpoints.every_n_epochs)
+    output_config.checkpoints.every_n_train_steps = str(
+        root_output_path / output_config.checkpoints.every_n_train_steps,
+    )
+    output_config.checkpoints.every_n_minutes = str(root_output_path / output_config.checkpoints.every_n_minutes)
 
 
 class BaseSchema(BaseModel):
@@ -53,8 +86,8 @@ class BaseSchema(BaseModel):
     """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
-    hardware: HardwareSchema
-    """Hardware configuration."""
+    system: SystemSchema
+    """System configuration, including filesystem and hardware specification."""
     graph: BaseGraphSchema
     """Graph configuration."""
     model: ModelSchema
@@ -67,20 +100,18 @@ class BaseSchema(BaseModel):
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:
         if not self.dataloader.read_group_size:
-            self.dataloader.read_group_size = self.hardware.num_gpus_per_model
+            self.dataloader.read_group_size = self.system.hardware.num_gpus_per_model
         return self
 
     @model_validator(mode="after")
     def check_log_paths_available_for_loggers(self) -> Self:
         logger = []
-        if self.diagnostics.log.wandb.enabled and (not self.hardware.paths.logs or not self.hardware.paths.logs.wandb):
+        if self.diagnostics.log.wandb.enabled and (not self.system.output.logs or not self.system.output.logs.wandb):
             logger.append("wandb")
-        if self.diagnostics.log.mlflow.enabled and (
-            not self.hardware.paths.logs or not self.hardware.paths.logs.mlflow
-        ):
+        if self.diagnostics.log.mlflow.enabled and (not self.system.output.logs or not self.system.output.logs.mlflow):
             logger.append("mlflow")
         if self.diagnostics.log.tensorboard.enabled and (
-            not self.hardware.paths.logs or not self.hardware.paths.logs.tensorboard
+            not self.system.output.logs or not self.system.output.logs.tensorboard
         ):
             logger.append("tensorboard")
 
@@ -112,6 +143,9 @@ class BaseSchema(BaseModel):
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
 
+    def model_post_init(self, _: Any) -> None:
+        expand_paths(self.system)
+
 
 class UnvalidatedBaseSchema(PydanticBaseModel):
     data: Any
@@ -122,7 +156,7 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
-    hardware: Any
+    system: Any
     """Hardware configuration."""
     graph: Any
     """Graph configuration."""
@@ -136,6 +170,9 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
+
+    def model_post_init(self, _: Any) -> None:
+        expand_paths(self.system)
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
