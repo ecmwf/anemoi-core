@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+import types
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from argparse import Namespace
 
     from mlflow.tracking import MlflowClient
+    from pytorch_lightning.loggers.mlflow import MLFlowLogger
 
 try:
     if TYPE_CHECKING:
@@ -218,8 +220,42 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             http_max_retries=http_max_retries,
         )
 
+        # replace logger.experiment.log_artifact with one that checks for resource conflicts
+        # note that we do this here since this is a unique issue for AzureML MLFlow loggers
+        self._original_log_artifact = self.experiment.log_artifact
+        self.experiment.log_artifact = types.MethodType(self._patched_log_artifact, self.experiment)
+
     def _init_authentication(self) -> None:
         self.auth = NoAuth()
+
+    def _patched_log_artifact(
+        self,
+        _experiment_self: MLFlowLogger.experiment, # leading underscore bypasses ruff, see note in docstring
+        *args,
+        **kwargs,
+    ) -> None:
+        """Overwrites MLFlowLogger.experiment.log_artifact.
+
+        AzureML does not allow artifacts to be overwritten, and will raise an exception related to a resource conflict.
+        To avoid this, we add the try/except logic here since this is unique to AML. Note that it's not clear **why**
+        some plots are being logged more than once, but until that's understood this patch is necessary.
+
+        Note:
+            We explicitly pass experiment_self even though it's not used because it is passed to the wrapped
+            log_artifact method during usage. The leading underscore bypasses the ruff check.
+        """
+        try:
+            return self._original_log_artifact(*args, **kwargs)
+
+        except Exception as e:
+            # Ignore resource conflicts for AML
+            if "Resource Conflict" in str(e) or "already exists" in str(e):
+                msg = f"AnemoiAzureMLflowLogger.experiment.log_artifact: Resource conflict ignored: {e}"
+                LOGGER.debug(msg)
+                return None
+            # Otherwise, re-raise unexpected exceptions
+            raise
+
 
     @rank_zero_only
     def log_hyperparams(
