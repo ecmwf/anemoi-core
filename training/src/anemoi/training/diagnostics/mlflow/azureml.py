@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import types
+from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
@@ -230,7 +230,7 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
 
     def _patched_log_artifact(
         self,
-        _experiment_self: MLFlowLogger.experiment, # leading underscore bypasses ruff, see note in docstring
+        _experiment_self: MLFlowLogger.experiment,  # leading underscore bypasses ruff, see note in docstring
         *args,
         **kwargs,
     ) -> None:
@@ -255,7 +255,6 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
                 return None
             # Otherwise, re-raise unexpected exceptions
             raise
-
 
     @rank_zero_only
     def log_hyperparams(
