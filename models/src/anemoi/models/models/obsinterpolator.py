@@ -58,8 +58,8 @@ class AnemoiModelObsInterpolator(AnemoiModelEncProcDec):
 
     def _calculate_input_dim(self):
         return (
-            self.multi_step * self.num_input_channels # past context for observations
+            self.multi_step * self.num_input_channels  # past context for observations
             + 2 * len(self.known_future_variables)  # 1 for specific interpolation time 1, for upper bound
-            + 1 # for time fraction
+            + 1  # for time fraction
             + self.node_attributes.attr_ndims[self._graph_name_data]
         )

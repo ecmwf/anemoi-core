@@ -13,11 +13,12 @@ from anemoi.models.models.obsinterpolator import AnemoiModelObsInterpolator
 def test_obsinterpolator_calculate_input_dim():
     # Construct a lightweight instance without running full __init__
     m = AnemoiModelObsInterpolator.__new__(AnemoiModelObsInterpolator)
-    m.multi_step = 6  
+    m.multi_step = 6
     m.num_input_channels = 4  # e.g. 4 observation variables
     m.known_future_variables = ["U_10M_NWP", "V_10M_NWP", "TD_2M_NWP", "T_2M_NWP", "TOT_PREC_NWP"]  # len = 5
+
     class _NA:
-        attr_ndims = {"data": 7} # graph attributes
+        attr_ndims = {"data": 7}  # graph attributes
 
     m.node_attributes = _NA()
     m._graph_name_data = "data"
@@ -46,4 +47,3 @@ def test_obsinterpolator_calculate_input_dim_no_future_vars():
 
     expected = (2 * 3) + (2 * 0) + 1 + 2  # 6 + 0 + 1 + 2 = 9
     assert m._calculate_input_dim() == expected
-
