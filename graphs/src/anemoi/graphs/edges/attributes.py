@@ -60,7 +60,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
         x = self.subset_node_information(*x)
-        return self.propagate(edge_index, x=x, size=size)
+        return self.propagate(edge_index.to(self.device), x=x, size=size)
 
     @abstractmethod
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
