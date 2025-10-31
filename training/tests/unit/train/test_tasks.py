@@ -33,6 +33,11 @@ class SimpleObsModel:
         model_comm_group: Any | None = None,
         grid_shard_shapes: Any | None = None,
     ) -> torch.Tensor:
+        self.called_with = {
+            "x_shape": tuple(x.shape),
+            "model_comm_group": model_comm_group,
+            "grid_shard_shapes": grid_shard_shapes,
+        }
         b, _, e, g, _ = x.shape
         return torch.zeros((b, 1, e, g, self.num_output_vars), dtype=x.dtype, device=x.device)
 
