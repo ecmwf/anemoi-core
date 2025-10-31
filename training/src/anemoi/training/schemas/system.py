@@ -11,7 +11,6 @@
 from functools import partial
 from pathlib import Path
 from typing import Annotated
-from typing import Any
 
 from pydantic import AfterValidator
 from pydantic import BaseModel as PydanticBaseModel
@@ -72,6 +71,7 @@ class Logs(PydanticBaseModel):
     "Path to output mlflow logs."
     tensorboard: Path | None = None
     "Path to output tensorboard logs."
+
 
 class OutputSchema(BaseModel):
     root: Path
