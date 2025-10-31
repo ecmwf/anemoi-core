@@ -33,7 +33,7 @@ class OutputStepScaler(BaseScaler):
 
         Parameters
         ----------
-        
+
         """
         super().__init__(norm=norm)
         del kwargs
@@ -41,5 +41,3 @@ class OutputStepScaler(BaseScaler):
 
     def get_scaling_values(self) -> torch.Tensor:
         return torch.tensor(self.weights, dtype=torch.float32)
-
-
