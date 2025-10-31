@@ -106,7 +106,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         multi_step = self.config.training.multistep_input
         multi_out = self.config.training.multistep_output
         time_range = multi_step + rollout * multi_out
-        
+
         return [self.timeincrement * mstep for mstep in range(time_range)]
 
     def add_trajectory_ids(self, data_reader: Callable) -> Callable:

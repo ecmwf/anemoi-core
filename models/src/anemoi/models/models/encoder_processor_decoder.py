@@ -137,7 +137,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             .clone()
         )
 
-        # residual connection 
+        # residual connection
         # add time dimension and extend along output steps
         x_skip = x_skip.unsqueeze(1).expand(-1, self.multi_out, -1, -1, -1)
         # unly use for the prognostic variables)

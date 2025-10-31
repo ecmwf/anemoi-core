@@ -552,13 +552,13 @@ diagnostics:
       enabled: False
       steps: 4 # wait warmup steps and then do steps
       warmup: 0
-  
+
   callbacks:
   # Add callbacks here
   - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
     rollout: ${dataloader.validation_rollout}
     every_n_batches: 50
-  
+
 
   plot:
     asynchronous: True # Whether to plot asynchronously

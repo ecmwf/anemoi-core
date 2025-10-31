@@ -15,8 +15,9 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.base import BaseGraphModule
-
-from anemoi.training.utils.masks import NoOutputMask #TODO: remove when boundary handling for multi-step output is implemented
+from anemoi.training.utils.masks import (
+    NoOutputMask,  # TODO: remove when boundary handling for multi-step output is implemented
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -108,12 +109,12 @@ class GraphForecaster(BaseGraphModule):
         rollout_step: int,
     ) -> torch.Tensor:
         x = x.roll(-self.multi_out, dims=1)
-        #TODO: see if we can replace for loop with tensor operations
+        # TODO: see if we can replace for loop with tensor operations
         for i in range(self.multi_out):
             # Get prognostic variables
-            x[:, -(i+1), :, :, self.data_indices.model.input.prognostic] = y_pred[
+            x[:, -(i + 1), :, :, self.data_indices.model.input.prognostic] = y_pred[
                 :,
-                -(i+1),
+                -(i + 1),
                 ...,
                 self.data_indices.model.output.prognostic,
             ]
@@ -128,9 +129,9 @@ class GraphForecaster(BaseGraphModule):
             # )
 
             # get new "constants" needed for time-varying fields
-            x[:, -(i+1), :, :, self.data_indices.model.input.forcing] = batch[
+            x[:, -(i + 1), :, :, self.data_indices.model.input.forcing] = batch[
                 :,
-                self.multi_step + (rollout_step+1)*self.multi_out-(i+1),
+                self.multi_step + (rollout_step + 1) * self.multi_out - (i + 1),
                 :,
                 :,
                 self.data_indices.data.input.forcing,
@@ -169,8 +170,8 @@ class GraphForecaster(BaseGraphModule):
             ...,
             self.data_indices.data.input.full,
         ]  # (bs, multi_step, latlon, nvar)
-        
-        required_time_steps = rollout*self.multi_out + self.multi_step
+
+        required_time_steps = rollout * self.multi_out + self.multi_step
         msg = (
             "Batch length not sufficient for requested multi_step length!"
             f", {batch.shape[1]} !>= {required_time_steps}"
@@ -180,7 +181,7 @@ class GraphForecaster(BaseGraphModule):
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x)
-            fc_times =[self.multi_step + rollout_step*self.multi_out + i for i in range(self.multi_out) ]
+            fc_times = [self.multi_step + rollout_step * self.multi_out + i for i in range(self.multi_out)]
             y = batch[:, fc_times, ...]
             y = y[..., self.data_indices.data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss

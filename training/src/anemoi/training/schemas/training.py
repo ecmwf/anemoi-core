@@ -181,12 +181,14 @@ class GraphNodeAttributeScalerSchema(BaseModel):
     norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
     "Normalisation method applied to the node attribute."
 
+
 class OutputStepScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.OutputStepScaler"] = Field(..., alias="_target_")
     norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
     "Normalisation method applied to the weights."
     weights: list[float] = Field(example=[1.0, 1.0])
     "Weights for each output step"
+
 
 class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler"] = Field(

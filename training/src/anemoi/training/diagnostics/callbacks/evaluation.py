@@ -54,7 +54,7 @@ class RolloutEval(Callback):
         loss = torch.zeros(1, dtype=batch.dtype, device=pl_module.device, requires_grad=False)
         metrics = {}
 
-        assert batch.shape[1] >= self.rollout * pl_module.multi_out+ pl_module.multi_step, (
+        assert batch.shape[1] >= self.rollout * pl_module.multi_out + pl_module.multi_step, (
             "Batch length not sufficient for requested validation rollout length! "
             f"Set `dataloader.validation_rollout` to at least {max(self.rollout)}"
         )
