@@ -11,6 +11,7 @@ from .base_scaler import TensorDim
 from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
+from .output_steps import OutputStepScaler
 from .scalers import create_scalers
 from .variable import GeneralVariableLossScaler
 from .variable_level import LinearVariableLevelScaler
@@ -29,6 +30,7 @@ __all__ = [
     "NaNMaskScaler",
     "NoTendencyScaler",
     "NoVariableLevelScaler",
+    "OutputStepScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
