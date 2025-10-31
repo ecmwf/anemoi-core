@@ -26,13 +26,12 @@ class SimpleObsModel:
 
     def pre_processors(self, x: torch.Tensor) -> torch.Tensor:
         return x
-        return x
 
     def __call__(
         self,
         x: torch.Tensor,
-        _model_comm_group: Any | None = None,
-        _grid_shard_shapes: Any | None = None,
+        model_comm_group: Any | None = None,
+        grid_shard_shapes: Any | None = None,
     ) -> torch.Tensor:
         b, _, e, g, _ = x.shape
         return torch.zeros((b, 1, e, g, self.num_output_vars), dtype=x.dtype, device=x.device)
@@ -170,7 +169,6 @@ def test_obsinterpolator_step_runs(monkeypatch: pytest.MonkeyPatch) -> None:
         self.model_comm_group = None
         self.grid_shard_shapes = None
         self.model = SimpleObsModel(num_output_vars=len(data_indices.data.input.name_to_index))
-        self.loss = DummyLoss()
         self.loss = DummyLoss()
 
     monkeypatch.setattr(BaseGraphModule, "__init__", _stub_bgm_init, raising=True)
