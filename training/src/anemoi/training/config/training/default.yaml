@@ -15,7 +15,9 @@ deterministic: False
 precision: 16-mixed
 
 # multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
+# Number of timesteps to be loaded as model input
+# k = 1: single step scheme, uses only [X(t-1)] to predict X(t).
+# k = 1, is also necessary for autoencoder training as X(t) is used to predict X^(t)
 # k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
 # Deepmind use k = 2 in their model
 multistep_input: 2
@@ -67,7 +69,7 @@ training_loss:
   # A selection of available scalers are listed in training/scalers.
   # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
   # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+  scalers: ['pressure_level', 'general_variable', 'node_weights']
   ignore_nans: False
 
 # Validation metrics calculation,
@@ -84,7 +86,7 @@ validation_metrics:
     # Available scalers include:
     # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
     # Use the `scale_validation_metrics` section to variable scale.
-    scalers: []
+    scalers: ['node_weights']
     # other kwargs
     ignore_nans: True
 
@@ -95,7 +97,8 @@ validation_metrics:
 
 # If more complex grouping is required, groups can be defined as a dictionary, such that all
 # keys must be evaluate to True.
-# .e.g.:
+# .e.g. to set the variable group based on if the metadata specifies the variable is a pressure level
+# you can write the following:
 #   variable_groups:
 #     default: sfc
 #     pl:
@@ -108,6 +111,7 @@ validation_metrics:
 #  pl: [q, t, u, v, w, z]
 #
 # still works
+# param is an alias for the variable name in the case of no metadata.
 
 variable_groups:
   default: sfc

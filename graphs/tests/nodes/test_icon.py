@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Type
 
 import netCDF4
 import numpy as np
@@ -109,7 +108,7 @@ def test_init(monkeypatch, max_level_multimesh: int, max_level_dataset: int):
 
 
 @pytest.mark.parametrize("node_builder_cls", [ICONCellGridNodes, ICONMultimeshNodes])
-def test_node_builder_dependencies(monkeypatch, node_builder_cls: Type[BaseNodeBuilder]):
+def test_node_builder_dependencies(monkeypatch, node_builder_cls: type[BaseNodeBuilder]):
     """Test that the `node_builder` depends on the presence of ICONNodes."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
     nodes = ICONNodes("test_icon_nodes", "test.nc", 0, 0)
@@ -142,7 +141,7 @@ class TestEdgeBuilderDependencies:
     @pytest.mark.parametrize(
         "edge_builder_cls", [ICONTopologicalProcessorEdges, ICONTopologicalEncoderEdges, ICONTopologicalDecoderEdges]
     )
-    def test_edges_dependencies(self, icon_graph, edge_builder_cls: Type[ICONTopologicalBaseEdgeBuilder]):
+    def test_edges_dependencies(self, icon_graph, edge_builder_cls: type[ICONTopologicalBaseEdgeBuilder]):
         """Test that the `edge_builder_cls` depends on the presence of ICONNodes."""
         edge_builder1 = edge_builder_cls(source_name="data", target_name="data", icon_mesh="test_icon_nodes")
         edge_builder1.update_graph(icon_graph)

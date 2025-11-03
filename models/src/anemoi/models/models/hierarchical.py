@@ -1,4 +1,4 @@
-# (C) Copyright 2024 ECMWF.
+# (C) Copyright 2025 Anemoi Contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -17,7 +17,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -65,28 +67,32 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # Unpack config for hierarchical graph
         self.level_process = model_config.model.enable_hierarchical_level_processing
-
         self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
 
-        # we can't register these as buffers because DDP does not support sparse tensors
-        # these will be moved to the GPU when first used via sefl.interpolate_down/interpolate_up
-        self.A_down, self.A_up = None, None
-        if "down" in self._truncation_data:
-            self.A_down = self._make_truncation_matrix(self._truncation_data["down"])
-            LOGGER.info("Truncation: A_down %s", self.A_down.shape)
-        if "up" in self._truncation_data:
-            self.A_up = self._make_truncation_matrix(self._truncation_data["up"])
-            LOGGER.info("Truncation: A_up %s", self.A_up.shape)
+        # build networks
+        self._build_networks(model_config)
+
+        # build truncation
+        self.truncation = BaseTruncation(self._truncation_data)
+
+        # build boundings
+        self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+
+    def _calculate_input_dim_latent(self):
+        return self.node_attributes.attr_ndims[self._graph_hidden_names[0]]
+
+    def _build_networks(self, model_config):
+        """Builds the model components."""
 
         # Encoder data -> hidden
         self.encoder = instantiate(
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             in_channels_src=self.input_dim,
-            in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[0]],
+            in_channels_dst=self.input_dim_latent,
             hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
             sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_hidden_names[0])],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
@@ -182,19 +188,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )
 
-        # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
-        self.boundings = nn.ModuleList(
-            [
-                instantiate(
-                    cfg,
-                    name_to_index=self.data_indices.model.output.name_to_index,
-                    statistics=self.statistics,
-                    name_to_index_stats=self.data_indices.data.input.name_to_index,
-                )
-                for cfg in getattr(model_config.model, "bounding", [])
-            ]
-        )
-
     def forward(
         self,
         x: Tensor,
@@ -239,11 +232,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Get data and hidden shapes for sharding
         shard_shapes_hiddens = {}
         for hidden, x_latent in x_hidden_latents.items():
-            shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group)
+            shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group=model_comm_group)
 
         # Run encoder
-        x_data_latent, curr_latent = self._run_mapper(
-            self.encoder,
+        x_data_latent, curr_latent = self.encoder(
             (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]),
@@ -274,8 +266,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             skip_connections[src_hidden_name] = curr_latent
 
             # Encode to next hidden level
-            x_encoded_latents[src_hidden_name], curr_latent = self._run_mapper(
-                self.downscale[src_hidden_name],
+            x_encoded_latents[src_hidden_name], curr_latent = self.downscale[src_hidden_name](
                 (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -299,8 +290,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
             # Decode to next level
-            curr_latent = self._run_mapper(
-                self.upscale[src_hidden_name],
+            curr_latent = self.upscale[src_hidden_name](
                 (curr_latent, x_encoded_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -323,8 +313,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 )
 
         # Run decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (curr_latent, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_data),

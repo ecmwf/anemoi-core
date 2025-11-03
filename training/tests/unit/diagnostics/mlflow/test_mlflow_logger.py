@@ -27,6 +27,15 @@ def default_logger(tmp_path: str) -> AnemoiMLflowLogger:
     return logger
 
 
+def test_mlflowlogger_params_limit(default_logger: AnemoiMLflowLogger) -> None:
+
+    default_logger._max_params_length = 3
+    params = {"lr": 0.001, "path": "era5", "anemoi.version": 1.5, "bounding": True}
+    # # Expect an exception when logging too many hyperparameters
+    with pytest.raises(ValueError, match=r"Too many params:"):
+        default_logger.log_hyperparams(params)
+
+
 def test_mlflowlogger_metric_deduplication(default_logger: AnemoiMLflowLogger) -> None:
 
     default_logger.log_metrics({"foo": 1.0}, step=5)

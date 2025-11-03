@@ -204,9 +204,9 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
-        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes)
 
-        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes)
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
@@ -310,9 +310,9 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
         )
 
-        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes)
 
-        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes)
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4

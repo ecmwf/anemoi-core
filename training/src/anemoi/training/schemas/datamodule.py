@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from __future__ import annotations
-
 from typing import Literal
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -20,5 +18,5 @@ class DataModuleSchema(PydanticBaseModel):
     target_: Literal[
         "anemoi.training.data.datamodule.AnemoiEnsDatasetsDataModule",
         "anemoi.training.data.datamodule.AnemoiDatasetsDataModule",
-        "anemoi.training.data.datamodule.AnemoiAutoencoderDatasetsDataModule",
+        "anemoi.training.data.datamodule.AnemoiSingleTimestepDatasetsDataModule",
     ] = Field(..., alias="_target_")
