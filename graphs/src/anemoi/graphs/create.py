@@ -62,7 +62,9 @@ class GraphCreator:
         for edges_cfg in self.config.get("edges", {}):
             for edge_builder_cfg in edges_cfg.edge_builders:
                 edge_builder = instantiate(
-                    edge_builder_cfg, source_name=edges_cfg.source_name, target_name=edges_cfg.target_name
+                    edge_builder_cfg,
+                    source_name=edges_cfg.source_name,
+                    target_name=edges_cfg.target_name,
                 )
                 graph = edge_builder.update_graph(graph, attrs_config=None)
 
@@ -142,7 +144,9 @@ class GraphCreator:
         else:
             # The error is only logged for compatibility with multi-gpu training in anemoi-training.
             # Currently, distributed graph creation is not supported so we create the same graph in each gpu.
-            LOGGER.error(f"Graph already exists at {save_path}. Use overwrite=True to overwrite.")
+            LOGGER.error(
+                f"Graph not saved because {save_path} already exists. If this occurred during a multi-process or multi-GPU run, another process likely saved it first. If you intended to recreate it, rerun with overwrite=True."
+            )
 
     def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
         """Create the graph and save it to the output path.
