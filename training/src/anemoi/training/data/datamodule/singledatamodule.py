@@ -176,6 +176,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
             open_dataset(self.config.dataloader.training),
+            shuffle=False,
             label="train",
         )
 

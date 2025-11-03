@@ -32,6 +32,10 @@ class GraphAutoEncoder(BaseGraphModule):
         batch: torch.Tensor,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
+        
+        print("\n")
+        print("Training batch: " if not validation_mode else "Validation batch:")
+        print(batch)
 
         x = batch[
             ...,
@@ -40,6 +44,18 @@ class GraphAutoEncoder(BaseGraphModule):
 
         y_pred = self(x)
         y = batch[:, 0, ..., self.data_indices.data.output.full]
+
+        import torch
+        print("Computing difference between input and target...")
+        diff = torch.sum(torch.abs(y-batch[
+            ...,
+            self.data_indices.data.output.full,
+        ]))
+        print(diff)
+
+        print("Computing difference between pred and target...")
+        diff = torch.sum(torch.abs(y-y_pred))
+        print(diff)
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         loss, metrics = checkpoint(
