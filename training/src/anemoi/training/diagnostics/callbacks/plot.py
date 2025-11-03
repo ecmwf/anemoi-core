@@ -226,7 +226,7 @@ class BasePlotCallback(Callback, ABC):
 class BasePerBatchPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each batch."""
 
-    def __init__(self, config: OmegaConf, every_n_batches: int | None = None):
+    def __init__(self, config: OmegaConf, every_n_batches: int | None = None, dataset_name: str = "data"):
         """Initialise the BasePerBatchPlotCallback.
 
         Parameters
@@ -240,6 +240,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         """
         super().__init__(config)
         self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
+        self.dataset_name = dataset_name
 
         if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
             LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
@@ -248,6 +249,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         output: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
@@ -300,7 +302,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 class BasePerEpochPlotCallback(BasePlotCallback):
     """Base Callback for plotting at the end of each epoch."""
 
-    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None):
+    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None, dataset_name: str = "data"):
         """Initialise the BasePerEpochPlotCallback.
 
         Parameters
@@ -313,17 +315,17 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         """
         super().__init__(config)
         self.every_n_epochs = every_n_epochs or self.config.diagnostics.plot.frequency.epoch
+        self.dataset_name = dataset_name
 
     @rank_zero_only
     def on_validation_epoch_end(
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        # dataset_name: str,
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
-            self.plot(trainer, pl_module, epoch=trainer.current_epoch, **kwargs)
+            self.plot(trainer, pl_module, self.dataset_name, epoch=trainer.current_epoch, **kwargs)
 
 
 class LongRolloutPlots(BasePlotCallback):
@@ -679,7 +681,7 @@ class LongRolloutPlots(BasePlotCallback):
 class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     """Visualize the node & edge trainable features defined."""
 
-    def __init__(self, config: OmegaConf, every_n_epochs: int | None = None) -> None:
+    def __init__(self, config: OmegaConf, dataset_name: str = "data", every_n_epochs: int | None = None) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback.
 
         Parameters
@@ -691,16 +693,23 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         """
         super().__init__(config, every_n_epochs=every_n_epochs)
         self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
+        self.dataset_name = dataset_name
 
     def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
         return {
-            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
+            name: tt.trainable
+            for name, tt in node_attributes[self.dataset_name].trainable_tensors.items()
+            if tt.trainable is not None
         }
 
-    def get_edge_trainable_modules(self, model: torch.nn.Module) -> dict[tuple[str, str], torch.Tensor]:
+    def get_edge_trainable_modules(
+        self,
+        model: torch.nn.Module,
+        dataset_name: str,
+    ) -> dict[tuple[str, str], torch.Tensor]:
         trainable_modules = {
-            (model._graph_name_data, model._graph_name_hidden): model.encoder,
-            (model._graph_name_hidden, model._graph_name_data): model.decoder,
+            (model._graph_name_data, model._graph_name_hidden): model.encoder[dataset_name],
+            (model._graph_name_hidden, model._graph_name_data): model.decoder[dataset_name],
         }
 
         if isinstance(model.processor, GraphEdgeMixin):
@@ -713,13 +722,18 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         epoch: int,
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
 
         if len(node_trainable_tensors := self.get_node_trainable_tensors(model.node_attributes)):
-            fig = plot_graph_node_features(model, node_trainable_tensors, datashader=self.datashader_plotting)
+            fig = plot_graph_node_features(
+                model.node_attributes[dataset_name],
+                node_trainable_tensors,
+                datashader=self.datashader_plotting,
+            )
 
             self._output_figure(
                 trainer.logger,
@@ -731,8 +745,12 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         else:
             LOGGER.warning("There are no trainable node attributes to plot.")
 
-        if len(edge_trainable_modules := self.get_edge_trainable_modules(model)):
-            fig = plot_graph_edge_features(model, edge_trainable_modules, q_extreme_limit=self.q_extreme_limit)
+        if len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
+            fig = plot_graph_edge_features(
+                model.node_attributes[dataset_name],
+                edge_trainable_modules,
+                q_extreme_limit=self.q_extreme_limit,
+            )
 
             self._output_figure(
                 trainer.logger,
