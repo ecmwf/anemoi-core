@@ -141,10 +141,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         if compute_dtype is not None:
-            if x_data_latent.dtype != compute_dtype:
-                x_data_latent = x_data_latent.to(compute_dtype)
-            if x_hidden_latent.dtype != compute_dtype:
-                x_hidden_latent = x_hidden_latent.to(compute_dtype)
+            x_data_latent = x_data_latent.to(compute_dtype)
+            x_hidden_latent = x_hidden_latent.to(compute_dtype)
 
         x_data_latent, x_latent = self._run_mapper(
             self.encoder,
