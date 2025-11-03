@@ -136,11 +136,11 @@ class PointWiseMLPProcessor(BaseProcessor):
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+            ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
 
             assert (
-                model_comm_group.size() > 1 and not self._has_dropout
-            ), "Dropout is not supported when model is sharded across GPUS"
+                model_comm_group.size() > 1 and self._has_dropout
+            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
 
         (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
 
