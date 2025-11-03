@@ -145,13 +145,83 @@ class PlotHistogramSchema(BaseModel):
     "Batch frequency to plot at, by default None."
 
 
+class PlotEnsSampleSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample"] = Field(alias="_target_")
+    "PlotEnsSample object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    accumulation_levels_plot: list[float]
+    "Accumulation levels to plot."
+    cmap_accumulation: list[str] | None = Field(default=None)
+    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
+    precip_and_related_fields: list[str] | None = Field(default=None)
+    "List of precipitation related fields, by default None."
+    per_sample: int = Field(example=6)
+    "Number of plots per sample, by default 6."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
+    "List of colormaps to use, by default None."
+    members: list[int] | None = Field(default=None)
+    "List of ensemble members to plot. If None, plots all members."
+
+
+class PlotEnsLossSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss"] = Field(alias="_target_")
+    "PlotLoss object from anemoi training diagnostics callbacks."
+    parameter_groups: dict[str, list[str]]
+    "Dictionary with parameter groups with parameter names as key."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at."
+
+
+class PlotEnsSpectrumSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum"] = Field(alias="_target_")
+    "PlotSpectrum object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+
+
+class PlotEnsHistogramSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram"] = Field(alias="_target_")
+    "PlotHistogram object from anemoi training diagnostics callbacks."
+    sample_idx: int
+    "Index of sample to plot, must be inside batch size."
+    parameters: list[str]
+    "List of parameters to plot."
+    precip_and_related_fields: list[str] | None = Field(default=None)
+    "List of precipitation related fields, by default None."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
+
+
+class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot"] = Field(
+        alias="_target_",
+    )
+    "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
+    every_n_epochs: int | None
+    "Epoch frequency to plot at."
+
+
 PlotCallbacks = Annotated[
     LongRolloutPlotsSchema
     | GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
     | PlotSampleSchema
     | PlotSpectrumSchema
-    | PlotHistogramSchema,
+    | PlotHistogramSchema
+    | PlotEnsSampleSchema
+    | PlotEnsLossSchema
+    | PlotEnsSpectrumSchema
+    | PlotEnsHistogramSchema
+    | GraphTrainableFeaturesPlotEnsSchema,
     Field(discriminator="target_"),
 ]
 
@@ -360,8 +430,6 @@ class DiagnosticsSchema(BaseModel):
     "Benchmark profiler schema for `profile` command."
     debug: Debug
     "Debug schema."
-    profiler: bool
-    "Activate the pytorch profiler and tensorboard logger."
     log: LoggingSchema
     "Log schema."
     enable_progress_bar: bool
