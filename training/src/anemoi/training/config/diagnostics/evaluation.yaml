@@ -1,6 +1,6 @@
 ---
 defaults:
-  - plot: simple
+  - plot: detailed
   - callbacks: placeholder
   - benchmark_profiler: detailed
 

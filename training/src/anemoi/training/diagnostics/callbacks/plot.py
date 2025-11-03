@@ -1109,39 +1109,39 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
 
-class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
-    """Base processing class for additional metrics."""
+# class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
+#     """Base processing class for additional metrics."""
 
-    def process(
-        self,
-        pl_module: pl.LightningModule,
-        outputs: list,
-        batch: torch.Tensor,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
+#     def process(
+#         self,
+#         pl_module: pl.LightningModule,
+#         outputs: list,
+#         batch: torch.Tensor,
+#     ) -> tuple[np.ndarray, np.ndarray]:
+#         if self.latlons is None:
+#             self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
 
-        input_tensor = (
-            batch[
-                :,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data = self.post_processors(input_tensor)[self.sample_idx]
-        output_tensor = torch.cat(
-            tuple(
-                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
-                for x in outputs[1]
-            ),
-        )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
-        return data, output_tensor
+#         input_tensor = (
+#             batch[
+#                 :,
+#                 pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+#                 ...,
+#                 pl_module.data_indices.data.output.full,
+#             ]
+#             .detach()
+#             .cpu()
+#         )
+#         data = self.post_processors(input_tensor)[self.sample_idx]
+#         output_tensor = torch.cat(
+#             tuple(
+#                 self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
+#                 for x in outputs[1]
+#             ),
+#         )
+#         output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
+#         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
+#         data = data.numpy()
+#         return data, output_tensor
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
@@ -1159,6 +1159,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         parameters: list[str],
         min_delta: float | None = None,
         every_n_batches: int | None = None,
+        dataset_name: str = "data",
     ) -> None:
         """Initialise the PlotSpectrum callback.
 
@@ -1177,12 +1178,14 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.min_delta = min_delta
+        self.dataset_name = dataset_name
 
     @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
@@ -1191,15 +1194,18 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch)
+        data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
         rollout = getattr(pl_module, "rollout", 0)
         for rollout_step in range(rollout):
             # Build dictionary of inidicies and parameters to be plotted
-
-            diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
+            diagnostics = (
+                []
+                if self.config.data.datasets[dataset_name].diagnostic is None
+                else self.config.data.datasets[dataset_name].diagnostic
+            )
             plot_parameters_dict_spectrum = {
-                pl_module.data_indices.model.output.name_to_index[name]: (
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
                     name not in diagnostics,
                 )
@@ -1238,6 +1244,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
+        dataset_name: str = "data",
     ) -> None:
         """Initialise the PlotHistogram callback.
 
@@ -1259,6 +1266,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self.parameters = parameters
         self.precip_and_related_fields = precip_and_related_fields
         self.log_scale = log_scale
+        self.dataset_name = dataset_name
         LOGGER.info(
             "Using precip histogram plotting method for fields: %s.",
             self.precip_and_related_fields,
@@ -1269,6 +1277,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        dataset_name: str,
         outputs: list[torch.Tensor],
         batch: torch.Tensor,
         batch_idx: int,
@@ -1277,17 +1286,21 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch)
+        data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
         rollout = getattr(pl_module, "rollout", 0)
 
         for rollout_step in range(rollout):
 
             # Build dictionary of inidicies and parameters to be plotted
-            diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
+            diagnostics = (
+                []
+                if self.config.data.datasets[dataset_name].diagnostic is None
+                else self.config.data.datasets[dataset_name].diagnostic
+            )
 
             plot_parameters_dict_histogram = {
-                pl_module.data_indices.model.output.name_to_index[name]: (
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
                     name,
                     name not in diagnostics,
                 )
