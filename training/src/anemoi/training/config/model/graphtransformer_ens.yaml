@@ -123,8 +123,8 @@ attributes:
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
-    options:
-      dynamic: false
+    #options:
+    #  dynamic: false
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
     options:
       dynamic: false

@@ -91,8 +91,8 @@ trainable_parameters:
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
-    options: 
-      dynamic: false
+    #options: 
+    # dynamic: false
 recompile_limit: 32
 
 attributes:
