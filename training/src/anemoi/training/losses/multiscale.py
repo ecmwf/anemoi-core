@@ -36,7 +36,7 @@ class MultiscaleLossWrapper(nn.Module):
         truncation_path: Path | str,
         filenames: list[Path | str],
         keep_batch_sharded: bool,
-        loss: BaseLoss,
+        internal_loss: BaseLoss,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
@@ -53,9 +53,10 @@ class MultiscaleLossWrapper(nn.Module):
 
         self.truncation_matrices = self.load_loss_truncation_matrices(truncation_path, filenames)
         self.num_scales = len(self.truncation_matrices)
-        self.loss = loss
+        self.loss = internal_loss
         self.scaler = self.loss.scaler
         self.keep_batch_sharded = keep_batch_sharded
+        self.supports_sharding = True
 
     def init_loss_scales(self, dtype: torch.dtype, device: torch.device) -> None:
         self.mloss = [torch.zeros(1, dtype=dtype, device=device, requires_grad=False) for _ in range(self.num_scales)]
@@ -69,7 +70,7 @@ class MultiscaleLossWrapper(nn.Module):
         # for loss decomposition
         truncation_matrices = []
         for interp_data_loss in filenames:
-            if interp_data_loss:
+            if interp_data_loss != "None":
                 truncation_matrix = load_npz(Path(truncation_path, interp_data_loss))
                 truncation_matrices.append(make_truncation_matrix(truncation_matrix))
                 LOGGER.info("Loss truncation: %s %s", truncation_matrix.shape[0], truncation_matrix.shape[1])

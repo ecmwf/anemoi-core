@@ -15,6 +15,7 @@ from .logcosh import LogCoshLoss
 from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
+from .multiscale import MultiscaleLossWrapper
 from .rmse import RMSELoss
 from .weighted_mse import WeightedMSELoss
 
@@ -27,6 +28,7 @@ __all__ = [
     "MAELoss",
     "MSELoss",
     "MultiscaleLoss",
+    "MultiscaleLossWrapper",
     "RMSELoss",
     "WeightedMSELoss",
     "get_loss_function",

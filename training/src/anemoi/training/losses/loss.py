@@ -23,7 +23,7 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSSES = ["anemoi.training.losses.multiscale.MultiscaleLossWrapper"]
+NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -70,7 +70,7 @@ def get_loss_function(
     if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
         internal_loss_config = loss_config.pop("internal_loss")
         internal_loss = get_loss_function(OmegaConf.create(internal_loss_config), scalers, data_indices)
-        return instantiate(loss_config, loss=internal_loss, **kwargs)
+        return instantiate(loss_config, internal_loss=internal_loss, **kwargs)
 
     if scalers is None:
         scalers = {}
