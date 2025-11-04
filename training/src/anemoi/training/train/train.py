@@ -381,8 +381,8 @@ class AnemoiTrainer(ABC):
     @cached_property
     def metadata(self) -> dict:
         """Metadata and provenance information."""
-        #datasets_config = _add_grouped_metadata({}, "dataset", self.datamodule.metadata)
-        #datasets_config = _add_grouped_metadata(datasets_config, "data_indices", self.data_indices.metadata)
+        # datasets_config = _add_grouped_metadata({}, "dataset", self.datamodule.metadata)
+        # datasets_config = _add_grouped_metadata(datasets_config, "data_indices", self.data_indices.metadata)
 
         return map_config_to_primitives(
             {
