@@ -15,9 +15,6 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.training.utils.masks import (
-    NoOutputMask,  # TODO(dieter): remove when boundary handling for multi-step output is implemented
-)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -119,11 +116,11 @@ class GraphForecaster(BaseGraphModule):
                 self.data_indices.model.output.prognostic,
             ]
 
-            # TODO(dieter): handle boundary conditions for multi-step output
-            assert isinstance(self.output_mask, NoOutputMask), "Boundary rollout not implemented for multi-step output!"
-            x[:, -1] = self.output_mask.rollout_boundary(
-                x[:, -1],
-                batch[:, self.multi_step + rollout_step],
+            batch_time_index = self.multi_step + (rollout_step + 1) * self.multi_out - (i + 1)
+
+            x[:, -(i + 1)] = self.output_mask.rollout_boundary(
+                x[:, -(i + 1)],
+                batch[:, batch_time_index],
                 self.data_indices,
                 grid_shard_slice=self.grid_shard_slice,
             )
@@ -131,7 +128,7 @@ class GraphForecaster(BaseGraphModule):
             # get new "constants" needed for time-varying fields
             x[:, -(i + 1), :, :, self.data_indices.model.input.forcing] = batch[
                 :,
-                self.multi_step + (rollout_step + 1) * self.multi_out - (i + 1),
+                batch_time_index,
                 :,
                 :,
                 self.data_indices.data.input.forcing,
