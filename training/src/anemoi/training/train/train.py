@@ -45,16 +45,6 @@ from anemoi.utils.provenance import gather_provenance_info
 LOGGER = logging.getLogger(__name__)
 
 
-def _add_grouped_metadata(config, new_key: str, metadata) -> DictConfig:
-    """Unwrap the config to a DictConfig."""
-    for dataset_name, dataset_metadata in metadata.items():
-        if dataset_name not in config:
-            config[dataset_name] = {new_key: dataset_metadata}
-        else:
-            config[dataset_name][new_key] = dataset_metadata
-    return config
-
-
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
@@ -381,16 +371,14 @@ class AnemoiTrainer(ABC):
     @cached_property
     def metadata(self) -> dict:
         """Metadata and provenance information."""
-        # datasets_config = _add_grouped_metadata({}, "dataset", self.datamodule.metadata)
-        # datasets_config = _add_grouped_metadata(datasets_config, "data_indices", self.data_indices.metadata)
-
         return map_config_to_primitives(
             {
                 "version": "2.0",
                 "config": convert_to_omegaconf(self.config),
                 "seed": self.initial_seed,
                 "run_id": self.run_id,
-                "datasets": datasets_config,
+                "dataset": self.datamodule.metadata,
+                "data_indices": self.datamodule.data_indices,
                 "provenance_training": gather_provenance_info(),
                 "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
             },
