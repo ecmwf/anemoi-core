@@ -211,7 +211,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             config.model_dump(by_alias=True).training.training_loss,
             scalers=self.scalers,
             data_indices=self.data_indices,
-            keep_batch_sharded=self.config.model.keep_batch_sharded,
         )
         print_variable_scaling(self.loss, data_indices)
 

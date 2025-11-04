@@ -34,9 +34,9 @@ class MultiscaleLossWrapper(nn.Module):
     def __init__(
         self,
         truncation_path: Path | str,
-        filenames: Path | str,
-        loss: BaseLoss,
+        filenames: list[Path | str],
         keep_batch_sharded: bool,
+        loss: BaseLoss,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
@@ -56,6 +56,12 @@ class MultiscaleLossWrapper(nn.Module):
         self.loss = loss
         self.scaler = self.loss.scaler
         self.keep_batch_sharded = keep_batch_sharded
+        self.grid_dim = None
+        self.grid_shard_shapes = None
+        self.model_comm_group_size = None
+
+    def init_loss_scales(self, dtype: torch.dtype, device: torch.device) -> None:
+        self.mloss = [torch.zeros(1, dtype=dtype, device=device, requires_grad=False) for _ in range(self.num_scales)]
 
     def load_loss_truncation_matrices(
         self,
@@ -128,13 +134,13 @@ class MultiscaleLossWrapper(nn.Module):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
-        squash: bool,  # noqa: ARG002
-        grid_shard_slice: tuple | None,
-        model_comm_group: ProcessGroup,
+        squash: bool = True,  # noqa: ARG002
+        grid_shard_slice: tuple | None = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> list[torch.Tensor]:
 
         shard_shapes, shard_shapes_y = None, None
-        if self.keep_batch_sharded and torch.distributed.get_world_size() > 1:
+        if self.model_comm_group_size > 1 and self.keep_batch_sharded:
             # go to full sequence dimension for interpolation / smoothing
             y_pred_ens_for_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
                 y_pred_ens,
@@ -159,7 +165,7 @@ class MultiscaleLossWrapper(nn.Module):
             # interpolate / smooth the predictions and the truth for loss computation
             y_pred_ens_tmp, y_tmp = self._interp_for_loss(y_pred_ens_for_interp, y_for_interp, i)
 
-            if self.keep_batch_sharded and torch.distributed.get_world_size() > 1:
+            if self.model_comm_group_size > 1 and self.keep_batch_sharded:
                 y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, model_comm_group)
                 y_tmp = gather_channels(y_tmp, shard_shapes_y, model_comm_group)
 
@@ -183,5 +189,5 @@ class MultiscaleLossWrapper(nn.Module):
             )
 
         loss = torch.stack(loss_inc).sum()
-        mloss = [x.detach() for x in loss_inc]
-        return loss, mloss
+        self.mloss = [x.detach() for x in loss_inc]
+        return loss

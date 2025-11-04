@@ -193,7 +193,7 @@ class GraphEnsForecaster(BaseGraphModule):
             mgroup=ens_comm_subgroup,
         )
 
-        loss, loss_inc = loss(
+        loss = loss(
             y_pred_ens,
             y,
             squash=False,
@@ -203,7 +203,7 @@ class GraphEnsForecaster(BaseGraphModule):
 
         #########
 
-        return loss, loss_inc, y_pred_ens if return_pred_ens else None
+        return loss, y_pred_ens if return_pred_ens else None
 
     def advance_input(
         self,
@@ -312,7 +312,7 @@ class GraphEnsForecaster(BaseGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, mloss, y_pred_ens_group = (
+            loss, y_pred_ens_group = (
                 checkpoint(
                     self.gather_and_compute_loss,
                     y_pred,
@@ -338,7 +338,7 @@ class GraphEnsForecaster(BaseGraphModule):
                     rollout_step,
                     grid_shard_slice=self.grid_shard_slice,
                 )
-            yield loss, mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
+            yield loss, self.loss.mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
                 x if validation_mode else None
             )
 
@@ -360,6 +360,11 @@ class GraphEnsForecaster(BaseGraphModule):
             # TODO(Helen): Check logic for having either 3 config entries and one of the is None
 
             LOGGER.debug("Using multiscale loss with %d scales", self.loss.num_scales)
+            self.loss.grid_dim = self.grid_dim
+            self.loss.grid_shard_shapes = self.grid_shard_shapes
+            self.loss.model_comm_group_size = self.model_comm_group_size
+
+            self.loss.init_loss_scales(batch[0].dtype, self.device)
 
             mloss = [
                 torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
