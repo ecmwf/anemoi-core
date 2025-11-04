@@ -55,6 +55,8 @@ class BaseProcessor(nn.Module, ABC):
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
+        self._has_dropout = kwargs.get("dropout_p", 0.0) > 0 if "dropout_p" in kwargs else False
+
         assert (
             num_layers % num_chunks == 0
         ), f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
@@ -83,6 +85,12 @@ class BaseProcessor(nn.Module, ABC):
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
+
+        if (model_comm_group := kwargs.get("model_comm_group", None)) is not None:
+            assert (
+                model_comm_group.size() == 1 or not self._has_dropout
+            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
+
         x = self.run_layers((x,), *args, **kwargs)
         return x
 
@@ -108,6 +116,7 @@ class PointWiseMLPProcessor(BaseProcessor):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
         )
 
         self.build_layers(
@@ -120,8 +129,6 @@ class PointWiseMLPProcessor(BaseProcessor):
         )
 
         self.offload_layers(cpu_offload)
-
-        self._has_dropout = dropout_p > 0 if dropout_p else False
 
     def forward(
         self,
@@ -137,10 +144,6 @@ class PointWiseMLPProcessor(BaseProcessor):
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
             ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
-
-            assert (
-                model_comm_group.size() == 1 or not self._has_dropout
-            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
 
         (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
 
@@ -210,6 +213,7 @@ class TransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
         )
 
         self.build_layers(
