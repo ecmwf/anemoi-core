@@ -69,8 +69,7 @@ loss_gradient_scaling: False
 # To train without multiscale loss, set it to the desired loss directly
 training_loss:
   # loss class to initialise, can be anything subclassing torch.nn.Module
-  _target_: anemoi.training.losses.multiscale.MultiscaleLossWrapper
-
+  _target_: anemoi.training.losses.MultiscaleLossWrapper
   truncation_path: ${hardware.paths.truncation}
   filenames: ${hardware.files.truncation_loss}
   keep_batch_sharded: ${model.keep_batch_sharded}
@@ -103,7 +102,7 @@ validation_metrics:
   #   alpha: 1.0
 
   multiscale:
-    _target_: anemoi.training.losses.multiscale.MultiscaleLossWrapper
+    _target_: anemoi.training.losses.MultiscaleLossWrapper
 
     truncation_path: ${hardware.paths.truncation}
     filenames: ${hardware.files.truncation_loss}
