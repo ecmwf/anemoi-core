@@ -106,7 +106,7 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # Decoder hidden -> data
-        decoded_vars = dict(ml=675, pl=88) 
+        decoded_vars = dict(ml=model_config.model.decoded_vars_ml, pl=model_config.model.decoded_vars_pl)
         assert sum(decoded_vars.values()) == self.num_output_channels, f"Set decoded_vars[ml]={self.num_output_channels-decoded_vars['pl']}"
         self.decoders = nn.ModuleDict()
         for key, num_vars in decoded_vars.items():
