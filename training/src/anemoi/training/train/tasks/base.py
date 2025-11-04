@@ -411,12 +411,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        return self.loss(
-            y_pred,
-            y,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-        )
+        return self.loss(y_pred, y, grid_shard_slice=grid_shard_slice, group=self.model_comm_group, kwargs=_kwargs)
 
     def _compute_metrics(
         self,

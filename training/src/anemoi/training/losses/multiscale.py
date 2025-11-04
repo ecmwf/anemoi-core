@@ -56,9 +56,6 @@ class MultiscaleLossWrapper(nn.Module):
         self.loss = loss
         self.scaler = self.loss.scaler
         self.keep_batch_sharded = keep_batch_sharded
-        self.grid_dim = None
-        self.grid_shard_shapes = None
-        self.model_comm_group_size = None
 
     def init_loss_scales(self, dtype: torch.dtype, device: torch.device) -> None:
         self.mloss = [torch.zeros(1, dtype=dtype, device=device, requires_grad=False) for _ in range(self.num_scales)]
@@ -87,6 +84,8 @@ class MultiscaleLossWrapper(nn.Module):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
         model_comm_group: ProcessGroup,
+        grid_dim: int,
+        grid_shard_shapes: list,
     ) -> tuple[torch.Tensor, torch.Tensor, tuple | None]:
         """Prepare tensors for interpolation/smoothing.
 
@@ -109,7 +108,7 @@ class MultiscaleLossWrapper(nn.Module):
         """
         batch_size, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1]
         y_pred_ens_interp = einops.rearrange(y_pred_ens, "b e g c -> (b e) g c")
-        shard_shapes = apply_shard_shapes(y_pred_ens_interp, self.grid_dim, self.grid_shard_shapes)
+        shard_shapes = apply_shard_shapes(y_pred_ens_interp, grid_dim, grid_shard_shapes)
         y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, model_comm_group)
         y_pred_ens_interp = einops.rearrange(
             y_pred_ens_interp,
@@ -118,7 +117,7 @@ class MultiscaleLossWrapper(nn.Module):
             e=ensemble_size,
         )
 
-        shard_shapes_y = apply_shard_shapes(y, self.grid_dim, self.grid_shard_shapes)
+        shard_shapes_y = apply_shard_shapes(y, grid_dim, grid_shard_shapes)
         y_interp = shard_channels(y, shard_shapes_y, model_comm_group)
 
         return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
@@ -137,15 +136,22 @@ class MultiscaleLossWrapper(nn.Module):
         squash: bool = True,  # noqa: ARG002
         grid_shard_slice: tuple | None = None,
         model_comm_group: ProcessGroup | None = None,
+        **kwargs,
     ) -> list[torch.Tensor]:
 
+        model_comm_group_size = kwargs.pop("model_comm_group_size", None)
+        grid_dim = kwargs.pop("grid_dim", None)
+        grid_shard_shapes = kwargs.pop("grid_shard_shapes", None)
+
         shard_shapes, shard_shapes_y = None, None
-        if self.model_comm_group_size > 1 and self.keep_batch_sharded:
+        if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
             # go to full sequence dimension for interpolation / smoothing
             y_pred_ens_for_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
                 y_pred_ens,
                 y,
                 model_comm_group,
+                grid_dim,
+                grid_shard_shapes,
             )
         else:
             y_pred_ens_for_interp = y_pred_ens
@@ -165,7 +171,7 @@ class MultiscaleLossWrapper(nn.Module):
             # interpolate / smooth the predictions and the truth for loss computation
             y_pred_ens_tmp, y_tmp = self._interp_for_loss(y_pred_ens_for_interp, y_for_interp, i)
 
-            if self.model_comm_group_size > 1 and self.keep_batch_sharded:
+            if model_comm_group and model_comm_group_size > 1 and self.keep_batch_sharded:
                 y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, model_comm_group)
                 y_tmp = gather_channels(y_tmp, shard_shapes_y, model_comm_group)
 

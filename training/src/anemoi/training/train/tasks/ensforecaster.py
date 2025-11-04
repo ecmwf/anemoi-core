@@ -193,12 +193,28 @@ class GraphEnsForecaster(BaseGraphModule):
             mgroup=ens_comm_subgroup,
         )
 
+        kwargs = {
+            "model_comm_group_size": self.model_comm_group_size,
+            "grid_dim": self.grid_dim,
+            "grid_shard_shapes": self.grid_shard_shapes,
+        }
+
+        loss.forward(
+            y_pred_ens,
+            y,
+            squash=False,
+            grid_shard_slice=self.grid_shard_slice,
+            model_comm_group=model_comm_group,
+            **kwargs,
+        )
+
         loss = loss(
             y_pred_ens,
             y,
             squash=False,
             grid_shard_slice=self.grid_shard_slice,
             model_comm_group=model_comm_group,
+            **kwargs,
         )
 
         #########
