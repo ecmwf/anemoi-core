@@ -69,7 +69,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             in_channels_src=self.input_dim,
             in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
             hidden_dim=self.num_channels,
-            sub_graph=graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
+            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
         )
@@ -79,7 +79,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
         )
@@ -92,7 +92,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             in_channels_dst=self.input_dim,
             hidden_dim=self.num_channels,
             out_channels_dst=self.num_output_channels,
-            sub_graph=graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
             src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )
@@ -138,100 +138,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
         return x_out
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        self.num_input_channels = len(data_indices.model.input)
-        self.num_output_channels = len(data_indices.model.output)
-        self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
-        self._internal_input_idx = data_indices.model.input.prognostic
-        self._internal_output_idx = data_indices.model.output.prognostic
-
-    def _assert_matching_indices(self, data_indices: dict) -> None:
-        assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
-            data_indices.model.output.diagnostic
-        ), (
-            f"Mismatch between the internal data indices ({len(self._internal_output_idx)}) and "
-            f"the output indices excluding diagnostic variables "
-            f"({len(data_indices.model.output.full) - len(data_indices.model.output.diagnostic)})",
-        )
-        assert len(self._internal_input_idx) == len(
-            self._internal_output_idx,
-        ), f"Model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
-
-    def _assert_valid_sharding(
-        self,
-        batch_size: int,
-        ensemble_size: int,
-        in_out_sharded: bool,
-        model_comm_group: Optional[ProcessGroup] = None,
-    ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
-
-        if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
-
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
-
-    def _run_mapper(
-        self,
-        mapper: nn.Module,
-        data: tuple[Tensor],
-        batch_size: int,
-        shard_shapes: tuple[tuple[int, int], tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
-        keep_x_dst_sharded: bool = False,
-        use_reentrant: bool = False,
-    ) -> Tensor:
-        """Run mapper with activation checkpoint.
-
-        Parameters
-        ----------
-        mapper : nn.Module
-            Which processor to use
-        data : tuple[Tensor]
-            tuple of data to pass in
-        batch_size: int,
-            Batch size
-        shard_shapes : tuple[tuple[int, int], tuple[int, int]]
-            Shard shapes for the data
-        model_comm_group : ProcessGroup
-            model communication group, specifies which GPUs work together
-            in one model instance
-        x_src_is_sharded : bool, optional
-            Source data is sharded, by default False
-        x_dst_is_sharded : bool, optional
-            Destination data is sharded, by default False
-        keep_x_dst_sharded : bool, optional
-            Keep destination data sharded, by default False
-        use_reentrant : bool, optional
-            Use reentrant, by default False
-
-        Returns
-        -------
-        Tensor
-            Mapped data
-        """
-        kwargs = {
-            "batch_size": batch_size,
-            "shard_shapes": shard_shapes,
-            "model_comm_group": model_comm_group,
-            "x_src_is_sharded": x_src_is_sharded,
-            "x_dst_is_sharded": x_dst_is_sharded,
-            "keep_x_dst_sharded": keep_x_dst_sharded,
-        }
-
-        if isinstance(mapper, GraphTransformerBaseMapper) and mapper.shard_strategy == "edges":
-            return mapper(data, **kwargs)
-
-        return checkpoint(mapper, data, **kwargs, use_reentrant=use_reentrant)
 
     def forward(
         self,

@@ -17,13 +17,13 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
+from hydra.utils import instantiate
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ class BaseGraphModel(nn.Module):
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
+        self._graph_name_truncation = model_config.graph.truncation
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
@@ -73,7 +74,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build truncation
-        self.truncation = BaseTruncation(self._truncation_data)
+        self.residual = instantiate(model_config.model.residual, graph=graph_data)
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)

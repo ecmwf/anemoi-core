@@ -1,21 +1,23 @@
 from typing import Literal
 
 from pydantic import Field
+from typing import Annotated
 
 from anemoi.utils.schemas import BaseModel
 
 
 class SkipConnectionSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.residual.SkipConnection"] = Field(
+    """Schema for skip connection residuals."""
+    target_: Literal[
+        "anemoi.models.layers.residual.SkipConnection",
+        "anemoi.models.layers.residual.NoConnection"
+    ] = Field(
         default="anemoi.models.layers.residual.SkipConnection", alias="_target_"
     )
 
 
-class NoConnectionSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.residual.NoConnection"] = Field(..., alias="_target_")
-
-
 class TruncatedConnectionSchema(BaseModel):
+    """Schema for truncated connection residuals."""
     target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(..., alias="_target_")
     data_nodes: str = Field(
         ..., description="Name of the node set in the graph representing the original (full) resolution data."
@@ -34,3 +36,9 @@ class TruncatedConnectionSchema(BaseModel):
     autocast: bool = Field(
         False, description="Whether to enable mixed precision autocasting during projection operations."
     )
+
+
+ResidualConnectionSchema = Annotated[
+    SkipConnectionSchema | TruncatedConnectionSchema,
+    Field(discriminator="target_"),
+]

@@ -3,6 +3,7 @@ overwrite: True
 
 data: "data"
 hidden: "hidden"
+truncation: null
 
 nodes:
   # Data nodes
@@ -16,7 +17,11 @@ nodes:
     node_builder:
       _target_: anemoi.graphs.nodes.TriNodes # options: AnemoiDatasetNodes, NPZFileNodes, TriNodes
       resolution: 5 # grid resolution for npz (o32, o48, ...)
-    attributes: ${graph.attributes.nodes}
+  # Intermediate nodes used for truncation of residual connection
+  int:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5
 
 edges:
 # Encoder configuration
@@ -47,7 +52,30 @@ edges:
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
-
+  # Truncated connection -> down
+- source_name: ${graph.data}
+  target_name: ${graph.truncation}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 5
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes:
+    gauss_weights:
+      _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+      norm: l1
+  # Truncated connection -> up
+- source_name: ${graph.truncation}
+  target_name: ${graph.data}
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes:
+    gauss_weights:
+      _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+      norm: l1
 
 attributes:
   nodes:
