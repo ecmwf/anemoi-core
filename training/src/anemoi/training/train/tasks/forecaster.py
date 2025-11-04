@@ -16,7 +16,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.masks import (
-    NoOutputMask,  # TODO: remove when boundary handling for multi-step output is implemented
+    NoOutputMask,  # TODO(dieter): remove when boundary handling for multi-step output is implemented
 )
 
 if TYPE_CHECKING:
@@ -109,7 +109,7 @@ class GraphForecaster(BaseGraphModule):
         rollout_step: int,
     ) -> torch.Tensor:
         x = x.roll(-self.multi_out, dims=1)
-        # TODO: see if we can replace for loop with tensor operations
+        # TODO(dieter): see if we can replace for loop with tensor operations
         for i in range(self.multi_out):
             # Get prognostic variables
             x[:, -(i + 1), :, :, self.data_indices.model.input.prognostic] = y_pred[
@@ -119,14 +119,14 @@ class GraphForecaster(BaseGraphModule):
                 self.data_indices.model.output.prognostic,
             ]
 
-            # TODO: handle boundary conditions for multi-step output
+            # TODO(dieter): handle boundary conditions for multi-step output
             assert isinstance(self.output_mask, NoOutputMask), "Boundary rollout not implemented for multi-step output!"
-            # x[:, -1] = self.output_mask.rollout_boundary(
-            #     x[:, -1],
-            #     batch[:, self.multi_step + rollout_step],
-            #     self.data_indices,
-            #     grid_shard_slice=self.grid_shard_slice,
-            # )
+            x[:, -1] = self.output_mask.rollout_boundary(
+                x[:, -1],
+                batch[:, self.multi_step + rollout_step],
+                self.data_indices,
+                grid_shard_slice=self.grid_shard_slice,
+            )
 
             # get new "constants" needed for time-varying fields
             x[:, -(i + 1), :, :, self.data_indices.model.input.forcing] = batch[

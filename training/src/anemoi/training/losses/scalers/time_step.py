@@ -18,7 +18,7 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
-class OutputStepScaler(BaseScaler):
+class TimeStepScaler(BaseScaler):
     """Class for scaling different output step contributions to the loss."""
 
     scale_dims: TensorDim = TensorDim.TIME
@@ -33,7 +33,10 @@ class OutputStepScaler(BaseScaler):
 
         Parameters
         ----------
-
+        weights: list
+            Weight per output step.
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
         super().__init__(norm=norm)
         del kwargs
