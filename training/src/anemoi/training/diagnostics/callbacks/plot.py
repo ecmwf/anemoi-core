@@ -451,7 +451,7 @@ class LongRolloutPlots(BasePlotCallback):
             # collect min and max values for each variable for the colorbar
             vmin, vmax = (np.inf * np.ones(len(plot_parameters_dict)), -np.inf * np.ones(len(plot_parameters_dict)))
 
-        # Plot for each rollout step# Plot for each rollout step
+        # Plot for each rollout step
         with torch.no_grad():
             for rollout_step, (_, _, y_pred) in enumerate(
                 pl_module.rollout_step(
@@ -949,7 +949,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         input_tensor = (
             batch[
                 :,
-                pl_module.multi_step : pl_module.multi_step + pl_module.rollout + 1,
+                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
@@ -964,7 +964,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             ),
         )
         output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data = pl_module.output_mask.apply(data, dim=2, fill_value=np.nan)
+        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
         return data, output_tensor
@@ -1068,41 +1068,6 @@ class PlotSample(BasePlotAdditionalMetrics):
                 tag=f"pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
                 exp_log_tag=f"val_pred_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
             )
-
-
-class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
-    """Base processing class for additional metrics."""
-
-    def process(
-        self,
-        pl_module: pl.LightningModule,
-        outputs: list,
-        batch: torch.Tensor,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
-
-        input_tensor = (
-            batch[
-                :,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data = self.post_processors(input_tensor)[self.sample_idx]
-        output_tensor = torch.cat(
-            tuple(
-                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
-                for x in outputs[1]
-            ),
-        )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
-        return data, output_tensor
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
