@@ -88,6 +88,10 @@ class DownscalingDataset(NativeGridDataset):
 
         for i in shuffled_chunk_indices:
 
+            import time
+
+            time_start = time.time()
+
             lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
                 self.reader_group_rank
             )
@@ -121,5 +125,10 @@ class DownscalingDataset(NativeGridDataset):
                 "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
             )
             y = torch.from_numpy(y)
+
+            time_end = time.time()
+            from icecream import ic
+
+            # ic("data load time", time_end - time_start)
 
             yield x_in_lres, x_in_hres, y

@@ -5,17 +5,7 @@ import numpy as np
 import xarray as xr
 from einops import rearrange
 from icecream import ic
-from anemoi.training.distributed.strategy import DDPGroupStrategy
-from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.train.downscaler import GraphDownscaler
-import argparse
-import torch.distributed as dist
-import torch.multiprocessing as mp  # For launching processes
-from torch.nn.parallel import DistributedDataParallel as DDP
-import pytorch_lightning as pl
-from tqdm import tqdm
-import logging
-from anemoi.training.data.ds_dataset import DownscalingDataset
+
 from dataclasses import dataclass
 
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
@@ -24,7 +14,7 @@ sys.path.append("/home/ecm5702/dev/inference")
 
 @dataclass
 class WeatherDataBatch:
-    dataset: DownscalingDataset
+    dataset: object
     device: str = "cuda"
 
     def prepare(self, idx: int, N_samples: int):
@@ -123,7 +113,7 @@ def create_xarray_dataset(
     N_samples,
     N_members,
     config,
-    downscaler,
+    data_indices,
     return_intermediate=False,
 ):
 
@@ -131,15 +121,14 @@ def create_xarray_dataset(
         data_batch.x_in, filtered_input_name_to_index = (
             extract_filtered_input_from_output(
                 data_batch.x_in,
-                downscaler.data_indices.data.input[0].name_to_index,
-                downscaler.data_indices.model.output.name_to_index,
+                data_indices.data.input[0].name_to_index,
+                data_indices.model.output.name_to_index,
             )
         )
     if len(data_batch.x_in.shape) != 3:
         data_batch.x_in = data_batch.x_in[:, 0, 0, ...]
         data_batch.y = data_batch.y[:, 0, 0, ...]
-        if config.training.predict_residuals:
-            data_batch.y_residuals = data_batch.y_residuals[:, 0, 0, ...]
+        data_batch.y_residuals = data_batch.y_residuals[:, 0, 0, ...]
 
     ds = xr.Dataset(
         {
@@ -160,9 +149,7 @@ def create_xarray_dataset(
             "ensemble_member": range(N_members),
             "grid_point_lres": range(data_batch.lon_lres.shape[0]),
             "grid_point_hres": range(data_batch.lon_hres.shape[0]),
-            "weather_state": list(
-                downscaler.data_indices.model.output.name_to_index.keys()
-            ),
+            "weather_state": list(data_indices.model.output.name_to_index.keys()),
         },
     )
 
@@ -197,8 +184,6 @@ def create_xarray_dataset(
         ds[f"y_pred_{i}"].attrs["lat"] = "lat_hres"
         ds[f"y_pred_{i}_diff"].attrs["lon"] = "lon_hres"
         ds[f"y_pred_{i}_diff"].attrs["lat"] = "lat_hres"
-
-    if config.training.predict_residuals:
         ds["y_pred_residuals"] = (
             ["sample", "ensemble_member", "grid_point_hres", "weather_state"],
             data_batch.y_pred_residuals,

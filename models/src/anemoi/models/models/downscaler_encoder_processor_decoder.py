@@ -64,8 +64,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             The residuals tensor output from model.
         """
         residuals = (
-            x_in_interp_to_hres[..., self.data_indices.data.output.full]
-            - y[..., self.data_indices.data.output.full]
+            y[..., self.data_indices.data.output.full]
+            - x_in_interp_to_hres[..., self.data_indices.data.output.full]
         )
 
         # to deal with residuals or direct prediction, see compute_tendency
@@ -594,7 +594,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             dataset="input_lres",
             in_place=False,
         )
-
         return state_outp
 
     def _after_sampling(

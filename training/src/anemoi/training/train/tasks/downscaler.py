@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from icecream import ic
 from typing import TYPE_CHECKING
-
+import time
 import torch
 from torch.utils.checkpoint import checkpoint
 from anemoi.training.losses.base import BaseLoss
@@ -158,6 +158,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         """Process batch size of len 3 with each item of dimensions:
         [batch_size, dates, ensemble, gridpoints, variables].
         """
+        import time
+
+        time_init = time.time()
         del batch_idx
         # loss = torch.zeros(
         #    1, dtype=batch[0].dtype, device=self.device, requires_grad=False
@@ -229,6 +232,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         )
 
         y_preds = [x_in_interp_to_hres + y_pred, y_pred]
+
+        time_elapsed = time.time() - time_init
+        # ic("fwd step", time_elapsed)
 
         return loss, metrics_next, y_preds
 
@@ -451,6 +457,59 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             self.lres_grid_shard_shapes, self.lres_grid_shard_slice = None, None
             self.hres_grid_shard_shapes, self.hres_grid_shard_slice = None, None
         return batch
+
+    def on_fit_start(self):
+        self.bw_last = 0.0
+        self.opt_last = 0.0
+
+    def on_train_batch_start(self, batch, batch_idx):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self._t0 = time.perf_counter()
+
+    def on_before_backward(self, loss):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self._tb = time.perf_counter()
+
+    def on_after_backward(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.bw_last = time.perf_counter() - self._tb
+
+    def optimizer_step(
+        self, epoch, batch_idx, optimizer, optimizer_closure=None, *a, **k
+    ):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t = time.perf_counter()
+        optimizer.step(closure=optimizer_closure)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.opt_last = time.perf_counter() - t
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        dt = time.perf_counter() - self._t0
+        it_s = 1.0 / dt
+        """
+        self.log_dict(
+            {"it_s": it_s, "bw_s": self.bw_last, "opt_s": self.opt_last},
+            on_step=True,
+            prog_bar=True,
+            logger=False,
+        )
+
+        print(
+            {
+                "step": self.global_step,
+                "it_s": it_s,
+                "bw_s": self.bw_last,
+                "opt_s": self.opt_last,
+            }
+        )
+        """
 
 
 def match_tensor_channels(input_name_to_index, output_name_to_index):

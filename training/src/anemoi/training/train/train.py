@@ -449,13 +449,13 @@ class AnemoiTrainer:
 
     def _log_information(self) -> None:
         # Log number of variables (features)
-        num_fc_features = len(self.datamodule.ds_train.data.variables) - len(
-            self.config.data.forcing
-        )
-        LOGGER.info("Total number of prognostic variables: %d", num_fc_features)
-        LOGGER.info(
-            "Total number of auxiliary variables: %d", len(self.config.data.forcing)
-        )
+        # num_fc_features = len(self.datamodule.ds_train.data.variables) - len(
+        #    self.config.data.forcing
+        # )
+        # LOGGER.info("Total number of prognostic variables: %d", num_fc_features)
+        # LOGGER.info(
+        #    "Total number of auxiliary variables: %d", len(self.config.data.forcing)
+        # )
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
         total_number_of_model_instances = (

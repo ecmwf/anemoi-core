@@ -3,17 +3,11 @@ import sys
 import torch
 import numpy as np
 import xarray as xr
-from einops import rearrange
+
 from icecream import ic
-from anemoi.training.distributed.strategy import DDPGroupStrategy
-from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.train.downscaler import GraphDownscaler
-import argparse
+
 import torch.distributed as dist
 import torch.multiprocessing as mp  # For launching processes
-from torch.nn.parallel import DistributedDataParallel as DDP
-import pytorch_lightning as pl
-from tqdm import tqdm
 import datetime
 import socket
 import subprocess
@@ -22,6 +16,17 @@ import logging
 
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+
+def get_parallel_info():
+    """Reads Slurm env vars, if they exist, to determine if inference is running in parallel"""
+    local_rank = int(
+        os.environ.get("SLURM_LOCALID", 0)
+    )  # Rank within a node, between 0 and num_gpus
+    global_rank = int(os.environ.get("SLURM_PROCID", 0))  # Rank within all nodes
+    world_size = int(os.environ.get("SLURM_NTASKS", 1))  # Total number of processes
+
+    return global_rank, local_rank, world_size
 
 
 def __get_parallel_info():
@@ -35,12 +40,12 @@ def __get_parallel_info():
     return global_rank, local_rank, world_size
 
 
-def __init_parallel(device, global_rank, world_size):
+def init_parallel(device, global_rank, world_size):
     """Creates a model communication group to be used for parallel inference"""
 
     if world_size > 1:
 
-        master_addr, master_port = __init_network()
+        master_addr, master_port = init_network()
 
         # use 'startswith' instead of '==' in case device is 'cuda:0'
         backend = "nccl"
@@ -68,7 +73,7 @@ def __init_parallel(device, global_rank, world_size):
     return model_comm_group
 
 
-def __init_network():
+def init_network():
     """Reads Slurm environment to set master address and port for parallel communication"""
 
     # Get the master address from the SLURM_NODELIST environment variable

@@ -97,16 +97,21 @@ class LocalInferencePlotter:
         list_regions,
         list_model_variables=["x_0", "y_0", "y_1", "y_pred_0", "y_pred_1"],
         weather_states=["10u", "10v", "2t", "z_500", "u_850", "v_850", "t_850"],
+        num_samples_to_plot=2,
     ):
-        with PdfPages(f"{self.dir_exp}/{self.name_exp}/all_regions_plots.pdf") as pdf:
+        pdf_path = f"{self.dir_exp}/{self.name_exp}/all_regions_plots.pdf"
+        if os.path.exists(pdf_path):
+            logging.info(f"Removing existing PDF at {pdf_path}")
+            os.remove(pdf_path)
+        with PdfPages(pdf_path) as pdf:
             for region in list_regions:
                 logging.info(f"Plotting region {region}")
                 region_ds = get_region_ds(self.ds, region)
                 region_ds.attrs["region_name"] = region
 
                 if "sample" in region_ds.dims:
-                    # Original behavior when sample dimension exists
-                    for sample in range(2):
+                    # manual inference with sample dimension
+                    for sample in range(num_samples_to_plot):
                         fig = plot_x_y(
                             ds_sample=region_ds.sel(sample=sample),
                             list_model_variables=list_model_variables,
@@ -116,7 +121,7 @@ class LocalInferencePlotter:
                         pdf.savefig(fig)
                         plt.close(fig)
                 else:
-                    # Alternative when using step and forecast_reference_time
+                    # anemoi inference with step and forecast_reference_time dimensions
                     sample_count = 0
                     for step in region_ds.step.values:
                         for ft in np.atleast_1d(
@@ -133,6 +138,7 @@ class LocalInferencePlotter:
                                 weather_states=weather_states,
                                 title=f"{region} - step {step} - forecast {pd.to_datetime(ft).strftime('%Y-%m-%d')}",
                             )
+
                             pdf.savefig(fig)
                             plt.close(fig)
                             sample_count += 1
