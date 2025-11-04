@@ -100,7 +100,7 @@ class EdgeDirection(BasePositionalBuilder):
         return edge_dirs
 
 
-class DirectionalHarmonics(BasePositionalBuilder):
+class DirectionalHarmonics(EdgeDirection):
     """Computes directional harmonics from edge directions.
 
     Builds directional harmonics [sin(mψ), cos(mψ)]_{m=1..order} from per-edge
@@ -281,10 +281,29 @@ class RadialBasisFeatures(EdgeLength):
         epsilon: float = 1e-10,
         dtype: str = "float32",
     ) -> None:
-        self.r_scale = r_scale
-        self.centers = centers if centers is not None else [0.0, 0.25, 0.5, 0.75, 1.0]
-        self.sigma = sigma
         self.epsilon = epsilon
+        self.r_scale = r_scale
+
+        if self.r_scale is not None and self.r_scale < self.epsilon:
+            LOGGER.warning(
+                "r_scale (%f) is too small (< epsilon=%f). Clamping to epsilon to avoid division by zero.",
+                self.r_scale,
+                self.epsilon,
+            )
+            self.r_scale = self.epsilon
+
+        self.centers = centers if centers is not None else [0.0, 0.25, 0.5, 0.75, 1.0]
+
+        # Normalize centers if using global scaling
+        if self.r_scale is not None:
+            self.centers = [c / self.r_scale for c in self.centers]
+
+        # Check that centers are in the range [0, 1]
+        assert all(
+            0.0 <= c <= 1.0 for c in self.centers
+        ), f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
+
+        self.sigma = sigma
         super().__init__(norm=norm, dtype=dtype)
 
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
@@ -311,7 +330,7 @@ class RadialBasisFeatures(EdgeLength):
         if edge_features.ndim == 2:
             edge_features = edge_features.squeeze(-1)
 
-        # 1. Compute scale factor per destination node
+        # Compute scale factor per destination node
         if self.r_scale is None:
             # Per-node max edge length scaling
             max_dists = scatter(edge_features, index.long(), dim=0, dim_size=dim_size, reduce="max")
@@ -321,12 +340,11 @@ class RadialBasisFeatures(EdgeLength):
 
             # Broadcast to each edge
             scales = max_dists[index]
+            alpha = edge_features / scales  # Normalized distance [0, 1]
         else:
             # Global scaling
-            scales = torch.full_like(edge_features, max(self.r_scale, self.epsilon))
-
-        # 2. Normalize distances and compute RBF features
-        alpha = edge_features / scales  # Normalized distance [0, 1]
+            scales = torch.full_like(edge_features, self.r_scale)
+            alpha = edge_features / scales  # Scaled distance [0, max_edge/r_scale]
 
         # Compute Gaussian RBF for each center
         rbf_features = []
