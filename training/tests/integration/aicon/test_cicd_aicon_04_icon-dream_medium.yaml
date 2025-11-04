@@ -23,20 +23,23 @@ config_validation: True
 system:
   input:
     graph: none
-    checkpoints: ${system.output.output}checkpoint/
-    plots: ${system.output.output}plots/
-    profiler: ${system.output.output}profiler/
     dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
     forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
     warm_start: null
   output:
     root: output_training/${data.resolution}
+    checkpoints:
+      root: checkpoint
+      every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+      every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+      every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+    plots: plots
     logs:
-      root: ${system.output.output}logs
+      root: logs
       wandb: ""
       mlflow: mlflow
       tensorboard: tensorboard
-    profiler: profiler/
+    profiler: profiler
   # number of GPUs per node and number of nodes (for DDP)
   hardware:
     accelerator: auto
