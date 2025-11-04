@@ -15,22 +15,19 @@ import einops
 import torch
 from hydra.utils import instantiate
 from torch import Tensor
-from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
-from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.mapper import GraphTransformerBaseMapper
+from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelEncProcDec(nn.Module):
+class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
     def __init__(
@@ -53,29 +50,17 @@ class AnemoiModelEncProcDec(nn.Module):
         graph_data : HeteroData
             Graph definition
         """
-        super().__init__()
-        self.data_indices = data_indices
-        self.statistics = statistics
-        self._truncation_data = truncation_data
 
-        model_config = DotDict(model_config)
-        self._graph_name_data = model_config.graph.data
-        self._graph_name_hidden = model_config.graph.hidden
-        self._graph_name_truncation = model_config.graph.truncation
-
-        self.multi_step = model_config.training.multistep_input
-        self.num_channels = model_config.model.num_channels
-
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, graph_data)
-
-        self._calculate_shapes_and_indices(data_indices)
-        self._assert_matching_indices(data_indices)
-
-        # Residual data -> data
-        self.residual = instantiate(
-            model_config.model.residual,
-            graph=graph_data,
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+            truncation_data=truncation_data,
         )
+
+    def _build_networks(self, model_config: DotDict) -> None:
+        """Builds the model components."""
 
         # Encoder data -> hidden
         self.encoder = instantiate(
@@ -112,30 +97,12 @@ class AnemoiModelEncProcDec(nn.Module):
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
         )
 
-        # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
-        self.boundings = nn.ModuleList(
-            [
-                instantiate(
-                    cfg,
-                    name_to_index=self.data_indices.model.output.name_to_index,
-                    statistics=self.statistics,
-                    name_to_index_stats=self.data_indices.data.input.name_to_index,
-                )
-                for cfg in getattr(model_config.model, "bounding", [])
-            ]
-        )
-
-    def _get_shard_shapes(self, x, dim=0, shard_shapes_dim=None, model_comm_group=None):
-        if shard_shapes_dim is None:
-            return get_shard_shapes(x, dim, model_comm_group)
-        else:
-            return apply_shard_shapes(x, dim, shard_shapes_dim)
-
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -146,7 +113,9 @@ class AnemoiModelEncProcDec(nn.Module):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
 
         return x_data_latent, shard_shapes_data
 
@@ -176,9 +145,6 @@ class AnemoiModelEncProcDec(nn.Module):
         self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
         self._internal_input_idx = data_indices.model.input.prognostic
         self._internal_output_idx = data_indices.model.output.prognostic
-        self.input_dim = (
-            self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
-        )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
@@ -309,8 +275,7 @@ class AnemoiModelEncProcDec(nn.Module):
         )
 
         # Encoder
-        x_data_latent, x_latent = self._run_mapper(
-            self.encoder,
+        x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -332,8 +297,7 @@ class AnemoiModelEncProcDec(nn.Module):
         x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),

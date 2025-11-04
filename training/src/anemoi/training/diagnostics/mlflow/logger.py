@@ -427,7 +427,7 @@ class AnemoiMLflowLogger(MLFlowLogger):
                 run = mlflow_client.get_run(run_id)
                 run_name = run.info.run_name
                 self._check_server2server_lineage(run)
-                self._check_dry_run(parent_run)
+                self._check_dry_run(run)
                 mlflow_client.update_run(run_id=run_id, status="RUNNING")
                 tags["resumedRun"] = "True"
             # This block is used when a run is forked and an existing run ID is specified
