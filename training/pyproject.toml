@@ -64,7 +64,7 @@ dependencies = [
   "zarr>=2.14.2",
 ]
 
-optional-dependencies.all = [ "azure" ]
+optional-dependencies.all = [ "anemoi-training[azure]" ]
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow", "strenum" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
