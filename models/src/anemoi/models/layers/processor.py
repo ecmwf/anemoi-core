@@ -63,13 +63,13 @@ class BaseProcessor(nn.Module, ABC):
         if cpu_offload:
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
 
-    def build_layers(self, layer_class, *args, **kwargs) -> None:
+    def build_layers(self, layer_class, *layer_args, **layer_kwargs) -> None:
         """Build Layers."""
         self.proc = nn.ModuleList(
             [
                 layer_class(
-                    *args,
-                    **kwargs,
+                    *layer_args,
+                    **layer_kwargs,
                 )
                 for _ in range(self.num_layers)
             ],
