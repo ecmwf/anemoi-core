@@ -23,7 +23,6 @@ metadata = MigrationMetadata(
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
 
-
     Parameters
     ----------
     ckpt : CkptType
@@ -34,7 +33,7 @@ def migrate(ckpt: CkptType) -> CkptType:
     CkptType
         The migrated checkpoint dict.
     """
-    print(f"\n\nApplying chunking fix migration.\n\n")
+    print("\n\nApplying chunking fix migration.\n\n")
     num_layers = ckpt["hyper_parameters"]["config"].model.processor.num_layers
     num_chunks = ckpt["hyper_parameters"]["config"].model.processor.num_chunks
     state_dict = ckpt["state_dict"]
@@ -52,7 +51,7 @@ def migrate(ckpt: CkptType) -> CkptType:
 
         flat_idx = chunk_idx * blocks_per_chunk + block_idx
         rest = [""] + parts[7:]
-        new_key = f"model.model.processor.proc." + str(flat_idx) + ".".join(rest)
+        new_key = "model.model.processor.proc." + str(flat_idx) + ".".join(rest)
 
         updates[new_key] = state_dict[key]
         del state_dict[key]
@@ -63,7 +62,6 @@ def migrate(ckpt: CkptType) -> CkptType:
 
 def rollback(ckpt: CkptType) -> CkptType:
     """Rollback the checkpoint.
-
 
     Parameters
     ----------
