@@ -19,6 +19,8 @@ precision: 16-mixed
 # k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
 # Deepmind use k = 2 in their model
 multistep_input: 2
+# TODO(dieter): update comments
+multistep_output: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
