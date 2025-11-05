@@ -83,6 +83,7 @@ log:
   tensorboard:
     enabled: False
   mlflow:
+    _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
     enabled: False
     offline: False
     authentication: False
