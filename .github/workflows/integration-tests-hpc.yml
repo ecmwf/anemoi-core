@@ -69,6 +69,7 @@ jobs:
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR
             git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
+            pip install pytorch-lightning==2.5.4
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
