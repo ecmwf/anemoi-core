@@ -50,7 +50,7 @@ def functionalloss() -> type[FunctionalLoss]:
 @pytest.fixture
 def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 1, 1, 4, 2]
+    tensor_shape = [1, 1, 4, 2]
 
     pred = torch.zeros(tensor_shape)
     pred[0, 0, 0] = torch.tensor([1.0, 1.0])
