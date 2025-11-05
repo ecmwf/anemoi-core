@@ -449,7 +449,12 @@ def test_variable_masking(
     )
     vars_to_mask = ["z", "other", "q"]
     indices_to_mask = [data_indices.model.output.name_to_index[v] for v in vars_to_mask]
-    assert scalers["variable_masking"][0][0] == len(vars_to_mask)
+    scaler = scalers["variable_masking"]
+    assert scaler[0][0] == TensorDim.VARIABLE.value, "Expected scaler to be applied along variable dimension"
+    # masked variables should have scaler of 0, unmasked 1
+    assert int(scaler[1].sum().item()) == scaler[1].shape[0] - len(
+        vars_to_mask,
+    ), "Sum of scaler values should be equal to number of unmasked variables"
     assert not scalers["variable_masking"][1][indices_to_mask].any(), "Expected scalers for masked variables to be zero"
 
     config.training.scalers.builders["variable_masking"].update(invert=True)
@@ -462,8 +467,12 @@ def test_variable_masking(
         metadata_extractor=metadata_extractor,
         output_mask=NoOutputMask(),
     )
-    assert scalers["variable_masking"][0][0] == len(vars_to_mask)
-    assert scalers["variable_masking"][1][indices_to_mask].all(), "Expected scalers for unmasked variables to be one"
+    inverted_scaler = scalers["variable_masking"]
+    # dimension where scaler is applied is variable
+    assert inverted_scaler[0][0] == TensorDim.VARIABLE.value
+    # masked variables with inverted = True should have scaler of 1, unmasked 0
+    assert int(inverted_scaler[1].sum().item()) == len(vars_to_mask)
+    assert inverted_scaler[1][indices_to_mask].all(), "Expected scalers for unmasked variables to be one"
 
 
 def test_variable_loss_scaling_val_complex_variable_groups(
