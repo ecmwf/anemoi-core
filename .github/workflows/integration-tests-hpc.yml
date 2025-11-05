@@ -69,12 +69,12 @@ jobs:
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR
             git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
-            pip install pytorch-lightning==2.5.4
             cd $REPO_NAME
             python3 -m venv .venv
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            pip install pytorch-lightning==2.5.4
             srun python -m pytest -v training/tests/integration --slow --multigpu -k "test_benchmark_training_cycle"
             deactivate
             rm -rf $REPO_NAME
