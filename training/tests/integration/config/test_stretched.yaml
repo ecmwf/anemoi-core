@@ -93,9 +93,9 @@ diagnostics:
       #   every_n_batches: ${diagnostics.plot.frequency.batch}
       #   parameters:
       #   - tp
-      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
-      #   sample_idx: ${diagnostics.plot.sample_idx}
-      #   every_n_batches: ${diagnostics.plot.frequency.batch}
-      #   precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
-      #   parameters:
-      #   - tp
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        sample_idx: ${diagnostics.plot.sample_idx}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        parameters:
+        - tp

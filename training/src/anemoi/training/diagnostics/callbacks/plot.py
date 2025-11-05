@@ -677,13 +677,22 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         }
 
     def get_edge_trainable_modules(self, model: torch.nn.Module) -> dict[tuple[str, str], torch.Tensor]:
-        trainable_modules = {
-            (model._graph_name_data, model._graph_name_hidden): model.encoder,
-            (model._graph_name_hidden, model._graph_name_data): model.decoder,
-        }
+        if hasattr(model, "_graph_hidden_names"):  # hierarchical
+            trainable_modules = {}
+            for i in range(model.num_hidden - 1):
+                nodes_names = model._graph_hidden_names[i]
+                trainable_modules[(model._graph_name_data, nodes_names)] = model.encoder
+                trainable_modules[(nodes_names, model._graph_name_data)] = model.decoder
+                if isinstance(model.processor, GraphEdgeMixin):
+                    trainable_modules[nodes_names, nodes_names] = model.processor
+        else:
+            trainable_modules = {
+                (model._graph_name_data, model._graph_name_hidden): model.encoder,
+                (model._graph_name_hidden, model._graph_name_data): model.decoder,
+            }
 
-        if isinstance(model.processor, GraphEdgeMixin):
-            trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
+            if isinstance(model.processor, GraphEdgeMixin):
+                trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
 
         return {name: module for name, module in trainable_modules.items() if module.trainable.trainable is not None}
 
