@@ -10,8 +10,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from operator import itemgetter
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -22,7 +22,6 @@ from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.training.utils.inicond import EnsembleInitialConditions
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
 
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -226,13 +225,10 @@ class GraphEnsInterp(BaseGraphModule):
         metrics = {}
         y_preds = []
 
-        #New code for ensemble interpolator: (no rollout loop, instead loops through interp targets)
+        # New code for ensemble interpolator: (no rollout loop, instead loops through interp targets)
 
-        batch = self.model.pre_processors(batch[0], in_place=not validation_mode) #don't use EDA for interpolator
-        x = self.ensemble_ic_generator(
-            batch,
-            None #no EDA for interpolator
-        )
+        batch = self.model.pre_processors(batch[0], in_place=not validation_mode)  # don't use EDA for interpolator
+        x = self.ensemble_ic_generator(batch, None)  # no EDA for interpolator
 
         # Scalers which are delayed need to be initialized after the pre-processors
         if self.is_first_step:
@@ -267,18 +263,16 @@ class GraphEnsInterp(BaseGraphModule):
             y = batch[:, self.imap[interp_step], 0, :, self.data_indices.data.output.full]
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss_next, y_pred_ens_group = (
-                checkpoint(
-                    self.gather_and_compute_loss,
-                    y_pred,
-                    y,
-                    self.loss,
-                    self.ens_comm_subgroup_size,
-                    self.ens_comm_subgroup,
-                    self.model_comm_group,
-                    validation_mode,
-                    use_reentrant=False,
-                )
+            loss_next, y_pred_ens_group = checkpoint(
+                self.gather_and_compute_loss,
+                y_pred,
+                y,
+                self.loss,
+                self.ens_comm_subgroup_size,
+                self.ens_comm_subgroup,
+                self.model_comm_group,
+                validation_mode,
+                use_reentrant=False,
             )
             if not validation_mode:
                 y_pred_ens_group = []

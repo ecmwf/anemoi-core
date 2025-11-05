@@ -27,7 +27,8 @@ LOGGER = logging.getLogger(__name__)
 
 class AnemoiModelEncProcDecEnsInterp(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble
-    and interpolator functionality."""
+    and interpolator functionality.
+    """
 
     def __init__(
         self,
