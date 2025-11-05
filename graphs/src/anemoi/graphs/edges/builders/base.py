@@ -109,8 +109,8 @@ class BaseEdgeBuilder(ABC):
         """
         for attr_name, attr_config in config.items():
             edge_index = graph[self.name].edge_index
-            edge_builder = instantiate(attr_config)
-            graph[self.name][attr_name] = edge_builder(
+            edge_attribute_builder = instantiate(attr_config)
+            graph[self.name][attr_name] = edge_attribute_builder(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
         return graph

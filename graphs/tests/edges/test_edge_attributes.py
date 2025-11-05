@@ -18,6 +18,7 @@ from anemoi.graphs.edges.attributes import DirectionalHarmonics
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.edges.attributes import RadialBasisFeatures
+from anemoi.graphs.edges.attributes import GaussianDistanceWeights
 
 TEST_EDGES = ("test_nodes", "to", "test_nodes")
 
@@ -33,10 +34,11 @@ def test_directional_features(graph_nodes_and_edges, norm):
     assert isinstance(edge_attr, torch.Tensor)
 
 
+@pytest.mark.parametrize("edge_attr_cls", [EdgeLength, GaussianDistanceWeights])
 @pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-std", "unit-range"])
-def test_edge_lengths(graph_nodes_and_edges, norm):
+def test_edge_lengths(edge_attr_cls, graph_nodes_and_edges, norm):
     """Test EdgeLength compute method."""
-    edge_attr_builder = EdgeLength(norm=norm)
+    edge_attr_builder = edge_attr_cls(norm=norm)
     edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
     source_nodes = graph_nodes_and_edges[TEST_EDGES[0]]
     target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
