@@ -221,6 +221,7 @@ def _import_file(location: Path) -> ModuleType:
         raise ValueError(f"{location} does not point to a valid path.")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    sys.modules[location.stem] = module
     return module
 
 
