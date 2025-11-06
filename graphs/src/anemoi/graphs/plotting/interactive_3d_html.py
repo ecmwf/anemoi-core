@@ -61,7 +61,7 @@ def extract_nodes_edges(
         edges_keys = graph.edge_types
 
     out_nodes = {n: graph[n].x for n in nodes}
-    out_edges = {"_".join(e) : graph[e].edge_index for e in edges_keys}
+    out_edges = {"_".join(e): graph[e].edge_index for e in edges_keys}
 
     return out_nodes, out_edges
 
@@ -84,6 +84,7 @@ def to_nodes_json(lats, lons, prefix="P"):
 def to_edges_json(names1, names2, pairs):
     edges = [[names1[i], names2[j]] for i, j in pairs]
     return edges
+
 
 def plot_interactive_graph_3d(
     graph: HeteroData,
