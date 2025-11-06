@@ -1,23 +1,33 @@
+# (C) Copyright 2024 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 from pathlib import Path
 
 import numpy as np
 import torch
+from torch_geometric.data import HeteroData
 from jinja2 import Template
 
-HTML_TEMPLATE_PATH = Path(__file__).parent / "interactive.html.jinja"
+HTML_TEMPLATE_PATH = Path(__file__).parent / "interactive_3d.html.jinja"
 
 
-def load_graph(
-    path: str,
-    nodes: list[str] = ["data", "hidden"],
-    edges: list[str] = ["data_to_hidden", "hidden_to_hidden", "hidden_to_data"],
+def subset_graph(
+    graph: HeteroData,
+    nodes: list[str] | None = None,
+    edges: list[str] | None = None,
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
     """Load a hetero graph from a file and separate nodes and edges by type.
 
     Parameters
     ----------
-    path : str
-        Path to the graph file.
+    graph : HeteroData
+        The graph to subset.
     nodes : list[str]
         List of node types to extract.
     edges : list[str]
@@ -30,16 +40,26 @@ def load_graph(
         - The first dictionary maps node types to their coordinates tensors.
         - The second dictionary maps edge types to their edge index tensors.
     """
-    hetero_data = torch.load(path, weights_only=False, map_location="cpu")
-    out_nodes = {n: hetero_data[n].x for n in nodes}
+    if nodes:
+        for n in nodes:
+            if n not in graph.node_types:
+                raise ValueError(f"Node type '{n}' not found in the graph.")
+    else:
+        nodes = graph.node_types
 
-    out_edges = {}
-    for e in edges:
-        # needed because in hierarchical graphs nodes names contain underscores...
-        edge_key = e.split("_to_")
-        edge_key = (edge_key[0], "to", edge_key[1])
-        # -----------------
-        out_edges[e] = hetero_data[edge_key].edge_index
+    if edges:
+        edges_keys = ()
+        for e in edges:
+            edge_key = e.split("_to_")
+            edge_key = (edge_key[0], "to", edge_key[1])
+            if edge_key not in graph.edge_types:
+                raise ValueError(f"Edge type '{e}' not found in the graph.")
+            edges_keys += (edge_key,)
+    else:
+        edges_keys = graph.edge_types
+
+    out_nodes = {n: graph[n].x for n in nodes}
+    out_edges = {"_".join(e) : graph[e].edge_index for e in edges_keys}
 
     return out_nodes, out_edges
 
@@ -63,32 +83,22 @@ def to_edges_json(names1, names2, pairs):
     edges = [[names1[i], names2[j]] for i, j in pairs]
     return edges
 
+def plot_interactive_graph_3d(
+    graph: HeteroData,
+    out_file: str | Path,
+) -> None:
+    """Plot the entire graph in 3D.
 
-if __name__ == "__main__":
+    This method creates an interactive 3D visualization of the entire graph.
 
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Generate HTML visualization of a graph.")
-    parser.add_argument("graph_path", type=str, help="Path to the graph file.")
-    parser.add_argument("output_path", type=str, help="Path to save the output HTML file.")
-    parser.add_argument(
-        "--nodes",
-        type=lambda s: s.split(","),
-        default="data,hidden",
-        help="Comma-separated list of node types to extract.",
-    )
-    parser.add_argument(
-        "--edges",
-        type=lambda s: s.split(","),
-        default="data_to_hidden,hidden_to_hidden,hidden_to_data",
-        help="Comma-separated list of edge types to extract.",
-    )
-    args = parser.parse_args()
-
-    print("Starting graph HTML generation...")
-    print(f"Arguments: {args}")
-
-    nodes, edges = load_graph(args.graph_path, nodes=args.nodes, edges=args.edges)
+    Parameters
+    ----------
+    graph : dict
+        The graph to plot.
+    out_file : str | Path, optional
+        Name of the file to save the plot. Default is None.
+    """
+    nodes, edges = subset_graph(graph)
 
     for node_set in nodes:
         node_lats, node_lons = coords_to_latlon(nodes[node_set].numpy())
@@ -117,21 +127,17 @@ if __name__ == "__main__":
 
     nodes_embed = []
     for i, (node_set, pts) in enumerate(nodes.items()):
-        nodes_embed.append({"name": node_set, "points": pts, "color": colors[i % len(colors)], "radius": 21 + i * 2})
+        nodes_embed.append({"name": node_set, "points": pts, "color": colors[i % len(colors)], "radius": 20.1 + i * 2})
 
     edges_embed = []
     for i, (edge_set, eds) in enumerate(edges.items()):
         edges_embed.append({"name": edge_set, "edges": eds})
 
     # # Render and save
-    print("Rendering HTML...")
     with open(HTML_TEMPLATE_PATH, "r") as f:
         HTML_TEMPLATE = f.read()
 
     template = Template(HTML_TEMPLATE)
     html_output = template.render(nodes=nodes_embed, edges=edges_embed, max_degree=50, min_degree=1)
-
-    with open(args.output_path, "w") as f:
+    with open(out_file, "w") as f:
         f.write(html_output)
-
-    print(f"HTML file generated: {args.output_path}")

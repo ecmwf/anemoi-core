@@ -1,3 +1,12 @@
+{# (C) Copyright 2025 Anemoi contributors.
+
+This software is licensed under the terms of the Apache Licence Version 2.0
+which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+
+In applying this licence, ECMWF does not waive the privileges and immunities
+granted to it by virtue of its status as an intergovernmental organisation
+nor does it submit to any jurisdiction. #}
+
 <!doctype html>
 <html>
 
@@ -31,7 +40,8 @@
             flex-direction: column;
             gap: 10px;
             max-height: 98vh;
-            overflow: hidden; /* keep structure fixed */
+            overflow: hidden;
+            /* keep structure fixed */
         }
 
         .controls {
@@ -46,7 +56,7 @@
             overflow-x: hidden;
         }
 
-        .controls > div {
+        .controls>div {
             overflow-y: hidden;
             overflow-x: hidden;
             flex: 1;
@@ -100,6 +110,15 @@
             cursor: pointer;
         }
 
+        input[type="checkbox"] {
+            width: 1em;
+            height: 1em;
+            border: 2px solid #666;
+            border-radius: 3px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
         hr {
             border: 0;
             border-top: 3px solid #ccc;
@@ -119,34 +138,79 @@
             display: none;
         }
 
+        /* Each row: label left, controls right */
+        .control-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            column-gap: 8px;
+        }
+
+        .control-row span:first-child {
+            text-align: left;
+        }
+
+        .control-right {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .control-row input[type="number"] {
+            width: 35px;
+            text-align: right;
+            margin: 0;
+        }
+
+        .control-row button {
+            padding: 2px 8px;
+            font-size: 0.9em;
+        }
     </style>
 </head>
+
 <body>
 
     <div id="controlsWrapper">
-    <div class="controls" style="min-height: 150px;">
-      <strong>Global controls</strong>
-      <div>
-            <button id="toggleMap">Toggle Map</button>
+        <div class="controls">
+            <strong>Global controls</strong>
+            <hr>
 
-            <label>Map Radius: <span id="mapRadiusValue">20</span></label>
-            <input id="mapRadiusRange" type="range" min="5" max="100" step="1" />
+            <div class="control-row">
+                <span>Earth</span>
+                <div class="control-right">
+                    <input id="toggleMap" type="checkbox" checked />
+                </div>
+            </div>
 
-            <label>Global Node Scale: <span id="scaleFactorValue">1.0</span></label>
-            <input id="scaleFactorRange" type="range" min="0.5" max="3.0" step="0.1" value="1.0" />
+            <div class="control-row">
+                <span>Earth radius</span>
+                <div class="control-right">
+                    <input id="mapRadius" type="number" min="5" max="100" step="1" value="20" />
+                </div>
+            </div>
 
-        </div>
-    </div>
-
-    <div class="controls" style="height: 300px;">
-      <strong>Nodes</strong>
-      <div id="nodeSetControls" style="overflow-y: auto;"></div>
+            <div class="control-row">
+                <span>Global node scale</span>
+                <div class="control-right">
+                    <input id="scaleFactor" type="number" min="0.5" max="3.0" step="0.1" value="1.0" />
+                </div>
+            </div>
         </div>
 
         <div class="controls">
-      <strong>Edges</strong>
-      <div id="edgeSetControls" style="overflow-y: auto;";></div>
+            <strong>Nodes</strong>
+            <hr>
+            <div id="nodeSetControls" style="overflow-y: auto;"></div>
         </div>
+
+        <div class="controls">
+            <strong>Edges</strong>
+            <hr>
+            <div id="edgeSetControls" style="overflow-y: auto;" ;></div>
+        </div>
+    </div>
+    </div>
     </div>
 
     <div id="info">
@@ -217,7 +281,8 @@
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0xf7f7fb);
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(50, 55, -5);
+        const distscale = 0.9;
+        camera.position.set(50*distscale, 55*distscale, -5*distscale);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
@@ -255,29 +320,42 @@
             pointNameToIndex.set(p.name, { setIdx, idx });
         }));
 
-        // Adjacency & degree maps
-        const adjacencyMap = new Map(POINTS.map(p => [p.name, new Set()]));
-        EDGE_SETS.forEach(es => es.edges.forEach(([a, b]) => {
-            if (adjacencyMap.has(a)) adjacencyMap.get(a).add(b);
-            if (adjacencyMap.has(b)) adjacencyMap.get(b).add(a);
-        }));
+        // Degree map
         const degreeMap = new Map(POINTS.map(p => [p.name, 0]));
-        EDGE_SETS.forEach(es => es.edges.forEach(([a, b]) => {
-            if (degreeMap.has(a)) degreeMap.set(a, degreeMap.get(a) + 1);
-            if (degreeMap.has(b)) degreeMap.set(b, degreeMap.get(b) + 1);
-        }));
 
-        // this does not scale well for huge graphs, temporarily set hardcoded values
-        // const maxDegree = Math.max(...degreeMap.values()), minDegree = Math.min(...degreeMap.values());
-        const maxDegree = {{ max_degree }}, minDegree = {{ min_degree }};
+        // Track min and max degrees as we go
+        let maxDegree = 0;
+        let minDegree = Infinity;
+
+        EDGE_SETS.forEach(es => {
+            es.edges.forEach(([a, b]) => {
+                if (degreeMap.has(a)) {
+                    const newDeg = degreeMap.get(a) + 1;
+                    degreeMap.set(a, newDeg);
+                    if (newDeg > maxDegree) maxDegree = newDeg;
+                    if (newDeg < minDegree) minDegree = newDeg;
+                }
+                if (degreeMap.has(b)) {
+                    const newDeg = degreeMap.get(b) + 1;
+                    degreeMap.set(b, newDeg);
+                    if (newDeg > maxDegree) maxDegree = newDeg;
+                    if (newDeg < minDegree) minDegree = newDeg;
+                }
+            });
+        });
+
+        // Handle the case where some nodes have no edges
+        if (minDegree === Infinity) minDegree = 0;
+
         document.getElementById('maxDegree').textContent = maxDegree;
+
 
         // Selection state
         let selectedNode = null;
         let connectedNodes = new Set();
 
         // Node shader
-        const pointGeometry = new THREE.SphereGeometry(0.02, 3, 2);
+        const pointGeometry = new THREE.SphereGeometry(0.01, 3, 2);
         const pointMaterialTemplate = new THREE.ShaderMaterial({
             uniforms: {
                 cameraPos: { value: camera.position },
@@ -336,10 +414,11 @@
         const nodeSetMeshes = [], baseScaleFactorRef = { value: 1.0 };
         let totalNodeCount = 0;
 
+        const BASE_SCALE = 1.0;
         function computeNodeScale(d) {
-            if (maxDegree === minDegree) return 1.0;
-            const n = (d - minDegree) / (maxDegree - minDegree);
-            return 1 + n * 4;
+            if (maxDegree === minDegree) return 1.0 * BASE_SCALE;
+            const n = (d - minDegree) / ((maxDegree / 4) - minDegree);
+            return (1 + n * 4) * BASE_SCALE;
         }
 
         function updateNodeScales() {
@@ -637,10 +716,19 @@
                 connectedNodes.clear();
             } else {
                 selectedNode = nodeName;
-                connectedNodes = adjacencyMap.has(nodeName) ? new Set(adjacencyMap.get(nodeName)) : new Set();
+                connectedNodes = new Set();
+
+                // Compute adjacency on the fly
+                EDGE_SETS.forEach(es => {
+                    es.edges.forEach(([a, b]) => {
+                        if (a === nodeName) connectedNodes.add(b);
+                        else if (b === nodeName) connectedNodes.add(a);
+                    });
+                });
             }
             updateSelectionVisuals();
         }
+
 
         // Raycasting for node selection with drag detection
         const raycaster = new THREE.Raycaster();
@@ -714,66 +802,122 @@
 
 
         // UI Controls
+
+        // --- Container layout ---
         const nodeSetControlsContainer = document.getElementById('nodeSetControls');
+        nodeSetControlsContainer.style.display = 'flex';
+        nodeSetControlsContainer.style.flexDirection = 'column';
+        nodeSetControlsContainer.style.gap = '4px';
+
+        // 4 columns: name | checkbox | color | radius
+        nodeSetControlsContainer.style.columnGap = '6px';
+
+        // --- Helper to make a grid row ---
+        function makeGridRow(columns) {
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '1fr auto auto auto'; // name | check | color | radius
+            row.style.alignItems = 'center';
+            row.style.columnGap = '6px';
+            row.style.marginBottom = '3px';
+            columns.forEach(c => row.appendChild(c));
+            return row;
+        }
+
+        // --- Node controls ---
         NODE_SETS.forEach((ns, i) => {
-            const btn = document.createElement('button');
-            btn.textContent = `Toggle ${ns.name}`; btn.onclick = () => { nodeSetMeshes[i].visible = !nodeSetMeshes[i].visible; };
-            nodeSetControlsContainer.appendChild(btn);
+            const name = document.createElement('span');
+            name.textContent = ns.name;
 
-            const label = document.createElement('label');
-            label.innerHTML = `${ns.name} Radius: <span id="nodeRadius${i}Value">${ns.radius}</span>`;
-            nodeSetControlsContainer.appendChild(label);
-            const range = document.createElement('input');
-            range.type = 'range'; range.min = '5'; range.max = '100'; range.step = '1'; range.value = ns.radius;
-            range.oninput = e => {
-                ns.radius = Number(e.target.value);
-                document.getElementById(`nodeRadius${i}Value`).textContent = ns.radius;
-                updateNodeScales(); EDGE_SETS.forEach((_, ei) => updateEdgePositions(ei));
-            };
-            nodeSetControlsContainer.appendChild(range);
+            const toggle = document.createElement('input');
+            toggle.type = 'checkbox';
+            toggle.checked = true;
+            toggle.title = `Show/Hide ${ns.name}`;
+            toggle.onchange = () => { nodeSetMeshes[i].visible = toggle.checked; };
 
-            // Color picker
-            const colorLabel = document.createElement('label');
-            colorLabel.textContent = `${ns.name} Color:`;
-            nodeSetControlsContainer.appendChild(colorLabel);
             const colorPicker = document.createElement('input');
-            colorPicker.type = 'color'; colorPicker.value = ns.color;
+            colorPicker.type = 'color';
+            colorPicker.value = ns.color;
+            colorPicker.style.width = '20px';
+            colorPicker.style.height = '20px';
+            colorPicker.style.padding = '0';
             colorPicker.addEventListener('input', e => {
                 const color = e.target.value;
                 ns.color = color;
                 nodeSetMeshes[i].material.uniforms.nearColor.value.set(color);
                 nodeSetMeshes[i].material.uniforms.farColor.value.set(color);
             });
-            nodeSetControlsContainer.appendChild(colorPicker);
+
+            const radiusWrapper = document.createElement('div');
+            radiusWrapper.style.display = 'flex';
+            radiusWrapper.style.alignItems = 'center';
+            radiusWrapper.style.gap = '3px';
+            radiusWrapper.title = 'Control radius of spherical geometry.'
+
+            const radiusLabel = document.createElement('span');
+            radiusLabel.textContent = 'r=';
+            const radiusInput = document.createElement('input');
+            radiusInput.type = 'number';
+            radiusInput.min = '5';
+            radiusInput.max = '100';
+            radiusInput.step = '1';
+            radiusInput.value = ns.radius;
+            radiusInput.style.width = '30px';
+            radiusInput.style.textAlign = 'right';
+            radiusInput.oninput = e => {
+                ns.radius = Number(e.target.value);
+                updateNodeScales();
+                EDGE_SETS.forEach((_, ei) => updateEdgePositions(ei));
+            };
+            radiusWrapper.appendChild(radiusLabel);
+            radiusWrapper.appendChild(radiusInput);
+
+            const row = makeGridRow([name, toggle, colorPicker, radiusWrapper]);
+            nodeSetControlsContainer.appendChild(row);
         });
 
+        // --- Edge controls ---
         const edgeSetControlsContainer = document.getElementById('edgeSetControls');
+        edgeSetControlsContainer.style.display = 'flex';
+        edgeSetControlsContainer.style.flexDirection = 'column';
+        edgeSetControlsContainer.style.gap = '4px';
+
         EDGE_SETS.forEach((es, i) => {
-            const btn = document.createElement('button');
-            btn.textContent = `Toggle ${es.name}`;
-            btn.onclick = () => { edgeSetMeshes[i].visible = !edgeSetMeshes[i].visible; };
-            edgeSetControlsContainer.appendChild(btn);
+            const name = document.createElement('span');
+            name.textContent = es.name;
+
+            const toggle = document.createElement('input');
+            toggle.type = 'checkbox';
+            toggle.checked = true;
+            toggle.title = `Show/Hide ${es.name}`;
+            toggle.onchange = () => { edgeSetMeshes[i].visible = toggle.checked; };
+
+            // grid with 2 columns: name | check
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '1fr auto';
+            row.style.alignItems = 'center';
+            row.style.columnGap = '6px';
+            row.appendChild(name);
+            row.appendChild(toggle);
+
+            edgeSetControlsContainer.appendChild(row);
         });
 
         document.getElementById('toggleMap').onclick = () => { globe.visible = !globe.visible; };
 
         // Map radius
-        const mapRadiusRangeEl = document.getElementById('mapRadiusRange');
-        const mapRadiusValueEl = document.getElementById('mapRadiusValue');
-        mapRadiusRangeEl.value = mapInitialRadius; mapRadiusValueEl.textContent = mapInitialRadius;
-        mapRadiusRangeEl.oninput = e => {
+        const mapRadiusEl = document.getElementById('mapRadius');
+        mapRadius.oninput = e => {
             const r = Number(e.target.value);
-            mapRadiusValueEl.textContent = r;
             globe.geometry.dispose();
             globe.geometry = new THREE.SphereGeometry(r, 64, 64);
         };
 
         // Node scale factor
-        const scaleFactorRangeEl = document.getElementById('scaleFactorRange');
-        const scaleFactorValueEl = document.getElementById('scaleFactorValue');
-        scaleFactorRangeEl.oninput = e => {
+        const scaleFactorEl = document.getElementById('scaleFactor');
+        scaleFactorEl.oninput = e => {
             baseScaleFactorRef.value = Number(e.target.value);
-            scaleFactorValueEl.textContent = baseScaleFactorRef.value.toFixed(1);
             updateNodeScales();
         };
 
@@ -808,4 +952,5 @@
         animate();
     </script>
 </body>
+
 </html>

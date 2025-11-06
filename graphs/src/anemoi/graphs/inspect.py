@@ -16,9 +16,10 @@ import torch
 from anemoi.graphs.plotting.displots import plot_distribution_edge_attributes
 from anemoi.graphs.plotting.displots import plot_distribution_node_attributes
 from anemoi.graphs.plotting.displots import plot_distribution_node_derived_attributes
-from anemoi.graphs.plotting.interactive_html import plot_interactive_nodes
-from anemoi.graphs.plotting.interactive_html import plot_interactive_subgraph
-from anemoi.graphs.plotting.interactive_html import plot_isolated_nodes
+from anemoi.graphs.plotting.interactive_2d_html import plot_interactive_nodes_2d
+from anemoi.graphs.plotting.interactive_2d_html import plot_interactive_subgraph_2d
+from anemoi.graphs.plotting.interactive_2d_html import plot_isolated_nodes_2d
+from anemoi.graphs.plotting.interactive_3d_html import plot_interactive_graph_3d
 from anemoi.graphs.processors.post_process import SubsetNodesInArea
 
 LOGGER = logging.getLogger(__name__)
@@ -68,13 +69,17 @@ class GraphInspector:
 
     def inspect(self):
         """Run all the inspector methods."""
+
+        LOGGER.info("Saving interactive 3d plot of the graph...")
+        plot_interactive_graph_3d(self.graph, out_file=self.output_path / "graph.html")
+
         LOGGER.info("Saving interactive plots of isolated nodes ...")
-        plot_isolated_nodes(self.graph, self.output_path / "isolated_nodes.html")
+        plot_isolated_nodes_2d(self.graph, self.output_path / "isolated_nodes.html")
 
         LOGGER.info("Saving interactive plots of subgraphs ...")
         for edges_subgraph in self.graph.edge_types:
             ofile = self.output_path / f"{edges_subgraph[0]}_to_{edges_subgraph[2]}.html"
-            plot_interactive_subgraph(self.graph, edges_subgraph, out_file=ofile)
+            plot_interactive_subgraph_2d(self.graph, edges_subgraph, out_file=ofile)
 
         if self.show_attribute_distributions:
             LOGGER.info("Saving distribution plots of node ande edge attributes ...")
@@ -85,4 +90,4 @@ class GraphInspector:
         if self.show_nodes:
             LOGGER.info("Saving interactive plots of nodes ...")
             for nodes_name in self.graph.node_types:
-                plot_interactive_nodes(self.graph, nodes_name, out_file=self.output_path / f"{nodes_name}_nodes.html")
+                plot_interactive_nodes_2d(self.graph, nodes_name, out_file=self.output_path / f"{nodes_name}_nodes.html")
