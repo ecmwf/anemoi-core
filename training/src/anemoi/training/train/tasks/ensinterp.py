@@ -290,7 +290,7 @@ class GraphEnsInterp(BaseGraphModule):
                 metrics_next = self.calculate_val_metrics(
                     y_pred_ens_group,
                     y,
-                    interp_step-1,
+                    interp_step - 1,
                     grid_shard_slice=self.grid_shard_slice,
                 )
 
