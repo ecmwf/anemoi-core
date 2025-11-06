@@ -13,23 +13,35 @@ Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
 
 import math
 
+from typing import Any, Callable, Iterable, Optional, Tuple
 import torch
 from torch.optim import Optimizer
 
 
-def linear_warmup_scheduler(step, alpha_end, alpha_start=0, warmup=1):
+def linear_warmup_scheduler(
+    step: int,
+    alpha_end: float,
+    alpha_start: float = 0.0,
+    warmup: int = 1
+) -> float:
     if step < warmup:
         a = step / float(warmup)
         return (1.0 - a) * alpha_start + a * alpha_end
     return alpha_end
 
 
-def linear_hl_warmup_scheduler(step, beta_end, beta_start=0, warmup=1):
 
-    def f(beta, eps=1e-8):
+def linear_hl_warmup_scheduler(
+    step: int,
+    beta_end: float,
+    beta_start: float = 0.0,
+    warmup: int = 1
+) -> float:
+    
+    def f(beta: float, eps: float = 1e-8) -> float:
         return math.log(0.5) / math.log(beta + eps) - 1
 
-    def f_inv(t):
+    def f_inv(t: float) -> float:
         return math.pow(0.5, 1 / (t + 1))
 
     if step < warmup:
@@ -58,15 +70,15 @@ class AdEMAMix(Optimizer):
 
     def __init__(
         self,
-        params,
-        lr=1e-3,
-        betas=(0.9, 0.999, 0.9999),
-        alpha=2.0,
-        beta3_warmup=None,
-        alpha_warmup=None,
-        eps=1e-8,
-        weight_decay=0,
-    ):
+        params: Iterable[Tensor] | Iterable[dict[str, Any]],
+        lr: float = 1e-3,
+        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        alpha: float = 2.0,
+        beta3_warmup: Optional[int] = None,
+        alpha_warmup: Optional[int] = None,
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+    ) -> None:
         if not lr >= 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not eps >= 0.0:
@@ -90,13 +102,13 @@ class AdEMAMix(Optimizer):
             alpha_warmup=alpha_warmup,
             weight_decay=weight_decay,
         )
-        super(AdEMAMix, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
-    def __setstate__(self, state):
-        super(AdEMAMix, self).__setstate__(state)
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        super().__setstate__(state)
 
     @torch.no_grad()
-    def step(self, closure=None):
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         """Performs a single optimization step.
 
         Arguments:
