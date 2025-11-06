@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -62,12 +61,6 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 
         dataset = open_dataset(self.dataset)
         return self.reshape_coords(dataset.latitudes, dataset.longitudes)
-
-
-class ZarrDatasetNodes(AnemoiDatasetNodes):
-    def __init__(self, dataset: DictConfig, name: str) -> None:
-        super().__init__(dataset, name)
-        LOGGER.warning(f"{self.__class__.__name__} is now deprecated in favour of AnemoiDatasetNodes.")
 
 
 class TextNodes(BaseNodeBuilder):

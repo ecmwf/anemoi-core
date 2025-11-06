@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from abc import ABC
@@ -19,10 +18,12 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
 from torch_geometric.typing import Size
+from torch_geometric.utils import scatter
 
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import NodesAxis
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import haversine_distance
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         super().__init__()
         self.norm = norm
         self.dtype = dtype
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = get_distributed_device()
         if self.node_attr_name is None:
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
@@ -60,7 +61,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
     def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
         x = self.subset_node_information(*x)
-        return self.propagate(edge_index, x=x, size=size)
+        return self.propagate(edge_index.to(self.device), x=x, size=size)
 
     @abstractmethod
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
@@ -99,12 +100,52 @@ class EdgeDirection(BasePositionalBuilder):
         return edge_dirs
 
 
+class DirectionalHarmonics(EdgeDirection):
+    """Computes directional harmonics from edge directions.
+
+    Builds directional harmonics [sin(mψ), cos(mψ)]_{m=1..order} from per-edge
+    2D directions (dx, dy). Returns shape [N, 2*order].
+
+    Attributes
+    ----------
+    order : int
+        The maximum order of harmonics to compute.
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+
+    Methods
+    -------
+    compute(x_i, x_j)
+        Compute directional harmonics from edge directions.
+    """
+
+    def __init__(self, order: int = 3, norm: str | None = None, dtype: str = "float32") -> None:
+        self.order = order
+        super().__init__(norm=norm, dtype=dtype)
+
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        # Get the 2D direction vectors [dx, dy]
+        edge_dirs = compute_directions(x_i, x_j)
+
+        # Compute the angle ψ from the direction vectors
+        psi = torch.atan2(edge_dirs[:, 1], edge_dirs[:, 0])  # atan2(dy, dx)
+
+        # Build harmonics: [sin(ψ), cos(ψ), sin(2ψ), cos(2ψ), ..., sin(order*ψ), cos(order*ψ)]
+        harmonics = []
+        for m in range(1, self.order + 1):
+            harmonics.append(torch.sin(m * psi))
+            harmonics.append(torch.cos(m * psi))
+
+        # Stack into shape [N, 2*order]
+        return torch.stack(harmonics, dim=1)
+
+
 class Azimuth(BasePositionalBuilder):
     """Compute the azimuth of the edge.
 
     Attributes
     ----------
-    norm : Optional[str]
+    norm : str | None
         Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
     invert : bool
         Whether to invert the edge lengths, i.e. 1 - edge_length. Defaults to False.
@@ -170,6 +211,153 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     """Copy an attribute of the target node to the edge."""
 
     nodes_axis = NodesAxis.TARGET
+
+
+class RadialBasisFeatures(EdgeLength):
+    """Radial basis features from edge distances using Gaussian RBFs.
+
+    Computes Gaussian radial basis function features from normalized great-circle distances:
+    phi_r = [exp(-((α - c)/σ)²) for c in centers], where α = r_ij / r_scale.
+
+    Provides RBF features via per-node adaptive scaling.
+    By default, each destination node's edges are normalized by that node's maximum edge length.
+    RBF features are normalized per target node per RBF center: within each RBF center,
+    all edges pointing to the same target node have values that sum to 1 (L1 norm).
+
+    Parameters
+    ----------
+    r_scale : float | None, optional
+        Global scale factor for normalizing distances. Default is None.
+        If None: Use per-node adaptive scaling (max edge length per destination node).
+        If float: Use global scale for all nodes.
+    centers : list of float, optional
+        RBF center positions along normalized distance axis [0, 1].
+        Default is [0.0, 0.25, 0.5, 0.75, 1.0].
+    sigma : float, optional
+        Width (standard deviation) of Gaussian RBF functions. Default is 0.2.
+        Controls how localized each basis function is around its center.
+    epsilon : float, optional
+        Small constant to avoid division by zero. Default is 1e-10.
+    dtype : str, optional
+        Data type for computations. Default is "float32".
+
+    Note
+    ----
+    RBF features are normalized per target node per RBF center.
+    Within each RBF center, all edges to the same target node sum to 1.
+
+    Methods
+    -------
+    compute(x_i, x_j)
+        Compute raw edge distances (RBF computation happens in aggregate).
+    aggregate(edge_features, index, ptr, dim_size)
+        Compute RBF features with adaptive scaling and per-target-node normalization.
+
+    Examples
+    --------
+    # Default: per-node adaptive scaling with grouped normalization
+    rbf = RadialBasisFeatures()
+
+    # To use global scale
+    rbf_global = RadialBasisFeatures(r_scale=1.0)
+
+    # Custom RBF centers and width
+    rbf_custom = RadialBasisFeatures(centers=[0.0, 0.33, 0.67, 1.0], sigma=0.15)
+
+    Notes
+    -----
+    - Closer edges → higher values at low-distance centers (0.0, 0.25)
+    - Farther edges → higher values at high-distance centers (0.75, 1.0)
+    """
+
+    norm_by_group: bool = True  # normalise the RBF features per destination node
+
+    def __init__(
+        self,
+        r_scale: float | None = None,
+        centers: list[float] | None = None,
+        sigma: float = 0.2,
+        norm: str = "l1",
+        epsilon: float = 1e-10,
+        dtype: str = "float32",
+    ) -> None:
+        self.epsilon = epsilon
+        self.r_scale = r_scale
+
+        if self.r_scale is not None and self.r_scale < self.epsilon:
+            LOGGER.warning(
+                "r_scale (%f) is too small (< epsilon=%f). Clamping to epsilon to avoid division by zero.",
+                self.r_scale,
+                self.epsilon,
+            )
+            self.r_scale = self.epsilon
+
+        self.centers = centers if centers is not None else [0.0, 0.25, 0.5, 0.75, 1.0]
+
+        # Normalize centers if using global scaling
+        if self.r_scale is not None:
+            self.centers = [c / self.r_scale for c in self.centers]
+
+        # Check that centers are in the range [0, 1]
+        assert all(
+            0.0 <= c <= 1.0 for c in self.centers
+        ), f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
+
+        self.sigma = sigma
+        super().__init__(norm=norm, dtype=dtype)
+
+    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+        """Aggregate edge features with per-node scaling and per-target-node normalization.
+
+        Parameters
+        ----------
+        edge_features : torch.Tensor
+            Raw edge distances, shape [num_edges] or [num_edges, 1]
+        index : torch.Tensor
+            Destination node index for each edge
+        ptr : optional
+            CSR pointer (not used)
+        dim_size : int, optional
+            Number of destination nodes
+
+        Returns
+        -------
+        torch.Tensor
+            RBF features, shape [num_edges, num_centers].
+            Normalized per target node per RBF center .
+        """
+        # Ensure edge_features is 1D
+        if edge_features.ndim == 2:
+            edge_features = edge_features.squeeze(-1)
+
+        # Compute scale factor per destination node
+        if self.r_scale is None:
+            # Per-node max edge length scaling
+            max_dists = scatter(edge_features, index.long(), dim=0, dim_size=dim_size, reduce="max")
+
+            # Clamp to epsilon to avoid division by zero
+            max_dists = torch.clamp(max_dists, min=self.epsilon)
+
+            # Broadcast to each edge
+            scales = max_dists[index]
+            alpha = edge_features / scales  # Normalized distance [0, 1]
+        else:
+            # Global scaling
+            scales = torch.full_like(edge_features, self.r_scale)
+            alpha = edge_features / scales  # Scaled distance [0, max_edge/r_scale]
+
+        # Compute Gaussian RBF for each center
+        rbf_features = []
+        for center in self.centers:
+            rbf = torch.exp(-(((alpha - center) / self.sigma) ** 2))
+            rbf_features.append(rbf)
+
+        rbf_features = torch.stack(rbf_features, dim=1)
+
+        # Within each RBF center, normalise edges to the same target node
+        rbf_features = self.normalise(rbf_features, index, dim_size)
+
+        return rbf_features
 
 
 class GaussianDistanceWeights(EdgeLength):

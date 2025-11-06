@@ -9,8 +9,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
-from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 def plot_interactive_subgraph(
     graph: HeteroData,
     edges_to_plot: tuple[str, str, str],
-    out_file: Optional[Union[str, Path]] = None,
+    out_file: str | Path | None = None,
 ) -> None:
     """Plots a bipartite graph (bi-graph).
 
@@ -119,7 +117,7 @@ def plot_interactive_subgraph(
         fig.show()
 
 
-def plot_isolated_nodes(graph: HeteroData, out_file: Optional[Union[str, Path]] = None) -> None:
+def plot_isolated_nodes(graph: HeteroData, out_file: str | Path | None = None) -> None:
     """Plot isolated nodes.
 
     This method creates an interactive visualization of the isolated nodes in the graph.
@@ -171,7 +169,7 @@ def plot_isolated_nodes(graph: HeteroData, out_file: Optional[Union[str, Path]] 
         fig.show()
 
 
-def plot_interactive_nodes(graph: HeteroData, nodes_name: str, out_file: Optional[str] = None) -> None:
+def plot_interactive_nodes(graph: HeteroData, nodes_name: str, out_file: str | None = None) -> None:
     """Plot nodes.
 
     This method creates an interactive visualization of a set of nodes.
@@ -237,7 +235,6 @@ def plot_interactive_nodes(graph: HeteroData, nodes_name: str, out_file: Optiona
             sliders=[
                 dict(active=0, currentvalue={"visible": False}, len=0.4, x=0.5, xanchor="center", steps=slider_steps)
             ],
-            titlefont_size=16,
             showlegend=False,
             hovermode="closest",
             margin={"b": 20, "l": 5, "r": 5, "t": 40},

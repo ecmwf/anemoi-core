@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 import time
@@ -23,6 +22,7 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.utils import concat_edges
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class BaseEdgeBuilder(ABC):
         self.target_name = target_name
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = get_distributed_device()
 
     @property
     def name(self) -> tuple[str, str, str]:
@@ -109,8 +109,8 @@ class BaseEdgeBuilder(ABC):
         """
         for attr_name, attr_config in config.items():
             edge_index = graph[self.name].edge_index
-            edge_builder = instantiate(attr_config)
-            graph[self.name][attr_name] = edge_builder(
+            edge_attribute_builder = instantiate(attr_config)
+            graph[self.name][attr_name] = edge_attribute_builder(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
         return graph

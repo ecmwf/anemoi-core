@@ -7,29 +7,25 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 from collections.abc import Iterable
 from datetime import timedelta
-from typing import TYPE_CHECKING
 from typing import Any
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from pydantic import BaseModel
+from pytorch_lightning.callbacks import Callback
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-
-if TYPE_CHECKING:
-    from pytorch_lightning.callbacks import Callback
-
-    from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.utils.checkpoint import RegisterMigrations
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +39,7 @@ def nestedget(config: DictConfig, key: str, default: Any) -> Any:
     keys = key.split(".")
     for k in keys:
         config = getattr(config, k, default)
-        if not isinstance(config, (BaseModel, dict, DictConfig)):
+        if not isinstance(config, BaseModel | dict | DictConfig):
             break
     return config
 
@@ -94,34 +90,31 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         )
 
     checkpoint_callbacks = []
-    if not config.diagnostics.profiler:
-        for save_key, (
-            name,
-            save_frequency,
-            save_n_models,
-        ) in ckpt_frequency_save_dict.items():
-            if save_frequency is not None:
-                LOGGER.debug("Checkpoint callback at %s = %s ...", save_key, save_frequency)
-                checkpoint_callbacks.append(
-                    # save_top_k: the save_top_k flag can either save the best or the last k checkpoints
-                    # depending on the monitor flag on ModelCheckpoint.
-                    # See https://lightning.ai/docs/pytorch/stable/common/checkpointing_intermediate.html for reference
-                    AnemoiCheckpoint(
-                        config=config,
-                        filename=name,
-                        save_last=True,
-                        **{save_key: save_frequency},
-                        # if save_top_k == k, last k models saved; if save_top_k == -1, all models are saved
-                        save_top_k=save_n_models,
-                        monitor="step",
-                        mode="max",
-                        **checkpoint_settings,
-                    ),
-                )
-            LOGGER.debug("Not setting up a checkpoint callback with %s", save_key)
-    else:
-        # the tensorboard logger + pytorch profiler cause pickling errors when writing checkpoints
-        LOGGER.warning("Profiling is enabled - will not write any training or inference model checkpoints!")
+    for save_key, (
+        name,
+        save_frequency,
+        save_n_models,
+    ) in ckpt_frequency_save_dict.items():
+        if save_frequency is not None:
+            LOGGER.debug("Checkpoint callback at %s = %s ...", save_key, save_frequency)
+            checkpoint_callbacks.append(
+                # save_top_k: the save_top_k flag can either save the best or the last k checkpoints
+                # depending on the monitor flag on ModelCheckpoint.
+                # See https://lightning.ai/docs/pytorch/stable/common/checkpointing_intermediate.html for reference
+                AnemoiCheckpoint(
+                    config=config,
+                    filename=name,
+                    save_last=True,
+                    **{save_key: save_frequency},
+                    # if save_top_k == k, last k models saved; if save_top_k == -1, all models are saved
+                    save_top_k=save_n_models,
+                    monitor="step",
+                    mode="max",
+                    **checkpoint_settings,
+                ),
+            )
+        LOGGER.debug("Not setting up a checkpoint callback with %s", save_key)
+
     return checkpoint_callbacks
 
 
@@ -176,7 +169,7 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     Returns
     -------
-    List[Callback]
+    list[Callback]
         A list of PyTorch Lightning callbacks
 
     """
@@ -196,10 +189,12 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     # Parent UUID callback
     # Check variable order callback
+    # Register Migrations callback
     trainer_callbacks.extend(
         (
             ParentUUIDCallback(config),
             CheckVariableOrder(),
+            RegisterMigrations(),
         ),
     )
 

@@ -63,6 +63,37 @@ class BaseBlock(nn.Module, ABC):
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
 
+class PointWiseMLPProcessorBlock(BaseBlock):
+    """Point-wise block with MLPs."""
+
+    def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
+        super().__init__()
+        assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
+        layers = [
+            layer_kernels.Linear(num_channels, hidden_dim),
+            # This pattern has been proven to produce good results in point-wise models
+            layer_kernels.LayerNorm(hidden_dim),
+            layer_kernels.Activation(),
+        ]
+        if num_channels != hidden_dim:
+            layers.append(layer_kernels.Linear(hidden_dim, num_channels))
+
+        if dropout_p is not None and dropout_p > 0:
+            layers.append(nn.Dropout(p=dropout_p))
+
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(
+        self,
+        x: Tensor,
+        shapes: list,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
+    ) -> Tensor:
+        return self.mlp(x)
+
+
 class TransformerProcessorBlock(BaseBlock):
     """Transformer block with MultiHeadSelfAttention and MLPs."""
 
@@ -113,15 +144,20 @@ class TransformerProcessorBlock(BaseBlock):
         shapes: list,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[Tensor] = None,
         **layer_kwargs,
     ) -> Tensor:
+
+        # In case we have conditionings we pass these to the layer norm
+        cond_kwargs = {"cond": cond} if cond is not None else {}
+
         x = x + self.attention(
-            self.layer_norm_attention(x, **layer_kwargs), shapes, batch_size, model_comm_group=model_comm_group
+            self.layer_norm_attention(x, **cond_kwargs), shapes, batch_size, model_comm_group=model_comm_group
         )
         x = x + self.mlp(
             self.layer_norm_mlp(
                 x,
-                **layer_kwargs,
+                **cond_kwargs,
             )
         )
         return x
@@ -680,13 +716,18 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
         **layer_kwargs,
     ):
         x_skip = x
 
+        # In case we have conditionings we pass these to the layer norm
+        cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
+        cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
+
         x = (
-            self.layer_norm_attention_src(x[0], **layer_kwargs),
-            self.layer_norm_attention_dest(x[1], **layer_kwargs),
+            self.layer_norm_attention_src(x[0], **cond_src_kwargs),
+            self.layer_norm_attention_dest(x[1], **cond_dst_kwargs),
         )
 
         x_r = self.lin_self(x[1])
@@ -714,10 +755,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         out = self.projection(out + x_r)
         out = out + x_skip[1]
 
-        nodes_new_dst = self.run_node_dst_mlp(out, **layer_kwargs) + out
+        nodes_new_dst = self.run_node_dst_mlp(out, **cond_dst_kwargs) + out
 
         if self.update_src_nodes:
-            nodes_new_src = self.run_node_src_mlp(x_skip[0], **layer_kwargs) + x_skip[0]
+            nodes_new_src = self.run_node_src_mlp(x_skip[0], **cond_dst_kwargs) + x_skip[0]
         else:
             nodes_new_src = x_skip[0]
 
@@ -792,11 +833,14 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
-        **layer_kwargs,
+        cond: Optional[Tensor] = None,
     ):
         x_skip = x
 
-        x = self.layer_norm_attention(x, **layer_kwargs)
+        # In case we have conditionings we pass these to the layer norm
+        cond_kwargs = {"cond": cond} if cond is not None else {}
+
+        x = self.layer_norm_attention(x, **cond_kwargs)
         x_r = self.lin_self(x)
 
         query, key, value, edges = self.get_qkve(x, edge_attr)
@@ -817,6 +861,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)
 
         out = out + x_skip
-        nodes_new = self.run_node_dst_mlp(out, **layer_kwargs) + out
+        nodes_new = self.run_node_dst_mlp(out, **cond_kwargs) + out
 
         return nodes_new, edge_attr

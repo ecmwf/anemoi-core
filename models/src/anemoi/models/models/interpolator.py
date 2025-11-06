@@ -17,6 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
@@ -63,9 +64,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         self.latent_skip = model_config.model.latent_skip
         self.grid_skip = model_config.model.grid_skip
 
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        super()._calculate_shapes_and_indices(data_indices)
-        self.input_dim = (
+    # Overwrite base class
+    def _calculate_input_dim(self):
+        return (
             self.input_times * self.num_input_channels
             + self.node_attributes.attr_ndims[self._graph_name_data]
             + self.num_target_forcings
@@ -74,7 +75,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
     def _assemble_input(self, x, target_forcing, batch_size, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=batch_size)
         if grid_shard_shapes is not None:
-            shard_shapes_nodes = self._get_shard_shapes(node_attributes_data, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
@@ -86,13 +89,15 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             ),
             dim=-1,  # feature dimension
         )
-        shard_shapes_data = self._get_shard_shapes(x_data_latent, 0, grid_shard_shapes, model_comm_group)
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
 
         if self.grid_skip is not None:
             x_skip = x[:, self.grid_skip, ...]
-            if self.A_down is not None or self.A_up is not None:
+            if self.truncation.A_down is not None or self.truncation.A_up is not None:
                 x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-                x_skip = self._apply_truncation(x_skip, grid_shard_shapes, model_comm_group)
+                x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
                 x_skip = einops.rearrange(
                     x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size
                 )
@@ -141,11 +146,10 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         )
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
 
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
         # Run encoder
-        x_data_latent, x_latent = self._run_mapper(
-            self.encoder,
+        x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -167,8 +171,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         # Run decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),

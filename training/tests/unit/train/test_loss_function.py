@@ -21,6 +21,7 @@ from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
+from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
@@ -30,7 +31,7 @@ from anemoi.training.utils.enums import TensorDim
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
     loss = loss_cls()
@@ -231,7 +232,7 @@ def test_grid_invariance(
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(DictConfig({"_target_": f"anemoi.training.losses.{loss_cls.__name__}"}))
@@ -240,7 +241,7 @@ def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
@@ -260,7 +261,7 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
@@ -280,7 +281,7 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
@@ -298,7 +299,7 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
 
 @pytest.mark.parametrize(
     "loss_cls",
-    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS],
+    [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss],
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
     loss = get_loss_function(
@@ -330,9 +331,6 @@ def test_combined_loss() -> None:
         ),
         scalers={"test": (-1, torch.ones(2))},
     )
-    assert isinstance(loss, CombinedLoss)
-    assert "test" in loss.scaler
-
     assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scaler
 
@@ -357,26 +355,6 @@ def test_combined_loss_invalid_loss_weights() -> None:
             ),
             scalers={"test": (-1, torch.ones(2))},
         )
-
-
-def test_combined_loss_invalid_behaviour() -> None:
-    """Test the combined loss function and setting the scalers."""
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
-                ],
-                "scalers": ["test"],
-                "loss_weights": [1.0, 0.5],
-            },
-        ),
-        scalers={"test": (-1, torch.ones(2))},
-    )
-    with pytest.raises(AttributeError):
-        loss.scaler = "test"
 
 
 def test_combined_loss_equal_weighting() -> None:
@@ -413,8 +391,6 @@ def test_combined_loss_seperate_scalers() -> None:
         scalers={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
     )
     assert isinstance(loss, CombinedLoss)
-    assert "test" in loss.scaler
-    assert "test2" in loss.scaler
 
     assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scaler

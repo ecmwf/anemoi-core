@@ -10,6 +10,7 @@ anemoi-training:
 #. Deterministic Forecasting (GraphForecaster)
 #. Ensemble Forecasting (GraphEnsForecaster)
 #. Time Interpolation (GraphInterpolator)
+#. Diffusion-based Forecasting (GraphDiffusionForecaster)
 
 The model tasks specify the training objective and are specified in the
 configuration through ``training.model_task``. They are our
@@ -20,6 +21,7 @@ configuration through ``training.model_task``. They are our
 #. Graph Neural Network (GNN)
 #. Graph Transformer Neural Network
 #. Transformer Neural Network
+#. Point-wise Multilayer Perceptron
 
 The model types specify the model architecture and can be chosen
 independently of the model task. Currently, all models have a
@@ -35,7 +37,7 @@ For detailed instructions on creating models, see the
 .. note::
 
    Currently, the GNN model type is not supported with the Ensemble
-   Forecasting model task.
+   Forecasting model task and the Diffusion Forecasting model task.
 
 ************
  Processors
@@ -43,7 +45,7 @@ For detailed instructions on creating models, see the
 
 The processor is the part of the model that performs the computation on
 the latent space. The processor can be chosen to be a GNN,
-GraphTransformer or Transformer with Flash attention.
+GraphTransformer, Transformer with Flash attention or Point-wise MLP.
 
 GNN
 ===
@@ -97,6 +99,21 @@ coarser than the resolution of the base data.
    :align: center
 
    Attention windows (grid points highlighted in blue) for different grid points (red).
+
+.. note::
+
+   The Transformer does not require a subgraph.
+
+Point-wise MLP
+==============
+
+The Point-wise MLP applies the same multilayer perceptron independently
+to each node. Results for each node are not conditioned on other nodes,
+as there is no message passing or interaction between nodes.
+
+.. note::
+
+   The Point-wise MLP does not require a subgraph.
 
 *******************
  Encoders/Decoders
@@ -172,4 +189,5 @@ configuration:
       ensemble_size_per_device: 4
 
 This determines how many ensemble members are generated per device
-during training.
+during training. Effective ensemble size is then the number of ensemble
+members per device times the number of GPUs per ensemble.

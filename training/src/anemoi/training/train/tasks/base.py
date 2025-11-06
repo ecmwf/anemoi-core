@@ -6,6 +6,8 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
+
 from __future__ import annotations
 
 import logging
@@ -16,6 +18,7 @@ from typing import TYPE_CHECKING
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
 from torch.distributed.optim import ZeroRedundancyOptimizer
 
@@ -28,6 +31,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -164,6 +168,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
@@ -187,7 +192,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         # Instantiate all scalers with the training configuration
-        self.scalers, self.delayed_scaler_builders = create_scalers(
+        self.scalers, self.updating_scalars = create_scalers(
             config.model_dump(by_alias=True).training.scalers,
             data_indices=data_indices,
             graph_data=graph_data,
@@ -208,7 +213,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             scalers=self.scalers,
             data_indices=self.data_indices,
         )
-        print_variable_scaling(self.loss, data_indices)
+        self._scaling_values_log = print_variable_scaling(
+            self.loss,
+            data_indices,
+        )
 
         self.metrics = torch.nn.ModuleDict(
             {
@@ -297,14 +305,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
             grid_shard_shapes=self.grid_shard_shapes,
         )
 
-    def on_load_checkpoint(self, checkpoint: torch.nn.module) -> None:
+    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
-    def define_delayed_scalers(self) -> None:
-        """Update delayed scalers such as the loss weights mask for imputed variables."""
-        for name, scaler_builder in self.delayed_scaler_builders.items():
-            self.scalers[name] = scaler_builder.get_delayed_scaling(model=self.model)
-            self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
+    def update_scalers(self, callback: AvailableCallbacks) -> None:
+        """Update scalers, calling the defined function on them, updating if not None."""
+        for name, scaler_builder in self.updating_scalars.items():
+            scaler = scaler_builder.update_scaling_values(callback, model=self.model)
+            if scaler is None:  # If scalar is None, no update to be applied
+                continue
+
+            if name in self.loss.scaler:  # If scalar in loss, update it
+                self.loss.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+
+            for metric in self.metrics.values():  # If scalar in metrics, update it
+                if name in metric.scaler:
+                    metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
 
     def set_model_comm_group(
         self,
@@ -332,19 +348,34 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
-    def compute_loss_metrics(
+    def _prepare_tensors_for_loss(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int = 0,
-        training_mode: bool = True,
         validation_mode: bool = False,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
+        """Prepare tensors for loss computation, handling sharding if necessary.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        validation_mode : bool
+            Whether in validation mode
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, slice | None]
+            Prepared y_pred, y, and grid_shard_slice
+        """
         is_sharded = self.grid_shard_slice is not None
 
-        sharding_supported = (self.loss_supports_sharding or not training_mode) and (
+        sharding_supported = (self.loss_supports_sharding or validation_mode) and (
             self.metrics_support_sharding or not validation_mode
         )
+
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
             shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, self.grid_shard_shapes)
             y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
@@ -354,57 +385,194 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y_pred_full, y_full = y_pred, y
             grid_shard_slice = self.grid_shard_slice
 
-        loss = (
-            self.loss(
-                y_pred_full,
-                y_full,
-                grid_shard_slice=grid_shard_slice,
-                group=self.model_comm_group,
-            )
-            if training_mode
-            else None
+        return y_pred_full, y_full, grid_shard_slice
+
+    def _compute_loss(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Compute the loss function.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+        **_kwargs
+            Additional arguments
+
+        Returns
+        -------
+        torch.Tensor
+            Computed loss
+        """
+        return self.loss(
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
         )
 
+    def _compute_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int = 0,
+        grid_shard_slice: slice | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Compute validation metrics.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        rollout_step : int
+            Current rollout step
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Computed metrics
+        """
+        return self.calculate_val_metrics(
+            y_pred,
+            y,
+            rollout_step,
+            grid_shard_slice=grid_shard_slice,
+        )
+
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        rollout_step: int,
+        validation_mode: bool = False,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        """Compute loss and metrics for the given predictions and targets.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        rollout_step : int
+            Current rollout step
+        validation_mode : bool
+            Whether to compute validation metrics
+        **kwargs
+            Additional arguments to pass to loss computation
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
+            Loss and metrics dictionary (if validation_mode)
+        """
+        # Prepare tensors for loss/metrics computation
+        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            validation_mode,
+        )
+
+        loss = self._compute_loss(y_pred=y_pred_full, y=y_full, grid_shard_slice=grid_shard_slice, **kwargs)
+
+        # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self.calculate_val_metrics(
-                y_pred_full,
-                y_full,
-                rollout_step,
-                grid_shard_slice=grid_shard_slice,
-            )
+            metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice)
 
         return loss, metrics_next
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
+        Also normalize the batch in-place if needed.
+
         Parameters
         ----------
         batch : torch.Tensor
             Batch to transfer
-        dataloader_idx : int
-            Dataloader index
 
         Returns
         -------
         torch.Tensor
             Batch after transfer
         """
+        # Gathering/sharding of batch
+        batch = self._setup_batch_sharding(batch)
+
+        # Batch normalization
+        batch = self._normalize_batch(batch)
+
+        # Prepare scalers, e.g. init delayed scalers and update scalers
+        self._prepare_loss_scalers()
+
+        return batch
+
+    def _setup_batch_sharding(self, batch: torch.Tensor) -> torch.Tensor:
+        """Setup batch sharding before every step.
+
+        If the batch is sharded, it will be setup with the grid shard shapes and slice.
+        Otherwise, the batch will be allgathered.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to setup
+
+        Returns
+        -------
+        torch.Tensor
+            Batch after setup
+        """
         if self.keep_batch_sharded and self.model_comm_group_size > 1:
             self.grid_shard_shapes = self.grid_indices.shard_shapes
-            self.grid_shard_slice = self.grid_indices.get_shard_indices(self.reader_group_rank)
+            self.grid_shard_slice = self.grid_indices.get_shard_slice(self.reader_group_rank)
         else:
             batch = self.allgather_batch(batch)
             self.grid_shard_shapes, self.grid_shard_slice = None, None
-
         return batch
+
+    def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
+        """Normalize batch for training and validation before every step.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Batch to prepare
+
+        Returns
+        -------
+        torch.Tensor
+            Normalized batch
+        """
+        return self.model.pre_processors(batch)
+
+    def _prepare_loss_scalers(self) -> None:
+        """Prepare scalers for training and validation before every step."""
+        # Delayed scalers need to be initialized after the pre-processors once
+        if self.is_first_step:
+            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
+            self.is_first_step = False
+        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
+        return
 
     @abstractmethod
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         pass
@@ -492,7 +660,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         return metrics
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        train_loss, _, _ = self._step(batch, batch_idx)
+        del batch_idx
+
+        train_loss, _, _ = self._step(batch)
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
@@ -513,7 +683,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         ----------
         scheduler : CosineLRScheduler
             Learning rate scheduler object.
-        metric : Optional[Any]
+        metric : Any
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """
@@ -534,8 +704,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Batch inces
 
         """
+        del batch_idx
+
         with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(batch, batch_idx, validation_mode=True)
+            val_loss, metrics, y_preds = self._step(batch, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
@@ -593,3 +765,22 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+
+    def setup(self, stage: str) -> None:
+        """Lightning hook that is called after model is initialized but before training starts."""
+        # The conditions should be separate, but are combined due to pre-commit hook
+        if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
+            # Log hyperparameters on rank 0
+            hyper_params = OmegaConf.to_container(convert_to_omegaconf(self.config), resolve=True)
+            hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
+            # Expand keys for better visibility
+            expand_keys = OmegaConf.select(
+                convert_to_omegaconf(self.config),
+                "diagnostics.log.mlflow.expand_hyperparams",
+                default=["config"],
+            )
+            # Log hyperparameters
+            self.logger.log_hyperparams(
+                hyper_params,
+                expand_keys=expand_keys,
+            )
