@@ -82,6 +82,7 @@ class GraphEnsInterp(BaseGraphModule):
 
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
+        self.use_all_targets = config.training.use_all_targets
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
 
@@ -251,7 +252,14 @@ class GraphEnsInterp(BaseGraphModule):
             dtype=batch.dtype,
         )
 
-        for interp_step in self.interp_times:
+        if self.use_all_targets or validation_mode:
+            interp_steps = self.interp_times
+        else:
+            ens_group = self.ens_comm_group_id
+            interp_step_index = ens_group % len(self.interp_times)
+            interp_steps = [self.interp_times[interp_step_index]]
+
+        for interp_step in interp_steps:
             if num_tfi >= 1:
                 target_forcing[..., :num_tfi] = batch[:, self.imap[interp_step], :, :, self.target_forcing_indices]
             if self.use_time_fraction:
@@ -282,7 +290,7 @@ class GraphEnsInterp(BaseGraphModule):
                 metrics_next = self.calculate_val_metrics(
                     y_pred_ens_group,
                     y,
-                    interp_step,
+                    interp_step-1,
                     grid_shard_slice=self.grid_shard_slice,
                 )
 
@@ -292,7 +300,7 @@ class GraphEnsInterp(BaseGraphModule):
 
         _ens_ic = x_bound if validation_mode else None
 
-        loss *= 1.0 / len(self.interp_times)
+        loss *= 1.0 / len(interp_steps)
         return loss, metrics, y_preds, _ens_ic
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
