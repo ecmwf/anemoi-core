@@ -139,7 +139,7 @@ configs = [
 if "PYTEST_VERSION" in os.environ:
     # Use a single config in testing for reproducibility
     configs = [
-        triton.Config(dict(BLOCK_M=128, BLOCK_N=64), num_stages=2, num_warps=4, pre_hook=_host_descriptor_pre_hook),
+        triton.Config(dict(BLOCK_M=128, BLOCK_N=64), num_stages=4, num_warps=4, pre_hook=_host_descriptor_pre_hook),
     ]
 
 
@@ -282,36 +282,52 @@ def _attn_bwd_dkdv(dk, dv,  #
     curr_m = start_m
     step_m = BLOCK_M1
     for blk_idx in range(num_steps):
-        qT = tl.load(qT_ptrs)
-        # Load m before computing qk to reduce pipeline stall.
-        offs_m = curr_m + tl.arange(0, BLOCK_M1)
-        m = tl.load(M + offs_m)
-        qkT = tl.dot(k, qT)
-        pT = tl.math.exp2(qkT - m[None, :])
-        # Autoregressive masking.
-        #if MASK:
-        #     mask = (offs_m[None, :] >= offs_n[:, None])
-        #     pT = tl.where(mask, pT, 0.0)
-        if STAGE == 3: #SW
-            #mask = (offs_m[None, :] >= offs_n[:, None])
-            #pT = tl.where(mask, pT, 0.0)
-            #offs_n = curr_n + tl.arange(0, BLOCK_N2)
-            mask = (offs_m[None, :] <= offs_n[:, None] + WINDOW)  & (offs_m[None, :] >= offs_n[:, None] - WINDOW) #right version
-            #mask = (offs_m[None, :] >= offs_n[:, None] + WINDOW)  & (offs_m[None, :] <= offs_n[:, None] - WINDOW) #right shape, possible wrong answer
-            #mask =  (offs_m[None, :] >= offs_n[:, None] - WINDOW) & (offs_m[None, :] <= offs_n[:, None] + WINDOW) #right shape, possible wrong answer
-            pT = tl.where(mask, pT, 0.0)
-        do = tl.load(do_ptrs)
-        # Compute dV.
-        ppT = pT
-        ppT = ppT.to(tl.float16)
-        dv += tl.dot(ppT, do)
-        # D (= delta) is pre-divided by ds_scale.
-        Di = tl.load(D + offs_m)
-        # Compute dP and dS.
-        dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
-        dsT = pT * (dpT - Di[None, :])
-        dsT = dsT.to(tl.float16)
-        dk += tl.dot(dsT, tl.trans(qT))
+        masked=False
+        # determine if this iterations q block is entirely outside the sliding window for this programs kv blocks
+        # if so, we can skip this iteration without loading
+        if STAGE == 3 and WINDOW > 0: #sw, overly defensive
+            # BLOCK_M1 => BLOCK_Q, BLOCK_N1 => BLOCK_KV
+            q_min=curr_m
+            q_max=curr_m + BLOCK_M1 - 1
+            kv_min = start_n
+            kv_max = start_n + BLOCK_N1 -1
+
+            masked = (kv_max < q_min - WINDOW) | (kv_min > q_max + WINDOW)
+            #if masked:
+                #print("dq single block masked sw, skipping block")
+
+        if not masked:
+            qT = tl.load(qT_ptrs)
+            # Load m before computing qk to reduce pipeline stall.
+            offs_m = curr_m + tl.arange(0, BLOCK_M1)
+            m = tl.load(M + offs_m)
+            qkT = tl.dot(k, qT)
+            pT = tl.math.exp2(qkT - m[None, :])
+            # Autoregressive masking.
+            #if MASK:
+            #     mask = (offs_m[None, :] >= offs_n[:, None])
+            #     pT = tl.where(mask, pT, 0.0)
+            if STAGE == 3 and WINDOW > 0: #SW
+                #mask = (offs_m[None, :] >= offs_n[:, None])
+                #pT = tl.where(mask, pT, 0.0)
+                #offs_n = curr_n + tl.arange(0, BLOCK_N2)
+                mask = (offs_m[None, :] <= offs_n[:, None] + WINDOW)  & (offs_m[None, :] >= offs_n[:, None] - WINDOW) #right version
+                #mask = (offs_m[None, :] >= offs_n[:, None] + WINDOW)  & (offs_m[None, :] <= offs_n[:, None] - WINDOW) #right shape, possible wrong answer
+                #mask =  (offs_m[None, :] >= offs_n[:, None] - WINDOW) & (offs_m[None, :] <= offs_n[:, None] + WINDOW) #right shape, possible wrong answer
+                pT = tl.where(mask, pT, 0.0)
+            do = tl.load(do_ptrs)
+            # Compute dV.
+            ppT = pT
+            ppT = ppT.to(tl.float16)
+            dv += tl.dot(ppT, do)
+            # D (= delta) is pre-divided by ds_scale.
+            Di = tl.load(D + offs_m)
+            # Compute dP and dS.
+            dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+            dsT = pT * (dpT - Di[None, :])
+            dsT = dsT.to(tl.float16)
+            dk += tl.dot(dsT, tl.trans(qT))
+
         # Increment pointers.
         curr_m += step_m
         qT_ptrs += step_m * stride_tok
@@ -346,46 +362,38 @@ def _attn_bwd_dq(dq, q, K, V,  #
     step_n = BLOCK_N2
     #offs_n = start_n + tl.arange(0, BLOCK_N2) # I added this
     for blk_idx in range(num_steps):
-        kT = tl.load(kT_ptrs)
-        vT = tl.load(vT_ptrs)
-        qk = tl.dot(q, kT)
-        p = tl.math.exp2(qk - m)
-        # Autoregressive masking.
-        #if MASK and STAGE == 3: #sliding window
-        #if MASK:
-        #    offs_n = curr_n + tl.arange(0, BLOCK_N2)
-        #    mask = (offs_m[:, None] >= offs_n[None, :])
-        #    p = tl.where(mask, p, 0.0)
+        masked=False
+        # determine if this iterations kv blocks are entirely outside the sliding window for this programs q block
+        # if so, we can skip this iteration without loading
+        if STAGE == 3 and WINDOW > 0: #sw, overly defensive
+            # BLOCK_M1 => BLOCK_Q, BLOCK_N1 => BLOCK_KV
+            q_min=start_m
+            q_max=start_m + BLOCK_M2 - 1
+            kv_min = curr_n
+            kv_max = curr_n + BLOCK_N2 -1
+            masked = (kv_max < q_min - WINDOW) | (kv_min > q_max + WINDOW)
+            #if masked:
+                #print("dq single block masked sw, skipping block")
 
-        if  STAGE == 3: #sliding window
-            #offs_n = curr_n + tl.arange(0, BLOCK_N2)
-            #mask = (offs_m[:, None] >= offs_n[None, :])
-            #p = tl.where(mask, p, 0.0)
+        if not masked:
+            kT = tl.load(kT_ptrs)
+            vT = tl.load(vT_ptrs)
+            qk = tl.dot(q, kT)
+            p = tl.math.exp2(qk - m)
 
-            #offs_kv_curr = curr_kv + tl.arange(0, BLOCK_KV)
-            #mask_block = (offs_kv_curr[None, :] <= offs_q[:, None] + WINDOW_SIZE)  & (offs_kv_curr[None, :] >= offs_q[:, None] - WINDOW_SIZE)
-            #P_block = tl.where(mask_block, P_block, 0.0)
+            if  STAGE == 3 and WINDOW > 0: #sliding window
+                offs_n = curr_n + tl.arange(0, BLOCK_N2)
+                mask = (offs_n[None, :] >= offs_m[:, None] - WINDOW) & (offs_n[None, :] <= offs_m[:, None] + WINDOW)
+                p = tl.where(mask, p, 0.0)
 
-            offs_n = curr_n + tl.arange(0, BLOCK_N2)
+            # Compute dP and dS.
+            dp = tl.dot(do, vT).to(tl.float32)
+            ds = p * (dp - Di[:, None])
+            ds = ds.to(tl.float16)
+            # Compute dQ.
+            # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+            dq += tl.dot(ds, tl.trans(kT))
 
-            #mask = (offs_m[None, :] <= offs_n[:, None] + WINDOW)  & (offs_m[None, :] >= offs_n[:, None] - WINDOW) #compilation error, incompatible shapes
-            #mask = (offs_m[:, None] <= offs_n[None, :] + WINDOW)  & (offs_m[:, None] >= offs_n[None, :] - WINDOW) #right shape, possible wrong answer
-            #mask = (offs_n[None, :] <= offs_m[:, None] + WINDOW) & (offs_n[:,None] >= offs_m[None, :] - WINDOW) #wrong shape, closest i ccan get from past example
-            #mask = (offs_n[None, :] <= offs_m[:, None] + WINDOW) & (offs_n[:,None] >= offs_m[None, :] - WINDOW) #wrong shape, closest i ccan get from past example
-            #mask = (offs_n[:, None] <= offs_m[None, :] + WINDOW) & (offs_n[None,:] >= offs_m[:,None] - WINDOW)
-            mask = (offs_n[None, :] >= offs_m[:, None] - WINDOW) & (offs_n[None, :] <= offs_m[:, None] + WINDOW)
-            #mask = (offs_m[:, None] >= offs_n[None, :] - WINDOW)  & (offs_m[:, None] <= offs_n[None, :] + WINDOW) #right shape, possible wrong answer
-            #mask = (offs_m[:, None] >= offs_n[None, :] + WINDOW)  & (offs_m[:, None] <= offs_n[None, :] - WINDOW) #with this version I get to failing at dq, pass dk and dv
-            #mask = (offs_m[:, None] <= offs_n[None, :] + WINDOW)  & (offs_m[:, None] >= offs_n[None, :] - WINDOW)
-            p = tl.where(mask, p, 0.0)
-
-        # Compute dP and dS.
-        dp = tl.dot(do, vT).to(tl.float32)
-        ds = p * (dp - Di[:, None])
-        ds = ds.to(tl.float16)
-        # Compute dQ.
-        # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
-        dq += tl.dot(ds, tl.trans(kT))
         # Increment pointers.
         curr_n += step_n
         kT_ptrs += step_n * stride_tok
@@ -433,7 +441,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     start_n = pid * BLOCK_N1
     start_m = start_n
 
-    MASK_BLOCK_M1: tl.constexpr = BLOCK_M1 // BLK_SLICE_FACTOR
+    #MASK_BLOCK_M1: tl.constexpr = BLOCK_M1 // BLK_SLICE_FACTOR
     offs_n = start_n + tl.arange(0, BLOCK_N1)
 
     dv = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
@@ -443,8 +451,9 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
     v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
+   
+    """
     num_steps = BLOCK_N1 // MASK_BLOCK_M1
-
     dk, dv = _attn_bwd_dkdv(dk, dv,  #
                             Q, k, v, sm_scale,  #
                             DO,  #
@@ -456,8 +465,10 @@ def _attn_bwd(Q, K, V, sm_scale,  #
                             STAGE=STAGE,
                             WINDOW=WINDOW, MASK=True  #
                             )
-
     start_m += num_steps * MASK_BLOCK_M1
+    """
+    
+
     num_steps = (N_CTX - start_m) // BLOCK_M1
 
     # Compute dK and dV for non-masked blocks.
@@ -486,7 +497,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     start_m = pid * BLOCK_M2
     end_n = start_m + BLOCK_M2
 
-    MASK_BLOCK_N2: tl.constexpr = BLOCK_N2 // BLK_SLICE_FACTOR
+    #MASK_BLOCK_N2: tl.constexpr = BLOCK_N2 // BLK_SLICE_FACTOR
     offs_m = start_m + tl.arange(0, BLOCK_M2)
 
     q = tl.load(Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
@@ -501,6 +512,9 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     # but inside each call to _attn_bwd_dq, from left to right), but that's
     # not due to anything important.  I just wanted to reuse the loop
     # structure for dK & dV above as much as possible.
+    
+    
+    """
     num_steps = BLOCK_M2 // MASK_BLOCK_N2
     dq = _attn_bwd_dq(dq, q, K, V,  #
                       do, m, D,  #
@@ -512,6 +526,8 @@ def _attn_bwd(Q, K, V, sm_scale,  #
                       WINDOW=WINDOW, MASK=True  #
                       )
     end_n -= num_steps * MASK_BLOCK_N2
+    """
+    
     # stage 2
     num_steps = end_n // BLOCK_N2
     dq = _attn_bwd_dq(dq, q, K, V,  #
@@ -621,8 +637,7 @@ class TritonAttention(torch.autograd.Function):
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
         BATCH, N_HEAD, N_CTX = q.shape[:3]
-        PRE_BLOCK = 128
-        NUM_WARPS, NUM_STAGES = 4, 5
+        NUM_WARPS, NUM_STAGES = 4, 3
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
         BLK_SLICE_FACTOR = 2
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
@@ -660,13 +675,13 @@ class TritonAttention(torch.autograd.Function):
 TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2')
 
 
-@pytest.mark.parametrize("Z", [1,4])
+@pytest.mark.parametrize("Z", [4])
 @pytest.mark.parametrize("H", [8])
-@pytest.mark.parametrize("N_CTX", [128]) #1024, (2 if is_hip() else 4) * 1024])
-@pytest.mark.parametrize("HEAD_DIM", [64, 128])
+@pytest.mark.parametrize("N_CTX", [2048]) #1024, (2 if is_hip() else 4) * 1024])
+@pytest.mark.parametrize("HEAD_DIM", [64])
 @pytest.mark.parametrize("causal", [False])  # FIXME: Non-causal tests do not pass at the moment.
-@pytest.mark.parametrize("window", [0,32])
-@pytest.mark.parametrize("warp_specialize", [False, ])# True] if is_blackwell() else [False])
+@pytest.mark.parametrize("window", [0,512])
+@pytest.mark.parametrize("warp_specialize", [False])# True] if is_blackwell() else [False])
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("provider", ["triton-fp16"]) #+ (["triton-fp8"] if TORCH_HAS_FP8 else []))
 def test_op(Z, H, N_CTX, HEAD_DIM, causal, window, warp_specialize, mode, provider, dtype=torch.float16):
