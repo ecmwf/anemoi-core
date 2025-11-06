@@ -99,7 +99,6 @@ def plot_interactive_subgraph(
     )
     layout = go.Layout(
         title="<br>" + f"Graph {source_name} --> {target_name}",
-        title_font_size=16,
         showlegend=True,
         hovermode="closest",
         margin={"b": 20, "l": 5, "r": 5, "t": 40},
@@ -151,7 +150,6 @@ def plot_isolated_nodes(graph: HeteroData, out_file: str | Path | None = None) -
 
     layout = go.Layout(
         title="<br>Orphan nodes",
-        title_font_size=16,
         showlegend=True,
         hovermode="closest",
         margin={"b": 20, "l": 5, "r": 5, "t": 40},
