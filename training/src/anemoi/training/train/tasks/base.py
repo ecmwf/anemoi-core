@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import Any
 from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
@@ -734,7 +735,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return val_loss, y_preds
 
-    def configure_optimizers(self) -> Tuple[List[torch.optim.Optimizer], List[Dict[str, Any]]]:
+    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
         scheduler = self._create_scheduler(optimizer)
@@ -766,7 +767,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return optimizer
 
-    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> Dict[str, Any]:
+    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
         """Helper to create the cosine LR scheduler."""
         scheduler = CosineLRScheduler(
             optimizer,
