@@ -4,11 +4,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 
-def _row_normalize_weights(
-    edge_index,
-    weights,
-    num_target_nodes,
-):
+def _row_normalize_weights(edge_index: torch.Tensor, weights: torch.Tensor, num_target_nodes: int) -> torch.Tensor:
     total = torch.zeros(num_target_nodes, device=weights.device)
     norm = total.scatter_add_(0, edge_index[1].long(), weights)
     norm = norm[edge_index[1]]
@@ -84,12 +80,11 @@ def build_sparse_projector(
     """Factory method to build a SparseProjector."""
     sub_graph = graph[edges_name]
 
-    weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
-
     if edge_weight_attribute:
-        weights = sub_graph[edge_weight_attribute].squeeze().to(sub_graph.edge_index.device)
+        weights = sub_graph[edge_weight_attribute].squeeze()
     else:
-        torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+        # uniform weights
+        weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
 
     if src_node_weight_attribute:
         weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
