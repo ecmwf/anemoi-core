@@ -53,7 +53,7 @@ diagnostics:
   log:
     mlflow:
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-      enabled: true
+      enabled: False
       offline: True
       tracking_uri: ""
     interval: 1
