@@ -13,11 +13,11 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
+from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
-from hydra.utils import instantiate
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
@@ -56,7 +56,6 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self._truncation_data = truncation_data
 
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data

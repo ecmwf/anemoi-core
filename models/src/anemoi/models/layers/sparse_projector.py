@@ -1,4 +1,18 @@
+from typing import Optional
+
 import torch
+from torch_geometric.data import HeteroData
+
+
+def _row_normalize_weights(
+    edge_index,
+    weights,
+    num_target_nodes,
+):
+    total = torch.zeros(num_target_nodes, device=weights.device)
+    norm = total.scatter_add_(0, edge_index[1].long(), weights)
+    norm = norm[edge_index[1]]
+    return weights / (norm + 1e-8)
 
 
 class SparseProjector(torch.nn.Module):
@@ -21,10 +35,19 @@ class SparseProjector(torch.nn.Module):
         Whether to normalize weights per destination node.
     """
 
-    def __init__(self, edge_index: torch.Tensor, weights: torch.Tensor, src_size: int, dst_size: int, row_normalize: bool = True, autocast: bool = False):
+    def __init__(
+        self,
+        edge_index: torch.Tensor,
+        weights: torch.Tensor,
+        src_size: int,
+        dst_size: int,
+        row_normalize: bool = True,
+        autocast: bool = False,
+    ) -> None:
         super().__init__()
-        weights = _row_normalize_weights(edge_index, weights, dst_size) if row_normalize else weights
         self.autocast = autocast
+
+        weights = _row_normalize_weights(edge_index, weights, dst_size) if row_normalize else weights
 
         self.projection_matrix = (
             torch.sparse_coo_tensor(
@@ -51,12 +74,30 @@ class SparseProjector(torch.nn.Module):
         return torch.stack(out)
 
 
-def _row_normalize_weights(
-    edge_index,
-    weights,
-    num_target_nodes,
-):
-    total = torch.zeros(num_target_nodes, device=weights.device)
-    norm = total.scatter_add_(0, edge_index[1].long(), weights)
-    norm = norm[edge_index[1]]
-    return weights / (norm + 1e-8)
+def build_sparse_projector(
+    graph: HeteroData,
+    edges_name: tuple[str, str, str],
+    edge_weight_attribute: Optional[str] = None,
+    src_node_weight_attribute: Optional[str] = None,
+    autocast: bool = False,
+) -> SparseProjector:
+    """Factory method to build a SparseProjector."""
+    sub_graph = graph[edges_name]
+
+    weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+
+    if edge_weight_attribute:
+        weights = sub_graph[edge_weight_attribute].squeeze().to(sub_graph.edge_index.device)
+    else:
+        torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+
+    if src_node_weight_attribute:
+        weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
+
+    return SparseProjector(
+        edge_index=sub_graph.edge_index,
+        weights=weights,
+        src_size=sub_graph[edges_name[0]].num_nodes,
+        dst_size=sub_graph[edges_name[2]].num_nodes,
+        autocast=autocast,
+    )

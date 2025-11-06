@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from typing import Optional
 
 import einops
@@ -7,36 +8,51 @@ from torch import nn
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.layers.sparse_projector import build_sparse_projector
 
 
-class SkipConnection(nn.Module):
-    """Skip connection module that selects the most recent timestep from the input sequence.
+class BaseResidualConnection(nn.Module):
+    """Base class for residual connection modules."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def get_last_timestep(self, x):
+        # x shape: (batch, time, ens, nodes, features)
+        return x[:, -1, ...]  # pick current date
+
+    @abstractmethod
+    def forward(self, x, *args, **kwargs):
+        pass
+
+
+class SkipConnection(BaseResidualConnection):
+    """Skip connection module
+
+    It selects the most recent timestep from the input sequence.
 
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__()
+    def forward(self, x, *args, **kwargs):
+        return self.get_last_timestep(x)
+
+
+class NoConnection(BaseResidualConnection):
+    """No-op connection
+
+    This module returns a zero tensor with the same shape as the last timestep.
+    """
 
     def forward(self, x, *args, **kwargs):
-        x = x[:, -1, ...]  # pick current date
-        return x
-
-
-class NoConnection(nn.Module):
-    """No-op connection that returns a zero tensor with the same shape as the last timestep."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-
-    def forward(self, x, *args, **kwargs):
-        x = x[:, -1, ...]  # pick current date
+        x = self.get_last_timestep(x)
         return torch.zeros_like(x, device=x.device, dtype=x.dtype)
 
 
 class TruncatedConnection(nn.Module):
-    """Applies a coarse-graining and reconstruction of input features using sparse projections to
+    """Truncated skip connection
+
+    It applies a coarse-graining and reconstruction of input features using sparse projections to
     truncate high frequency features.
 
     This module uses two projection operators: one to map features from the full-resolution
@@ -44,16 +60,18 @@ class TruncatedConnection(nn.Module):
 
     Parameters
     ----------
-    num_data_nodes : int
-        Number of nodes in the original full-resolution grid.
-    num_truncation_nodes : int
-        Number of nodes in the truncated grid.
-    sub_graph_down
-        Graph object containing edge_index and edge_length for down-projection.
-    sub_graph_up
-        Graph object containing edge_index and edge_length for up-projection.
+    graph : HeteroData
+        The graph containing the subgraphs for down and up projections.
+    data_nodes : str
+        Name of the nodes representing the data nodes.
+    truncation_nodes : str
+        Name of the nodes representing the truncated (coarse) nodes.
     edge_weight_attribute : str, optional
         Name of the edge attribute to use as weights for the projections.
+    src_node_weight_attribute : str, optional
+        Name of the source node attribute to use as weights for the projections.
+    autocast : bool, default False
+        Whether to use automatic mixed precision for the projections.
     """
 
     def __init__(
@@ -67,35 +85,19 @@ class TruncatedConnection(nn.Module):
     ) -> None:
         super().__init__()
 
-        num_data_nodes = graph[data_nodes].num_nodes
-        num_truncation_nodes = graph[truncation_nodes].num_nodes
-        sub_graph_down = graph[data_nodes, "to", truncation_nodes]
-        sub_graph_up = graph[truncation_nodes, "to", data_nodes]
-
-        up_weight = torch.ones(sub_graph_up.edge_index.shape[1], device=sub_graph_up.edge_index.device)
-        down_weight = torch.ones(sub_graph_down.edge_index.shape[1], device=sub_graph_down.edge_index.device)
-
-        if edge_weight_attribute:
-            up_weight = sub_graph_up[edge_weight_attribute].squeeze() * up_weight
-            down_weight = sub_graph_down[edge_weight_attribute].squeeze() * down_weight
-
-        if src_node_weight_attribute:
-            down_weight = graph[data_nodes][src_node_weight_attribute][sub_graph_down.edge_index[0]]
-            up_weight = graph[truncation_nodes][src_node_weight_attribute][sub_graph_up.edge_index[0]]
-
-        self.project_up = SparseProjector(
-            edge_index=sub_graph_up.edge_index,
-            weights=up_weight,
-            src_size=num_truncation_nodes,
-            dst_size=num_data_nodes,
+        self.project_down = build_sparse_projector(
+            graph=graph,
+            edges_name=(data_nodes, "to", truncation_nodes),
+            edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
             autocast=autocast,
         )
 
-        self.project_down = SparseProjector(
-            edge_index=sub_graph_down.edge_index,
-            weights=down_weight,
-            src_size=num_data_nodes,
-            dst_size=num_truncation_nodes,
+        self.project_up = build_sparse_projector(
+            graph=graph,
+            edges_name=(truncation_nodes, "to", data_nodes),
+            edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
             autocast=autocast,
         )
 
