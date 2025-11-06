@@ -44,11 +44,16 @@ class TruncatedConnection(nn.Module):
 
     Parameters
     ----------
-        num_data_nodes (int): Number of nodes in the original full-resolution grid.
-        num_truncation_nodes (int): Number of nodes in the truncated grid.
-        sub_graph_down: Graph object containing edge_index and edge_length for down-projection.
-        sub_graph_up: Graph object containing edge_index and edge_length for up-projection.
-        edge_weight_attribute (str, optional): Name of the edge attribute to use as weights for the projections.
+    num_data_nodes : int
+        Number of nodes in the original full-resolution grid.
+    num_truncation_nodes : int
+        Number of nodes in the truncated grid.
+    sub_graph_down
+        Graph object containing edge_index and edge_length for down-projection.
+    sub_graph_up
+        Graph object containing edge_index and edge_length for up-projection.
+    edge_weight_attribute : str, optional
+        Name of the edge attribute to use as weights for the projections.
     """
 
     def __init__(

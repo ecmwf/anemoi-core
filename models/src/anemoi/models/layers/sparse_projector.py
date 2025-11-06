@@ -9,14 +9,19 @@ class SparseProjector(torch.nn.Module):
 
     Parameters
     ----------
-        edge_index (Tensor): Edge indices (2, E) representing source and destination nodes.
-        weights (Tensor): Raw edge attributes (e.g., distances) of shape (E,).
-        src_size (int): Number of nodes in the source grid.
-        dst_size (int): Number of nodes in the target grid.
-        row_normalize (bool): Whether to normalize weights per destination node.
+    edge_index : torch.Tensor
+        Edge indices (2, E) representing source and destination nodes.
+    weights : torch.Tensor
+        Raw edge attributes (e.g., distances) of shape (E,).
+    src_size : int
+        Number of nodes in the source grid.
+    dst_size : int
+        Number of nodes in the target grid.
+    row_normalize : bool
+        Whether to normalize weights per destination node.
     """
 
-    def __init__(self, edge_index, weights, src_size, dst_size, row_normalize=True, autocast=False):
+    def __init__(self, edge_index: torch.Tensor, weights: torch.Tensor, src_size: int, dst_size: int, row_normalize: bool = True, autocast: bool = False):
         super().__init__()
         weights = _row_normalize_weights(edge_index, weights, dst_size) if row_normalize else weights
         self.autocast = autocast

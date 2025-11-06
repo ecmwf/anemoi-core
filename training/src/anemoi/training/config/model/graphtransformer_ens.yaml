@@ -88,7 +88,7 @@ decoder:
   shard_strategy: "edges"
 
 residual:
-  _target_: anemoi.models.layers.residual.SkipConnection
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, NoConnection, TruncatedConnection
 
 trainable_parameters:
   data: 8
