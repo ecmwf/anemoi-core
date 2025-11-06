@@ -90,4 +90,6 @@ class GraphInspector:
         if self.show_nodes:
             LOGGER.info("Saving interactive plots of nodes ...")
             for nodes_name in self.graph.node_types:
-                plot_interactive_nodes_2d(self.graph, nodes_name, out_file=self.output_path / f"{nodes_name}_nodes.html")
+                plot_interactive_nodes_2d(
+                    self.graph, nodes_name, out_file=self.output_path / f"{nodes_name}_nodes.html"
+                )

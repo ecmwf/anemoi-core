@@ -11,18 +11,20 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch_geometric.data import HeteroData
 from jinja2 import Template
+from torch_geometric.data import HeteroData
 
 HTML_TEMPLATE_PATH = Path(__file__).parent / "interactive_3d.html.jinja"
 
 
-def subset_graph(
+def extract_nodes_edges(
     graph: HeteroData,
     nodes: list[str] | None = None,
     edges: list[str] | None = None,
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-    """Load a hetero graph from a file and separate nodes and edges by type.
+    """Extracts nodes and edges from a heterogeneous graph.
+
+    Optionally filters by specified types.
 
     Parameters
     ----------
@@ -98,7 +100,7 @@ def plot_interactive_graph_3d(
     out_file : str | Path, optional
         Name of the file to save the plot. Default is None.
     """
-    nodes, edges = subset_graph(graph)
+    nodes, edges = extract_nodes_edges(graph)
 
     for node_set in nodes:
         node_lats, node_lons = coords_to_latlon(nodes[node_set].numpy())
