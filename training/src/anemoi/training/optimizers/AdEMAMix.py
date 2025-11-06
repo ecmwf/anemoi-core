@@ -12,9 +12,9 @@ Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
 """
 
 import math
-from typing import Any
 from collections.abc import Callable
 from collections.abc import Iterable
+from typing import Any
 
 import torch
 from torch.optim import Optimizer
