@@ -39,6 +39,7 @@ swa:
 
 # Optimizer settings
 optimizer:
+  _target_: torch.optim.AdamW
   zero: False
   kwargs:
     weight_decay: 0.1
