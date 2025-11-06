@@ -60,12 +60,13 @@ optimizer:
   # Uncomment the lines below to enable it
   # ---------------------------------------------------------------
   # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
-  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
-  # alpha: 8.0                   # Mixing factor controlling EMA fusion
-  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
-  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
-  # weight_decay: 0.1
   # zero: false                   # Use ZeroRedundancyOptimizer for large distributed models
+  # kwargs:
+  #   betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
+  #   alpha: 8.0                   # Mixing factor controlling EMA fusion
+  #   beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
+  #   alpha_warmup: 260000         # Warm-up steps for α (in iterations)
+  #   weight_decay: 0.01
 
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
