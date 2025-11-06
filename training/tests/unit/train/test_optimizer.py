@@ -1,12 +1,13 @@
-import torch
+
 import pytest
+import torch
 from omegaconf import OmegaConf
-from unittest.mock import MagicMock
+from timm.scheduler import CosineLRScheduler
+
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
 
 # ---- Import the class and required objects ----
 from anemoi.training.train.tasks.base import BaseGraphModule  # adjust import path
-from timm.scheduler import CosineLRScheduler
 
 
 @pytest.fixture
@@ -31,16 +32,19 @@ def mocked_module(mocker):
 
 # ---- Tests ----
 
-def test_create_optimizer_from_config( mocked_module):
-    
-    optimizer_cfg=OmegaConf.create({
-        "_target_": "torch.optim.Adam",  # Replace AdEMAMix with torch Adam for test
-        "zero": False,
-        "kwargs": {
-            "betas": [0.9, 0.95],
-            "weight_decay": 0.1,
+
+def test_create_optimizer_from_config(mocked_module):
+
+    optimizer_cfg = OmegaConf.create(
+        {
+            "_target_": "torch.optim.Adam",  # Replace AdEMAMix with torch Adam for test
+            "zero": False,
+            "kwargs": {
+                "betas": [0.9, 0.95],
+                "weight_decay": 0.1,
+            },
         },
-    })
+    )
 
     # Save expected values *before* mutation
     expected_wd = optimizer_cfg.kwargs.weight_decay
@@ -58,16 +62,18 @@ def test_create_optimizer_from_config( mocked_module):
     assert optimizer.defaults["betas"] == expected_betas
 
 
-def test_create_optimizer_from_config_ADEMAMIX( mocked_module):
-    
-    optimizer_cfg=OmegaConf.create({
-        "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix",  # Replace AdEMAMix with torch Adam for test
-        "zero": False,
-        "kwargs": {
-            "betas": [0.9, 0.95, 0.9999],
-            "weight_decay": 0.1,
+def test_create_optimizer_from_config_ADEMAMIX(mocked_module):
+
+    optimizer_cfg = OmegaConf.create(
+        {
+            "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix",  # Replace AdEMAMix with torch Adam for test
+            "zero": False,
+            "kwargs": {
+                "betas": [0.9, 0.95, 0.9999],
+                "weight_decay": 0.1,
+            },
         },
-    })
+    )
 
     # Save expected values *before* mutation
     expected_wd = optimizer_cfg.kwargs.weight_decay
@@ -85,14 +91,16 @@ def test_create_optimizer_from_config_ADEMAMIX( mocked_module):
     assert optimizer.defaults["betas"] == expected_betas
 
 
-
 def test_create_optimizer_from_config_invalid(mocked_module):
-    bad_cfg = OmegaConf.create({
-        "_target_": "nonexistent.OptimizerClass",
-        "kwargs": {},
-    })
+    bad_cfg = OmegaConf.create(
+        {
+            "_target_": "nonexistent.OptimizerClass",
+            "kwargs": {},
+        },
+    )
     with pytest.raises(Exception):
         mocked_module._create_optimizer_from_config(bad_cfg)
+
 
 def test_create_scheduler(mocked_module):
     """Ensure cosine scheduler is constructed correctly."""
@@ -102,6 +110,7 @@ def test_create_scheduler(mocked_module):
     assert isinstance(scheduler, CosineLRScheduler)
     # Quick sanity check: scheduler should expose optimizer
     assert scheduler.optimizer is optimizer
+
 
 def test_ademamix_single_step_numerical():
     # --- Setup a single scalar parameter ---
