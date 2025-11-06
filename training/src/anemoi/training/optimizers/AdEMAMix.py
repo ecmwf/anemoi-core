@@ -12,32 +12,23 @@ Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
 """
 
 import math
+from typing import Any
+from collections.abc import Callable
+from collections.abc import Iterable
 
-from typing import Any, Callable, Iterable, Optional, Tuple
 import torch
 from torch.optim import Optimizer
 
 
-def linear_warmup_scheduler(
-    step: int,
-    alpha_end: float,
-    alpha_start: float = 0.0,
-    warmup: int = 1
-) -> float:
+def linear_warmup_scheduler(step: int, alpha_end: float, alpha_start: float = 0.0, warmup: int = 1) -> float:
     if step < warmup:
         a = step / float(warmup)
         return (1.0 - a) * alpha_start + a * alpha_end
     return alpha_end
 
 
+def linear_hl_warmup_scheduler(step: int, beta_end: float, beta_start: float = 0.0, warmup: int = 1) -> float:
 
-def linear_hl_warmup_scheduler(
-    step: int,
-    beta_end: float,
-    beta_start: float = 0.0,
-    warmup: int = 1
-) -> float:
-    
     def f(beta: float, eps: float = 1e-8) -> float:
         return math.log(0.5) / math.log(beta + eps) - 1
 
@@ -72,10 +63,10 @@ class AdEMAMix(Optimizer):
         self,
         params: Iterable[Tensor] | Iterable[dict[str, Any]],
         lr: float = 1e-3,
-        betas: Tuple[float, float, float] = (0.9, 0.999, 0.9999),
+        betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 2.0,
-        beta3_warmup: Optional[int] = None,
-        alpha_warmup: Optional[int] = None,
+        beta3_warmup: int | None = None,
+        alpha_warmup: int | None = None,
         eps: float = 1e-8,
         weight_decay: float = 0.0,
     ) -> None:
@@ -108,7 +99,7 @@ class AdEMAMix(Optimizer):
         super().__setstate__(state)
 
     @torch.no_grad()
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         """Performs a single optimization step.
 
         Arguments:
