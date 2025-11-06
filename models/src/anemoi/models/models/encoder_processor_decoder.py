@@ -16,7 +16,6 @@ import torch
 from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
@@ -29,35 +28,6 @@ LOGGER = logging.getLogger(__name__)
 
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
-
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-        truncation_data: dict,
-    ) -> None:
-        """Initializes the graph neural network.
-
-        Parameters
-        ----------
-        model_config : DotDict
-            Model configuration
-        data_indices : dict
-            Data indices
-        graph_data : HeteroData
-            Graph definition
-        """
-
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            truncation_data=truncation_data,
-        )
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
