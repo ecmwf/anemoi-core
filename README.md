@@ -7,6 +7,8 @@
   <a href="https://opensource.org/licenses/apache-2-0">
     <img src="https://img.shields.io/badge/Licence-Apache 2.0-blue.svg" alt="Licence">
   </a>
+</p>
+<p align="center">
   <!-- Individual package releases -->
   <a href="https://github.com/ecmwf/anemoi-training/releases">
     <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-training?color=orange&label=Training%20Release" alt="Anemoi Training Release">
@@ -17,6 +19,8 @@
   <a href="https://github.com/ecmwf/anemoi-graphs/releases">
     <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-graphs?color=orange&label=Graphs%20Release" alt="Anemoi Graphs Release">
   </a>
+</p>
+<p align="center">
   <!-- documentation badges -->
   <a href="https://anemoi-training.readthedocs.io/en/latest/">
     <img src="https://img.shields.io/readthedocs/anemoi-training/latest?label=Docs%20(Training)&color=green" alt="Anemoi Training Docs">
