@@ -13,9 +13,11 @@ from typing import Annotated
 from typing import Any
 from typing import Literal
 
+from omegaconf import OmegaConf
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
@@ -324,10 +326,9 @@ class WandbSchema(BaseModel):
 
 class MlflowSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
-        ...,
+        default="anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
         alias="_target_",
     )
-
     enabled: bool
     "Use MLflow logger."
     offline: bool
@@ -404,6 +405,19 @@ class LoggingSchema(BaseModel):
     "MLflow logging schema."
     interval: PositiveInt
     "Logging frequency in batches."
+
+    @model_validator(mode="before")
+    def inject_default_target(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+        mlflow_cfg = OmegaConf.to_container(values.get("mlflow"), resolve=True)
+        if (
+            mlflow_cfg is not None
+            and isinstance(mlflow_cfg, dict)
+            and "_target_" not in mlflow_cfg
+            and mlflow_cfg["enabled"]
+        ):
+            mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
+            values["mlflow"] = mlflow_cfg
+        return values
 
 
 class MemorySchema(BaseModel):

@@ -26,8 +26,16 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    logger_config = OmegaConf.to_container(convert_to_omegaconf(config.diagnostics.log.mlflow))
+    logger_config = OmegaConf.to_container(convert_to_omegaconf(config).diagnostics.log.mlflow)
     del logger_config["enabled"]
+
+    # backward compatibility to not break configs
+    logger_config["_target_"] = getattr(
+        logger_config,
+        "_target",
+        "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
+    )
+    logger_config["save_dir"] = getattr(logger_config, "save_dir", config.hardware.paths.logs.mlflow)
 
     logger = instantiate(
         logger_config,
