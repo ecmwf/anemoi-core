@@ -669,11 +669,10 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
         expanded_params = {}
         params = params.copy()
-
         for key in expand_keys or []:
             if key in params:
                 expanded_params.update(
-                    expand_iterables(params.pop(key), size_threshold=None, delimiter="."),
+                    expand_iterables(params, size_threshold=None, delimiter="."),
                 )
         expanded_params.update(params)
 
@@ -681,6 +680,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             expanded_params,
             delimiter=".",
         )  # Flatten dict with '.' to not break API queries
+
         if clean_params:
             expanded_params = clean_config_params(expanded_params)
 
