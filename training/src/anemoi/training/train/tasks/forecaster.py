@@ -87,25 +87,3 @@ class GraphForecaster(BaseRolloutGraphModule):
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
-
-    def _step(
-        self,
-        batch: torch.Tensor,
-        validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
-        for loss_next, metrics_next, y_preds_next in self.rollout_step(
-            batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,
-        ):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
-
-        loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds

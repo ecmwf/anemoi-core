@@ -100,14 +100,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_num_groups = None
         self.ens_comm_group_size = None
 
-    def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
-        return self.model(
-            x,
-            fcstep=fcstep,
-            model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
-        )
-
     def set_ens_comm_group(
         self,
         ens_comm_group: ProcessGroup,
@@ -307,27 +299,3 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                     grid_shard_slice=self.grid_shard_slice,
                 )
             yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
-
-    def _step(
-        self,
-        batch: tuple[torch.Tensor, ...],
-        validation_mode: bool = False,
-    ) -> tuple:
-        """Training / validation step."""
-        LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
-
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
-        for loss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
-            batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,
-        ):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
-
-        loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds, _ens_ic

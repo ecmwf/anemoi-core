@@ -298,11 +298,13 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = None
         self.grid_shard_slice = None
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self.model(
             x,
+            *args,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
+            **kwargs,
         )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
@@ -676,23 +678,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return train_loss
 
-    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
-        """Step the learning rate scheduler by Pytorch Lightning.
-
-        Parameters
-        ----------
-        scheduler : CosineLRScheduler
-            Learning rate scheduler object.
-        metric : Any
-            Metric object for e.g. ReduceLRonPlateau. Default is None.
-
-        """
-        del metric
-        scheduler.step(epoch=self.trainer.global_step)
-
-    def on_train_epoch_end(self) -> None:
-        pass
-
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
         """Calculate the loss over a validation batch using the training loss function.
 
@@ -733,6 +718,23 @@ class BaseGraphModule(pl.LightningModule, ABC):
             )
 
         return val_loss, *args
+
+    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
+        """Step the learning rate scheduler by Pytorch Lightning.
+
+        Parameters
+        ----------
+        scheduler : CosineLRScheduler
+            Learning rate scheduler object.
+        metric : Any
+            Metric object for e.g. ReduceLRonPlateau. Default is None.
+
+        """
+        del metric
+        scheduler.step(epoch=self.trainer.global_step)
+
+    def on_train_epoch_end(self) -> None:
+        pass
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
         """Configure the optimizers and learning rate scheduler.
@@ -881,6 +883,30 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             sync_dist=False,
         )
         return train_loss
+
+    def _step(
+        self,
+        batch: tuple[torch.Tensor, ...],
+        validation_mode: bool = False,
+    ) -> tuple:
+        """Training / validation step."""
+        LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
+
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+        metrics = {}
+        y_preds = []
+
+        for loss_next, metrics_next, y_preds_next, *args in self.rollout_step(
+            batch,
+            rollout=self.rollout,
+            validation_mode=validation_mode,
+        ):
+            loss += loss_next
+            metrics.update(metrics_next)
+            y_preds.append(y_preds_next)
+
+        loss *= 1.0 / self.rollout
+        return loss, metrics, y_preds, *args
 
     def on_train_epoch_end(self) -> None:
         if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
