@@ -25,7 +25,6 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
-from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
 
 from anemoi.training.diagnostics.callbacks import get_callbacks
