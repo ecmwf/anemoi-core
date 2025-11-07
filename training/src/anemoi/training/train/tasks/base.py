@@ -888,7 +888,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self,
         batch: torch.Tensor,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict, list, ...]:
+    ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""
         LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
 
@@ -896,7 +896,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         metrics = {}
         y_preds = []
 
-        for loss_next, metrics_next, y_preds_next, *args in self.rollout_step(
+        for loss_next, metrics_next, y_preds_next in self.rollout_step(
             batch,
             rollout=self.rollout,
             validation_mode=validation_mode,
@@ -906,7 +906,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             y_preds.append(y_preds_next)
 
         loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds, *args
+        return loss, metrics, y_preds
 
     def on_train_epoch_end(self) -> None:
         if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:

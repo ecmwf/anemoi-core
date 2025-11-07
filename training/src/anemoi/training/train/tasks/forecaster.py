@@ -48,7 +48,7 @@ class GraphForecaster(BaseRolloutGraphModule):
 
         Yields
         ------
-        Generator[tuple[Union[torch.Tensor, None], dict, list], None, None]
+        Generator[Tuple[torch.Tensor | None, dict, list]]
             Loss value, metrics, and predictions (per step)
 
         """
