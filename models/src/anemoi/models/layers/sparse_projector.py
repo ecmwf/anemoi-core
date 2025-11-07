@@ -1,5 +1,6 @@
 from typing import Optional
 
+import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
@@ -54,6 +55,66 @@ class SparseProjector(torch.nn.Module):
             )
             .coalesce()
             .T
+        )
+
+    @classmethod
+    def from_graph(
+        cls,
+        graph: HeteroData,
+        edges_name: str,
+        edge_weight_attribute: Optional[str] = None,
+        src_node_weight_attribute: Optional[str] = None,
+        autocast: bool = False,
+    ) -> "SparseProjector":
+        """
+        Build a SparseProjection from a graph.
+
+        Parameters
+        ----------
+        graph : networkx.Graph
+            The input graph.
+        edge_name : str
+            The name/identifier for the edge set to use.
+        edge_weight_attribute : str
+            Attribute name for edge weights.
+        src_node_weight_attribute : str
+            Attribute name for source node weights.
+
+        """
+        sub_graph = graph[edges_name]
+
+        if edge_weight_attribute:
+            weights = sub_graph[edge_weight_attribute].squeeze()
+        else:
+            # uniform weights
+            weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+
+        if src_node_weight_attribute:
+            weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
+
+        return cls(
+            edge_index=sub_graph.edge_index,
+            weights=weights,
+            src_size=sub_graph[edges_name[0]].num_nodes,
+            dst_size=sub_graph[edges_name[2]].num_nodes,
+            autocast=autocast,
+        )
+
+    @classmethod
+    def from_file(cls, file_path: str, autocast: bool = False) -> "SparseProjector":
+        """Load projection matrix from a file."""
+        from scipy.sparse import load_npz
+
+        truncation_data = load_npz(file_path)
+        edge_index = torch.tensor(np.vstack(truncation_data.nonzero()), dtype=torch.long)
+        weights = torch.tensor(truncation_data.data, dtype=torch.float32)
+        src_size, dst_size = truncation_data.shape
+        return cls(
+            edge_index=edge_index,
+            weights=weights,
+            src_size=src_size,
+            dst_size=dst_size,
+            autocast=autocast,
         )
 
     def forward(self, x, *args, **kwargs):
