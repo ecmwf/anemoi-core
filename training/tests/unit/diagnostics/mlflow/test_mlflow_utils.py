@@ -11,6 +11,8 @@ from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 
 def test_clean_config_params() -> None:
     params = {
+        "config.dataset.format": None,
+        "config.model.num_channels": None,
         "model.num_channels": None,
         "data.frequency": None,
         "diagnostics.plot": None,
@@ -18,22 +20,20 @@ def test_clean_config_params() -> None:
         "metadata.config.dataset": None,
         "metadata.dataset.sources/1.specific.forward.forward.attrs.variables_metadata.z_500.mars.expver": None,
         "metadata.dataset.specific.forward.forward.attrs.variables_metadata.z_500.mars.expver": None,
-        "data.normalizer.default": None,
-        "data.normalizer.std": None,
-        "data.normalizer.min-max": None,
-        "data.normalizer.max": None,
+        "config.data.normalizer.default": None,
+        "config.data.normalizer.std": None,
+        "config.data.normalizer.min-max": None,
+        "config.data.normalizer.max": None,
     }
 
     cleaned = clean_config_params(params)
     result = {
-        "model.num_channels": None,
-        "data.frequency": None,
-        "diagnostics.plot": None,
-        "hardware.num_gpus": None,
-        "data.normalizer.default": None,
-        "data.normalizer.std": None,
-        "data.normalizer.min-max": None,
-        "data.normalizer.max": None,
+        "config.dataset.format": None,
+        "config.model.num_channels": None,
+        "config.data.normalizer.default": None,
+        "config.data.normalizer.std": None,
+        "config.data.normalizer.min-max": None,
+        "config.data.normalizer.max": None,
     }
     assert cleaned == result
 
