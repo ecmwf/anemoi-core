@@ -886,12 +886,11 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
 
     def _step(
         self,
-        batch: tuple[torch.Tensor, ...],
+        batch: torch.Tensor,
         validation_mode: bool = False,
-        *args,
-    ) -> tuple:
+    ) -> tuple[torch.Tensor, dict, list, ...]:
         """Training / validation step."""
-        LOGGER.debug("SHAPES: batch[0].shape = %s, multi_step = %d", list(batch[0].shape), self.multi_step)
+        LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -901,7 +900,6 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             batch,
             rollout=self.rollout,
             validation_mode=validation_mode,
-            *args,
         ):
             loss += loss_next
             metrics.update(metrics_next)
