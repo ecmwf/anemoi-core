@@ -64,6 +64,9 @@ class ReadPattern:
         j = i * self.multiply_i + self.add_to_i
         return dict(j=j, group=self.group, ds=self._ds)
 
+    def __repr__(self):
+        return f"ReadPattern({self.group=}, {self.variables=}, {self.add_to_i}, {self.multiply_i})"
+
 
 class DataHandler(ABC):
     """Provides data from multiple datasets, groups.
@@ -225,7 +228,13 @@ class GriddedDatasetDataHandler(OneDatasetDataHandler):
 class RecordsDataHandler(OneDatasetDataHandler):
     def select(self, group: str, variables: List[str]):
         assert group in self.groups, (group, self.groups)
-        return open_dataset(self._dataset, select=[f"{group}.{v}" for v in variables])
+
+        if isinstance(self._dataset, dict):
+            ds = open_dataset(**self._dataset, select=[f"{group}.{v}" for v in variables])
+        else:
+            ds = open_dataset(self._dataset, select=[f"{group}.{v}" for v in variables])
+
+        return ds
 
     def static(self, group: str, variables: List[str]) -> StaticDataDict:
         ds = self.select(group, variables)

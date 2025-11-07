@@ -104,12 +104,15 @@ class SampleProvider(ABC):
         # default implementation is to just call the visitor on the visited object
         visitor(self)
 
-    def update_index_offsets(self: "SampleProvider", dates_block):
-        pass
-
     @property
     def _dates_block_in_dataset(self):
         return None
+
+    def filter_available_dates(self, dates_block):
+        return dates_block
+
+    def update_index_offsets(self: "SampleProvider", dates_block):
+        pass
 
     def register_read_pattern(self):
         pass
@@ -224,7 +227,7 @@ def build_sample_provider(cfg: Any, data_handler) -> SampleProvider:
     visitor = DatesGathererVisitor()
     sp.visit(visitor.read_date_offsets)
     dates_block = visitor.dates_block
-    LOGGER.debug(f"Computed date range: {dates_block}")
+    LOGGER.debug(f"Computed available dates: {dates_block}")
 
     # then, update the indices to each container
     sp.visit(lambda obj: obj.update_index_offsets(dates_block))

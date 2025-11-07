@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 import datetime
 import logging
+from math import gcd
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -107,20 +108,28 @@ class _DatesBlock:
         if np.any(self.missing < self.start) or np.any(self.missing > self.end):
             raise ValueError(f"Missing dates {self.missing} are out of range [{self.start}, {self.end}]")
 
-        assert self.missing.dtype == "datetime64[s]", self.missing.dtype
         assert self.start.dtype == "datetime64[s]", self.start.dtype
         assert self.end.dtype == "datetime64[s]", self.end.dtype
         assert self.frequency.dtype == "timedelta64[s]", self.frequency.dtype
+        assert self.missing.dtype == "datetime64[s]", self.missing.dtype
 
     @property
     def missing_indices(self):
         # Get the indices of the missing dates
         return self._missing_as_indices(self.missing)
 
-    def __len__(self):
-        return int((self.end - self.start) / self.frequency) + 1 - len(self.missing)
+    @property
+    def length_including_missing(self):
+        return int((self.end - self.start) / self.frequency) + 1
 
-    def _missing_as_dates(self, missing: np.ndarray | list[int] | set[int]) -> np.ndarray:
+    @property
+    def length_removing_missing(self):
+        return self.length_including_missing - len(self.missing)
+
+    def __len__(self):
+        return self.length_removing_missing
+
+    def _missing_as_dates(self, missing: np.ndarray | list[int] | set[int]) -> np.ndarray:  # ["datetime64[s]"]
         if isinstance(missing, set):
             missing = np.array(sorted(list(missing)), dtype=int)
         if isinstance(missing, list) and all(isinstance(i, int) for i in missing):
@@ -135,7 +144,7 @@ class _DatesBlock:
 
         return self.start + missing * self.frequency
 
-    def _missing_as_indices(self, missing: np.ndarray) -> np.ndarray:
+    def _missing_as_indices(self, missing: np.ndarray) -> np.ndarray[int]:
         if isinstance(missing, np.ndarray) and missing.dtype == int:
             return missing
 
@@ -152,11 +161,20 @@ class _DatesBlock:
     def __add__(self, offset: str | np.timedelta64) -> "_DatesBlock":
         offset = offset_to_np_timedelta(offset)
         return _DatesBlock(
-            max(self.start + offset, self.start),
-            min(self.end + offset, self.end),
+            self.start + offset,
+            self.end + offset,
             self.frequency,
             self.missing + offset,
         )
+
+    def __sub__(self, offset: str | np.timedelta64) -> "_DatesBlock":
+        return self + (-offset_to_np_timedelta(offset))
+
+    def __contain__(self, date):
+        assert False, "not used"
+        date = normalise_date(date)
+        i = (date - self.start) / self.frequency
+        return int(i) == i
 
     def __and__(self, other: "_DatesBlock") -> "_DatesBlock":
         # Returns the intersection of two DatesBlocks, i.e common dates
@@ -167,27 +185,60 @@ class _DatesBlock:
         if b is None:
             return a
 
-        # What is below is not what we want
-        # just fail for now
-        if a.frequency != b.frequency:
-            raise ValueError(f"Cannot merge DatesBlocks with different frequencies: {a.frequency} != {b.frequency}")
-
-        # find largest common frequency
-        a_frequency = a.frequency.astype("timedelta64[s]").astype(int)
-        b_frequency = b.frequency.astype("timedelta64[s]").astype(int)
-        frequency = np.gcd(a_frequency, b_frequency)
+        # find smallest multiple frequency
+        a_frequency = a.frequency.astype("timedelta64[s]")
+        b_frequency = b.frequency.astype("timedelta64[s]")
+        frequency = np.lcm(a_frequency.astype(int), b_frequency.astype(int))
         frequency = frequency.astype("timedelta64[s]")
+        assert frequency.astype(int) % a_frequency.astype(int) == 0
+        assert frequency.astype(int) % b_frequency.astype(int) == 0
 
         a_start = a.start.astype("datetime64[s]")
         b_start = b.start.astype("datetime64[s]")
+        a_freq = a.frequency.astype("timedelta64[s]")
+        b_freq = b.frequency.astype("timedelta64[s]")
 
-        start = max(a_start, b_start)
+        # Solve: a_start + k1*a_freq = b_start + k2*b_freq
+        a0, b0 = a_start.astype(int), b_start.astype(int)
+        fa, fb = a_freq.astype(int), b_freq.astype(int)
+        d = b0 - a0
+        g = gcd(fa, fb)
+        if d % g != 0:
+            raise ValueError(f"No common date between {a} and {b}")
+
+        def egcd(x, y):
+            if y == 0:
+                return 1, 0, x
+            u, v, g = egcd(y, x % y)
+            return v, u - (x // y) * v, g
+
+        x0, y0, _ = egcd(fa, fb)
+        x0 *= d // g
+        start = a0 + x0 * fa
+        # Ensure start is the first common date ≥ both starts
+        lcm = abs(fa * fb) // g
+        while start < max(a0, b0):
+            start += lcm
+        assert start == int(start), start
+        start = int(start)
+        start = np.datetime64(start, "s")
+        assert (a_start - start) % a_frequency == 0
+        assert (b_start - start) % b_frequency == 0
 
         a_end = a.end.astype("datetime64[s]")
         b_end = b.end.astype("datetime64[s]")
         end = min(a_end, b_end)
+        # Round down to the last point that aligns with the new frequency
+        delta = (end - start).astype("timedelta64[s]").astype(int)
+        freq_s = frequency.astype("timedelta64[s]").astype(int)
+        end = start + (delta // freq_s) * frequency
+        assert (end - start) % frequency == 0
 
-        missing = set(a.missing).union(set(b.missing))
+        a_missing = a.missing
+        b_missing = b.missing
+        a_missing = set(_ for _ in a_missing if (_ - start) % frequency == 0)
+        b_missing = set(_ for _ in b_missing if (_ - start) % frequency == 0)
+        missing = set(a_missing).union(set(b_missing))
         missing = np.array(sorted(list(missing)), dtype="datetime64[s]")
         missing = missing[missing >= start]
         missing = missing[missing <= end]
@@ -219,13 +270,7 @@ class DatesGathererVisitor:
         self.dates_block = None
 
     def read_date_offsets(self, obj: "SampleProvider"):
-        self.dates_block = merge_dates_blocks_with_offset(self.dates_block, obj)
-
-
-def merge_dates_blocks_with_offset(current: _DatesBlock, obj: "SampleProvider"):
-    if obj._dates_block_in_dataset is None:
-        return current
-    return current & (obj._dates_block_in_dataset + obj._offset)
+        self.dates_block = obj.filter_available_dates(self.dates_block)
 
 
 def find_required_steps_for_rollout(steps: list | int, input: list, target: list, frequency: str = None) -> list[str]:

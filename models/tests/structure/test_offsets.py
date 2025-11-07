@@ -14,7 +14,6 @@ import re
 import numpy as np
 
 from anemoi.models.data_structure.offsets import _DatesBlock
-from anemoi.models.data_structure.offsets import merge_dates_blocks_with_offset
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
@@ -117,11 +116,11 @@ def container(name, missing_indices, offset):
 def _test_update_dates_block(a, b):
     print()
     current = None
-    current = merge_dates_blocks_with_offset(current, a)
     print("a      :", a)
+    current = current & (a._dates_block_in_dataset + a._offset)
     print("after a:", _(current))
-    current = merge_dates_blocks_with_offset(current, b)
     print("b      :", b)
+    current = current & (b._dates_block_in_dataset + b._offset)
     print("after b:", _(current))
     return current
 
@@ -146,20 +145,20 @@ def test_update_dates_block_2():
 
 def test_update_dates_block_3():
     c = _test_update_dates_block(
-        container("2001-01-01-00:00:00-to-2001-01-10-00:00:00-frequency-48h", missing_indices=[2], offset="0h"),
-        container("2001-01-03-00:00:00-to-2001-01-12-00:00:00-frequency-24h", missing_indices=[3], offset="0h"),
+        container("2001-01-01-00:00:00-to-2001-01-20-00:00:00-frequency-48h", missing_indices=[2], offset="0h"),
+        container("2001-01-03-00:00:00-to-2001-01-22-00:00:00-frequency-24h", missing_indices=[3], offset="0h"),
     )
-    assert len(c) == 6, len(c)
-    assert np.all(c.missing_indices == [2, 3]), c.missing_indices
+    assert len(c) == 8, len(c)
+    assert np.all(c.missing_indices == [1]), c.missing_indices
 
 
 def test_update_dates_block_4():
     c = _test_update_dates_block(
-        container("2001-01-02-00:00:00-to-2001-01-11-00:00:00-frequency-48h", missing_indices=[2], offset="0h"),
-        container("2001-01-03-00:00:00-to-2001-01-12-00:00:00-frequency-72h", missing_indices=[1], offset="0h"),
+        container("2001-01-02-00:00:00-to-2001-01-21-00:00:00-frequency-48h", missing_indices=[2], offset="0h"),
+        container("2001-01-03-00:00:00-to-2001-01-22-00:00:00-frequency-72h", missing_indices=[1], offset="0h"),
     )
-    assert len(c) == 6, len(c)
-    assert np.all(c.missing_indices == [2, 3]), c.missing_indices
+    assert len(c) == 2, len(c)
+    assert np.all(c.missing_indices == [0]), c.missing_indices
 
 
 if __name__ == "__main__":

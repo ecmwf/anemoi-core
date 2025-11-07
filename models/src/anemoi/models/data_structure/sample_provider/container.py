@@ -113,6 +113,10 @@ class Container(SampleProvider):
     def _dates_block_in_dataset(self):
         return self.dh.dates_block(self.data_group)
 
+    def filter_available_dates(self, dates_block):
+        minus_offset = self._dates_block_in_dataset - self._offset
+        return dates_block & minus_offset
+
     def update_index_offsets(self: "SampleProvider", dates_block):
         # Update the object's index offset from the overall dates_block and its own offset
         #
@@ -133,9 +137,6 @@ class Container(SampleProvider):
         # multiply_i = F / f
 
         in_dataset = self._dates_block_in_dataset
-        if in_dataset is None:
-            return
-
         offset = offset_to_np_timedelta(self._offset)
 
         add_to_i = (dates_block.start - in_dataset.start + offset) / in_dataset.frequency
