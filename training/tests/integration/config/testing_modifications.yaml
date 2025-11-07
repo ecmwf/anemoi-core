@@ -21,7 +21,7 @@ diagnostics:
       enabled: False
     mlflow:
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-      enabled: True
+      enabled: false
       tracking_uri: null # override '???'
 
 hardware:
