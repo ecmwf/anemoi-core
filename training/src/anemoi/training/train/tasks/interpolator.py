@@ -117,7 +117,7 @@ class GraphInterpolator(BaseGraphModule):
                     self.boundary_times[-1] - self.boundary_times[-2]
                 )
 
-            y_pred = self(x_bound, target_forcing)
+            y_pred = self(x_bound, target_forcing=target_forcing)
             y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
 
             loss_step, metrics_next = checkpoint(
