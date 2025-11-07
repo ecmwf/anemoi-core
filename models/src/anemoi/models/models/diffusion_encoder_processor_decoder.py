@@ -43,7 +43,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
 
         model_config_local = DotDict(model_config)
@@ -61,7 +60,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
-            truncation_data=truncation_data,
         )
 
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)
@@ -547,24 +545,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     """Diffusion model for tendency prediction."""
 
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-        truncation_data: dict,
-    ) -> None:
-
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            truncation_data=truncation_data,
-        )
-
     def _calculate_input_dim(self):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
         input_dim += self.num_output_channels  # noised targets
@@ -574,7 +554,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         x_trunc = x[:, -1, :, :, self._internal_input_idx]
         x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
+        x_trunc = self.residual(x_trunc, grid_shard_shapes, model_comm_group)
 
         # Get node attributes
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
@@ -818,5 +798,5 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """
         bs, ens, _, _ = x.shape
         x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-        x_trunc = self.truncation(x_trunc, grid_shard_shapes, model_comm_group)
+        x_trunc = self.residual(x_trunc, grid_shard_shapes, model_comm_group)
         return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)

@@ -173,24 +173,6 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def truncation_data(self) -> dict:
-        """Truncation data.
-
-        Loads truncation data.
-        """
-        truncation_data = {}
-        if self.config.hardware.files.truncation is not None:
-            truncation_data["down"] = load_npz(
-                Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation),
-            )
-        if self.config.hardware.files.truncation_inv is not None:
-            truncation_data["up"] = load_npz(
-                Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation_inv),
-            )
-
-        return truncation_data
-
-    @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         assert (
@@ -213,7 +195,6 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
-            "truncation_data": self.truncation_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,

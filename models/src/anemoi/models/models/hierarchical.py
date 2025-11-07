@@ -36,7 +36,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -53,7 +52,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self._truncation_data = truncation_data
 
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
