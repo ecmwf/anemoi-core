@@ -281,6 +281,9 @@ class DDPGroupStrategy(DDPStrategy):
             model_comm_group_id,
             model_comm_group_rank,
             model_comm_num_groups,
+            0,  # ens_comm_group_id - not used in non-ensemble mode
+            0,  # ens_comm_group_rank - not used in non-ensemble mode
+            1,  # ens_comm_num_groups - single group in non-ensemble mode
             reader_group_rank,
             self.read_group_size,
         )
