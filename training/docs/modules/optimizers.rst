@@ -49,17 +49,9 @@ with optional warm-up steps and minimum learning rate.
 
 The scheduler is created by ``BaseGraphModule._create_scheduler`` and
 returned to the trainer together with the optimizer in
-``configure_optimizers``. The default scheduler configuration follows a
-cosine decay with per-step updates:
-
-.. code:: yaml
-
-   lr_scheduler:
-      _target_: timm.scheduler.CosineLRScheduler
-      kwargs:
-         t_initial: 1000      # total number of iterations
-         lr_min: 1e-5         # minimum learning rate
-         warmup_t: 100        # number of warmup iterations
+``configure_optimizers``. Currently, the scheduler is hard-coded to
+``CosineLRScheduler``, but in the future this will be made more flexible to
+allow configurable schedulers.
 
 The scheduler is returned in a dictionary of the form:
 
