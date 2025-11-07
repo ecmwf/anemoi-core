@@ -73,9 +73,9 @@ The scheduler is returned in a dictionary of the form:
        },
    }
 
-**********************
+********************
  AdEMAMix Optimizer
-**********************
+********************
 
 ``AdEMAMix`` is a custom optimizer implemented in
 ``anemoi.training.optimizers.AdEMAMix.py`` and taken from the
@@ -85,9 +85,10 @@ mixing for improved stability and generalization.
 
 The optimizer maintains **three exponential moving averages (EMAs)** of
 the gradients. See <https://arxiv.org/abs/2409.03137> for more details.
-***************************
+
+**************************
  Configuration in YAML
-***************************
+**************************
 
 An example configuration for using ``AdEMAMix`` is shown below:
 

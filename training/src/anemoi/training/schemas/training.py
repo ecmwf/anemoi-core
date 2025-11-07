@@ -78,17 +78,12 @@ class LR(BaseModel):
     "Number of warm up iteration. Default to 1000."
 
 
-class OptimizerConfig(BaseModel):
+class OptimizerSchema(BaseModel):
     target_: str = Field(..., alias="_target_")
     """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
 
     zero: bool = Field(False, description="Use Zero optimiser.")
     kwargs: dict[str, Any] = Field(default_factory=dict)
-
-    class Config:
-        # Allow using aliases (so "_target_" in YAML maps to "target_" here)
-        allow_population_by_field_name = True
-
 
 class ExplicitTimes(BaseModel):
     """Time indices for input and output.

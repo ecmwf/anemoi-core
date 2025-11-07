@@ -1,6 +1,7 @@
 import pytest
 import torch
 from omegaconf import OmegaConf
+from pytest_mock import MockerFixture
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
@@ -10,7 +11,7 @@ from anemoi.training.train.tasks.base import BaseGraphModule  # adjust import pa
 
 
 @pytest.fixture
-def mocked_module(mocker):
+def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
     """Create a lightweight mock BaseGraphModule instance with real methods bound."""
     module = mocker.MagicMock(spec=BaseGraphModule)
 
@@ -31,8 +32,7 @@ def mocked_module(mocker):
 
 # ---- Tests ----
 
-
-def test_create_optimizer_from_config(mocked_module):
+def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
 
     optimizer_cfg = OmegaConf.create(
         {
@@ -61,7 +61,7 @@ def test_create_optimizer_from_config(mocked_module):
     assert optimizer.defaults["betas"] == expected_betas
 
 
-def test_create_optimizer_from_config_ADEMAMIX(mocked_module):
+def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -> None:
 
     optimizer_cfg = OmegaConf.create(
         {
@@ -90,18 +90,18 @@ def test_create_optimizer_from_config_ADEMAMIX(mocked_module):
     assert optimizer.defaults["betas"] == expected_betas
 
 
-def test_create_optimizer_from_config_invalid(mocked_module):
+def test_create_optimizer_from_config_invalid(mocked_module: BaseGraphModule) -> None:
     bad_cfg = OmegaConf.create(
         {
             "_target_": "nonexistent.OptimizerClass",
             "kwargs": {},
         },
     )
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="Error locating target"):
         mocked_module._create_optimizer_from_config(bad_cfg)
 
 
-def test_create_scheduler(mocked_module):
+def test_create_scheduler(mocked_module: BaseGraphModule) -> None:
     """Ensure cosine scheduler is constructed correctly."""
     optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.lr)
     sched_dict = mocked_module._create_scheduler(optimizer)
@@ -111,7 +111,7 @@ def test_create_scheduler(mocked_module):
     assert scheduler.optimizer is optimizer
 
 
-def test_ademamix_single_step_numerical():
+def test_ademamix_single_step_numerical() -> None:
     # --- Setup a single scalar parameter ---
     param = torch.tensor([1.0], requires_grad=True)
     optimizer = AdEMAMix([param], lr=1e-3, betas=(0.9, 0.999, 0.9999), alpha=2.0)

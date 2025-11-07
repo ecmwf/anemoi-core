@@ -11,6 +11,7 @@ Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
 
 """
 
+
 import math
 from collections.abc import Callable
 from collections.abc import Iterable
@@ -61,7 +62,7 @@ class AdEMAMix(Optimizer):
 
     def __init__(
         self,
-        params: Iterable[Tensor] | Iterable[dict[str, Any]],
+        params: Iterable[torch.tensor] | Iterable[dict[str, Any]],
         lr: float = 1e-3,
         betas: tuple[float, float, float] = (0.9, 0.999, 0.9999),
         alpha: float = 2.0,
@@ -71,35 +72,42 @@ class AdEMAMix(Optimizer):
         weight_decay: float = 0.0,
     ) -> None:
         if not lr >= 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            msg = f"Invalid learning rate: {lr}"
+            raise ValueError(msg)
         if not eps >= 0.0:
-            raise ValueError(f"Invalid epsilon value: {eps}")
+            msg = f"Invalid epsilon value: {eps}"
+            raise ValueError(msg)
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
+            msg = f"Invalid beta parameter at index 0: {betas[0]}"
+            raise ValueError(msg)
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
+            msg = f"Invalid beta parameter at index 1: {betas[1]}"
+            raise ValueError(msg)
         if not 0.0 <= betas[2] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 2: {betas[2]}")
+            msg = f"Invalid beta parameter at index 2: {betas[2]}"
+            raise ValueError(msg)
         if not weight_decay >= 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            msg = f"Invalid weight_decay value: {weight_decay}"
+            raise ValueError(msg)
         if not alpha >= 0.0:
-            raise ValueError(f"Invalid alpha value: {alpha}")
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            alpha=alpha,
-            beta3_warmup=beta3_warmup,
-            alpha_warmup=alpha_warmup,
-            weight_decay=weight_decay,
-        )
+            msg = f"Invalid alpha value: {alpha}"
+            raise ValueError(msg)
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "alpha": alpha,
+            "beta3_warmup": beta3_warmup,
+            "alpha_warmup": alpha_warmup,
+            "weight_decay": weight_decay,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         super().__setstate__(state)
 
     @torch.no_grad()
-    def step(self, closure: Callable[[], float] | None = None) -> float | None:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None: # noqa: C901
         """Performs a single optimization step.
 
         Arguments:
@@ -126,7 +134,8 @@ class AdEMAMix(Optimizer):
                     continue
                 grad = p.grad
                 if grad.is_sparse:
-                    raise RuntimeError("AdEMAMix does not support sparse gradients.")
+                    msg = "AdEMAMix does not support sparse gradients."
+                    raise RuntimeError(msg)
 
                 state = self.state[p]
 
