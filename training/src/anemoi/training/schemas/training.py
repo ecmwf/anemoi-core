@@ -85,6 +85,7 @@ class OptimizerSchema(BaseModel):
     zero: bool = Field(False, description="Use Zero optimiser.")
     kwargs: dict[str, Any] = Field(default_factory=dict)
 
+
 class ExplicitTimes(BaseModel):
     """Time indices for input and output.
 

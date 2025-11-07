@@ -32,6 +32,7 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
 
 # ---- Tests ----
 
+
 def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
 
     optimizer_cfg = OmegaConf.create(

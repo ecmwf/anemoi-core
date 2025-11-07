@@ -11,7 +11,6 @@ Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
 
 """
 
-
 import math
 from collections.abc import Callable
 from collections.abc import Iterable
@@ -107,7 +106,7 @@ class AdEMAMix(Optimizer):
         super().__setstate__(state)
 
     @torch.no_grad()
-    def step(self, closure: Callable[[], float] | None = None) -> float | None: # noqa: C901
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:  # noqa: C901
         """Performs a single optimization step.
 
         Arguments:
