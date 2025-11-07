@@ -409,12 +409,7 @@ class LoggingSchema(BaseModel):
     @model_validator(mode="before")
     def inject_default_target(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
         mlflow_cfg = OmegaConf.to_container(values.get("mlflow"), resolve=True)
-        if (
-            mlflow_cfg is not None
-            and isinstance(mlflow_cfg, dict)
-            and "_target_" not in mlflow_cfg
-            and mlflow_cfg["enabled"]
-        ):
+        if mlflow_cfg is not None and isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
             mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
             values["mlflow"] = mlflow_cfg
         return values
