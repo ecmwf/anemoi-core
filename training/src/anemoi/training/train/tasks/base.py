@@ -662,7 +662,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         del batch_idx
 
-        train_loss, _, _ = self._step(batch)
+        train_loss, *_ = self._step(batch)
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,

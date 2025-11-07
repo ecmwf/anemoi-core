@@ -345,13 +345,9 @@ class GraphEnsForecaster(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple:
         """Training / validation step."""
-        LOGGER.debug(
-            "SHAPES: batch[0].shape = %s, batch[1].shape == %s",
-            list(batch[0].shape),
-            list(batch[1].shape) if len(batch) == 2 else "n/a",
-        )
+        LOGGER.debug("SHAPES: batch.shape = %s", list(batch.shape))
 
-        loss = torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
@@ -366,12 +362,6 @@ class GraphEnsForecaster(BaseGraphModule):
 
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic
-
-    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
-        batch[0] = super().allgather_batch(batch[0])
-        if len(batch) == 2:
-            batch[1] = super().allgather_batch(batch[1])
-        return batch
 
     def training_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> torch.Tensor | dict:
         """Run one training step.
@@ -391,7 +381,7 @@ class GraphEnsForecaster(BaseGraphModule):
         """
         del batch_idx
 
-        train_loss, _, _, _ = self._step(batch)
+        train_loss, *_ = self._step(batch)
 
         self.log(
             "train_" + self.loss.name,
