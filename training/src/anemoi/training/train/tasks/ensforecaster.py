@@ -108,8 +108,6 @@ class GraphEnsForecaster(BaseGraphModule):
         self.ens_comm_num_groups = None
         self.ens_comm_group_size = None
 
-        self.ensemble_ic_generator = EnsembleInitialConditions(config=config, data_indices=data_indices)
-
     def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
         return self.model(
             x,
