@@ -35,13 +35,8 @@ example, to use the standard Adam optimizer:
          weight_decay: 0.1
 
 The ``BaseGraphModule`` automatically injects the learning rate from
-``config.training.lr`` unless explicitly overridden. The optimizer
+``config.training.lr``. The optimizer
 configuration can therefore focus on algorithm-specific parameters.
-
-All optimizers inherit their parameters from the module being trained.
-If multiple parameter groups are defined (e.g., with different learning
-rates or regularization), they are passed directly to the optimizer as
-expected in PyTorch.
 
 **************************
  Learning Rate Schedulers
