@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
-
 LOGGER = logging.getLogger(__name__)
 
 
