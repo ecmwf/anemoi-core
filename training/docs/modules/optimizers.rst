@@ -50,8 +50,8 @@ with optional warm-up steps and minimum learning rate.
 The scheduler is created by ``BaseGraphModule._create_scheduler`` and
 returned to the trainer together with the optimizer in
 ``configure_optimizers``. Currently, the scheduler is hard-coded to
-``CosineLRScheduler``, but in the future this will be made more flexible to
-allow configurable schedulers.
+``CosineLRScheduler``, but in the future this will be made more flexible
+to allow configurable schedulers.
 
 The scheduler is returned in a dictionary of the form:
 
