@@ -18,12 +18,8 @@ from anemoi.training.train.tasks.base import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from collections.abc import Mapping
 
-    from torch_geometric.data import HeteroData
 
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 

@@ -75,7 +75,7 @@ class NativeGridDataset(IterableDataset):
         self.n_samples_per_epoch_total: int = 0
         self.n_samples_per_epoch_per_worker: int = 0
 
-        self.ens_members_per_device = ens_members_per_device # Is it used? 
+        self.ens_members_per_device = ens_members_per_device  # Is it used?
         self.num_gpus_per_ens = num_gpus_per_ens
         self.num_gpus_per_model = num_gpus_per_model
 
