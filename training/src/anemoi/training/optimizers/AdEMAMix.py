@@ -1,4 +1,6 @@
-"""-----------------------------------------------------------------------------
+"""AdEMAMix optimizer implementation.
+
+-----------------------------------------------------------------------------
 Copyright (c) 2024 Apple Inc.
 
 This source file is part of the ADEMAMix project:
@@ -8,7 +10,7 @@ Licensed under the MIT License.
 See the LICENSE file at: https://github.com/apple/ml-ademamix/blob/main/LICENSE
 
 Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
-
+-----------------------------------------------------------------------------
 """
 
 import math
