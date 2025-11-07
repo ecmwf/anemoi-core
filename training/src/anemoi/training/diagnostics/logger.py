@@ -35,7 +35,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         "_target",
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
-    logger_config["save_dir"] = getattr(logger_config, "save_dir", config.hardware.paths.logs.mlflow)
+    logger_config["save_dir"] = getattr(logger_config, "save_dir", str(config.hardware.paths.logs.mlflow))
 
     logger = instantiate(
         logger_config,
