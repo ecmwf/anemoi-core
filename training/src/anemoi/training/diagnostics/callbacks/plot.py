@@ -282,7 +282,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             for dataset_name in self.post_processors:
                 for post_processor in self.post_processors[dataset_name].processors.values():
                     if hasattr(post_processor, "nan_locations"):
-                        post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
+                        post_processor.nan_locations = pl_module.allgather_batch(
+                            post_processor.nan_locations,
+                            pl_module.grid_indices[dataset_name],
+                            pl_module.grid_dim,
+                        )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             self.plot(
@@ -976,7 +980,9 @@ class PlotLoss(BasePerBatchPlotCallback):
                     and self.loss[dataset].scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
                 ):
                     self.loss[dataset].scaler.nan_mask_weights = pl_module.allgather_batch(
-                        self.loss.scaler.nan_mask_weights,
+                        self.loss[dataset].scaler.nan_mask_weights,
+                        pl_module.grid_indices[dataset],
+                        pl_module.grid_dim,
                     )
 
             super().on_validation_batch_end(
