@@ -17,7 +17,6 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.training.utils.inicond import EnsembleInitialConditions
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -283,10 +282,15 @@ class GraphEnsForecaster(BaseGraphModule):
         None
             None
         """
-        x = self.ensemble_ic_generator(
-            batch[0],
-            batch[1] if len(batch) == 2 else None,
-        )
+        x = x[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]  # (bs, ms, ens_dummy, latlon, nvar)
+
+        x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
+
         LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(x.shape))
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
@@ -345,7 +349,7 @@ class GraphEnsForecaster(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple:
         """Training / validation step."""
-        LOGGER.debug("SHAPES: batch.shape = %s", list(batch.shape))
+        LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
