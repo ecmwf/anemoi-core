@@ -707,7 +707,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         del batch_idx
 
         with torch.no_grad():
-            val_loss, metrics, y_preds = self._step(batch, validation_mode=True)
+            val_loss, metrics, *args = self._step(batch, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
@@ -732,7 +732,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 sync_dist=True,
             )
 
-        return val_loss, y_preds
+        return val_loss, *args
 
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
         """Configure the optimizers and learning rate scheduler.
@@ -784,3 +784,106 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 hyper_params,
                 expand_keys=expand_keys,
             )
+
+
+class BaseRolloutGraphModule(BaseGraphModule, ABC):
+    """Base class for rollout tasks."""
+
+    def __init__(
+        self,
+        *,
+        config: BaseSchema,
+        graph_data: HeteroData,
+        truncation_data: dict,
+        statistics: dict,
+        statistics_tendencies: dict,
+        data_indices: IndexCollection,
+        metadata: dict,
+        supporting_arrays: dict,
+    ) -> None:
+        """Initialize graph neural network forecaster.
+
+        Parameters
+        ----------
+        config : DictConfig
+            Job configuration
+        graph_data : HeteroData
+            Graph object
+        statistics : dict
+            Statistics of the training data
+        data_indices : IndexCollection
+            Indices of the training data,
+        metadata : dict
+            Provenance information
+        supporting_arrays : dict
+            Supporting NumPy arrays to store in the checkpoint
+
+        """
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            truncation_data=truncation_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+
+        self.rollout = config.training.rollout.start
+        self.rollout_epoch_increment = config.training.rollout.epoch_increment
+        self.rollout_max = config.training.rollout.max
+
+        LOGGER.debug("Rollout window length: %d", self.rollout)
+        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
+        LOGGER.debug("Rollout max : %d", self.rollout_max)
+
+    def advance_input(
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        batch: torch.Tensor,
+        rollout_step: int,
+    ) -> torch.Tensor:
+        x = x.roll(-1, dims=1)
+
+        # Get prognostic variables
+        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
+            ...,
+            self.data_indices.model.output.prognostic,
+        ]
+
+        x[:, -1] = self.output_mask.rollout_boundary(
+            x[:, -1],
+            batch[:, self.multi_step + rollout_step],
+            self.data_indices,
+            grid_shard_slice=self.grid_shard_slice,
+        )
+
+        # get new "constants" needed for time-varying fields
+        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
+            :,
+            self.multi_step + rollout_step,
+            :,
+            :,
+            self.data_indices.data.input.forcing,
+        ]
+        return x
+
+    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        train_loss = super().training_step(batch, batch_idx)
+        self.log(
+            "rollout",
+            float(self.rollout),
+            on_step=True,
+            logger=self.logger_enabled,
+            rank_zero_only=True,
+            sync_dist=False,
+        )
+        return train_loss
+
+    def on_train_epoch_end(self) -> None:
+        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
+            self.rollout += 1
+            LOGGER.debug("Rollout window length: %d", self.rollout)
+        self.rollout = min(self.rollout, self.rollout_max)
