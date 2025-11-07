@@ -52,7 +52,7 @@ class EnsembleInitialConditions(nn.Module):
         -------
             Ensemble IC, shape (bs, ms, nens_per_device, latlon, input.full)
         """
-            # no EDA available, just stack the analysis nens_per_device times along an ensemble dimension
+        # no EDA available, just stack the analysis nens_per_device times along an ensemble dimension
 
         LOGGER.debug("NO EDA -- SHAPES: x_an.shape = %s, multi_step = %d", list(x_an.shape), self.multi_step)
         x_ = x_an[
@@ -63,4 +63,3 @@ class EnsembleInitialConditions(nn.Module):
         ]  # (bs, ms, ens_dummy, latlon, nvar)
 
         return torch.cat([x_] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
-
