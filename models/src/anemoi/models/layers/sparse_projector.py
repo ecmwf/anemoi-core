@@ -66,8 +66,7 @@ class SparseProjector(torch.nn.Module):
         src_node_weight_attribute: Optional[str] = None,
         autocast: bool = False,
     ) -> "SparseProjector":
-        """
-        Build a SparseProjection from a graph.
+        """Build a SparseProjection from a graph.
 
         Parameters
         ----------
