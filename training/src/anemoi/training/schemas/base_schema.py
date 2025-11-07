@@ -32,7 +32,6 @@ from anemoi.utils.schemas.errors import convert_errors
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
 from .data import DataSchema
 from .dataloader import DataLoaderSchema
-from .datamodule import DataModuleSchema
 from .diagnostics import DiagnosticsSchema
 from .hardware import HardwareSchema
 from .training import TrainingSchema
@@ -49,8 +48,6 @@ class BaseSchema(BaseModel):
     """Data configuration."""
     dataloader: DataLoaderSchema
     """Dataloader configuration."""
-    datamodule: DataModuleSchema
-    """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: HardwareSchema
