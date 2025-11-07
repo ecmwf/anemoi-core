@@ -109,30 +109,3 @@ This environment variable controls the number of chunks used in the
    :members:
    :no-undoc-members:
    :show-inheritance:
-
-*****************
- Skip Connection
-*****************
-
-.. autoclass:: anemoi.models.layers.residual.SkipConnection
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
-***************
- No Connection
-***************
-
-.. autoclass:: anemoi.models.layers.residual.NoConnection
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
-**********************
- Truncated Connection
-**********************
-
-.. autoclass:: anemoi.models.layers.residual.TruncatedConnection
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
