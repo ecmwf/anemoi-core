@@ -144,11 +144,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         # Residual
-        x_skip = self.residual(
-            x,
-            grid_shard_shapes=grid_shard_shapes,
-            model_comm_group=model_comm_group,
-        )
+        x_skip = self.residual(x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
 
         # Encoder
         x_data_latent, x_latent = self.encoder(

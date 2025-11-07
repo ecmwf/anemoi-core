@@ -72,7 +72,7 @@ class BaseGraphModel(nn.Module):
         # build networks
         self._build_networks(model_config)
 
-        # build truncation
+        # build residual connection
         self.residual = instantiate(model_config.model.residual, graph=graph_data)
 
         # build boundings
