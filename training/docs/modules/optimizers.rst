@@ -35,8 +35,8 @@ example, to use the standard Adam optimizer:
          weight_decay: 0.1
 
 The ``BaseGraphModule`` automatically injects the learning rate from
-``config.training.lr``. The optimizer
-configuration can therefore focus on algorithm-specific parameters.
+``config.training.lr``. The optimizer configuration can therefore focus
+on algorithm-specific parameters.
 
 **************************
  Learning Rate Schedulers
