@@ -523,11 +523,19 @@ class AnemoiTrainer:
 
         LOGGER.debug("Starting training..")
 
-        trainer.fit(
-            self.model,
-            datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-        )
+        if self.config.dataloader.limit_batches.training==0:
+            trainer.validate(
+                self.model,
+                verbose=True,
+                datamodule=self.datamodule,
+                ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+            )
+        else:
+            trainer.fit(
+                self.model,
+                datamodule=self.datamodule,
+                ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+            )
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary())

@@ -89,7 +89,7 @@ class GraphExporter:
     def export(self):
         """Export the graph to a sparse format."""
         os.makedirs(self.output_path, exist_ok=True)
-        for source_nodes, _, target_nodes in self.edges_name:
+        for source_nodes, target_nodes in self.edges_name:
             edge_index, edge_attribute = self.get_edges_info(source_nodes, target_nodes)
             num_source_nodes, num_target_nodes = self.get_nodes_info(source_nodes, target_nodes)
             A = GraphExporter.get_sparse_matrix(edge_index, edge_attribute, num_source_nodes, num_target_nodes)
@@ -97,3 +97,6 @@ class GraphExporter:
 
             output_path = Path(self.output_path) / f"{self.edge_attribute_name}-{source_nodes}_to_{target_nodes}.npz"
             sp.save_npz(output_path, A)
+
+            output_path = Path(self.output_path) / f"{self.edge_attribute_name}-{source_nodes}_to_{target_nodes}_transpose.npz"
+            sp.save_npz(output_path, A.T)
