@@ -89,6 +89,9 @@ decoder:
 
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, NoConnection, TruncatedConnection
+#  _target_: anemoi.models.layers.residual.TruncatedConnection
+#  truncation_up_file_path: ${hardware.paths.truncation}/${hardware.files.truncation}
+#  truncation_down_file_path:  ${hardware.paths.truncation}/${hardware.files.truncation_inv}
 
 trainable_parameters:
   data: 8
