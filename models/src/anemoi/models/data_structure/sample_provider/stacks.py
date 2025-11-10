@@ -41,6 +41,7 @@ class Stack(Forward):
         if self.name in res.dimensions:
             raise ValueError(f"Cannot stack along existing dimension '{self.name}' in {list(res.dimensions)}")
         res["dimensions"] = [self.name] + res.dimensions
+        res["offsets"] = [v.static["offset"] for v in self._providers.values()]
         return res
 
     def _getitem(self, data):
@@ -82,6 +83,7 @@ class StackAsLists(Forward):
         if self.name in res.dimensions:
             raise ValueError(f"Cannot stack along existing dimension '{self.name}' in {list(res.dimensions)}")
         res["dimensions"] = [self.name] + res.dimensions
+        res["offsets"] = [v.static["offset"] for v in self._providers.values()]
         return res
 
     def _getitem(self, data):

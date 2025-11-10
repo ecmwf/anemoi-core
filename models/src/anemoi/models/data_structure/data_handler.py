@@ -30,7 +30,7 @@ from anemoi.models.data_structure.offsets import _DatesBlock
 LOGGER = logging.getLogger(__name__)
 
 
-def extended_open_dataset(dataset, start, end, search_path):
+def search_and_open_dataset(dataset, start, end, search_path):
     try:
         # expected use case : dataset name or full path
         return open_dataset(dataset, start=start, end=end)
@@ -170,7 +170,7 @@ class OneDatasetDataHandler(DataHandler):
 
     @cached_property
     def _ds(self) -> object:  # returns a gridded anemoi-datasets object
-        return extended_open_dataset(self._dataset, start=self.start, end=self.end, search_path=self._search_path)
+        return search_and_open_dataset(self._dataset, start=self.start, end=self.end, search_path=self._search_path)
 
     def __repr__(self):
         if isinstance(self.extra_configs, dict):
@@ -215,13 +215,12 @@ class GriddedDatasetDataHandler(OneDatasetDataHandler):
 
     def dynamic(self, j, group, ds) -> DynamicDataDict:
         date = ds.dates[j]
-        date = date.astype(datetime.datetime)  # remove this when anemoi-datasets returns consistent datetime objects
         return DynamicDataDict(
             data=ds[j],
             latitudes=ds.latitudes,
             longitudes=ds.longitudes,
             timedeltas=None,
-            date_str=date.isoformat(),
+            date_str=date.astype(datetime.datetime).isoformat(),
         )
 
 
@@ -260,7 +259,7 @@ class RecordsDataHandler(OneDatasetDataHandler):
             latitudes=ds[j].latitudes[group],
             longitudes=ds[j].longitudes[group],
             timedeltas=timedeltas,
-            date_str=ds.dates[j].isoformat(),
+            date_str=ds.dates[j].astype(datetime.datetime).isoformat(),
         )
 
 
@@ -311,7 +310,7 @@ def _data_handler_factory(sources: dict, start, end, search_path) -> DataHandler
             # For now, just check for known dataset types
             # but anemoi-datasets should provide a way to get the right class
             # such as ds.is_gridded or ds.is_grouped
-            ds = extended_open_dataset(name, start=cfg["start"], end=cfg["end"], search_path=cfg["search_path"])
+            ds = search_and_open_dataset(name, start=cfg["start"], end=cfg["end"], search_path=cfg["search_path"])
             from anemoi.datasets.data.records import BaseRecordsDataset
 
             if isinstance(ds, BaseRecordsDataset):

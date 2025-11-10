@@ -176,6 +176,7 @@ class Container(SampleProvider):
         extra_configs = {**self._static.pop("extra_configs", {}), **self.extra_configs}
         if extra_configs:
             self._static["extra_configs"] = extra_configs
+        self._static["offset"] = self._offset
         return self._static
 
     def _getitem(self, data):
