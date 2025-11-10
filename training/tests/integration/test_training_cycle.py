@@ -13,8 +13,10 @@ from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -39,6 +41,26 @@ def test_training_cycle_architecture_configs(
 def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = architecture_config
     BaseSchema(**cfg)
+
+
+def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, str, str]) -> None:
+    from anemoi.training.diagnostics.logger import get_mlflow_logger
+    from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
+
+    config, _, _ = base_global_config
+    if config.config_validation:
+        OmegaConf.resolve(config)
+        config = BaseSchema(**config)
+        assert config.diagnostics.log.mlflow.target_ == "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
+    else:
+        config = OmegaConf.to_object(config)
+        config = UnvalidatedBaseSchema(**DictConfig(config))
+
+    logger = get_mlflow_logger(config)
+
+    assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.hardware.paths.logs.mlflow)
+    if config.diagnostics.log.mlflow.enabled:
+        assert isinstance(logger, AnemoiMLflowLogger)
 
 
 @skip_if_offline

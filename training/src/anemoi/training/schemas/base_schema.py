@@ -77,6 +77,8 @@ class BaseSchema(BaseModel):
             not self.hardware.paths.logs or not self.hardware.paths.logs.mlflow
         ):
             logger.append("mlflow")
+        if self.diagnostics.log.mlflow.enabled and (not self.diagnostics.log.mlflow.save_dir):
+            self.diagnostics.log.mlflow.save_dir = str(self.hardware.paths.logs.mlflow)
         if self.diagnostics.log.tensorboard.enabled and (
             not self.hardware.paths.logs or not self.hardware.paths.logs.tensorboard
         ):
