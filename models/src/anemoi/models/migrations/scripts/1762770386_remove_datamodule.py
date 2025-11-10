@@ -23,7 +23,6 @@ metadata = MigrationMetadata(
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
 
-
     Parameters
     ----------
     ckpt : CkptType
@@ -34,13 +33,12 @@ def migrate(ckpt: CkptType) -> CkptType:
     CkptType
         The migrated checkpoint dict.
     """
-    # TODO: Implement migration logic here. Remove datamodule from schemas 
+    # TODO: Implement migration logic here. Remove datamodule from schemas
     return ckpt
 
 
 def rollback(ckpt: CkptType) -> CkptType:
     """Rollback the checkpoint.
-
 
     Parameters
     ----------
