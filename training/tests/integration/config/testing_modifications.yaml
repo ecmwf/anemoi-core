@@ -20,6 +20,7 @@ diagnostics:
     tensorboard:
       enabled: False
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
       tracking_uri: null # override '???'
 

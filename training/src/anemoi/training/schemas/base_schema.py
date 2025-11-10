@@ -104,6 +104,8 @@ class BaseSchema(BaseModel):
             logger.append("wandb")
         if self.diagnostics.log.mlflow.enabled and (not self.system.output.logs or not self.system.output.logs.mlflow):
             logger.append("mlflow")
+        if self.diagnostics.log.mlflow.enabled and (not self.diagnostics.log.mlflow.save_dir):
+            self.diagnostics.log.mlflow.save_dir = str(self.hardware.paths.logs.mlflow)
         if self.diagnostics.log.tensorboard.enabled and (
             not self.system.output.logs or not self.system.output.logs.tensorboard
         ):
