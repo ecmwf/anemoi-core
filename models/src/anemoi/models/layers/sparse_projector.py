@@ -95,8 +95,8 @@ class SparseProjector(torch.nn.Module):
         return cls(
             edge_index=sub_graph.edge_index,
             weights=weights,
-            src_size=sub_graph[edges_name[0]].num_nodes,
-            dst_size=sub_graph[edges_name[2]].num_nodes,
+            src_size=graph[edges_name[0]].num_nodes,
+            dst_size=graph[edges_name[2]].num_nodes,
             **kwargs,
         )
 
