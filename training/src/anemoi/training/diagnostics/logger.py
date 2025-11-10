@@ -43,7 +43,6 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         fork_run_id=config.training.fork_run_id,
     )
 
-
     if logger.log_terminal:
         logger.log_terminal_output(artifact_save_dir=config.system.output.plots)
     if logger.log_system:
