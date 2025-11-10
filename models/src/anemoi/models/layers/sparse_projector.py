@@ -1,4 +1,5 @@
 from typing import Optional
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -64,7 +65,7 @@ class SparseProjector(torch.nn.Module):
         edges_name: str,
         edge_weight_attribute: Optional[str] = None,
         src_node_weight_attribute: Optional[str] = None,
-        autocast: bool = False,
+        **kwargs,
     ) -> "SparseProjector":
         """Build a SparseProjection from a graph.
 
@@ -96,11 +97,11 @@ class SparseProjector(torch.nn.Module):
             weights=weights,
             src_size=sub_graph[edges_name[0]].num_nodes,
             dst_size=sub_graph[edges_name[2]].num_nodes,
-            autocast=autocast,
+            **kwargs,
         )
 
     @classmethod
-    def from_file(cls, file_path: str, autocast: bool = False) -> "SparseProjector":
+    def from_file(cls, file_path: str | Path, **kwargs) -> "SparseProjector":
         """Load projection matrix from a file."""
         from scipy.sparse import load_npz
 
@@ -113,7 +114,7 @@ class SparseProjector(torch.nn.Module):
             weights=weights,
             src_size=src_size,
             dst_size=dst_size,
-            autocast=autocast,
+            **kwargs,
         )
 
     def forward(self, x, *args, **kwargs):
@@ -131,28 +132,24 @@ class SparseProjector(torch.nn.Module):
 
 
 def build_sparse_projector(
-    graph: HeteroData,
-    edges_name: tuple[str, str, str],
+    *,
+    file_path: Optional[str | Path] = None,
+    graph: Optional[HeteroData] = None,
+    edges_name: Optional[tuple[str, str, str]] = None,
     edge_weight_attribute: Optional[str] = None,
-    src_node_weight_attribute: Optional[str] = None,
-    autocast: bool = False,
+    **kwargs,
 ) -> SparseProjector:
     """Factory method to build a SparseProjector."""
-    sub_graph = graph[edges_name]
+    assert (file_path is not None) ^ (
+        graph is not None and edges_name is not None
+    ), "Either file_path or graph and edges_name must be provided."
 
-    if edge_weight_attribute:
-        weights = sub_graph[edge_weight_attribute].squeeze()
+    if file_path is not None:
+        return SparseProjector.from_file(file_path=file_path, **kwargs)
     else:
-        # uniform weights
-        weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
-
-    if src_node_weight_attribute:
-        weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
-
-    return SparseProjector(
-        edge_index=sub_graph.edge_index,
-        weights=weights,
-        src_size=sub_graph[edges_name[0]].num_nodes,
-        dst_size=sub_graph[edges_name[2]].num_nodes,
-        autocast=autocast,
-    )
+        return SparseProjector.from_graph(
+            graph=graph,
+            edges_name=edges_name,
+            edge_weight_attribute=edge_weight_attribute,
+            **kwargs,
+        )
