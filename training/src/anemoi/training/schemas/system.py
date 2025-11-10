@@ -74,7 +74,7 @@ class Logs(PydanticBaseModel):
 
 
 class OutputSchema(BaseModel):
-    root: Path
+    root: Path | None = None
     "Path to the output directory."
     logs: Logs | None = None
     "Logging directories."

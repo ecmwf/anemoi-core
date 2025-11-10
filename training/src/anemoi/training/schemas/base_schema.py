@@ -46,7 +46,7 @@ LOGGER = logging.getLogger(__name__)
 
 def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> None:
     output_config = config_system.output
-    root_output_path = Path(output_config.root)
+    root_output_path = Path(output_config.root) if output_config.root else Path()
     # OutputSchema
     if output_config.plots:
         config_system.output.plots = root_output_path / output_config.plots
@@ -68,11 +68,11 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> None:
     # CheckPointSchema
     output_config.checkpoints.root = root_output_path / output_config.checkpoints.root
 
-    output_config.checkpoints.every_n_epochs = str(root_output_path / output_config.checkpoints.every_n_epochs)
-    output_config.checkpoints.every_n_train_steps = str(
-        root_output_path / output_config.checkpoints.every_n_train_steps,
-    )
-    output_config.checkpoints.every_n_minutes = str(root_output_path / output_config.checkpoints.every_n_minutes)
+    # output_config.checkpoints.every_n_epochs = str(output_config.checkpoints.root / output_config.checkpoints.every_n_epochs)
+    # output_config.checkpoints.every_n_train_steps = str(
+    #     output_config.checkpoints.root / output_config.checkpoints.every_n_train_steps,
+    # )
+    # output_config.checkpoints.every_n_minutes = str(output_config.checkpoints.root / output_config.checkpoints.every_n_minutes)
 
 
 class BaseSchema(BaseModel):
