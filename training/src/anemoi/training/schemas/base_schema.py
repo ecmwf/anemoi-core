@@ -68,12 +68,6 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> None:
     # CheckPointSchema
     output_config.checkpoints.root = root_output_path / output_config.checkpoints.root
 
-    # output_config.checkpoints.every_n_epochs = str(output_config.checkpoints.root / output_config.checkpoints.every_n_epochs)
-    # output_config.checkpoints.every_n_train_steps = str(
-    #     output_config.checkpoints.root / output_config.checkpoints.every_n_train_steps,
-    # )
-    # output_config.checkpoints.every_n_minutes = str(output_config.checkpoints.root / output_config.checkpoints.every_n_minutes)
-
 
 class BaseSchema(BaseModel):
     """Top-level schema for the training configuration."""
