@@ -11,7 +11,6 @@
 import logging
 import sys
 from typing import Any
-from typing import Optional
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -118,7 +117,7 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Data configuration."""
     dataloader: Any
     """Dataloader configuration."""
-    datamodule: Optional[Any] = None
+    datamodule: Any | None = None
     """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
