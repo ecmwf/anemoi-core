@@ -23,7 +23,11 @@ class BaseResidualConnection(nn.Module):
         return x[:, -1, ...]  # pick current date
 
     @abstractmethod
-    def forward(self, x, *args, **kwargs):
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        """Define the residual connection operation.
+        
+        Should be overridden by subclasses.
+        """
         pass
 
 
@@ -36,6 +40,7 @@ class SkipConnection(BaseResidualConnection):
     """
 
     def forward(self, x, *args, **kwargs):
+        """Return the last timestep of the input sequence."""
         return self.get_last_timestep(x)
 
 
@@ -45,7 +50,8 @@ class NoConnection(BaseResidualConnection):
     This module returns a zero tensor with the same shape as the last timestep.
     """
 
-    def forward(self, x, *args, **kwargs):
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        """Return a zero tensor with the same shape as the last timestep."""
         x = self.get_last_timestep(x)
         return torch.zeros_like(x, device=x.device, dtype=x.dtype)
 
@@ -96,6 +102,7 @@ class TruncatedConnection(nn.Module):
     >>> out = conn(x)
     >>> print(out.shape)
     torch.Size([2, 4, 1, 40192, 44])
+
     >>> # Example specifying .npz files for projection matrices
     >>> conn = TruncatedConnection(
     ...     truncation_down_file_path="n320_to_o96.npz",
@@ -171,7 +178,8 @@ class TruncatedConnection(nn.Module):
             up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 
-    def forward(self, x, grid_shard_shapes=None, model_comm_group=None, *args, **kwargs):
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None, *args, **kwargs) -> torch.Tensor:
+        """Apply truncated skip connection."""
         batch_size = x.shape[0]
         x = x[:, -1, ...]  # pick latest step
         shard_shapes = apply_shard_shapes(x, 0, grid_shard_shapes) if grid_shard_shapes is not None else None
