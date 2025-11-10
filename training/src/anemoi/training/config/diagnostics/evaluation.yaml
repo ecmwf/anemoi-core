@@ -40,6 +40,7 @@ log:
     enabled: False
   mlflow:
     enabled: False
+    _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
     offline: False
     authentication: False
     tracking_uri: ???
@@ -52,7 +53,8 @@ log:
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
     http_max_retries: 35
-    max_params_length: 10000
+    max_params_length: 2000
+    save_dir: ${hardware.paths.logs.mlflow}
   interval: 100 # passed to trainer.log_every_n_steps
 
 enable_progress_bar: True
