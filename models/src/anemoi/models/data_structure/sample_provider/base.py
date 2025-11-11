@@ -16,6 +16,7 @@ from typing import Any
 from omegaconf import DictConfig
 from rich.console import Console
 
+from anemoi.models.data_structure.data_handler import build_data_handler
 from anemoi.models.data_structure.dicts import StaticDataDict
 from anemoi.models.data_structure.dicts import _resolve_omega_conf_reference
 from anemoi.models.data_structure.offsets import DatesGathererVisitor
@@ -188,6 +189,9 @@ def _sample_provider_factory(_context: Context, cfg: Any) -> SampleProvider:
             return _sample_provider_factory(_context, cfg)
 
         case {"dictionary": dict() as dictionary} if len(cfg) == 1:
+            raise ValueError("Don't use 'dictionary'. Use 'groups' instead.")
+
+        case {"groups": dict() as dictionary} if len(cfg) == 1:
             # create a dictionary of sample providers
             from anemoi.models.data_structure.sample_provider.dictionary import SampleProviderDictionary
 
@@ -211,11 +215,21 @@ def _sample_provider_factory(_context: Context, cfg: Any) -> SampleProvider:
             return Container.new(_context, cfg)
 
 
-def build_sample_provider(cfg: Any, data_handler) -> SampleProvider:
+def build_sample_provider(cfg: Any, /, kind=None, data_handler=None) -> SampleProvider:
+    cfg = cfg.copy()
+    cfg.pop("aliases", None)  # remove aliases if present
+
+    initial_config = cfg.copy()
+
+    if kind is None:
+        kind = cfg.pop("kind", None)
+    if data_handler is None:
+        data_handler_config = cfg.pop("data_handler")
+        data_handler = build_data_handler(data_handler_config, kind=kind)
+
     # the context will be available to all sample providers downstream
     # and used to pass information such as data_handler, offset, etc.
     context = Context(data_handler=data_handler)
-    initial_config = cfg.copy()
 
     sp = _sample_provider_factory(context, cfg)
     # at this point the sample provider is not finished yet,

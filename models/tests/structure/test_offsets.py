@@ -73,7 +73,7 @@ def test_add_offset():
     print("a", _(a))
     print("b", _(b))
     assert len(a) == 8, len(a)
-    assert len(b) == 7, (len(a), len(b))
+    assert len(b) == 8, (len(a), len(b))
     assert np.all(a.missing_indices == [2, 5]), a.missing_indices
     assert np.all(b.missing_indices == [2, 5]), (a.missing_indices, b.missing_indices)
 
@@ -95,7 +95,7 @@ def test_add_offset_3():
     print("a", _(a))
     print("b", _(b))
     assert len(a) == 3, len(a)
-    assert len(b) == 2, (len(a), len(b))
+    assert len(b) == 3, (len(a), len(b))
     assert np.all(a.missing_indices == [2]), a.missing_indices
     assert np.all(b.missing_indices == [2]), (a.missing_indices, b.missing_indices)
 

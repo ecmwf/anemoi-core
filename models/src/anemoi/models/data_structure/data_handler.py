@@ -329,6 +329,7 @@ def _data_handler_factory(sources: dict, start, end, search_path) -> DataHandler
 
 def build_data_handler(config: dict, /, kind: str | None) -> DataHandler:
     initial_config = config.copy()
+    config.pop("aliases", None)  # remove aliases if present
 
     if kind not in ["training", "validation", "test", None]:
         raise ValueError(f"build_data_handler: kind={kind} must be one of ['training', 'validation', 'test', None]")

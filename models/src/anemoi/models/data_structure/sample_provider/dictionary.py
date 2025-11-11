@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import warnings
 
 from rich.tree import Tree as _RichTree
 
@@ -24,7 +25,21 @@ class SampleProviderDictionary(SampleProvider):
 
     def __init__(self, _context: Context, providers: dict):
         self.context = _context
-        self._providers = {k: _sample_provider_factory(_context, cfg) for k, cfg in providers.items()}
+        self._providers = {}
+        for k, cfg in providers.items():
+            cfg = cfg.copy()
+            if "data_group" in cfg:
+                if cfg["data_group"] != k:
+                    raise ValueError(
+                        f"Group key in the dictionary '{k}' does not match the data_group '{cfg['data_group']}'"
+                    )
+                warnings.warn(
+                    f"data_group '{cfg['data_group']}' in the dictionary entry is redundant with the key '{k}'",
+                    UserWarning,
+                )
+            if "data_group" not in cfg:
+                cfg["data_group"] = k
+            self._providers[k] = _sample_provider_factory(_context, cfg)
 
     def visit(self, visitor):
         visitor(self)
