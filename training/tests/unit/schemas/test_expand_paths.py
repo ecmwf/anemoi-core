@@ -100,3 +100,34 @@ def test_expand_paths_with_no_root(root_value: Union[None, str]) -> None:
     assert output.logs.root == Path("logs")
     assert output.logs.wandb == Path("logs") / "wandb"
     assert output.checkpoints.root == Path("checkpoints")
+
+
+@pytest.mark.parametrize("root_value", [None, ""])
+def test_expand_paths_with_no_root_but_full_paths(root_value: Union[None, str]) -> None:
+    """When root is None or empty, relative paths should not be prefixed."""
+    config = OmegaConf.create(
+        {
+            "output": {
+                "root": root_value,
+                "plots": "/test/plots",
+                "profiler": "/home/profiler",
+                "logs": {
+                    "root": "/scratch/logs",
+                    "wandb": None,
+                    "mlflow": None,
+                    "tensorboard": None,
+                },
+                "checkpoints": {"root": "/scratch/checkpoints"},
+            },
+        },
+    )
+
+    result = expand_paths(config)
+    output = result.output
+
+    # root is None -> no prefix
+    assert output.plots == Path("/test") / Path("plots")
+    assert output.profiler == Path("/home") / Path("profiler")
+    assert output.logs.root == Path("/scratch") / Path("logs")
+    assert output.logs.wandb == Path("/scratch") / Path("logs") / "wandb"
+    assert output.checkpoints.root == Path("/scratch") / Path("checkpoints")
