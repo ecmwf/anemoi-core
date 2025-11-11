@@ -296,7 +296,7 @@ class AnemoiTrainer(ABC):
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
         """Returns the directory where checkpoints are stored."""
-        return Path(self.config.system.output.checkpoints.root, fork_id or self.lineage_run) / "last.ckpt"
+        return Path(self.config.system.output.checkpoints.root.parent, fork_id or self.lineage_run) / "last.ckpt"
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
@@ -306,7 +306,6 @@ class AnemoiTrainer(ABC):
 
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
         checkpoint = self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
-
         # Check if the last checkpoint exists
         if checkpoint.exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)

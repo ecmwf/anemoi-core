@@ -46,8 +46,6 @@ class InputSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Path | None = None
     "Path to the inverse truncation matrix file."
-    checkpoint: Path | None = None
-    "Path to checkpoint for resuming training."
     warm_start: str | None = None
     "Path of the checkpoint file to use for warm starting the training"
 

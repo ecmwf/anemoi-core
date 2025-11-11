@@ -50,7 +50,7 @@ def build_mock_config(
     config.training.fork_run_id = fork_run_id
     config.training.load_weights_only = False
     config.training.transfer_learning = False
-    config.system.input.checkpoint = checkpoints_path
+    config.system.output.root = ""
     config.system.output.checkpoints.root = checkpoints_path
     config.system.input.warm_start = warm_start_path / warm_start if warm_start_path and warm_start else None
     config.diagnostics.log.mlflow.enabled = False
@@ -81,7 +81,6 @@ def trainer_factory() -> AnemoiTrainer:
 def test_restart_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
     run_id = "run-id-123"
     expected_path, checkpoints_path = tmp_checkpoint_factory(rid=run_id, ckpt_path_name="mock_checkpoints")
-
     config = build_mock_config(
         run_id=run_id,
         checkpoints_path=checkpoints_path,
@@ -108,7 +107,6 @@ def test_restart_fork_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_fact
     )
 
     trainer = trainer_factory(config)
-
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id != fork_run_id
     assert trainer.last_checkpoint == expected_path

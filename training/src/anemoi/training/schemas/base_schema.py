@@ -79,8 +79,6 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
 class SchemaCommonMixin:
     """Shared logic for schema objects."""
 
-    config_validation: bool = True
-
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)

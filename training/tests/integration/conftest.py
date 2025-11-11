@@ -82,10 +82,10 @@ def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestDa
         [
             "config_validation=False",
             "diagnostics.log.mlflow.enabled=True",
-            "hardware.files.graph=null",
+            "system.input.graph=null",
             "diagnostics.log.mlflow.offline=True",
         ],
-        ["config_validation=False", "diagnostics.log.mlflow.enabled=False", "hardware.files.graph=null"],
+        ["config_validation=False", "diagnostics.log.mlflow.enabled=False", "system.input.graph=null"],
     ],
 )
 def base_global_config(
@@ -104,8 +104,7 @@ def base_global_config(
     assert isinstance(use_case_modifications, DictConfig)
 
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
-    use_case_modifications.hardware.paths.data = tmp_dir
-    use_case_modifications.hardware.files.dataset = rel_paths[0]
+    use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
     # Add the imputer here as it's not part of the default config
     imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
