@@ -1,0 +1,91 @@
+# Multi-dataset data configuration for debugging with era5 and era5_copy
+format: zarr
+# Time frequency requested from dataset
+frequency: 6h
+# Time step of model (must be multiple of frequency)
+timestep: 6h
+
+# Dataset-specific configurations
+datasets:
+  era5:
+    # ERA5 inherits from default configuration
+    # Could override specific settings here if needed
+    forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "insolation"
+    - "lsm"
+    - "sdor"
+    - "slor"
+    - "z"
+    diagnostic: [tp, cp]
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          - "tp"
+          min-max:
+          max:
+          - "sdor"
+          - "slor"
+          - "z"
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+          - "insolation"
+          - "lsm"
+  mw_t:
+    forcing:
+    # TODO: add these in later
+    # - "cos_latitude"
+    # - "cos_longitude"
+    # - "sin_latitude"
+    # - "sin_longitude"
+    - "mw_t_reportype"
+    - "mw_t_cos_julian_day"
+    - "mw_t_cos_local_time"
+    - "mw_t_sin_julian_day"
+    - "mw_t_sin_local_time"
+    - "mw_t_cos_vza"
+    - "mw_t_sin_vza"
+    diagnostic: null
+    processors:
+      const_imputer:
+        _target_: anemoi.models.preprocessing.imputer.InputImputer
+        config:
+          default: "mean"  # TODO: try a constant imputer, e.g. 0 or -1
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+          none:
+          # - "cos_latitude"
+          # - "cos_longitude"
+          # - "sin_latitude"
+          # - "sin_longitude"
+          - "mw_t_cos_julian_day"
+          - "mw_t_cos_local_time"
+          - "mw_t_sin_julian_day"
+          - "mw_t_sin_local_time"
+          - "mw_t_cos_vza"
+          - "mw_t_sin_vza"
+
+# Values set in the code
+num_features: null # number of features in the forecast state

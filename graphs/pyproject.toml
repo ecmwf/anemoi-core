@@ -43,7 +43,7 @@ dependencies = [
   "matplotlib>=3.6",
   "netcdf4>1.7",
   "networkx>=3.1",
-  "numpy>=1.26,<2",
+  # "numpy>=1.26,<2",
   "plotly>=5.19",
   "scikit-learn>=1.5",
   "torch>=2.2",
