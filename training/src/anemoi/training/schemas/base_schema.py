@@ -130,8 +130,8 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
 
-    def model_dump(self, by_alias: bool = False) -> dict:
-        dumped_model = super().model_dump(by_alias=by_alias)
+    def model_dump(self, by_alias: bool = False, **kwargs) -> dict:
+        dumped_model = super().model_dump(by_alias=by_alias, **kwargs)
         return DictConfig(dumped_model)
 
 
