@@ -44,7 +44,7 @@ _object_setattr = _model_construction.object_setattr
 LOGGER = logging.getLogger(__name__)
 
 
-def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> None:
+def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[SystemSchema, DictConfig]:
     output_config = config_system.output
     root_output_path = Path(output_config.root) if output_config.root else Path()
     # OutputSchema
@@ -52,24 +52,49 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> None:
         config_system.output.plots = root_output_path / output_config.plots
     if output_config.profiler:
         config_system.output.profiler = root_output_path / output_config.profiler
-    if output_config.logs:
-        config_system.output.logs.root = root_output_path / output_config.logs.root
 
-        base = root_output_path / output_config.logs.root
+    # LogsSchema
+    config_system.output.logs.root = (
+        root_output_path / output_config.logs.root if output_config.logs.root else root_output_path
+    )
+    base = config_system.output.logs.root
 
-        # LogsSchema
-        if output_config.logs.wandb is None:
-            output_config.logs.wandb = base / "wandb"
-        if output_config.logs.mlflow is None:
-            output_config.logs.mlflow = base / "mlflow"
-        if output_config.logs.tensorboard is None:
-            output_config.logs.tensorboard = base / "tensorboard"
+    # LogsSchema
+    output_config.logs.wandb = base / "wandb" if output_config.logs.wandb is None else base / output_config.logs.wandb
+    output_config.logs.mlflow = (
+        base / "mlflow" if output_config.logs.mlflow is None else base / output_config.logs.mlflow
+    )
+    output_config.logs.tensorboard = (
+        base / "tensorboard" if output_config.logs.tensorboard is None else base / output_config.logs.tensorboard
+    )
 
     # CheckPointSchema
-    output_config.checkpoints.root = root_output_path / output_config.checkpoints.root
+    output_config.checkpoints.root = (
+        root_output_path / output_config.checkpoints.root if output_config.checkpoints.root else root_output_path
+    )
+
+    return config_system
 
 
-class BaseSchema(BaseModel):
+class SchemaCommonMixin:
+    """Shared logic for schema objects."""
+
+    config_validation: bool = True
+
+    def model_dump(self, by_alias: bool = False) -> dict:
+        dumped_model = super().model_dump(by_alias=by_alias)
+        return DictConfig(dumped_model)
+
+    def model_post_init(self, _: Any) -> None:
+        expand_paths(self.system)
+        if self.diagnostics.log.mlflow.enabled and (
+            self.system.output.logs.mlflow != self.diagnostics.log.mlflow.save_dir
+        ):
+            LOGGER.info("adjusting save_dir path to match output mlflow logs")
+            self.diagnostics.log.mlflow.save_dir = str(self.system.output.logs.mlflow)
+
+
+class BaseSchema(SchemaCommonMixin, BaseModel):
     """Top-level schema for the training configuration."""
 
     data: DataSchema
@@ -98,25 +123,6 @@ class BaseSchema(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def check_log_paths_available_for_loggers(self) -> Self:
-        logger = []
-        if self.diagnostics.log.wandb.enabled and (not self.system.output.logs or not self.system.output.logs.wandb):
-            logger.append("wandb")
-        if self.diagnostics.log.mlflow.enabled and (not self.system.output.logs or not self.system.output.logs.mlflow):
-            logger.append("mlflow")
-        if self.diagnostics.log.mlflow.enabled and (not self.diagnostics.log.mlflow.save_dir):
-            self.diagnostics.log.mlflow.save_dir = str(self.hardware.paths.logs.mlflow)
-        if self.diagnostics.log.tensorboard.enabled and (
-            not self.system.output.logs or not self.system.output.logs.tensorboard
-        ):
-            logger.append("tensorboard")
-
-        if logger:
-            msg = ", ".join(logger) + " logging path(s) not provided."
-            raise PydanticCustomError("logger_path_missing", msg)  # noqa: EM101
-        return self
-
-    @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
         if (
@@ -135,15 +141,8 @@ class BaseSchema(BaseModel):
             )
         return self
 
-    def model_dump(self, by_alias: bool = False) -> dict:
-        dumped_model = super().model_dump(by_alias=by_alias)
-        return DictConfig(dumped_model)
 
-    def model_post_init(self, _: Any) -> None:
-        expand_paths(self.system)
-
-
-class UnvalidatedBaseSchema(PydanticBaseModel):
+class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     data: Any
     """Data configuration."""
     dataloader: Any
@@ -162,13 +161,6 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Training configuration."""
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
-
-    def model_dump(self, by_alias: bool = False) -> dict:
-        dumped_model = super().model_dump(by_alias=by_alias)
-        return DictConfig(dumped_model)
-
-    def model_post_init(self, _: Any) -> None:
-        expand_paths(self.system)
 
 
 def convert_to_omegaconf(config: BaseSchema) -> dict:
