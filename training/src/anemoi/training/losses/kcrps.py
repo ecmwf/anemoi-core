@@ -41,6 +41,48 @@ class KernelCRPS(BaseLoss):
 
         self.fair = fair
 
+    def _mae(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """MAE component of Kernel (ensemble) CRPS.
+
+        Parameters
+        ----------
+        preds : torch.Tensor
+            Predicted ensemble, shape (batch_size, n_vars, latlon, ens_size)
+        targets : torch.Tensor
+            Ground truth, shape (batch_size, n_vars, latlon)
+
+        Returns
+        -------
+        mae : torch.Tensor
+            The point-wise MAE component, shape (batch_size, n_vars, latlon).
+        """
+        return torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
+
+    def _ens_var(self, preds: torch.Tensor) -> torch.Tensor:
+        """Ensemble variance component of Kernel (ensemble) CRPS.
+
+        Parameters
+        ----------
+        preds : torch.Tensor
+            Predicted ensemble, shape (batch_size, n_vars, latlon, ens_size)
+
+        Returns
+        -------
+        ens_var : torch.Tensor
+            The point-wise ensemble variance component, shape (batch_size, n_vars, latlon).
+        """
+        ens_size = preds.shape[-1]
+
+        assert ens_size > 1, "Ensemble size must be greater than 1."
+
+        coef = -1.0 / (ens_size * (ens_size - 1)) if self.fair else -1.0 / (ens_size**2)
+
+        ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
+        for i in range(ens_size):  # loop version to reduce memory usage
+            ens_var += torch.sum(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+
+        return coef * ens_var
+
     def _kernel_crps(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Kernel (ensemble) CRPS.
 
@@ -54,21 +96,9 @@ class KernelCRPS(BaseLoss):
         Returns
         -------
         kCRPS : torch.Tensor
-            The point-wise kernel CRPS, shape (batch_size, 1, latlon).
+            The point-wise kernel CRPS, shape (batch_size, n_vars, latlon).
         """
-        ens_size = preds.shape[-1]
-        mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
-
-        assert ens_size > 1, "Ensemble size must be greater than 1."
-
-        coef = -1.0 / (ens_size * (ens_size - 1)) if self.fair else -1.0 / (ens_size**2)
-
-        ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
-        for i in range(ens_size):  # loop version to reduce memory usage
-            ens_var += torch.sum(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
-        ens_var = coef * ens_var
-
-        return mae + ens_var
+        return self._mae(preds, targets) + self._ens_var(preds)
 
     def forward(
         self,
@@ -194,3 +224,118 @@ class AlmostFairKernelCRPS(BaseLoss):
     @property
     def name(self) -> str:
         return f"afkcrps{self.alpha:.2f}"
+
+
+class EnsembleMAE(KernelCRPS):
+    """MAE component of Fair kernel CRPS loss."""
+
+    def __init__(
+        self,
+        no_autocast: bool = True,
+        ignore_nans: bool = False,
+        **kwargs,
+    ) -> None:
+        """MAE component of latitude- and (inverse-)variance-weighted kernel CRPS loss.
+
+        Parameters
+        ----------
+        no_autocast : bool, optional
+            Deactivate autocast for the kernel CRPS calculation
+        ignore_nans : bool, optional
+            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
+        """
+        super().__init__(ignore_nans=ignore_nans, **kwargs)
+
+        self.no_autocast = no_autocast
+
+    def forward(
+        self,
+        y_pred: torch.Tensor,
+        y_target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+    ) -> torch.Tensor:
+        is_sharded = grid_shard_slice is not None
+
+        y_target = einops.rearrange(y_target, "bs latlon v -> bs v latlon")
+        y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
+
+        if self.no_autocast:
+            with torch.amp.autocast(device_type="cuda", enabled=False):
+                mae_ = self._mae(y_pred, y_target)
+        else:
+            mae_ = self._mae(y_pred, y_target)
+
+        mae_ = einops.rearrange(mae_, "bs v latlon -> bs 1 latlon v")
+        mae_ = self.scale(mae_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+
+        return self.reduce(mae_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
+
+    @property
+    def name(self) -> str:
+        return "kcrps_mae"
+
+
+class EnsembleVariance(KernelCRPS):
+    """Ensemble variance component of Fair kernel CRPS loss."""
+
+    def __init__(
+        self,
+        fair: bool = True,
+        ignore_nans: bool = False,
+        no_autocast: bool = True,
+        **kwargs,
+    ) -> None:
+        """Ensemble variance component of latitude- and (inverse-)variance-weighted kernel CRPS loss.
+
+        Parameters
+        ----------
+        fair : bool
+            Calculate a "fair" (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1.
+        ignore_nans : bool, optional
+            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
+        no_autocast : bool, optional
+            Deactivate autocast for the kernel CRPS calculation
+        """
+        super().__init__(fair=fair, ignore_nans=ignore_nans, **kwargs)
+        self.no_autocast = no_autocast
+
+    def forward(
+        self,
+        y_pred: torch.Tensor,
+        y_target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+    ) -> torch.Tensor:
+        del y_target
+        is_sharded = grid_shard_slice is not None
+
+        y_pred = einops.rearrange(y_pred, "bs e latlon v -> bs v latlon e")
+
+        if self.no_autocast:
+            with torch.amp.autocast(device_type="cuda", enabled=False):
+                ens_var_ = self._ens_var(y_pred)
+        else:
+            ens_var_ = self._ens_var(y_pred)
+
+        ens_var_ = einops.rearrange(ens_var_, "bs v latlon -> bs 1 latlon v")
+        ens_var_ = self.scale(
+            ens_var_,
+            scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
+
+        return self.reduce(ens_var_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
+
+    @property
+    def name(self) -> str:
+        return "kcrps_ensvar"

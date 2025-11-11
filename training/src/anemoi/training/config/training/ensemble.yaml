@@ -89,6 +89,16 @@ validation_metrics:
     scalers: ['node_weights']
     ignore_nans: False
     alpha: 1.0
+  kcrps_mae:
+    _target_: anemoi.training.losses.kcrps.EnsembleMAE
+    scalers: ['node_weights']
+    fair: True
+    ignore_nans: True
+  kcrps_ensvar:
+    _target_: anemoi.training.losses.kcrps.EnsembleVariance
+    scalers: ['node_weights']
+    fair: True
+    ignore_nans: True
 
 # Variable groups definition for scaling
 # The variable level scaling methods are defined under training/scalers
