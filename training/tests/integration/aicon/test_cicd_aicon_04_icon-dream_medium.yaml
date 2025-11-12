@@ -340,6 +340,7 @@ diagnostics:
     tensorboard:
       enabled: false
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
       offline: True
       authentication: False
