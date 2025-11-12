@@ -105,8 +105,8 @@ def serialize_setup_callback(setup: Callable[[MigrationContext], None]) -> Seria
         "module_paths": ctx.module_paths,
         "deleted_attributes": ctx.deleted_attributes,
         "deleted_modules": ctx.deleted_modules,
-
     }
+
 
 class DeserializeMigrationContext:
     """Deserializes the serialized migratoin context into a setup callback"""

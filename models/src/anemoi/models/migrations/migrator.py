@@ -264,7 +264,7 @@ class MissingAttribute:
     """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class"""
 
 
-def _get_unpickler(replace_attrs: dict[str,list[str]] | bool = False):
+def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
     """Get the Unpickler
 
     Parameters
@@ -303,7 +303,12 @@ def _get_unpickler(replace_attrs: dict[str,list[str]] | bool = False):
 
                 if replace_attrs is False:
                     raise e
-                if replace_attrs is True or attr_name in deleted_attributes or module_name in deleted_modules or wild_name in replace_attrs:
+                if (
+                    replace_attrs is True
+                    or attr_name in deleted_attributes
+                    or module_name in deleted_modules
+                    or wild_name in replace_attrs
+                ):
                     LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
                     return MissingAttribute
                 raise e
@@ -318,7 +323,7 @@ def _get_unpickler(replace_attrs: dict[str,list[str]] | bool = False):
     return UnpicklerWrapper
 
 
-def _load_ckpt(path: str | PathLike, replace_attrs: dict[str,list[str]] | bool = False) -> CkptType:
+def _load_ckpt(path: str | PathLike, replace_attrs: dict[str, list[str]] | bool = False) -> CkptType:
     """Loads a checkpoint
 
     Parameters
@@ -629,14 +634,14 @@ class Migrator:
         compatible_migrations = self._grouped_migrations[-1]
         self._check_executed_migrations(ckpt, compatible_migrations)
         setups, ops = self._resolve_operations(ckpt, compatible_migrations)
-        replace_attrs: dict[str,list[str]] = {}
+        replace_attrs: dict[str, list[str]] = {}
         if len(setups):
             context = MigrationContext()
             for setup in setups:
                 setup(context)
             self._resolve_context(context)
-            replace_attrs['deleted_modules'] = context.deleted_modules
-            replace_attrs['deleted_attributes'] = context.deleted_attributes
+            replace_attrs["deleted_modules"] = context.deleted_modules
+            replace_attrs["deleted_attributes"] = context.deleted_attributes
         # Force reloading checkpoint without obfuscating import issues.
         ckpt = _load_ckpt(path, replace_attrs)
         ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
