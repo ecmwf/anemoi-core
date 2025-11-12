@@ -53,7 +53,7 @@ def test_gridded():
                     offsets: ["+0h", "+6h"]
               data_handler:
                 training:
-                    start: 1979-01-01
+                    start: 2016-12-19
                     end: 2021
                 validation:
                     start: 2022
@@ -137,7 +137,8 @@ def test_gridded():
         print(f"-> Static for {key}: {value}")
     print("************************")
     i = 0
-    for key, value in sp[i].items():
+    sample = sp[i]
+    for key, value in sample.items():
         print(f"-> Sample data at [{i}] for {key}: {value}")
 
 
@@ -162,7 +163,7 @@ def test_observations():
                     more_config: {}
              data_handler:
                training:
-                   start: 1979-01-01
+                   start: 2018-11-01T12:00:00
                    end: 2021
                validation:
                    start: 2022
@@ -184,6 +185,7 @@ def test_observations():
     )["sample_provider"]
 
     sp = build_sample_provider(cfg, kind="training")
+    print("datahandler", sp.context.data_handler)
 
     print(len(sp))
 
@@ -200,8 +202,6 @@ def test_observations():
 def test_dop():
     with open("dop_sample_provider.yaml", "r") as f:
         cfg = yaml.safe_load(f)
-    with open("dop_data_handler.yaml", "r") as f:
-        cfg["data_handler"] = yaml.safe_load(f)
 
     sp = build_sample_provider(cfg, kind="training")
 

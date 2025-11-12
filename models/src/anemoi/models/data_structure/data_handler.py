@@ -181,7 +181,7 @@ class OneDatasetDataHandler(DataHandler):
 
     def _tree(self, prefix=""):
         tree = _RichTree(prefix if prefix else "")
-        tree.add(f"groups: {', '.join(self.groups)}")
+        tree.add(f"groups: {self.groups}")
         tree.add(f"dataset: {self._dataset}")
         if self.start:
             tree.add(f"start: {self.start}")
@@ -229,9 +229,11 @@ class RecordsDataHandler(OneDatasetDataHandler):
         assert group in self.groups, (group, self.groups)
 
         if isinstance(self._dataset, dict):
-            ds = open_dataset(**self._dataset, select=[f"{group}.{v}" for v in variables])
+            ds = open_dataset(
+                **self._dataset, select=[f"{group}.{v}" for v in variables], start=self.start, end=self.end
+            )
         else:
-            ds = open_dataset(self._dataset, select=[f"{group}.{v}" for v in variables])
+            ds = open_dataset(self._dataset, select=[f"{group}.{v}" for v in variables], start=self.start, end=self.end)
 
         return ds
 
@@ -284,7 +286,8 @@ class MultiDatasetDataHandler(DataHandler):
         for dh in self._data_handlers:
             if group in dh.groups:
                 return dh
-        raise KeyError(f"group {group} not found in any data_handler {self._data_handlers}")
+        LOGGER.error(f"Available groups: {self._data_handlers}")
+        raise KeyError(f"group '{group}' not found")
 
     def _tree(self, prefix=""):
         # for pretty printing of dicts
