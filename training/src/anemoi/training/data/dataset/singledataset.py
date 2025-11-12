@@ -289,10 +289,10 @@ class NativeGridDataset(IterableDataset):
             if isinstance(grid_shard_indices, slice):
                 # Load only shards into CPU memory
                 try:
-                    # when setting skip_missing_dates to True in the open_dataset function, 
+                    # when setting skip_missing_dates to True in the open_dataset function,
                     # this line returns a tuple! The slicing is done by anemoi-datasets internally.
                     x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
-                except Exception as e:
+                except Exception:
                     LOGGER.debug(f"Not loading data for indices start:end {start}:{end}")
                     continue
 
@@ -302,7 +302,7 @@ class NativeGridDataset(IterableDataset):
                 # in the same operation.
                 try:
                     x = self.data[start:end:timeincrement, :, :, :]
-                except Exception as e:
+                except Exception:
                     LOGGER.debug(f"Not loading data for indices start:end {start}:{end}")
                     continue
                 x = x[..., grid_shard_indices]  # select the grid shard
