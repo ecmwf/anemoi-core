@@ -1,6 +1,6 @@
 ---
 defaults:
-  - plot: detailed
+  - plot: detailed_era_mw
   - callbacks: placeholder
   - benchmark_profiler: detailed
 

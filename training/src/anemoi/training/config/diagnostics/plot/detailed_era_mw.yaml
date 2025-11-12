@@ -6,21 +6,23 @@ frequency: # Frequency of the plotting
 
 # Parameters to plot
 parameters:
-- z_500
-- t_850
-- u_850
-- v_850
-- 2t
-- 10u
-- 10v
-- sp
-- tp
-- cp
-- mw_t_ch03
-- mw_t_ch06
-- mw_t_ch09
-- mw_t_ch14
-- mw_t_ch16
+  era5:
+    - z_500
+    - t_850
+    - u_850
+    - v_850
+    - 2t
+    - 10u
+    - 10v
+    - sp
+    - tp
+    - cp
+  mw_t:
+    - mw_t_ch03
+    - mw_t_ch06
+    - mw_t_ch09
+    - mw_t_ch14
+    - mw_t_ch16
 
 # Sample index
 sample_idx: 0
@@ -49,14 +51,18 @@ callbacks:
   # Add plot callbacks here
   - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
     every_n_epochs: 5
+    dataset_names: ["era5"]
+
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
     # group parameters by categories when visualizing contributions to the loss
     # one-parameter groups are possible to highlight individual parameters
     parameter_groups:
       moisture: [tp, cp, tcw]
       sfc_wind: [10u, 10v]
-      mw_t: [mw_t_ch03, mw_t_ch06, mw_t_ch09, mw_t_ch14, mw_t_ch16]
+      microwave_bt: [mw_t_ch03, mw_t_ch06, mw_t_ch09, mw_t_ch14, mw_t_ch16]
     every_n_batches: ${diagnostics.plot.frequency.batch}
+    dataset_names: ["era5", "mw_t"]
+
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
     sample_idx: ${diagnostics.plot.sample_idx}
     per_sample : 6
@@ -66,24 +72,25 @@ callbacks:
     accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
     precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
     colormaps: ${diagnostics.plot.colormaps}
+    dataset_names: ["era5", "mw_t"]
+
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
     # every_n_batches: 100 # Override for batch frequency
     # min_delta: 0.01 # Minimum distance between two consecutive points
     sample_idx: ${diagnostics.plot.sample_idx}
     every_n_batches: ${diagnostics.plot.frequency.batch}
+    dataset_names: ["era5"]
     parameters:
-    - z_500
-    - tp
-    - 2t
-    - 10u
-    - 10v
+      era5:
+        - z_500
+        - tp
+        - 2t
+        - 10u
+        - 10v
+
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
     sample_idx: ${diagnostics.plot.sample_idx}
     every_n_batches: ${diagnostics.plot.frequency.batch}
     precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
-    parameters:
-    - z_500
-    - tp
-    - 2t
-    - 10u
-    - 10v
+    dataset_names: ["era5", "mw_t"]
+    parameters: ${diagnostics.plot.parameters}
