@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import MigrationMetadata
 from anemoi.models.migrations import MigrationContext
+from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -22,24 +22,18 @@ metadata = MigrationMetadata(
 
 
 def migrate_setup(context: MigrationContext) -> None:
-    """
-    Migrate setup callback to be run before loading the checkpoint.
+    """Migrate setup callback to be run before loading the checkpoint.
 
     Parameters
     ----------
     context : MigrationContext
        A MigrationContext instance
     """
-    context.delete_attribute(
-        "anemoi.training.schemas.datamodule.AnemoiDatasetsDataModule."
-    )
-    context.delete_module(
-        "anemoi.training.schemas.datamodule"
-    )
+    context.delete_module("anemoi.training.schemas.datamodule")
+
 
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
-
 
     Parameters
     ----------
@@ -56,7 +50,6 @@ def migrate(ckpt: CkptType) -> CkptType:
 
 def rollback(ckpt: CkptType) -> CkptType:
     """Rollback the checkpoint.
-
 
     Parameters
     ----------
