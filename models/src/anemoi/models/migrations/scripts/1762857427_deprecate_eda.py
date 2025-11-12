@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationContext
 from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
@@ -18,6 +19,17 @@ metadata = MigrationMetadata(
     },
 )
 # <-- END DO NOT CHANGE
+
+
+def migrate_setup(context: MigrationContext) -> None:
+    """Migrate setup callback to be run before loading the checkpoint.
+
+    Parameters
+    ----------
+    context : MigrationContext
+       A MigrationContext instance
+    """
+    context.delete_module("anemoi.training.schemas.datamodule")
 
 
 def migrate(ckpt: CkptType) -> CkptType:
@@ -33,8 +45,6 @@ def migrate(ckpt: CkptType) -> CkptType:
     CkptType
         The migrated checkpoint dict.
     """
-    config = ckpt["hyper_parameters"]["config"]
-    ckpt["hyper_parameters"]["config"] = config.model_validate(config.model_dump(exclude={"datamodule"}))
     return ckpt
 
 
