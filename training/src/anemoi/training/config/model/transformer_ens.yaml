@@ -35,10 +35,10 @@ layer_kernels:
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
   num_layers: 16
-  num_chunks: 2
+  num_chunks: 8
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  window_size: 512
+  num_heads: 8 # GraphTransformer or Transformer only
+  window_size: 1120
   dropout_p: 0.0
   attention_implementation: flash_attention # Possible values:  scaled_dot_product_attention, flash_attention
   qk_norm: True # Transformer and GraphTransformer only
@@ -65,7 +65,7 @@ encoder:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  num_heads: 8 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
@@ -79,7 +79,7 @@ decoder:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
+  num_heads: 8 # GraphTransformer or Transformer only
   initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
@@ -90,10 +90,10 @@ output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
-  data: 8
-  hidden: 8
-  data2hidden: 8
-  hidden2data: 8
+  data: 0
+  hidden: 0
+  data2hidden: 0
+  hidden2data: 0
 
 
 attributes:
@@ -103,13 +103,14 @@ attributes:
   nodes: []
 
 # Bounding configuration
-bounding: #These are applied in order
+# bounding: #These are applied in order
 
   # Bound tp (total precipitation) with a Relu bounding layer
   # ensuring a range of [0, infinity) to avoid negative precipitation values.
-  - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
-    variables:
-    - tp
+  # - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+  # - _target_: anemoi.models.layers.bounding.LeakyReluBounding #[0, infinity)
+  #   variables:
+  #   - tp
 
   # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
   # This guarantees that cp is physically consistent with tp by restricting cp
@@ -135,3 +136,50 @@ bounding: #These are applied in order
   #   variables: [sst]
   #   min_val: [-2]
   #   normalizer: ['mean-std']
+
+
+# bounding setting 1, all diag
+# bounding: []
+bounding: #These are applied in order
+  # - _target_: anemoi.models.layers.bounding.LeakyReluBounding #[0, infinity)
+  - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+    variables:
+    - tp
+    - ro
+    - tcw
+    - ssrd
+    - q_50
+    - q_100
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - q_1000
+  - _target_: anemoi.models.layers.bounding.HardtanhBounding #[0, 1)
+    variables:
+    - tcc
+    # - swvl1
+    # - swvl2
+    min_val: 0
+    max_val: 1
+  - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+    variables:
+    - cp
+    - sf
+    min_val: 0
+    max_val: 1
+    total_var: tp
+  - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+    variables:
+    - lcc
+    - mcc
+    - hcc
+    min_val: 0
+    max_val: 1
+    total_var: tcc

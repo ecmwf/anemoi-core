@@ -429,6 +429,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         bias: bool = True,
         qk_norm: bool = False,
         update_src_nodes: bool = False,
+        edge_pre_mlp: bool = True,
         layer_kernels: DotDict,
         **kwargs,
     ) -> None:
@@ -452,6 +453,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Normalize query and key
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
+        edge_pre_mlp : bool, by default False
+            Apply MLP preprocessing to edges before lin_edge projection
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
@@ -472,6 +475,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_value = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
+
+        # Optional edge preprocessing MLP
+        if edge_pre_mlp:
+            self.edge_pre_mlp = nn.Sequential(
+                Linear(edge_dim, edge_dim),
+                layer_kernels.Activation(),
+            )
+        else:
+            self.edge_pre_mlp = nn.Identity()
 
         self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
@@ -502,7 +514,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         query = self.lin_query(x_dst)
         key = self.lin_key(x_src)
         value = self.lin_value(x_src)
-        edges = self.lin_edge(edge_attr)
+        edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
 
         return query, key, value, edges
 

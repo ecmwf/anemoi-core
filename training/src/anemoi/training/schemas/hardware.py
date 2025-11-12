@@ -11,6 +11,7 @@
 from functools import partial
 from pathlib import Path
 from typing import Annotated
+from typing import Union
 
 from pydantic import AfterValidator
 from pydantic import BaseModel as PydanticBaseModel
@@ -39,6 +40,8 @@ class FilesSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Path | None = None
     "Path to the inverse truncation matrix file."
+    truncation_loss: Union[list[Union[Path, bool, None]], None] = None
+    "List of paths to truncation loss files for multi-scale loss computation."
     checkpoint: dict[str, str]
     "Each dictionary key is a checkpoint name, and the value is the path to the checkpoint file."
     warm_start: str | None = None

@@ -151,7 +151,7 @@ class GraphEnsForecaster(BaseGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        loss: torch.nn.Module,
+        loss_fn: torch.nn.Module,
         ens_comm_subgroup_size: int,
         ens_comm_subgroup: ProcessGroup,
         model_comm_group: ProcessGroup,
@@ -166,7 +166,7 @@ class GraphEnsForecaster(BaseGraphModule):
                 Predicted state tensor, calculated on self.device
             y: torch.Tensor
                 Ground truth
-            loss: torch.nn.Module
+            loss_fn: torch.nn.Module
                 Loss function
             ens_comm_group_size: int
                 Size of the ensemble communication group
@@ -184,8 +184,7 @@ class GraphEnsForecaster(BaseGraphModule):
             y_pred_ens:
                 Predictions if validation mode
         """
-        # gather ensemble members,
-        # full ensemble is only materialised on GPU in checkpointed region
+        # gather ensemble members
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=1,
@@ -193,10 +192,23 @@ class GraphEnsForecaster(BaseGraphModule):
             mgroup=ens_comm_subgroup,
         )
 
-        # compute the loss
-        loss_inc = loss(y_pred_ens, y, squash=True, grid_shard_slice=self.grid_shard_slice, group=model_comm_group)
+        kwargs = {
+            "model_comm_group_size": self.model_comm_group_size,
+            "grid_dim": self.grid_dim,
+            "grid_shard_shapes": self.grid_shard_shapes,
+        }
 
-        return loss_inc, y_pred_ens if return_pred_ens else None
+        loss = loss_fn(
+            y_pred_ens,
+            y,
+            squash=True,  # ignores by multi scale loss wrapper?
+            grid_shard_slice=self.grid_shard_slice,
+            group=model_comm_group,  # kcrps uses group
+            model_comm_group=model_comm_group,  # multi scale loss wrapper uses model_comm_group
+            **kwargs,
+        )
+
+        return loss, y_pred_ens if return_pred_ens else None
 
     def advance_input(
         self,
@@ -337,7 +349,10 @@ class GraphEnsForecaster(BaseGraphModule):
                     rollout_step,
                     grid_shard_slice=self.grid_shard_slice,
                 )
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
+            mloss = self.loss.mloss if hasattr(self.loss, "mloss") else None
+            yield loss, mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
+                x if validation_mode else None
+            )
 
     def _step(
         self,
@@ -352,10 +367,28 @@ class GraphEnsForecaster(BaseGraphModule):
         )
 
         loss = torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+
+        if self.loss.name == "MultiscaleLossWrapper":
+            # TODO(Helen): Check logic for having either 3 config entries and one of the is None
+
+            LOGGER.debug("Using multiscale loss with %d scales", self.loss.num_scales)
+            self.loss.grid_dim = self.grid_dim
+            self.loss.grid_shard_shapes = self.grid_shard_shapes
+            self.loss.model_comm_group_size = self.model_comm_group_size
+
+            self.loss.init_loss_scales(batch[0].dtype, self.device)
+
+            mloss = [
+                torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+                for _ in self.config.hardware.files.truncation_loss
+            ]
+        else:
+            mloss = None
+
         metrics = {}
         y_preds = []
 
-        for loss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
+        for loss_next, mloss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
             batch,
             rollout=self.rollout,
             validation_mode=validation_mode,
@@ -364,8 +397,17 @@ class GraphEnsForecaster(BaseGraphModule):
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
+            if mloss is not None:
+                for i in range(len(mloss)):
+                    mloss[i] += mloss_next[i]
+
         loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds, _ens_ic
+
+        if mloss is not None:
+            for i in range(len(mloss)):
+                mloss[i] *= 1.0 / self.rollout
+
+        return loss, mloss, metrics, y_preds, _ens_ic
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         batch[0] = super().allgather_batch(batch[0])
@@ -391,7 +433,7 @@ class GraphEnsForecaster(BaseGraphModule):
         """
         del batch_idx
 
-        train_loss, _, _, _ = self._step(batch)
+        train_loss, _, _, _, _ = self._step(batch)
 
         self.log(
             "train_" + self.loss.name,
@@ -440,7 +482,7 @@ class GraphEnsForecaster(BaseGraphModule):
         del batch_idx
 
         with torch.no_grad():
-            val_loss, metrics, y_preds, ens_ic = self._step(batch, validation_mode=True)
+            val_loss, val_mloss, metrics, y_preds, ens_ic = self._step(batch, validation_mode=True)
         self.log(
             "val_" + self.loss.name,
             val_loss,
@@ -451,6 +493,20 @@ class GraphEnsForecaster(BaseGraphModule):
             batch_size=batch[0].shape[0],
             sync_dist=True,
         )
+
+        if val_mloss is not None:
+            for i, loss_scale in enumerate(val_mloss):
+                self.log(
+                    f"val_{self.loss.name}_scale{i}",
+                    loss_scale,
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=True,
+                    logger=self.logger_enabled,
+                    batch_size=batch[0].shape[0],
+                    sync_dist=True,
+                )
+
         for mname, mvalue in metrics.items():
             self.log(
                 "val_" + mname,
