@@ -677,22 +677,13 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         }
 
     def get_edge_trainable_modules(self, model: torch.nn.Module) -> dict[tuple[str, str], torch.Tensor]:
-        if hasattr(model, "_graph_hidden_names"):  # hierarchical
-            trainable_modules = {}
-            for i in range(model.num_hidden - 1):
-                nodes_names = model._graph_hidden_names[i]
-                trainable_modules[(model._graph_name_data, nodes_names)] = model.encoder
-                trainable_modules[(nodes_names, model._graph_name_data)] = model.decoder
-                if isinstance(model.processor, GraphEdgeMixin):
-                    trainable_modules[nodes_names, nodes_names] = model.processor
-        else:
-            trainable_modules = {
-                (model._graph_name_data, model._graph_name_hidden): model.encoder,
-                (model._graph_name_hidden, model._graph_name_data): model.decoder,
-            }
+        trainable_modules = {
+            (model._graph_name_data, model._graph_name_hidden): model.encoder,
+            (model._graph_name_hidden, model._graph_name_data): model.decoder,
+        }
 
-            if isinstance(model.processor, GraphEdgeMixin):
-                trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
+        if isinstance(model.processor, GraphEdgeMixin):
+            trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
 
         return {name: module for name, module in trainable_modules.items() if module.trainable.trainable is not None}
 
@@ -719,7 +710,13 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         else:
             LOGGER.warning("There are no trainable node attributes to plot.")
 
-        if len(edge_trainable_modules := self.get_edge_trainable_modules(model)):
+        from anemoi.models.models import AnemoiModelEncProcDecHierarchical
+
+        if isinstance(model, AnemoiModelEncProcDecHierarchical):
+            LOGGER.warning(
+                "Edge trainable features are not supported for Hierarchical models, skipping plot generation.",
+            )
+        elif len(edge_trainable_modules := self.get_edge_trainable_modules(model)):
             fig = plot_graph_edge_features(model, edge_trainable_modules, q_extreme_limit=self.q_extreme_limit)
 
             self._output_figure(
