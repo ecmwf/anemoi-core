@@ -300,7 +300,11 @@ class NativeGridDataset(IterableDataset):
                 # Load full grid in CPU memory, select grid_shard after
                 # Note that anemoi-datasets currently doesn't support slicing + indexing
                 # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
+                try:
+                    x = self.data[start:end:timeincrement, :, :, :]
+                except Exception as e:
+                    LOGGER.debug(f"Not loading data for indices start:end {start}:{end}")
+                    continue
                 x = x[..., grid_shard_indices]  # select the grid shard
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
