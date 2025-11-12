@@ -248,8 +248,16 @@ class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
     truncation_path: str
     filenames: list[str | None]
+    weights: list[float]
     keep_batch_sharded: bool
     internal_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
+
+    @field_validator("weights")
+    @classmethod
+    def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
+        if "filenames" in info.data:
+            assert len(v) == len(info.data["filenames"]), "weights must have same length as filenames"
+        return v
 
 
 class HuberLossSchema(BaseLossSchema):
