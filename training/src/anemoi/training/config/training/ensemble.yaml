@@ -72,6 +72,8 @@ training_loss:
   _target_: anemoi.training.losses.MultiscaleLossWrapper
   truncation_path: ${hardware.paths.truncation}
   filenames: ${hardware.files.truncation_loss}
+  weights:
+    - 1.0
   keep_batch_sharded: ${model.keep_batch_sharded}
 
   internal_loss:
@@ -84,7 +86,8 @@ training_loss:
     # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
     # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
     ignore_nans: False
-    alpha: 1.0
+    no_autocast: True
+    alpha: 0.95
 
 
 
@@ -110,7 +113,7 @@ validation_metrics:
 
     internal_loss:
       _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+      scalers: ['node_weights']
 
       # Scalers to include in loss calculation
       # A selection of available scalers are listed in training/scalers.
@@ -118,7 +121,15 @@ validation_metrics:
       # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
       # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
       ignore_nans: False
+      no_autocast: True
       alpha: 1.0
+
+  afkcrps:
+    _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+    scalers: ['node_weights']
+    ignore_nans: False
+    no_autocast: True
+    alpha: 1.0
 
 # Variable groups definition for scaling
 # The variable level scaling methods are defined under training/scalers

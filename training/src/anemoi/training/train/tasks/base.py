@@ -632,7 +632,16 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                    grid_shard_slice=grid_shard_slice,
+                    group=self.model_comm_group,
+                    model_comm_group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_shapes=self.grid_shard_shapes,
+                )
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():

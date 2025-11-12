@@ -151,7 +151,7 @@ class GraphEnsForecaster(BaseGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        loss: torch.nn.Module,
+        loss_fn: torch.nn.Module,
         ens_comm_subgroup_size: int,
         ens_comm_subgroup: ProcessGroup,
         model_comm_group: ProcessGroup,
@@ -166,7 +166,7 @@ class GraphEnsForecaster(BaseGraphModule):
                 Predicted state tensor, calculated on self.device
             y: torch.Tensor
                 Ground truth
-            loss: torch.nn.Module
+            loss_fn: torch.nn.Module
                 Loss function
             ens_comm_group_size: int
                 Size of the ensemble communication group
@@ -198,25 +198,15 @@ class GraphEnsForecaster(BaseGraphModule):
             "grid_shard_shapes": self.grid_shard_shapes,
         }
 
-        loss.forward(
+        loss = loss_fn(
             y_pred_ens,
             y,
-            squash=False,
+            squash=True,  # ignores by multi scale loss wrapper?
             grid_shard_slice=self.grid_shard_slice,
-            model_comm_group=model_comm_group,
+            group=model_comm_group,  # kcrps uses group
+            model_comm_group=model_comm_group,  # multi scale loss wrapper uses model_comm_group
             **kwargs,
         )
-
-        loss = loss(
-            y_pred_ens,
-            y,
-            squash=False,
-            grid_shard_slice=self.grid_shard_slice,
-            model_comm_group=model_comm_group,
-            **kwargs,
-        )
-
-        #########
 
         return loss, y_pred_ens if return_pred_ens else None
 
@@ -359,7 +349,8 @@ class GraphEnsForecaster(BaseGraphModule):
                     rollout_step,
                     grid_shard_slice=self.grid_shard_slice,
                 )
-            yield loss, self.loss.mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
+            mloss = self.loss.mloss if hasattr(self.loss, "mloss") else None
+            yield loss, mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
                 x if validation_mode else None
             )
 
@@ -503,17 +494,18 @@ class GraphEnsForecaster(BaseGraphModule):
             sync_dist=True,
         )
 
-        for i, loss_scale in enumerate(val_mloss):
-            self.log(
-                f"val_{self.loss.name}_scale{i}",
-                loss_scale,
-                on_epoch=True,
-                on_step=True,
-                prog_bar=True,
-                logger=self.logger_enabled,
-                batch_size=batch[0].shape[0],
-                sync_dist=True,
-            )
+        if val_mloss is not None:
+            for i, loss_scale in enumerate(val_mloss):
+                self.log(
+                    f"val_{self.loss.name}_scale{i}",
+                    loss_scale,
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=True,
+                    logger=self.logger_enabled,
+                    batch_size=batch[0].shape[0],
+                    sync_dist=True,
+                )
 
         for mname, mvalue in metrics.items():
             self.log(
