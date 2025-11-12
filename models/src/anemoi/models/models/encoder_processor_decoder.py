@@ -22,6 +22,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.layers.graph_providers import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
@@ -65,7 +66,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Encoder data -> hidden
         self.encoder = torch.nn.ModuleDict()
+        self.encoder_graph_provider = torch.nn.ModuleDict()
+
         for dataset_name in self._graph_data.keys():
+
+            # Create graph providers
+            self.encoder_graph_provider[dataset_name] = create_graph_provider(
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
+                sub_graph_edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                edge_dim=model_config.model.encoder.get("edge_dim"),
+            )
+
             self.encoder[dataset_name] = instantiate(
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -75,25 +89,43 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
                 src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
                 dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
 
         # Processor hidden -> hidden (shared across all datasets)
         first_dataset_name = next(iter(self._graph_data.keys()))
-        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
-        processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
+
+        # Processor hidden -> hidden
+        self.processor_graph_provider = create_graph_provider(
+            sub_graph=self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            sub_graph_edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_grid_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            edge_dim=model_config.model.processor.get("edge_dim"),
+        )
 
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=processor_graph,
-            src_grid_size=processor_grid_size,
-            dst_grid_size=processor_grid_size,
+            edge_dim=self.processor_graph_provider.edge_dim,
         )
 
         # Decoder hidden -> data
         self.decoder = torch.nn.ModuleDict()
+        self.decoder_graph_provider = torch.nn.ModuleDict()
+
         for dataset_name in self._graph_data.keys():
+            self.decoder_graph_provider[dataset_name] = create_graph_provider(
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                sub_graph_edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                edge_dim=model_config.model.decoder.get("edge_dim"),
+            )
+
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -104,55 +136,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 sub_graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
                 src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
                 dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
-
-    def _make_truncation_matrix(self, A, data_type=torch.float32):
-        A_ = torch.sparse_coo_tensor(
-            torch.tensor(np.vstack(A.nonzero()), dtype=torch.long),
-            torch.tensor(A.data, dtype=data_type),
-            size=A.shape,
-        ).coalesce()
-        return A_
-
-    def _multiply_sparse(self, x, A):
-        return torch.sparse.mm(A, x)
-
-    def _truncate_fields(self, x, A, batch_size=None, auto_cast=False):
-        if not batch_size:
-            batch_size = x.shape[0]
-        out = []
-        with torch.amp.autocast(device_type="cuda", enabled=auto_cast):
-            for i in range(batch_size):
-                out.append(self._multiply_sparse(x[i, ...], A))
-        return torch.stack(out)
-
-    def _get_shard_shapes(self, x, dim=0, shard_shapes_dim=None, model_comm_group=None):
-        if shard_shapes_dim is None:
-            return get_shard_shapes(x, dim, model_comm_group)
-        else:
-            return apply_shard_shapes(x, dim, shard_shapes_dim)
-
-    def _apply_truncation(self, x, grid_shard_shapes=None, model_comm_group=None):
-        if self.A_down is not None or self.A_up is not None:
-            if grid_shard_shapes is not None:
-                shard_shapes = self._get_shard_shapes(x, -2, grid_shard_shapes, model_comm_group)
-                # grid-sharded input: reshard to channel-shards to apply truncation
-                x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
-
-            # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
-            # hence we check that they are on the correct device ; copy should only happen in the first forward run
-            if self.A_down is not None:
-                self.A_down = self.A_down.to(x.device)
-                x = self._truncate_fields(x, self.A_down)  # to coarse resolution
-            if self.A_up is not None:
-                self.A_up = self.A_up.to(x.device)
-                x = self._truncate_fields(x, self.A_up)  # back to high resolution
-
-            if grid_shard_shapes is not None:
-                # back to grid-sharding as before
-                x = gather_channels(x, shard_shapes, model_comm_group)
-
-        return x
 
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         x_skip = x[:, -1, ...]
@@ -298,6 +283,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_data_dict[dataset_name], shard_shapes_hidden_dict[dataset_name]),
                 model_comm_group=model_comm_group,
+                graph_provider=self.encoder_graph_provider[dataset_name],
                 x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
                 x_dst_is_sharded=False,  # x_latent does not come sharded
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
@@ -316,6 +302,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_for_processor,
+            graph_provider=self.processor_graph_provider,
             model_comm_group=model_comm_group,
         )
 
@@ -330,6 +317,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hidden_dict[dataset_name], shard_shapes_data_dict[dataset_name]),
+                graph_provider=self.decoder_graph_provider[dataset_name],
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,  # x_latent always comes sharded
                 x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
@@ -342,69 +330,69 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         return x_out_dict
 
-    def predict_step(
-        self,
-        batch: torch.Tensor,
-        pre_processors: nn.Module,
-        post_processors: nn.Module,
-        multi_step: int,
-        model_comm_group: Optional[ProcessGroup] = None,
-        gather_out: bool = True,
-        **kwargs,
-    ) -> Tensor:
-        """Prediction step for the model.
+    # def predict_step(
+    #     self,
+    #     batch: torch.Tensor,
+    #     pre_processors: nn.Module,
+    #     post_processors: nn.Module,
+    #     multi_step: int,
+    #     model_comm_group: Optional[ProcessGroup] = None,
+    #     gather_out: bool = True,
+    #     **kwargs,
+    # ) -> Tensor:
+    #     """Prediction step for the model.
 
-        Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
-        Subclasses can override this for different behavior (e.g., sampling for diffusion models).
+    #     Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
+    #     Subclasses can override this for different behavior (e.g., sampling for diffusion models).
 
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Input batched data (before pre-processing)
-        pre_processors : nn.Module,
-            Pre-processing module
-        post_processors : nn.Module,
-            Post-processing module
-        multi_step : int,
-            Number of input timesteps
-        model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
-        gather_out : bool
-            Whether to gather output tensors across distributed processes
-        **kwargs
-            Additional arguments
+    #     Parameters
+    #     ----------
+    #     batch : torch.Tensor
+    #         Input batched data (before pre-processing)
+    #     pre_processors : nn.Module,
+    #         Pre-processing module
+    #     post_processors : nn.Module,
+    #         Post-processing module
+    #     multi_step : int,
+    #         Number of input timesteps
+    #     model_comm_group : Optional[ProcessGroup]
+    #         Process group for distributed training
+    #     gather_out : bool
+    #         Whether to gather output tensors across distributed processes
+    #     **kwargs
+    #         Additional arguments
 
-        Returns
-        -------
-        Tensor
-            Model output (after post-processing)
-        """
-        with torch.no_grad():
+    #     Returns
+    #     -------
+    #     Tensor
+    #         Model output (after post-processing)
+    #     """
+    #     with torch.no_grad():
 
-            assert (
-                len(batch.shape) == 4
-            ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
-            # Dimensions are
-            # batch, timesteps, grid, variables
-            x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
+    #         assert (
+    #             len(batch.shape) == 4
+    #         ), f"The input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch.shape}!"
+    #         # Dimensions are
+    #         # batch, timesteps, grid, variables
+    #         x = batch[:, 0:multi_step, None, ...]  # add dummy ensemble dimension as 3rd index
 
-            # Handle distributed processing
-            grid_shard_shapes = None
-            if model_comm_group is not None:
-                shard_shapes = get_shard_shapes(x, -2, model_comm_group)
-                grid_shard_shapes = [shape[-2] for shape in shard_shapes]
-                x = shard_tensor(x, -2, shard_shapes, model_comm_group)
+    #         # Handle distributed processing
+    #         grid_shard_shapes = None
+    #         if model_comm_group is not None:
+    #             shard_shapes = get_shard_shapes(x, -2, model_comm_group)
+    #             grid_shard_shapes = [shape[-2] for shape in shard_shapes]
+    #             x = shard_tensor(x, -2, shard_shapes, model_comm_group)
 
-            x = pre_processors(x, in_place=False)
+    #         x = pre_processors(x, in_place=False)
 
-            # Perform forward pass
-            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
+    #         # Perform forward pass
+    #         y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
 
-            # Apply post-processing
-            y_hat = post_processors(y_hat, in_place=False)
+    #         # Apply post-processing
+    #         y_hat = post_processors(y_hat, in_place=False)
 
-            # Gather output if needed
-            if gather_out and model_comm_group is not None:
-                y_hat = gather_tensor(y_hat, -2, apply_shard_shapes(y_hat, -2, grid_shard_shapes), model_comm_group)
+    #         # Gather output if needed
+    #         if gather_out and model_comm_group is not None:
+    #             y_hat = gather_tensor(y_hat, -2, apply_shard_shapes(y_hat, -2, grid_shard_shapes), model_comm_group)
 
-        return y_hat
+    #     return y_hat
