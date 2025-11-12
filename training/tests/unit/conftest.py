@@ -20,14 +20,14 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 @pytest.fixture
 def config(request: SubRequest) -> DictConfig:
     overrides = request.param
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config"):
         # config is relative to a module
         return compose(config_name="debug", overrides=overrides)
 
 
 @pytest.fixture
 def datamodule() -> AnemoiDatasetsDataModule:
-    with initialize(version_base=None, config_path="../src/anemoi/training/config"):
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config"):
         # config is relative to a module
         cfg = compose(config_name="config")
     return AnemoiDatasetsDataModule(cfg)
