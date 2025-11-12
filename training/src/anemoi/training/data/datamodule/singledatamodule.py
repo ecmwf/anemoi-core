@@ -175,7 +175,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> NativeGridDataset:
         return self._get_dataset(
-            open_dataset(self.config.dataloader.training),
+            open_dataset(
+                self.config.dataloader.training,
+                # skip_missing_dates=True,
+                # expected_access=slice(0, 3),
+            ),
             label="train",
         )
 
