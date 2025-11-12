@@ -1,0 +1,84 @@
+# ----------------------------------------
+# Sample provider config
+# ----------------------------------------
+frequency: 3h
+
+groups:
+  # MSG SEVIRI O256
+  msg_combined_seviri_o256:
+    variables: ['cos_latitude', 'rawbt_4', 'rawbt_5']
+      # diagnostics: null
+    dimensions: [["offsets"], "values", "variables"]
+    #offsets: ["0h"]
+    offsets:
+      input: ["-3h", "+0h"]
+      target: ["+3h"]
+    # extra_configs:
+    #   more_config: {}
+
+  # NPP ATMS
+  npp_atms_unthinned_native:
+    variables:
+      - cos_latitude
+      - sin_latitude
+    dimensions: [["offsets"], "values", "variables"]
+    offsets:
+      input: ["-3h", "+0h"]
+      target: ["+3h"]
+    extra_configs:
+      more_config: {}
+
+  # Aeolus ALADIN MIE
+  aeolus_aladin_mie:
+    variables:
+      - cos_latitude
+      - sin_latitude
+    dimensions: [["offsets"], "values", "variables"]
+    offsets:
+      input: ["-3h", "+0h"]
+      target: ["+3h"]
+    extra_configs:
+      more_config: {}
+
+  # MSLP + IBTrACS combined
+  combined_pmsl_ibtracs:
+    variables:
+      forcings: ["cos_latitude"]
+      prognostics: ["pmsl_0"]
+    dimensions: [["offsets"], "values", "variables"]
+    offsets:
+      input: ["-3h", "+0h"]
+      target: ["+3h"]
+    # extra_configs:
+    #   more_config: {}
+
+data_handler:
+  training:
+      start: 2010-01-01
+      end: 2020-12-31
+  validation:
+      start: 2021-01-01
+      end: 2021-12-31
+  search_path: null
+  sources:
+      - dataset:
+          dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
+          frequency: 3h
+        data_group: msg_combined_seviri_o256
+
+      - dataset:
+          dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
+          frequency: 3h
+        data_group: npp_atms_unthinned_native
+
+      - dataset:
+          dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
+          frequency: 3h
+        data_group: combined_pmsl_ibtracs
+
+      - dataset:
+          dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
+          frequency: 3h
+        data_group: aeolus_aladin_mie
+
+aliases: "is ignored"
