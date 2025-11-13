@@ -8,11 +8,28 @@
 # nor does it submit to any jurisdiction.
 
 
+import time
+
 import yaml
 
 from anemoi.models.data_structure import build_sample_provider
 
-# logging.basicConfig(level="DEBUG")
+
+def wrapped_build_sample_provider(*args, **kwargs):
+    print("start building SampleProvider")
+    t_start = time.time()
+    sp = build_sample_provider(*args, **kwargs)
+    t_elapsed = time.time() - t_start
+    print(f"SampleProvider built in {t_elapsed:.3f} seconds")
+    return sp
+
+
+def wrapped_getitem(sample_provider, index):
+    t_start = time.time()
+    sample = sample_provider[index]
+    t_elapsed = time.time() - t_start
+    print(f"Sample at index {index} retrieved in {t_elapsed:.3f} seconds")
+    return sample
 
 
 def test_gridded():
@@ -129,17 +146,19 @@ def test_gridded():
                """
     )
 
-    sp = build_sample_provider(config_sample_provider["sample_provider"], kind="training")
+    sp = wrapped_build_sample_provider(config_sample_provider["sample_provider"], kind="training")
 
     print(sp)
     print("************************")
     for key, value in sp.static.items():
-        print(f"-> Static for {key}: {value}")
+        print(f"GRIDDED -> Static for {key}: {value}")
     print("************************")
-    i = 0
-    sample = sp[i]
-    for key, value in sample.items():
-        print(f"-> Sample data at [{i}] for {key}: {value}")
+
+    for i in [0, 2]:
+        sample = wrapped_getitem(sp, i)
+
+        for key, value in sample.items():
+            print(f"GRIDDED -> Sample data at [{i}] for {key}: {value}")
 
 
 def test_observations():
@@ -184,7 +203,7 @@ def test_observations():
            """
     )["sample_provider"]
 
-    sp = build_sample_provider(cfg, kind="training")
+    sp = wrapped_build_sample_provider(cfg, kind="training")
     print("datahandler", sp.context.data_handler)
 
     print(len(sp))
@@ -192,29 +211,31 @@ def test_observations():
     print(sp)
     print("************************")
     for key, value in sp.static.items():
-        print(f"-> Static for {key}: {value}")
+        print(f"OBS -> Static for {key}: {value}")
     print("************************")
     i = 0
-    for key, value in sp[i].items():
-        print(f"-> Sample data at [{i}] for {key}: {value}")
+    sample = wrapped_getitem(sp, i)
+    for key, value in sample.items():
+        print(f"OBS -> Sample data at [{i}] for {key}: {value}")
 
 
 def test_dop():
     with open("dop_sample_provider.yaml", "r") as f:
         cfg = yaml.safe_load(f)
 
-    sp = build_sample_provider(cfg, kind="training")
+    sp = wrapped_build_sample_provider(cfg, kind="training")
 
     print(len(sp))
 
     print(sp)
     print("************************")
     for key, value in sp.static.items():
-        print(f"-> Static for {key}: {value}")
+        print(f"DOP -> Static for {key}: {value}")
     print("************************")
     i = 0
-    for key, value in sp[i].items():
-        print(f"-> Sample data at [{i}] for {key}: {value}")
+    sample = wrapped_getitem(sp, i)
+    for key, value in sample.items():
+        print(f"DOP -> Sample data at [{i}] for {key}: {value}")
 
     training = build_sample_provider(cfg, kind="training")
     validation = build_sample_provider(cfg, kind="validation")

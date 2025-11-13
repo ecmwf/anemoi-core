@@ -10,8 +10,6 @@
 import datetime
 import logging
 import warnings
-from abc import ABC
-from abc import abstractmethod
 from functools import cached_property
 from typing import Any
 from typing import List
@@ -50,15 +48,15 @@ def search_and_open_dataset(dataset, start, end, search_path):
 
 
 class ReadPattern:
-    def __init__(self, data_handler, container, group: str, variables, add_to_i, multiply_i):
+    def __init__(self, registry, container, group: str, variables, add_to_i, multiply_i):
         self.container = container
         self.group = group
         self.variables = variables
         self.add_to_i = add_to_i
         self.multiply_i = multiply_i
-        self.data_handler = data_handler.find_data_handler(group)
+        self.registry = registry.data_handlers[group]
 
-        self._ds = self.data_handler.select(group, variables)
+        self._ds = self.registry.select(group, variables)
 
     def __call__(self, i) -> DynamicDataDict:
         j = i * self.multiply_i + self.add_to_i
@@ -68,66 +66,7 @@ class ReadPattern:
         return f"ReadPattern({self.group=}, {self.variables=}, {self.add_to_i}, {self.multiply_i})"
 
 
-class DataHandler(ABC):
-    """Provides data from multiple datasets, groups.
-    The data handler is used by the sample provider.
-
-    The data handler keeps track of the data access patterns from the sample providers
-    and provide a unified view of the data. This allows optimising data access.
-
-    Data handlers should not be instantiated directly, but through the build function.
-    """
-
-    def __init__(self, **kwargs):
-        self._read_pattern: dict[Any, ReadPattern] = {}
-        self._loaded_data: dict = {}
-
-    @abstractmethod
-    def static(self, group: str) -> StaticDataDict:
-        pass
-
-    # @abstractmethod
-    def __getitem__(self, *args, group: str) -> DynamicDataDict:
-        pass
-
-    @abstractmethod
-    def dates_block(self, group: str) -> _DatesBlock:
-        pass
-
-    def register_read_pattern(self, container, group: str, /, variables, add_to_i, multiply_i):
-        self._read_pattern[container] = ReadPattern(
-            data_handler=self,
-            container=container,
-            group=group,
-            variables=variables,
-            add_to_i=add_to_i,
-            multiply_i=multiply_i,
-        )
-
-    def grouped_read(self, *index):
-        """Context manager to group read patterns in one call."""
-        data = {}
-        for c in self._read_pattern:
-            kwargs = self._read_pattern[c](*index)
-            data[c] = self.dynamic(**kwargs)
-        return data
-
-    def get_item(self, container, data) -> DynamicDataDict:
-        return data[container]
-
-    @abstractmethod
-    def _tree(self, prefix=""):
-        pass
-
-    def __repr__(self):
-        console = Console(record=True)
-        tree = self._tree()
-        with console.capture() as capture:
-            console.print(tree, overflow="ellipsis")
-        return capture.get()
-
-
-class OneDatasetDataHandler(DataHandler):
+class DataHandler:
     """Provide access to data for one dataset. A gridded dataset."""
 
     def __init__(
@@ -139,7 +78,6 @@ class OneDatasetDataHandler(DataHandler):
         search_path: str | None = None,
         extra_configs: dict | None = None,
     ):
-        super().__init__()
         if extra_configs is None:
             extra_configs = {}
 
@@ -169,7 +107,7 @@ class OneDatasetDataHandler(DataHandler):
         return _DatesBlock(self._ds.start_date, self._ds.end_date, self._ds.frequency, missing)
 
     @cached_property
-    def _ds(self) -> object:  # returns a gridded anemoi-datasets object
+    def _ds(self) -> object:
         return search_and_open_dataset(self._dataset, start=self.start, end=self.end, search_path=self._search_path)
 
     def __repr__(self):
@@ -177,7 +115,14 @@ class OneDatasetDataHandler(DataHandler):
             extra = ", ".join(f"{k}={v}" for k, v in self.extra_configs.items())
         else:
             extra = extra.__class__.__name__ + " " + str(self.extra_configs)[:10]
-        return f"{super().__repr__()}(dataset={self._dataset}, extra_configs={self.extra_configs})"
+        return f"{super().rich_repr()}(dataset={self._dataset}, extra_configs={self.extra_configs})"
+
+    def rich_repr(self):
+        console = Console(record=True)
+        tree = self._tree()
+        with console.capture() as capture:
+            console.print(tree, overflow="ellipsis")
+        return capture.get()
 
     def _tree(self, prefix=""):
         tree = _RichTree(prefix if prefix else "")
@@ -192,11 +137,11 @@ class OneDatasetDataHandler(DataHandler):
         return tree
 
 
-class GriddedDatasetDataHandler(OneDatasetDataHandler):
+class GriddedDatasetDataHandler(DataHandler):
 
     def select(self, group: str, variables: List[str]):
         assert group in self.groups, (group, self.groups)
-        return open_dataset(self._ds, select=variables)
+        return open_dataset(self._ds, select=variables)  # start and end are already applied in self._ds
 
     def static(self, group: str, variables: List[str]) -> StaticDataDict:
         ds = self.select(group, variables)
@@ -224,18 +169,14 @@ class GriddedDatasetDataHandler(OneDatasetDataHandler):
         )
 
 
-class RecordsDataHandler(OneDatasetDataHandler):
+class RecordsDataHandler(DataHandler):
     def select(self, group: str, variables: List[str]):
         assert group in self.groups, (group, self.groups)
 
+        variables = [f"{group}.{v}" for v in variables]
         if isinstance(self._dataset, dict):
-            ds = open_dataset(
-                **self._dataset, select=[f"{group}.{v}" for v in variables], start=self.start, end=self.end
-            )
-        else:
-            ds = open_dataset(self._dataset, select=[f"{group}.{v}" for v in variables], start=self.start, end=self.end)
-
-        return ds
+            return open_dataset(**self._dataset, select=variables, start=self.start, end=self.end)
+        return open_dataset(self._dataset, select=variables, start=self.start, end=self.end)
 
     def static(self, group: str, variables: List[str]) -> StaticDataDict:
         ds = self.select(group, variables)
@@ -265,69 +206,91 @@ class RecordsDataHandler(OneDatasetDataHandler):
         )
 
 
-class MultiDatasetDataHandler(DataHandler):
+class Registry:
     """Uses several datahandles to provide access to multiple groups"""
 
-    def __init__(self, *data_handlers):
-        super().__init__()
-        self._data_handlers = data_handlers
-        self.groups = [g for dh in data_handlers for g in dh.groups]
+    def __init__(self, sources, start=None, end=None, search_path=None):
+        data_handlers = []
+
+        for cfg in sources:
+            # if not defined in cfg, use the provided global search_path, start, end
+            cfg["search_path"] = cfg.get("search_path", search_path)
+            cfg["start"] = cfg.get("start", start)
+            cfg["end"] = cfg.get("end", end)
+            if "dataset" not in cfg:
+                raise ValueError("Each source in registry config must contain a 'dataset' key")
+
+            def find_class(name: str):
+                # For now, just check for known dataset types
+                # but anemoi-datasets should provide a way to get the right class
+                # such as ds.is_gridded or ds.is_grouped
+                ds = search_and_open_dataset(name, start=cfg["start"], end=cfg["end"], search_path=cfg["search_path"])
+                from anemoi.datasets.use.tabular.records import BaseRecordsDataset
+
+                if isinstance(ds, BaseRecordsDataset):
+                    return RecordsDataHandler
+                return GriddedDatasetDataHandler
+
+            try:
+                cls = find_class(cfg["dataset"])
+                dh = cls(**cfg)
+                data_handlers.append(dh)
+            except Exception as e:
+                warnings.warn(f"Failed to create data handler for {cfg['dataset']}: {e}")
+
+        self._read_pattern: dict[Any, ReadPattern] = {}
+
+        self.data_handlers = {}
+        for dh in data_handlers:
+            for g in dh.groups:
+                if g in self.data_handlers:
+                    raise KeyError(f"Duplicate group '{g}' found in data handlers")
+                self.data_handlers[g] = dh
 
     def static(self, group, variables: List[str]) -> StaticDataDict:
-        return self.find_data_handler(group).static(group, variables)
+        return self.data_handlers[group].static(group, variables)
 
     def dynamic(self, /, group, **kwargs) -> DynamicDataDict:
-        return self.find_data_handler(group).dynamic(group=group, **kwargs)
+        return self.data_handlers[group].dynamic(group=group, **kwargs)
 
     def dates_block(self, group):
-        return self.find_data_handler(group).dates_block(group)
+        return self.data_handlers[group].dates_block(group)
 
-    def find_data_handler(self, group):
-        for dh in self._data_handlers:
-            if group in dh.groups:
-                return dh
-        LOGGER.error(f"Available groups: {self._data_handlers}")
-        raise KeyError(f"group '{group}' not found")
+    def get_item(self, container, data):
+        return data[container]
+
+    def register_read_pattern(self, container, group: str, /, variables, add_to_i, multiply_i):
+        self._read_pattern[container] = ReadPattern(
+            registry=self,
+            container=container,
+            group=group,
+            variables=variables,
+            add_to_i=add_to_i,
+            multiply_i=multiply_i,
+        )
+
+    def grouped_read(self, *index):
+        """Context manager to group read patterns in one call."""
+        data = {}
+        for c in self._read_pattern:
+            kwargs = self._read_pattern[c](*index)
+            data[c] = self.dynamic(**kwargs)
+        return data
 
     def _tree(self, prefix=""):
         # for pretty printing of dicts
         name = prefix if prefix else ""
         tree = _RichTree(name)
-        for i, dh in enumerate(self._data_handlers):
-            tree.add(dh._tree(prefix=f"{i}"))
+        for group, dh in self.data_handlers.items():
+            tree.add(dh._tree(prefix=f"{group}"))
         return tree
 
-
-def _data_handler_factory(sources: dict, start, end, search_path) -> DataHandler:
-    data_handlers = []
-
-    for cfg in sources:
-        # if not defined in cfg, use the provided global search_path, start, end
-        cfg["search_path"] = cfg.get("search_path", search_path)
-        cfg["start"] = cfg.get("start", start)
-        cfg["end"] = cfg.get("end", end)
-        if "dataset" not in cfg:
-            raise ValueError("Each source in data_handler config must contain a 'dataset' key")
-
-        def find_class(name: str):
-            # For now, just check for known dataset types
-            # but anemoi-datasets should provide a way to get the right class
-            # such as ds.is_gridded or ds.is_grouped
-            ds = search_and_open_dataset(name, start=cfg["start"], end=cfg["end"], search_path=cfg["search_path"])
-            from anemoi.datasets.data.records import BaseRecordsDataset
-
-            if isinstance(ds, BaseRecordsDataset):
-                return RecordsDataHandler
-            return GriddedDatasetDataHandler
-
-        try:
-            cls = find_class(cfg["dataset"])
-            dh = cls(**cfg)
-            data_handlers.append(dh)
-        except Exception as e:
-            warnings.warn(f"Failed to create data handler for {cfg['dataset']}: {e}")
-
-    return MultiDatasetDataHandler(*data_handlers)
+    def __repr__(self):
+        console = Console(record=True)
+        tree = self._tree()
+        with console.capture() as capture:
+            console.print(tree, overflow="ellipsis")
+        return capture.get()
 
 
 def build_data_handler(config: dict, /, kind: str | None) -> DataHandler:
@@ -353,7 +316,7 @@ def build_data_handler(config: dict, /, kind: str | None) -> DataHandler:
                 LOGGER.debug(f"Overriding config.{k} with config.{kind}.{k}")
             config[k] = v
 
-    dh = _data_handler_factory(config["sources"], config.get("start"), config.get("end"), config.get("search_path"))
+    dh = Registry(config["sources"], config.get("start"), config.get("end"), config.get("search_path"))
 
     dh._initial_config = initial_config
     return dh
