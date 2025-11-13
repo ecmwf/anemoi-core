@@ -3,7 +3,7 @@ overwrite: True
 
 data: "data"
 hidden: "hidden"
-truncation: null
+truncation: "int"
 
 nodes:
   # Data nodes
