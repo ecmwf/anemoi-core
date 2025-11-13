@@ -175,7 +175,10 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
     compute(self, graph, nodes_name)
         Compute the attribute for each node.
     """
+
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        assert nodes["node_type"] in ["StretchedTriNodes"], f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."
+        assert nodes["node_type"] in [
+            "StretchedTriNodes"
+        ], f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."
         lam_mask = nodes["_area_mask_builder"].get_mask(nodes.x)
         return torch.from_numpy(lam_mask)
