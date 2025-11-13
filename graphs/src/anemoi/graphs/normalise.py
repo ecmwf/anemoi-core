@@ -125,4 +125,4 @@ class NormaliserMixin:
         if self.norm == "unit-range":
             values = values - statistics[0]
 
-        return values / statistics[0]
+        return values / statistics[-1]
