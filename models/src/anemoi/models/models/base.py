@@ -59,7 +59,6 @@ class BaseGraphModel(nn.Module):
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
         self._graph_name_hidden = model_config.graph.hidden
-        self._graph_name_truncation = model_config.graph.truncation
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
