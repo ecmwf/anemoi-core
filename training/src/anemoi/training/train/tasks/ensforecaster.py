@@ -267,4 +267,4 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                     rollout_step,
                     grid_shard_slice=self.grid_shard_slice,
                 )
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
+            yield loss, metrics_next, y_pred_ens_group if validation_mode else []
