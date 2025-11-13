@@ -234,7 +234,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-            y_pred = self(x, rollout_step)
+            y_pred = self(x, fcstep=rollout_step)
             y = batch[
                 :,
                 self.multi_step + rollout_step,
