@@ -371,6 +371,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerProcessor.
@@ -404,6 +405,8 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
         super().__init__(
             num_channels=num_channels,
@@ -428,6 +431,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             qk_norm=qk_norm,
             edge_dim=self.edge_dim,
+            backend=backend,
         )
 
         self.offload_layers(cpu_offload)

@@ -26,11 +26,13 @@ from torch_geometric.typing import Size
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
 from anemoi.models.distributed.transformer import shard_heads
 from anemoi.models.distributed.transformer import shard_sequence
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
+from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.triton.gt import GraphTransformerFunction
 from anemoi.models.triton.utils import edge_index_to_csc
@@ -430,6 +432,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         qk_norm: bool = False,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
+        backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -489,6 +492,19 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Linear(hidden_dim, out_channels),
         )
 
+        self.backend = backend
+        assert self.backend in [
+            "triton",
+            "pyg",
+        ], f"Backend {self.backend} not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
+
+        if self.backend == "triton":
+            LOGGER.info(f"{self.__class__.__name__} using triton backend.")
+            self.conv = GraphTransformerFunction
+        else:
+            LOGGER.warning(f"{self.__class__.__name__} using pyg backend, consider using triton backend.")
+            self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
 
@@ -545,6 +561,25 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         return query, key, value, edges
 
+    def apply_gt(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        size: Union[int, tuple[int, int]],
+    ) -> Tensor:
+        # self.conv requires size to be a tuple
+        conv_size = (size, size) if isinstance(size, int) else size
+
+        if self.backend == "triton":
+            csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
+            edges_csc = edges.index_select(0, perm)
+            return self.conv.apply(query, key, value, edges_csc, csc, reverse)
+        else:
+            return self.conv(query, key, value, edges, edge_index, size=conv_size)
+
     def attention_block(
         self,
         query: Tensor,
@@ -555,22 +590,21 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         size: Union[int, tuple[int, int]],
         num_chunks: int,
     ) -> Tensor:
-        # self.conv requires size to be a tuple
-        conv_size = (size, size) if isinstance(size, int) else size
+        # split 1-hop edges into chunks, compute self.conv chunk-wise
+        if num_chunks > 1:
+            edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
+                num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
+            )
+            # shape: (num_nodes, num_heads, out_channels_conv)
+            out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
+            for i in range(num_chunks):
+                out += self.apply_gt(
+                    query=query, key=key, value=value, edges=edge_attr_list[i], edge_index=edge_index_list[i], size=size
+                )
+        else:
+            out = self.apply_gt(query=query, key=key, value=value, edges=edges, edge_index=edge_index, size=size)
 
-        # TODO(Jan): precompute graph conversions and chunking operations (separate PR)
-        csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
-
-        edges_csc = edges.index_select(0, perm)
-
-        return GraphTransformerFunction.apply(
-            query,
-            key,
-            value,
-            edges_csc,
-            csc,
-            reverse,
-        )
+        return out
 
     def shard_output_seq(
         self,
@@ -618,6 +652,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
+        backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -645,6 +680,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Defined in config/models/<model>.yaml
         shard_strategy: str, by default "edges"
             Strategy to shard tensors
+        backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
 
         super().__init__(
@@ -776,6 +813,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         qk_norm: bool = False,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
+        backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -801,6 +839,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
 
         super().__init__(
@@ -814,6 +854,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             qk_norm=qk_norm,
             num_chunks=num_chunks,
             update_src_nodes=update_src_nodes,
+            backend=backend,
             **kwargs,
         )
 

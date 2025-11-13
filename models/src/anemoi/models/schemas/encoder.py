@@ -38,7 +38,7 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"shard_strategy": str}
+        allowed_extras = {"shard_strategy": str, "backend": str}
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:

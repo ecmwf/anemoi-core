@@ -43,6 +43,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: True # Transformer and GraphTransformer only
   cpu_offload: ${model.cpu_offload}
+  backend: "triton"
   layer_kernels:
     LayerNorm:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
@@ -73,6 +74,7 @@ encoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
+  backend: "triton"
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -86,6 +88,7 @@ decoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
+  backend: "triton"
 
 trainable_parameters:
   data: 8

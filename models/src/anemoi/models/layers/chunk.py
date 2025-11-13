@@ -264,6 +264,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
         mlp_hidden_ratio: int = 4,
         qk_norm: bool = False,
         edge_dim: Optional[int] = None,
+        backend: str = "triton",
     ) -> None:
         """Initialize GraphTransformerProcessorChunk.
 
@@ -284,6 +285,8 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             Normalize query and key, by default False
         edge_dim: int, by default None
             Embed edges with input dimension edge_dim
+        backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
         super().__init__(num_channels=num_channels, num_layers=num_layers)
 
@@ -297,6 +300,7 @@ class GraphTransformerProcessorChunk(BaseProcessorChunk):
             edge_dim=edge_dim,
             layer_kernels=layer_kernels,
             qk_norm=qk_norm,
+            backend=backend,
         )
 
     def forward(
