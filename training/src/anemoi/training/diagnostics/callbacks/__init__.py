@@ -25,6 +25,7 @@ from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAver
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.utils.callbacks import PlotCallbacksHook
 from anemoi.training.utils.checkpoint import RegisterMigrations
 
 LOGGER = logging.getLogger(__name__)
@@ -137,21 +138,6 @@ def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
             callbacks.append(callback_list(config))
 
     return callbacks
-
-
-class PlotCallbacksHook:
-    plotloss = False
-    plotadditionalmetrics = False
-
-    @classmethod
-    def initialize_from_config(cls: "PlotCallbacksHook", config: DictConfig, trainer_callbacks: []) -> None:
-        for callback in config.diagnostics.plot.callbacks:
-            if "PlotLoss" in callback:
-                cls.plotLoss = True
-            if any(name in str(callback) for name in ["PlotSpectrum", "PlotSample", "PlotHistogram"]):
-                cls.plotAdditionalMetrics = True
-
-            trainer_callbacks.extend(instantiate(callback, config))
 
 
 def get_callbacks(config: DictConfig) -> list[Callback]:

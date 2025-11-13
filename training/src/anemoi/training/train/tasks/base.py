@@ -26,7 +26,6 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
-from anemoi.training.diagnostics.plots import PlotCallbacksHook
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -36,6 +35,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.utils.callbacks import PlotCallbacksHook
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
