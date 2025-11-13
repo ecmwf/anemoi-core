@@ -4,12 +4,12 @@ from typing import Optional
 import einops
 import torch
 from torch import nn
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.sparse_projector import build_sparse_projector
-from torch_geometric.data import HeteroData
 
 
 class BaseResidualConnection(nn.Module):
@@ -25,7 +25,7 @@ class BaseResidualConnection(nn.Module):
     @abstractmethod
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """Define the residual connection operation.
-        
+
         Should be overridden by subclasses.
         """
         pass
@@ -166,15 +166,17 @@ class TruncatedConnection(nn.Module):
         if not are_files_specified:
             assert graph is not None, "graph must be provided if file paths are not specified."
             assert data_nodes is not None, "data nodes name must be provided if file paths are not specified."
-            assert truncation_nodes is not None, "truncation nodes name must be provided if file paths are not specified."
+            assert (
+                truncation_nodes is not None
+            ), "truncation nodes name must be provided if file paths are not specified."
             up_edges = (truncation_nodes, "to", data_nodes)
             down_edges = (data_nodes, "to", truncation_nodes)
             assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."
             assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."
         else:
-            assert data_nodes is None or truncation_nodes is None or edge_weight_attribute is None, (
-                "If file paths are specified, node and attribute names should not be provided."
-            )
+            assert (
+                data_nodes is None or truncation_nodes is None or edge_weight_attribute is None
+            ), "If file paths are specified, node and attribute names should not be provided."
             up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 
