@@ -1,0 +1,106 @@
+---
+defaults:
+  - plot: simple
+  - benchmark_profiler: simple
+
+# another alternative if you don't have any callbacks is to remove it from the
+# defaults list and just use
+callbacks:
+  - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEvalEns
+    rollout: ${dataloader.validation_rollout}
+    every_n_batches: 4
+
+plot:
+  callbacks:
+    # Add plot callbacks here.
+    - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample
+      sample_idx: ${diagnostics.plot.sample_idx}
+      per_sample : 2
+      parameters: ${diagnostics.plot.parameters}
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+      #Defining the accumulation levels for precipitation related fields and the colormap
+      accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+      members: null  # None for all members, list for specific members
+
+    # Deterministic callbacks are also overloaded.
+    - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss
+      # group parameters by categories when visualizing contributions to the loss
+      # one-parameter groups are possible to highlight individual parameters
+      parameter_groups:
+        moisture: [tp, cp, tcw]
+        sfc_wind: [10u, 10v]
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+    - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum
+      sample_idx: ${diagnostics.plot.sample_idx}
+      parameters: ${diagnostics.plot.parameters}
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+    - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram
+      sample_idx: ${diagnostics.plot.sample_idx}
+      parameters: ${diagnostics.plot.parameters}
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+      precip_and_related_fields: ["tp", "cp"] # Optional: specify precip fields for special histogram treatment
+    - _target_: anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot
+      every_n_epochs: ${diagnostics.plot.frequency.epoch}
+
+    # Overloaded PlotSample will return the plots for the first ensemble member
+    # - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotSample
+    #   sample_idx: ${diagnostics.plot.sample_idx}
+    #   per_sample: 6
+    #   parameters: ${diagnostics.plot.parameters}
+    #   every_n_batches: ${diagnostics.plot.frequency.batch}
+    #   accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+    #   precip_and_related_fields: ["tp", "cp"] # Optional: specify precip fields
+
+debug:
+  # this will detect and trace back NaNs / Infs etc. but will slow down training
+  anomaly_detection: False
+
+
+enable_checkpointing: True
+checkpoint:
+  every_n_minutes:
+    save_frequency: 30 # Approximate, as this is checked at the end of training steps
+    num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
+
+  every_n_epochs:
+    save_frequency: 1
+    num_models_saved: -1 # If set to -1, all checkpoints are kept ensuring runs can be continued/forked at any point in the training process
+
+  every_n_train_steps:
+    save_frequency: null # Does not scale with rollout
+    num_models_saved: 0
+
+log:
+  wandb:
+    enabled: False
+    offline: False
+    log_model: False
+    project: 'Anemoi'
+    entity: ???
+    # logger options (these probably come with some overhead)
+    gradients: False
+    parameters: False
+  tensorboard:
+    enabled: False
+  mlflow:
+    _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
+    enabled: False
+    offline: False
+    authentication: False
+    tracking_uri: ???
+    experiment_name: 'anemoi-debug'
+    project_name: 'Anemoi'
+    system: False
+    terminal: True
+    run_name: null # If set to null, the run name will be the a random UUID
+    on_resume_create_child: True
+    expand_hyperparams: # Which keys in hyperparams to expand
+      - config
+    http_max_retries: 35
+    max_params_length: 2000
+    save_dir: ${hardware.paths.logs.mlflow}
+  interval: 100 # passed to trainer.log_every_n_steps
+
+enable_progress_bar: True
+check_val_every_n_epoch: 1
+print_memory_summary: False

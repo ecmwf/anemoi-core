@@ -77,6 +77,55 @@ def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestDa
 
 @pytest.fixture(
     params=[
+        ["config_validation=True", "diagnostics.log.mlflow.enabled=True", "diagnostics.log.mlflow.offline=True"],
+        ["config_validation=True", "diagnostics.log.mlflow.enabled=False"],
+        [
+            "config_validation=False",
+            "diagnostics.log.mlflow.enabled=True",
+            "hardware.files.graph=null",
+            "diagnostics.log.mlflow.offline=True",
+        ],
+        ["config_validation=False", "diagnostics.log.mlflow.enabled=False", "hardware.files.graph=null"],
+    ],
+)
+def base_global_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, str, str]:
+    overrides = request.param
+    model_architecture = overrides[0].split("=")[1]
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+        template = compose(
+            config_name="config",
+            overrides=overrides,
+        )  # apply architecture overrides to template since they override a default
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    # Add the imputer here as it's not part of the default config
+    imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
+
+    OmegaConf.set_struct(template.data, False)  # allow adding new keys to the template to add the imputer
+    cfg = OmegaConf.merge(
+        template,
+        testing_modifications_with_temp_dir,
+        use_case_modifications,
+        imputer_modifications,
+        OmegaConf.from_dotlist(overrides),
+    )
+
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0], model_architecture
+
+
+@pytest.fixture(
+    params=[
         ["model=gnn"],
         ["model=graphtransformer"],
     ],
