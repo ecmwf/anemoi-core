@@ -26,6 +26,16 @@ from anemoi.utils.testing import TemporaryDirectoryForTestData
 LOGGER = logging.getLogger(__name__)
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    group = parser.getgroup("anemoi")
+    group.addoption("--cache", action="store_true", default=False, help="Enable caching of test datasets")
+
+
+@pytest.fixture(scope="session")
+def cache_enabled(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption("--cache"))
+
+
 @pytest.fixture(autouse=True)
 def set_working_directory() -> None:
     """Automatically set the working directory to the repo root."""
@@ -45,8 +55,10 @@ def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
 
 
 class GetTmpPaths:
-    def __init__(self, temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> None:
+    def __init__(self, temporary_directory_for_test_data: TemporaryDirectoryForTestData, cache_path: str = "") -> None:
         self.temporary_directory_for_test_data = temporary_directory_for_test_data
+        if cache_path:
+            self.temporary_directory_for_test_data.base_dir = Path(cache_path)
 
     def __call__(self, config: DictConfig, list_datasets: list[str]) -> tuple[str, list[str], list[str]]:
         tmp_paths = []
@@ -71,8 +83,12 @@ class GetTmpPaths:
 
 
 @pytest.fixture
-def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> GetTmpPaths:
-    return GetTmpPaths(temporary_directory_for_test_data)
+def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestData, cache_enabled: bool) -> GetTmpPaths:
+    cache_path = ""
+    if cache_enabled:
+        cache_path = os.environ.get("ANEMOI_TEST_CACHE", str(Path.home() / ".anemoi_test_cache"))
+
+    return GetTmpPaths(temporary_directory_for_test_data, cache_path=cache_path)
 
 
 @pytest.fixture(
