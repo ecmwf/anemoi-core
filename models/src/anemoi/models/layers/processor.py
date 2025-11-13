@@ -16,6 +16,7 @@ from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
@@ -25,7 +26,6 @@ from anemoi.models.layers.chunk import GNNProcessorChunk
 from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
 from anemoi.models.layers.chunk import PointWiseMLPProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
-from anemoi.models.layers.graph_providers import BaseGraphProvider
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -232,6 +232,8 @@ class TransformerProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: list[list[int]],
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -310,14 +312,13 @@ class GNNProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: list[list[int]],
-        graph_provider: BaseGraphProvider,
+        edge_attr: Tensor,
+        edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-
-        edge_attr, edge_index = graph_provider.get_edges(batch_size)
 
         target_nodes = sum(x[0] for x in shape_nodes)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -405,7 +406,8 @@ class GraphTransformerProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_shapes: list[list[int]],
-        graph_provider: BaseGraphProvider,
+        edge_attr: Tensor,
+        edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -413,8 +415,6 @@ class GraphTransformerProcessor(BaseProcessor):
         size = sum(x[0] for x in shard_shapes)
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-
-        edge_attr, edge_index = graph_provider.get_edges(batch_size)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
