@@ -244,7 +244,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
-        # Compute edges at model level (outside checkpoint for efficiency)
         encoder_edge_attr, encoder_edge_index = self.encoder_graph_provider.get_edges(
             batch_size=bse,
         )
