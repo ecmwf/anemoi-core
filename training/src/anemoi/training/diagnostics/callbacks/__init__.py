@@ -139,6 +139,21 @@ def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
     return callbacks
 
 
+class PlotCallbacksHook:
+    plotloss = False
+    plotadditionalmetrics = False
+
+    @classmethod
+    def initialize_from_config(cls: "PlotCallbacksHook", config: DictConfig, trainer_callbacks: []) -> None:
+        for callback in config.diagnostics.plot.callbacks:
+            if "PlotLoss" in callback:
+                cls.plotLoss = True
+            if any(name in str(callback) for name in ["PlotSpectrum", "PlotSample", "PlotHistogram"]):
+                cls.plotAdditionalMetrics = True
+
+            trainer_callbacks.extend(instantiate(callback, config))
+
+
 def get_callbacks(config: DictConfig) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
@@ -183,7 +198,7 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     # Plotting callbacks
     if config["training"]["model_task"] != "anemoi.training.train.tasks.GraphInterpolator":
-        trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+        PlotCallbacksHook.initialize_from_config(config, trainer_callbacks)
     else:
         LOGGER.info("Plotting callbacks have been temporarily deactivated for the TimeInterpolator")
 

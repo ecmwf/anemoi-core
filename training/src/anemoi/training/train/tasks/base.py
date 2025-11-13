@@ -26,6 +26,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.training.diagnostics.plots import PlotCallbacksHook
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -392,6 +393,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
+        squash: bool = True,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -404,6 +406,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        squash: bool
+            Wether to squash the loss or not - default True
         **_kwargs
             Additional arguments
 
@@ -417,6 +421,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y,
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
+            squash=squash,
         )
 
     def _compute_metrics(
@@ -450,6 +455,28 @@ class BaseGraphModule(pl.LightningModule, ABC):
             rollout_step,
             grid_shard_slice=grid_shard_slice,
         )
+
+    def hook_plotloss_callback(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        **kwargs,
+    ) -> None:
+        if PlotCallbacksHook.plotloss:
+            val_plot_loss = self._compute_loss(
+                y_pred=y_pred,
+                y=y,
+                grid_shard_slice=grid_shard_slice,
+                squash=False,
+                **kwargs,
+            )
+            self.log("val_plotloss", val_plot_loss, on_step=True, logger=None)
+
+    def hook_plotting_callbacks(self, y_pred_postprocessed: torch.Tensor, y_postprocessed: torch.Tensor) -> None:
+        if PlotCallbacksHook.plotadditionalmetrics:
+            self.log("y_pred_postprocessed", y_pred_postprocessed, on_step=True, logger=None)
+            self.log("y_postprocessed", y_postprocessed, on_step=True, logger=None)
 
     def compute_loss_metrics(
         self,
@@ -492,6 +519,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         metrics_next = {}
         if validation_mode:
             metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice)
+
+            self.hook_plotloss_callback(y_pred_full, y_full, grid_shard_slice)
 
         return loss, metrics_next
 
@@ -633,6 +662,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         metrics = {}
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
+
+        self.hook_plotting_callbacks(y_postprocessed, y_pred_postprocessed)
 
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):

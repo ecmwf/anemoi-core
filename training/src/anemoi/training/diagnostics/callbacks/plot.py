@@ -860,13 +860,20 @@ class PlotLoss(BasePerBatchPlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
     ) -> None:
         logger = trainer.logger
         _ = batch_idx
+
+        self.loss = copy.deepcopy(pl_module.loss)
+
+        # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+        if (
+            hasattr(self.loss.scaler, "nan_mask_weights")
+            and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+        ):
+            self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
 
         parameter_names = list(pl_module.data_indices.model.output.name_to_index.keys())
         parameter_positions = list(pl_module.data_indices.model.output.name_to_index.values())
@@ -889,94 +896,37 @@ class PlotLoss(BasePerBatchPlotCallback):
         rollout = getattr(pl_module, "rollout", 0)
 
         for rollout_step in range(rollout):
-            y_hat = outputs[1][rollout_step]
-            y_true = batch[
-                :,
-                pl_module.multi_step + rollout_step,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
+
+            val_loss = trainer.callback_metrics.get("val_loss")
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
-            loss = loss[argsort_indices]
-            fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
+            val_loss = val_loss[argsort_indices]
+            fig = plot_loss(val_loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
             self._output_figure(
                 logger,
                 fig,
                 epoch=epoch,
-                tag=f"loss_rstep_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-                exp_log_tag=f"loss_sample_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-            )
-
-    def on_validation_batch_end(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        output: list[torch.Tensor],
-        batch: torch.Tensor,
-        batch_idx: int,
-    ) -> None:
-
-        if batch_idx % self.every_n_batches == 0:
-
-            self.loss = copy.deepcopy(pl_module.loss)
-
-            # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
-            if (
-                hasattr(self.loss.scaler, "nan_mask_weights")
-                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-            ):
-                self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
-
-            super().on_validation_batch_end(
-                trainer,
-                pl_module,
-                output,
-                batch,
-                batch_idx,
+                tag=f"loss_validation_rstep_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+                exp_log_tag=f"loss_validation_sample_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
             )
 
 
-class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
-    """Base processing class for additional metrics."""
+def process(
+    trainer: pl.Trainer,
+    pl_module: pl.LightningModule,
+    sample_idx: int,
+) -> tuple[np.ndarray, np.ndarray]:
 
-    def process(
-        self,
-        pl_module: pl.LightningModule,
-        outputs: list,
-        batch: torch.Tensor,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    data = trainer.callback_metrics.get("y_postprocessed")[sample_idx].detach().cpu()
+    pred = trainer.callback_metrics.get("y_pred_postprocessed")[sample_idx].detach().cpu()
+    output_tensor = pl_module.output_mask.apply(pred, dim=2, fill_value=np.nan).numpy()
+    data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan).numpy()
 
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
-
-        input_tensor = (
-            batch[
-                :,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data = self.post_processors(input_tensor)[self.sample_idx]
-        output_tensor = torch.cat(
-            tuple(
-                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
-                for x in outputs[1]
-            ),
-        )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
-
-        return data, output_tensor
+    return data, output_tensor
 
 
-class PlotSample(BasePlotAdditionalMetrics):
+class PlotSample(BasePerBatchPlotCallback):
     """Plots a post-processed sample: input, target and prediction."""
 
     def __init__(
@@ -1032,8 +982,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
     ) -> None:
@@ -1048,8 +996,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
             for name in self.parameters
         }
-
-        data, output_tensor = self.process(pl_module, outputs, batch)
+        data, output_tensor = process(trainer, pl_module, self.sample_idx)
 
         local_rank = pl_module.local_rank
         rollout = getattr(pl_module, "rollout", 0)
@@ -1057,7 +1004,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
                 self.per_sample,
-                self.latlons,
+                np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy()),
                 self.accumulation_levels_plot,
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
@@ -1076,7 +1023,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
 
-class PlotSpectrum(BasePlotAdditionalMetrics):
+class PlotSpectrum(BasePerBatchPlotCallback):
     """Plots TP related metric comparing target and prediction.
 
     The actual increment (output - input) is plot for prognostic variables while the output is plot for diagnostic ones.
@@ -1115,15 +1062,13 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
     ) -> None:
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch)
+        data, output_tensor = process(trainer, pl_module, self.sample_idx)
 
         rollout = getattr(pl_module, "rollout", 0)
         for rollout_step in range(rollout):
@@ -1140,7 +1085,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
             fig = plot_power_spectrum(
                 plot_parameters_dict_spectrum,
-                self.latlons,
+                np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy()),
                 data[0, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
@@ -1156,7 +1101,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             )
 
 
-class PlotHistogram(BasePlotAdditionalMetrics):
+class PlotHistogram(BasePerBatchPlotCallback):
     """Plots histograms comparing target and prediction.
 
     The actual increment (output - input) is plot for prognostic variables while the output is plot for diagnostic ones.
@@ -1201,15 +1146,14 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
     ) -> None:
+
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch)
+        data, output_tensor = process(trainer, pl_module, self.sample_idx)
 
         rollout = getattr(pl_module, "rollout", 0)
 
