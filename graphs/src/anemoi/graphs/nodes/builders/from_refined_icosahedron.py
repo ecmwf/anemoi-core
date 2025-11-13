@@ -184,9 +184,10 @@ class StretchedIcosahedronNodes(LimitedAreaIcosahedralNodes, ABC):
             reference_node_name=reference_node_name,
             mask_attr_name=mask_attr_name,
             margin_radius_km=margin_radius_km,
-            name=name
+            name=name,
         )
         self.global_resolution = global_resolution
+
 
 class StretchedTriNodes(StretchedIcosahedronNodes):
     """Nodes based on iterative refinements of an icosahedron with 2
