@@ -292,12 +292,18 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         for hidden, x_latent in x_hidden_latents.items():
             shard_shapes_hiddens[hidden] = get_shard_shapes(x_latent, 0, model_comm_group=model_comm_group)
 
+        # Compute encoder edges at model level
+        encoder_edge_attr, encoder_edge_index = self.encoder_graph_provider.get_edges(
+            batch_size=batch_size,
+        )
+
         # Run encoder
         x_data_latent, curr_latent = self.encoder(
             (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]),
-            graph_provider=self.encoder_graph_provider,
+            edge_attr=encoder_edge_attr,
+            edge_index=encoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
@@ -314,23 +320,37 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             # Processing at same level
             if self.level_process:
+                # Compute edges for down level processor
+                down_level_edge_attr, down_level_edge_index = self.down_level_processor_graph_providers[
+                    src_hidden_name
+                ].get_edges(
+                    batch_size=batch_size,
+                )
+
                 curr_latent = self.down_level_processor[src_hidden_name](
                     curr_latent,
                     batch_size=batch_size,
                     shard_shapes=shard_shapes_hiddens[src_hidden_name],
-                    graph_provider=self.down_level_processor_graph_providers[src_hidden_name],
+                    edge_attr=down_level_edge_attr,
+                    edge_index=down_level_edge_index,
                     model_comm_group=model_comm_group,
                 )
 
             # store latents for skip connections
             skip_connections[src_hidden_name] = curr_latent
 
+            # Compute edges for downscale mapper
+            downscale_edge_attr, downscale_edge_index = self.downscale_graph_providers[src_hidden_name].get_edges(
+                batch_size=batch_size,
+            )
+
             # Encode to next hidden level
             x_encoded_latents[src_hidden_name], curr_latent = self.downscale[src_hidden_name](
                 (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
-                graph_provider=self.downscale_graph_providers[src_hidden_name],
+                edge_attr=downscale_edge_attr,
+                edge_index=downscale_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=True,
                 x_dst_is_sharded=False,  # x_latent does not come sharded
@@ -338,11 +358,17 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
         # Processing hidden-most level
+        # Compute edges for main processor
+        processor_edge_attr, processor_edge_index = self.processor_graph_provider.get_edges(
+            batch_size=batch_size,
+        )
+
         curr_latent = self.processor(
             curr_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_hiddens[dst_hidden_name],
-            graph_provider=self.processor_graph_provider,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
         )
 
@@ -351,12 +377,18 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             src_hidden_name = self._graph_hidden_names[i]
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
+            # Compute edges for upscale mapper
+            upscale_edge_attr, upscale_edge_index = self.upscale_graph_providers[src_hidden_name].get_edges(
+                batch_size=batch_size,
+            )
+
             # Decode to next level
             curr_latent = self.upscale[src_hidden_name](
                 (curr_latent, x_encoded_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
-                graph_provider=self.upscale_graph_providers[src_hidden_name],
+                edge_attr=upscale_edge_attr,
+                edge_index=upscale_edge_index,
                 model_comm_group=model_comm_group,
                 x_src_is_sharded=in_out_sharded,
                 x_dst_is_sharded=in_out_sharded,
@@ -368,20 +400,34 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             # Processing at same level
             if self.level_process:
+                # Compute edges for up level processor
+                up_level_edge_attr, up_level_edge_index = self.up_level_processor_graph_providers[
+                    dst_hidden_name
+                ].get_edges(
+                    batch_size=batch_size,
+                )
+
                 curr_latent = self.up_level_processor[dst_hidden_name](
                     curr_latent,
                     batch_size=batch_size,
                     shard_shapes=shard_shapes_hiddens[dst_hidden_name],
-                    graph_provider=self.up_level_processor_graph_providers[dst_hidden_name],
+                    edge_attr=up_level_edge_attr,
+                    edge_index=up_level_edge_index,
                     model_comm_group=model_comm_group,
                 )
+
+        # Compute decoder edges
+        decoder_edge_attr, decoder_edge_index = self.decoder_graph_provider.get_edges(
+            batch_size=batch_size,
+        )
 
         # Run decoder
         x_out = self.decoder(
             (curr_latent, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_data),
-            graph_provider=self.decoder_graph_provider,
+            edge_attr=decoder_edge_attr,
+            edge_index=decoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded

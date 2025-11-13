@@ -203,16 +203,26 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
 
+        # Compute edges at model level (outside checkpoint for efficiency)
+        encoder_edge_attr, encoder_edge_index = self.encoder_graph_provider.get_edges(
+            batch_size=batch_size,
+        )
+
         # Encoder
         x_data_latent, x_latent = self.encoder(
             (x_data_latent, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_data, shard_shapes_hidden),
-            graph_provider=self.encoder_graph_provider,
+            edge_attr=encoder_edge_attr,
+            edge_index=encoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
             x_dst_is_sharded=False,  # x_latent does not come sharded
             keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+        )
+
+        processor_edge_attr, processor_edge_index = self.processor_graph_provider.get_edges(
+            batch_size=batch_size,
         )
 
         # Processor
@@ -220,19 +230,26 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_hidden,
-            graph_provider=self.processor_graph_provider,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
         )
 
         # Skip
         x_latent_proc = x_latent_proc + x_latent
 
+        # Compute decoder edges using updated latent representation
+        decoder_edge_attr, decoder_edge_index = self.decoder_graph_provider.get_edges(
+            batch_size=batch_size,
+        )
+
         # Decoder
         x_out = self.decoder(
             (x_latent_proc, x_data_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_data),
-            graph_provider=self.decoder_graph_provider,
+            edge_attr=decoder_edge_attr,
+            edge_index=decoder_edge_index,
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_data_latent comes sharded iff in_out_sharded
