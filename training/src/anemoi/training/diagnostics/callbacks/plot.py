@@ -269,8 +269,8 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             self.plot(
                 trainer,
                 pl_module,
-                output,
-                batch,
+                # output,
+                # batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
                 **kwargs,
@@ -897,8 +897,7 @@ class PlotLoss(BasePerBatchPlotCallback):
 
         for rollout_step in range(rollout):
 
-            val_loss = trainer.callback_metrics.get("val_loss")
-
+            val_loss = pl_module.val_plotloss.cpu().numpy()
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             val_loss = val_loss[argsort_indices]
             fig = plot_loss(val_loss[sort_by_parameter_group], colors, xticks, legend_patches)
@@ -913,15 +912,13 @@ class PlotLoss(BasePerBatchPlotCallback):
 
 
 def process(
-    trainer: pl.Trainer,
     pl_module: pl.LightningModule,
     sample_idx: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-
-    data = trainer.callback_metrics.get("y_postprocessed")[sample_idx].detach().cpu()
-    pred = trainer.callback_metrics.get("y_pred_postprocessed")[sample_idx].detach().cpu()
-    output_tensor = pl_module.output_mask.apply(pred, dim=2, fill_value=np.nan).numpy()
-    data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan).numpy()
+    data = pl_module.y_postprocessed[sample_idx].detach().cpu().numpy()
+    pred = pl_module.y_pred_postprocessed[sample_idx].detach().cpu().numpy()
+    output_tensor = pl_module.output_mask.apply(pred, dim=2, fill_value=np.nan)
+    data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
 
     return data, output_tensor
 
@@ -996,7 +993,7 @@ class PlotSample(BasePerBatchPlotCallback):
             )
             for name in self.parameters
         }
-        data, output_tensor = process(trainer, pl_module, self.sample_idx)
+        data, output_tensor = process(pl_module, self.sample_idx)
 
         local_rank = pl_module.local_rank
         rollout = getattr(pl_module, "rollout", 0)
@@ -1068,7 +1065,7 @@ class PlotSpectrum(BasePerBatchPlotCallback):
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = process(trainer, pl_module, self.sample_idx)
+        data, output_tensor = process(pl_module, self.sample_idx)
 
         rollout = getattr(pl_module, "rollout", 0)
         for rollout_step in range(rollout):
@@ -1153,7 +1150,7 @@ class PlotHistogram(BasePerBatchPlotCallback):
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = process(trainer, pl_module, self.sample_idx)
+        data, output_tensor = process(pl_module, self.sample_idx)
 
         rollout = getattr(pl_module, "rollout", 0)
 

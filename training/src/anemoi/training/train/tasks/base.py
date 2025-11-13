@@ -464,19 +464,18 @@ class BaseGraphModule(pl.LightningModule, ABC):
         **kwargs,
     ) -> None:
         if PlotCallbacksHook.plotloss:
-            val_plot_loss = self._compute_loss(
+            self.val_plotloss = self._compute_loss(
                 y_pred=y_pred,
                 y=y,
                 grid_shard_slice=grid_shard_slice,
                 squash=False,
                 **kwargs,
             )
-            self.log("val_plotloss", val_plot_loss, on_step=True, logger=None)
 
     def hook_plotting_callbacks(self, y_pred_postprocessed: torch.Tensor, y_postprocessed: torch.Tensor) -> None:
         if PlotCallbacksHook.plotadditionalmetrics:
-            self.log("y_pred_postprocessed", y_pred_postprocessed, on_step=True, logger=None)
-            self.log("y_postprocessed", y_postprocessed, on_step=True, logger=None)
+            self.y_pred_postprocessed = y_pred_postprocessed
+            self.y_postprocessed = (y_postprocessed,)
 
     def compute_loss_metrics(
         self,
