@@ -38,6 +38,7 @@ from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ class AnemoiTrainer:
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
         LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
+       
         return datamodule
 
     @cached_property
@@ -521,6 +523,15 @@ class AnemoiTrainer:
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
+        
+        #TODO move to better place
+        if getattr(self.config.hardware.paths, "cache_dir", None) is not None:
+            LOGGER.info(f"'config.hardware.paths.cache_dir' given. Caching dataset under '{self.config.hardware.paths.cache_dir}'")
+            #import pdb
+            #breakpoint()
+            dataset_path=f"{self.config.hardware.paths.data}/{self.config.hardware.files.dataset}"
+            self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.hardware.paths.cache_dir, dataset_path=dataset_path)
+            #self.datamodule.ds_train = DatasetCache(ds=self.datamodule.ds_train, cache_root=self.config.hardware.paths.cache_dir, dataset_path=self.config.hardware.paths.data)
 
         LOGGER.debug("Starting training..")
 

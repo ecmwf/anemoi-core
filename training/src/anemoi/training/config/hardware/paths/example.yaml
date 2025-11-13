@@ -1,5 +1,6 @@
 data: ???
 output: ???
+cache_dir: ${oc.decode:${oc.env:TMPDIR}} #if not none, will cache input data under cache_dir
 truncation: null
 logs:
   base: ${hardware.paths.output}logs/
