@@ -53,8 +53,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             num_channels=self.num_channels,
         )
 
-    def _calculate_input_dim(self, model_config):
-        base_input_dim = super()._calculate_input_dim(model_config)
+    def _calculate_input_dim(self) -> int:
+        base_input_dim = super()._calculate_input_dim()
         base_input_dim += 1  # for forecast step, fcstep
         if self.condition_on_residual:
             base_input_dim += self.num_input_channels_prognostic
