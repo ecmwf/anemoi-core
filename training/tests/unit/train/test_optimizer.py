@@ -38,11 +38,8 @@ def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
     optimizer_cfg = OmegaConf.create(
         {
             "_target_": "torch.optim.Adam",  # Replace AdEMAMix with torch Adam for test
-            "zero": False,
-            "kwargs": {
-                "betas": [0.9, 0.95],
-                "weight_decay": 0.1,
-            },
+            "betas": [0.9, 0.95],
+            "weight_decay": 0.1,
         },
     )
 
@@ -67,17 +64,15 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -
     optimizer_cfg = OmegaConf.create(
         {
             "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix",  # Replace AdEMAMix with torch Adam for test
-            "zero": False,
-            "kwargs": {
-                "betas": [0.9, 0.95, 0.9999],
-                "weight_decay": 0.1,
-            },
+            "betas": [0.9, 0.95, 0.9999],
+            "weight_decay": 0.1,
+
         },
     )
 
     # Save expected values *before* mutation
-    expected_wd = optimizer_cfg.kwargs.weight_decay
-    expected_betas = tuple(optimizer_cfg.kwargs.betas)
+    expected_wd = optimizer_cfg.weight_decay
+    expected_betas = tuple(optimizer_cfg.betas)
 
     # Use a copy so the original fixture isn't mutated
     cfg_copy = OmegaConf.create(OmegaConf.to_container(optimizer_cfg, resolve=True))
@@ -95,7 +90,6 @@ def test_create_optimizer_from_config_invalid(mocked_module: BaseGraphModule) ->
     bad_cfg = OmegaConf.create(
         {
             "_target_": "nonexistent.OptimizerClass",
-            "kwargs": {},
         },
     )
     with pytest.raises(Exception, match="Error locating target"):
