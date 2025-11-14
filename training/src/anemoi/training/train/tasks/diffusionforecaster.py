@@ -37,7 +37,6 @@ class GraphDiffusionForecaster(GraphForecaster):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -48,7 +47,6 @@ class GraphDiffusionForecaster(GraphForecaster):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
@@ -208,7 +206,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -219,7 +216,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,

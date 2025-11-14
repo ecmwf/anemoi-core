@@ -20,7 +20,6 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -37,7 +36,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -54,7 +52,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self._truncation_data = truncation_data
 
         model_config = DotDict(model_config)
         self._graph_name_data = model_config.graph.data
@@ -76,8 +73,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # build networks
         self._build_networks(model_config)
 
-        # build truncation
-        self.truncation = BaseTruncation(self._truncation_data)
+        # build residual connection
+        self.residual = instantiate(model_config.model.residual, graph=graph_data)
 
         # build boundings
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
@@ -221,9 +218,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         ), "If input is sharded, grid_shard_shapes and model_comm_group must be provided."
 
         # Prepare input
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x, batch_size, grid_shard_shapes, model_comm_group
-        )
+        x_data_latent, shard_shapes_data = self._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
+
+        # Residual
+        x_skip = self.residual(x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
 
         # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
         x_hidden_latents = {}

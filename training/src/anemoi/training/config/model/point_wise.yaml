@@ -44,6 +44,9 @@ decoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
 
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, NoConnection, TruncatedConnection
+
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 

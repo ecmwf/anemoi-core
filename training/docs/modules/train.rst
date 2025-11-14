@@ -57,8 +57,6 @@ method and optionally customizing the initialization logic in
    positions.
 -  ``supporting_arrays``: Optional maps like topography or land-sea
    masks.
--  ``truncation_data``: Masking information to restrict training or
-   validation to a subset of time or space.
 
 **Subclasses must implement:**
 
