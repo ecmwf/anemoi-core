@@ -4,11 +4,72 @@ defaults:
 - diagnostics: evaluation
 - datamodule: single
 - hardware: example
-- graph: multi_scale
+- graph: existing_graph
 - model: graphtransformer_diffusion
 - training: diffusion
 - _self_
 
 
 # set to true to switch on config validation
-config_validation: True
+config_validation: False
+diagnostics:
+  log:
+    mlflow:
+      enabled: false
+      offline: True
+      experiment_name: 'my_experiment_name_test_jav'
+      project_name: 'my_project_name_jav'
+      run_name: 'my_run_name_jav'
+      tracking_uri: 'none'
+      authentication: True
+      terminal: False
+    wandb:
+      enabled: False
+      entity: "none"
+data:
+    diagnostic: []
+    forcing:
+      - cos_latitude
+      - sin_latitude
+      - insolation
+    normalizer:
+      std: null
+      max: null
+      none: ${data.forcing}
+dataloader:
+    dataset:
+        cutout:
+          - dataset: /home/users/u102751/code/anemoi/anemoi-mf/quickstart/locally/datasets/titan-arome.zarr
+          - dataset: /home/users/u102751/code/anemoi/anemoi-mf/quickstart/locally/datasets/titan-arpege.zarr
+        adjust: all
+        min_distance_km: 0
+    grid_indices:
+        _target_: anemoi.training.data.grid_indices.MaskedGrid
+        nodes_name: data
+        node_attribute_name: indices_connected_nodes
+    training:
+        start: "2023-05-21"
+        end: "2023-05-24"
+    validation:
+        start: "2023-05-20"
+        end: "2023-05-21"
+    test:
+        start: "2023-05-20"
+        end: "2023-05-21"
+model:
+  output_mask:
+    _target_: anemoi.training.utils.masks.Boolean1DMask
+    nodes_name: ${graph.data}
+    attribute_name: cutout_mask
+hardware:
+  paths:
+    data: /home/users/u102751/code/anemoi/anemoi-mf/quickstart/locally/datasets
+    output: /home/users/u102751/code/anemoi/anemoi-core/training/src/anemoi/training/outputs/
+  files:
+    dataset: titan-arome.zarr
+    forcing_dataset: titan-arpege.zarr
+    graph: /home/users/u102751/code/anemoi/anemoi-mf/quickstart/locally/graphs/second-graph.pt
+  num_gpus_per_node: 4
+  num_gpus_per_model: 1
+training:
+  max_epochs: 25
