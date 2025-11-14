@@ -185,7 +185,7 @@ def test_rollout_eval_ens_eval():
     ]
 
     # Mock batch (bs, ms, nens_per_device, latlon, nvar)
-    batch = torch.randn(1, 2, 4, 10, 5)
+    batch = torch.randn(2, 4, 4, 10, 5)
 
     with patch.object(callback, "_log") as mock_log:
         callback._eval(pl_module, batch)

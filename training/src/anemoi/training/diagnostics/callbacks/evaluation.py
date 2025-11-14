@@ -137,7 +137,7 @@ class RolloutEvalEns(RolloutEval):
         loss = torch.zeros(1, dtype=batch.dtype, device=pl_module.device, requires_grad=False)
         assert (
             batch.shape[1] >= self.rollout + pl_module.multi_step
-        ), "Batch length not sufficient for requested rollout length!"
+        ), f"Batch length ({batch.shape[1]}) not sufficient for requested rollout length!"
 
         metrics = {}
         with torch.no_grad():
