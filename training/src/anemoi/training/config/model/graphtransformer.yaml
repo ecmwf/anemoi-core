@@ -32,6 +32,7 @@ processor:
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
+  backend: "triton"
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -44,6 +45,7 @@ encoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
+  backend: "triton"
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -57,6 +59,7 @@ decoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
+  backend: "triton"
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
