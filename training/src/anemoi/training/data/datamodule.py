@@ -227,7 +227,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             grid_indices=self.grid_indices,
             label=label,
-            ens_members_per_device=getattr(self.config.training, "ensemble_size_per_device", 1),
             num_gpus_per_ens=getattr(self.config.hardware, "num_gpus_per_ensemble", 1),
             num_gpus_per_model=self.config.hardware.num_gpus_per_model,
         )

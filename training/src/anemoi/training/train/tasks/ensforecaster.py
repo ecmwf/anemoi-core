@@ -218,6 +218,16 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
         LOGGER.debug("Shapes: x.shape = %s", list(x.shape))
+        # Stack the analysis nens_per_device times along an ensemble dimension
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]  # (bs, ms, ens_dummy, latlon, nvar)
+
+        x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
+        LOGGER.debug("Shapes: x.shape = %s", list(x.shape))
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -229,7 +239,9 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         msg = (
             "Batch length not sufficient for requested multi_step length!"
             f", {batch.shape[1]} !>= {rollout + self.multi_step}"
+            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
         )
+        assert batch.shape[1] >= rollout + self.multi_step, msg
         assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
@@ -277,6 +289,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         """Training / validation step."""
         LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
 
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
