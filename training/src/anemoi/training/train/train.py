@@ -27,6 +27,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
+from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
@@ -99,11 +100,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = instantiate(
-            convert_to_omegaconf(self.config).datamodule,
-            convert_to_omegaconf(self.config),
-            self.graph_data,
-        )
+        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
         LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
