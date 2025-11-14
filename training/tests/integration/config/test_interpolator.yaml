@@ -1,13 +1,11 @@
 # Modifications for the basic template "interpolator.yaml"
-hardware:
-  paths:
-    data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
-    truncation: null
-  files:
+system:
+  input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    # We only use the graph file in test_training_cycle_lam_with_existing_graph, not in test_training_cycle_lam
+    graph: anemoi-integration-tests/training/graphs/lam-graph.pt
     truncation: null
     truncation_inv: null
-    graph: null
 
 data:
   frequency: 6h
