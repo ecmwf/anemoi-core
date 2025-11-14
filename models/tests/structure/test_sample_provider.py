@@ -147,14 +147,13 @@ def test_gridded():
     )
 
     sp = wrapped_build_sample_provider(config_sample_provider["sample_provider"], kind="training")
-
+    print("GRIDDED ************************")
     print(sp)
-    print("************************")
     for key, value in sp.static.items():
         print(f"GRIDDED -> Static for {key}: {value}")
-    print("************************")
+    print("GRIDDED ************************")
 
-    for i in [0, 2]:
+    for i in [0, 5]:
         sample = wrapped_getitem(sp, i)
 
         for key, value in sample.items():
@@ -166,16 +165,15 @@ def test_observations():
         """sample_provider:
              frequency: 3h
              groups:
-                amsr2_h180:
+                aeolus_aladin_mie:
                   variables:
-                    forcings: ["rawbt_1", "rawbt_2"]
-                    prognostics: ["rawbt_3"]
-                    diagnostics: ["rawbt_4"]
+                    forcings: ["los_0", "vert_length"]
+                    prognostics: ["sin_vaa"]
+                    diagnostics: ["cos_vaa"]
                   dimensions: [["offsets"], "values", "variables"]
-                  offsets:
-                    input: ["-3h", "+0h"]
-                    # input: ["-6h", "+0h"]
-                    target: ["+3h"]
+                  offsets: ["-6h", "+0h"]
+                    # input: ["-3h", "+0h"]
+                    # target: ["+3h"]
                   extra_configs:
                     normalisation: # override the one in data_handler
                       {default: 'mean-std', 'mean-std': [u_100, v_100]}
@@ -189,34 +187,28 @@ def test_observations():
                    end: 2023-12-31
                search_path: null
                sources:
-                 # unused in this example
                  - dataset:
-                      dataset: observations-testing-2018-2018-6h-v1
+                      # contains: aeolus_aladin_mie
+                      dataset: observations-2021-10days-6h-v1-zeta
                       frequency: 3h
-                   data_group: iasi
-
-                 - dataset:
-                      dataset: observations-testing-2018-2018-6h-v1
-                      frequency: 3h
-                   data_group: amsr2_h180
              aliases: "is ignored"
            """
     )["sample_provider"]
 
     sp = wrapped_build_sample_provider(cfg, kind="training")
-    print("datahandler", sp.context.data_handler)
+    print("OBS datahandler", sp.context.data_handler)
 
     print(len(sp))
 
     print(sp)
-    print("************************")
+    print("OBS ************************")
     for key, value in sp.static.items():
         print(f"OBS -> Static for {key}: {value}")
-    print("************************")
+    print("OBS ************************")
     i = 0
-    sample = wrapped_getitem(sp, i)
-    for key, value in sample.items():
-        print(f"OBS -> Sample data at [{i}] for {key}: {value}")
+    for key, value in wrapped_getitem(sp, i).items():
+        print(f"DOP -> Sample data at [{i}] for {key}: {value}")
+    wrapped_getitem(sp, 5)
 
 
 def test_dop():
@@ -228,19 +220,20 @@ def test_dop():
     print(len(sp))
 
     print(sp)
-    print("************************")
+    print("DOP ************************")
     for key, value in sp.static.items():
         print(f"DOP -> Static for {key}: {value}")
-    print("************************")
+    print("DOP ************************")
     i = 0
-    sample = wrapped_getitem(sp, i)
-    for key, value in sample.items():
+    for key, value in wrapped_getitem(sp, i).items():
         print(f"DOP -> Sample data at [{i}] for {key}: {value}")
+    wrapped_getitem(sp, 5)
 
+    print("Now rebuilding sample providers for training and validation")
     training = build_sample_provider(cfg, kind="training")
     validation = build_sample_provider(cfg, kind="validation")
-    print(len(training))
-    print(len(validation))
+    print(f"Number of samples for training: {len(training)}")
+    print(f"Number of samples for validation: {len(validation)}")
 
 
 if __name__ == "__main__":

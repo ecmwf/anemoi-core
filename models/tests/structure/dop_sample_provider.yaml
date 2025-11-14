@@ -62,23 +62,8 @@ data_handler:
   search_path: null
   sources:
       - dataset:
+          # contains : aeolus_aladin_mie combined_pmsl_ibtracs msg_combined_seviri_o256 npp_atms_unthinned_native
           dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
           frequency: 3h
-        data_group: msg_combined_seviri_o256
-
-      - dataset:
-          dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
-          frequency: 3h
-        data_group: npp_atms_unthinned_native
-
-      - dataset:
-          dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
-          frequency: 3h
-        data_group: combined_pmsl_ibtracs
-
-      - dataset:
-          dataset: /etc/ecmwf/nfs/dh1_home_a/mafp/work/obs/data/vz/observations-1979-2023-6h-v1-epsilon.vz
-          frequency: 3h
-        data_group: aeolus_aladin_mie
 
 aliases: "is ignored"

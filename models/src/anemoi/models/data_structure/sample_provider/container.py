@@ -69,9 +69,9 @@ class Rearrange(Forward):
         # add here something about the new dimensions shape
         return res
 
-    def _getitem(self, data):
+    def __getitem__(self, data):
         res = DynamicDataDict()
-        for k, v in self._forward._getitem(data).items():
+        for k, v in self._forward.__getitem__(data).items():
             match k:
                 case "latitudes" | "longitudes" | "timedeltas" | "date_str":
                     res[k] = v
@@ -161,26 +161,20 @@ class Container(SampleProvider):
         self.add_to_i = add_to_i
         self.multiply_i = multiply_i
 
-    def register_read_pattern(self):
-        self.dh.register_read_pattern(
-            self,
-            self.data_group,
-            variables=self.variables,
-            add_to_i=self.add_to_i,
-            multiply_i=self.multiply_i,
-        )
-
     @property
     def static(self):
-        self._static = self.dh.static(self.data_group, variables=self.variables).copy()
+        request = (self.data_group, self.variables)
+        self._static = self.dh.static(request)[0].copy()
         extra_configs = {**self._static.pop("extra_configs", {}), **self.extra_configs}
         if extra_configs:
             self._static["extra_configs"] = extra_configs
         self._static["offset"] = self._offset
         return self._static
 
-    def _getitem(self, data):
-        return self.dh.get_item(self, data)
+    def __getitem__(self, i):
+        assert isinstance(i, int), f"Expected integer index, got {type(i)}: {i}"
+        j = i * self.multiply_i + self.add_to_i
+        return self.dh.dynamic((j, self.data_group, self.variables))[0]
 
     def visit(self, visitor):
         visitor(self)

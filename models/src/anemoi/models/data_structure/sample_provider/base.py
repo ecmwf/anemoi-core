@@ -86,13 +86,8 @@ class SampleProvider(ABC):
     def static(self):
         raise NotImplementedError(f"{self.__class__.__name__}.static is not implemented")
 
-    def __getitem__(self, *args):
-        dh = self.context["data_handler"]
-        data = dh.grouped_read(*args)
-        return self._getitem(data)
-
     @abstractmethod
-    def _getitem(self, data):
+    def __getitem__(self, *args):
         pass
 
     def __len__(self):
@@ -113,9 +108,6 @@ class SampleProvider(ABC):
         return dates_block
 
     def update_index_offsets(self: "SampleProvider", dates_block):
-        pass
-
-    def register_read_pattern(self):
         pass
 
     def set_dates_block(self, date_block):
@@ -147,8 +139,8 @@ class Forward(SampleProvider):
     def static(self):
         return self._forward.static
 
-    def _getitem(self, data):
-        return self._forward._getitem(data)
+    def __getitem__(self, data):
+        return self._forward.__getitem__(data)
 
     def _tree(self, prefix=None):
         return self._forward._tree(prefix=prefix)
@@ -246,9 +238,6 @@ def build_sample_provider(cfg: Any, /, kind=None, data_handler=None) -> SamplePr
     # then, update the indices to each container
     sp.visit(lambda obj: obj.update_index_offsets(dates_block))
     sp.visit(lambda obj: obj.set_dates_block(dates_block))
-
-    # finally, we can register each container's request to the data handler
-    sp.visit(lambda obj: obj.register_read_pattern())
 
     sp.missing = dates_block.missing_indices
     sp._initial_config = initial_config

@@ -44,8 +44,8 @@ class Stack(Forward):
         res["offsets"] = [v.static["offset"] for v in self._providers.values()]
         return res
 
-    def _getitem(self, data):
-        multi = {k: v._getitem(data) for k, v in self._providers.items()}
+    def __getitem__(self, data):
+        multi = {k: v.__getitem__(data) for k, v in self._providers.items()}
         res = DynamicDataDict()
         first = next(iter(multi.values()))
         for k, v in first.items():
@@ -86,8 +86,8 @@ class StackAsLists(Forward):
         res["offsets"] = [v.static["offset"] for v in self._providers.values()]
         return res
 
-    def _getitem(self, data):
-        multi = {k: v._getitem(data) for k, v in self._providers.items()}
+    def __getitem__(self, data):
+        multi = {k: v.__getitem__(data) for k, v in self._providers.items()}
         res = DynamicDataDict()
         first = next(iter(multi.values()))
         for k, v in first.items():

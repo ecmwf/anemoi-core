@@ -50,8 +50,8 @@ class SampleProviderDictionary(SampleProvider):
     def static(self):
         return {k: v.static for k, v in self._providers.items()}
 
-    def _getitem(self, data):
-        return {k: v._getitem(data) for k, v in self._providers.items()}
+    def __getitem__(self, data):
+        return {k: v.__getitem__(data) for k, v in self._providers.items()}
 
     def _tree(self, prefix=None):
         name = ""  # self.__class__.__name__
