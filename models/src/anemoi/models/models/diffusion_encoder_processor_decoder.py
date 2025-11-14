@@ -553,13 +553,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         statistics: dict,
         graph_data: HeteroData,
     ) -> None:
+        self.condition_on_residual = model_config.model.condition_on_residual
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
         )
-        self.condition_on_residual = model_config.model.condition_on_residual
 
     def _calculate_input_dim(self):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
