@@ -1121,7 +1121,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         rollout = getattr(pl_module, "rollout", 0)
         for rollout_step in range(rollout):
-            # Build dictionary of inidicies and parameters to be plotted
+            # Build dictionary of indices and parameters to be plotted
 
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
             plot_parameters_dict_spectrum = {
@@ -1209,7 +1209,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         for rollout_step in range(rollout):
 
-            # Build dictionary of inidicies and parameters to be plotted
+            # Build dictionary of indicies and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
 
             plot_parameters_dict_histogram = {
