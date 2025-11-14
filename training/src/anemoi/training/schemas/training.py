@@ -14,6 +14,7 @@ from typing import Any
 from typing import Literal
 
 from pydantic import AfterValidator
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -78,13 +79,11 @@ class LR(BaseModel):
     "Number of warm up iteration. Default to 1000."
 
 
-class OptimizerSchema(BaseModel):
-    """Optimizer configuration."""
+class OptimizerSchema(PydanticBaseModel):
+    """Choosing the PydanticBaseModel to allow extra inputs."""
 
-    zero: bool = Field(example=False)
-    "Use Zero optimiser."
-    kwargs: dict[str, Any] = Field(default_factory=dict)
-    "Additional arguments to pass to the optimizer."
+    target_: str = Field(..., alias="_target_")
+    """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
 
 
 class ExplicitTimes(BaseModel):
