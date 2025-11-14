@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from os import stat
 
 import torch
 
@@ -125,4 +126,7 @@ class NormaliserMixin:
         if self.norm == "unit-range":
             values = values - statistics[0]
 
+        assert statistics[-1] != 0, (
+            f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
+        )
         return values / statistics[-1]
