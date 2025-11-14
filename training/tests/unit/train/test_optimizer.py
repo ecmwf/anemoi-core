@@ -44,8 +44,8 @@ def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
     )
 
     # Save expected values *before* mutation
-    expected_wd = optimizer_cfg.kwargs.weight_decay
-    expected_betas = tuple(optimizer_cfg.kwargs.betas)
+    expected_wd = optimizer_cfg.weight_decay
+    expected_betas = tuple(optimizer_cfg.betas)
 
     # Use a copy so the original fixture isn't mutated
     cfg_copy = OmegaConf.create(OmegaConf.to_container(optimizer_cfg, resolve=True))

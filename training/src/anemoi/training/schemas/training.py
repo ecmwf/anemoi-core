@@ -80,7 +80,7 @@ class LR(BaseModel):
 
 
 class OptimizerSchema(PydanticBaseModel):
-    """Choosing the PydanticBaseModel to allow extra inputs"""
+    """Choosing the PydanticBaseModel to allow extra inputs."""
 
     target_: str = Field(..., alias="_target_")
     """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""

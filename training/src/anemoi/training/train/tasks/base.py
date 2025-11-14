@@ -747,9 +747,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Convert schema to dict if needed
         if hasattr(opt_cfg, "model_dump"):
             opt_cfg = opt_cfg.model_dump(by_alias=True)
-        optimizer = instantiate(opt_cfg, params=params, lr=self.lr)
 
-        return optimizer
+        return instantiate(opt_cfg, params=params, lr=self.lr)
 
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
         """Helper to create the cosine LR scheduler."""
