@@ -15,6 +15,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
@@ -31,8 +32,8 @@ class GraphTransformerProcessorConfig:
     trainable_size: int = 6
     src_grid_size: int = 0
     dst_grid_size: int = 0
-    qk_norm: bool = (True,)
-    cpu_offload: bool = (False,)
+    qk_norm: bool = True
+    cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
 
     def __post_init__(self):
@@ -74,6 +75,9 @@ class TestGraphTransformerProcessor:
             == graphtransformer_init.num_layers // graphtransformer_init.num_chunks
         )
         assert isinstance(graphtransformer_processor.trainable, TrainableTensor)
+
+    def test_all_blocks(self, graphtransformer_processor):
+        assert all(isinstance(block, GraphTransformerProcessorBlock) for block in graphtransformer_processor.proc)
 
     def test_forward(self, graphtransformer_processor, graphtransformer_init):
         batch_size = 1
