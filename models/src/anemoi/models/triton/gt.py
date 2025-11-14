@@ -41,7 +41,7 @@ def _gt_fwd(
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        zeros = tl.zeros((H,), dtype=out_dtype)
+        zeros = tl.zeros((H,), dtype=tl.float32)  # m initialised as torch.float32
         tl.store(M_ptr + dst_idx * H + tl.arange(0, H), zeros)
         zeros = tl.zeros((H * C,), dtype=out_dtype)
         tl.store(OUT_ptr + dst_off, zeros)
