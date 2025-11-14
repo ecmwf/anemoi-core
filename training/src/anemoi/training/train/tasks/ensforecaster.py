@@ -16,7 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphEnsForecaster(BaseGraphModule):
+class GraphEnsForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
     def __init__(
@@ -67,14 +67,6 @@ class GraphEnsForecaster(BaseGraphModule):
             supporting_arrays=supporting_arrays,
         )
 
-        self.rollout = config.training.rollout.start
-        self.rollout_epoch_increment = config.training.rollout.epoch_increment
-        self.rollout_max = config.training.rollout.max
-
-        LOGGER.debug("Rollout window length: %d", self.rollout)
-        LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
-        LOGGER.debug("Rollout max : %d", self.rollout_max)
-
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
         self.model_comm_group_size = config.hardware.num_gpus_per_model
         assert config.hardware.num_gpus_per_ensemble % config.hardware.num_gpus_per_model == 0, (
@@ -107,14 +99,6 @@ class GraphEnsForecaster(BaseGraphModule):
         self.ens_comm_group_rank = None
         self.ens_comm_num_groups = None
         self.ens_comm_group_size = None
-
-    def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
-        return self.model(
-            x,
-            fcstep=fcstep,
-            model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
-        )
 
     def set_ens_comm_group(
         self,
@@ -195,37 +179,6 @@ class GraphEnsForecaster(BaseGraphModule):
 
         return loss_inc, y_pred_ens if return_pred_ens else None
 
-    def advance_input(
-        self,
-        x: torch.Tensor,
-        y_pred: torch.Tensor,
-        batch: torch.Tensor,
-        rollout_step: int,
-    ) -> torch.Tensor:
-        x = x.roll(-1, dims=1)
-
-        # Get prognostic variables
-        x[:, -1, :, :, self.data_indices.model.input.prognostic] = y_pred[
-            ...,
-            self.data_indices.model.output.prognostic,
-        ]
-
-        x[:, -1] = self.output_mask.rollout_boundary(
-            x[:, -1],
-            batch[:, self.multi_step + rollout_step],
-            self.data_indices,
-        )
-
-        # get new "constants" needed for time-varying fields
-        x[:, -1, :, :, self.data_indices.model.input.forcing] = batch[
-            :,
-            self.multi_step + rollout_step,
-            :,
-            :,
-            self.data_indices.data.input.forcing,
-        ]
-        return x
-
     def rollout_step(
         self,
         batch: torch.Tensor,
@@ -281,7 +234,7 @@ class GraphEnsForecaster(BaseGraphModule):
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-            y_pred = self(x, rollout_step)
+            y_pred = self(x, fcstep=rollout_step)
             y = batch[
                 :,
                 self.multi_step + rollout_step,
@@ -322,7 +275,7 @@ class GraphEnsForecaster(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple:
         """Training / validation step."""
-        LOGGER.debug("SHAPES: batch.shape = %s", list(batch.shape))
+        LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -339,95 +292,3 @@ class GraphEnsForecaster(BaseGraphModule):
 
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic
-
-    def training_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> torch.Tensor | dict:
-        """Run one training step.
-
-        Args:
-            batch: tuple
-                Batch data. tuple of length 1 or 2.
-                batch[0]: analysis, shape (bs, multi_step + rollout, nvar, latlon)
-                batch[1] (optional with ensemble): EDA perturbations, shape (multi_step, nens_per_device, nvar, latlon)
-            batch_idx: int
-                Training batch index
-
-        Returns
-        -------
-            train_loss:
-                Training loss
-        """
-        del batch_idx
-
-        train_loss, _, _, _ = self._step(batch)
-
-        self.log(
-            "train_" + self.loss.name,
-            train_loss,
-            on_epoch=True,
-            on_step=True,
-            prog_bar=True,
-            logger=self.logger_enabled,
-            batch_size=batch.shape[0],
-            sync_dist=True,
-        )
-        self.log(
-            "rollout",
-            float(self.rollout),
-            on_step=True,
-            logger=self.logger_enabled,
-            rank_zero_only=True,
-            sync_dist=False,
-        )
-
-        return train_loss
-
-    def on_train_epoch_end(self) -> None:
-        if self.rollout_epoch_increment > 0 and self.current_epoch % self.rollout_epoch_increment == 0:
-            self.rollout += 1
-            LOGGER.debug("Rollout window length: %d", self.rollout)
-        self.rollout = min(self.rollout, self.rollout_max)
-
-    def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Perform a validation step.
-
-        Parameters
-        ----------
-        batch: tuple
-            Batch data. tuple of length 1 or 2.
-            batch[0]: analysis, shape (bs, multi_step + rollout, nvar, latlon)
-            batch[1] (optional): EDA perturbations, shape (nens_per_device, multi_step, nvar, latlon)
-        batch_idx: int
-            Validation batch index
-
-        Returns
-        -------
-        tuple[torch.Tensor, torch.Tensor]
-            Tuple containing the validation loss, the predictions, and the ensemble initial conditions
-        """
-        del batch_idx
-
-        with torch.no_grad():
-            val_loss, metrics, y_preds, ens_ic = self._step(batch, validation_mode=True)
-        self.log(
-            "val_" + self.loss.name,
-            val_loss,
-            on_epoch=True,
-            on_step=True,
-            prog_bar=True,
-            logger=self.logger_enabled,
-            batch_size=batch.shape[0],
-            sync_dist=True,
-        )
-        for mname, mvalue in metrics.items():
-            self.log(
-                "val_" + mname,
-                mvalue,
-                on_epoch=True,
-                on_step=False,
-                prog_bar=False,
-                logger=self.logger_enabled,
-                batch_size=batch.shape[0],
-                sync_dist=True,
-            )
-
-        return val_loss, y_preds, ens_ic
