@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from os import stat
 
 import torch
 
