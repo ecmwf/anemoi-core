@@ -107,7 +107,7 @@ def test_variable_scaling_multi_variable(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _, _ = create_scalers(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -132,7 +132,7 @@ def test_variable_scaling_single_variable(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _, _ = create_scalers(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,

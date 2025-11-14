@@ -21,6 +21,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.utils.enums import OutputTensorDim
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -236,6 +237,14 @@ reweighted_graph_node_scaler = {
     "norm": "unit-sum",
 }
 
+lead_time_decay_scaler = {
+    "_target_": "anemoi.training.losses.scalers.LeadTimeScaler",
+    "decay_factor": 0.15,
+    "method": "linear",
+    "inverse": False,
+    "max_lead_time": 12,
+}
+
 expected_linear_scaling = torch.Tensor(
     [
         50 / 1000 * 0.5,  # y_50
@@ -317,6 +326,8 @@ expected_var_tendency_scaling = torch.Tensor(
     ],
 )
 
+expected_lead_time_decay_scaling = 1 - 0.15 * torch.tensor([0, 1, 3, 6, 12]) / torch.tensor(12)
+
 
 @pytest.mark.parametrize(
     ("fake_data", "expected_scaling"),
@@ -337,12 +348,11 @@ def test_variable_loss_scaling_vals(
     graph_with_nodes: HeteroData,
 ) -> None:
     config, data_indices, statistics, statistics_tendencies = fake_data
-
     metadata_extractor = ExtractVariableGroupAndLevel(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _, _ = create_scalers(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -356,7 +366,45 @@ def test_variable_loss_scaling_vals(
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 
-    assert torch.allclose(final_variable_scaling, expected_scaling)
+    assert torch.allclose(torch.tensor(final_variable_scaling), expected_scaling)
+
+
+@pytest.mark.parametrize(
+    ("fake_data", "expected_scaling"),
+    [(lead_time_decay_scaler, expected_lead_time_decay_scaling)],
+    indirect=["fake_data"],
+)
+def test_lead_time_decay_loss_scaling(
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    expected_scaling: torch.Tensor,
+) -> None:
+    config, data_indices, _, _ = fake_data
+    metadata_extractor = ExtractVariableGroupAndLevel(
+        config.training.variable_groups,
+    )
+    scalers, _, time_scalers = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        group_config=config.training.variable_groups,
+        metadata_extractor=metadata_extractor,
+        output_mask=NoOutputMask(),
+    )
+
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+    for lead_time, expected in zip(
+        [0, 1, 3, 6, 12],
+        expected_scaling,
+        strict=False,
+    ):
+        for name, scaler_builder in time_scalers.items():
+            scalers[name] = scaler_builder.get_time_varying_scaler(lead_time=lead_time)
+            if name in loss.scaler:
+                loss.update_scaler(scaler=scalers[name][1], name=name)
+            else:
+                loss.add_scaler(*scalers[name], name=name)
+        final_variable_scaling = loss.scaler.subset_by_dim(OutputTensorDim.TIME.value).get_scaler(len(OutputTensorDim))
+        unique_scaling = final_variable_scaling.squeeze()
+        assert torch.allclose(unique_scaling, expected)
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
@@ -438,7 +486,7 @@ def test_variable_masking(
         config.training.variable_groups,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _, _ = create_scalers(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -458,7 +506,7 @@ def test_variable_masking(
     assert not scalers["variable_masking"][1][indices_to_mask].any(), "Expected scalers for masked variables to be zero"
 
     config.training.scalers.builders["variable_masking"].update(invert=True)
-    scalers, _ = create_scalers(
+    scalers, _, _ = create_scalers(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,
@@ -495,7 +543,7 @@ def test_variable_loss_scaling_val_complex_variable_groups(
         metadata_variables,
     )
 
-    scalers, _ = create_scalers(
+    scalers, _, _ = create_scalers(
         config.training.scalers.builders,
         data_indices=data_indices,
         graph_data=graph_with_nodes,

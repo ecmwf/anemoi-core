@@ -192,7 +192,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         # Instantiate all scalers with the training configuration
-        self.scalers, self.updating_scalars = create_scalers(
+        self.scalers, self.updating_scalars, _ = create_scalers(
             config.model_dump(by_alias=True).training.scalers,
             data_indices=data_indices,
             graph_data=graph_data,
@@ -307,6 +307,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+
+    def update_time_varying_scaler(self, lead_time: int) -> None:
+        """Update time varying scalers such as lead time decay scaling."""
+        for name, scaler_builder in self.time_varying_scalers.items():
+            self.scalers[name] = scaler_builder.get_scaling_values(lead_time=lead_time)
+            if name in self.loss.scaler:
+                self.loss.update_scaler(scaler=self.scalers[name][1], name=name)
+            else:
+                self.loss.add_scaler(*self.scalers[name], name=name)
 
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
@@ -485,7 +494,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y,
             validation_mode,
         )
-
+        self.update_time_varying_scaler(rollout_step + 1)
         loss = self._compute_loss(y_pred=y_pred_full, y=y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
         # Compute metrics if in validation mode
