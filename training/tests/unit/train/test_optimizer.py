@@ -5,8 +5,7 @@ from pytest_mock import MockerFixture
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
-
-from anemoi.training.train.tasks.base import BaseGraphModule 
+from anemoi.training.train.tasks.base import BaseGraphModule
 
 
 @pytest.fixture
@@ -60,7 +59,7 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -
 
     optimizer_cfg = OmegaConf.create(
         {
-            "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix", 
+            "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix",
             "betas": [0.9, 0.95, 0.9999],
             "weight_decay": 0.1,
         },
