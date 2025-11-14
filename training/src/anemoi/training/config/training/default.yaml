@@ -68,10 +68,10 @@ optimizer:
   # Optional: configuration for ZeroRedundancyOptimizer
   # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
   # optimizer_class:
-  #   _target_: torch.optim.AdamW  
-  #   _partial_: true  
+  #   _target_: torch.optim.AdamW
+  #   _partial_: true
   # betas: [0.9, 0.95]
-  
+
 # select model
 model_task: anemoi.training.train.tasks.GraphForecaster
 
