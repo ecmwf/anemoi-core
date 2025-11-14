@@ -22,8 +22,8 @@ the same module.
 **************************
 
 An optimizer can be defined in the training configuration file using its
-Python import path as the ``_target_``. For
-example, to use the standard Adam optimizer:
+Python import path as the ``_target_``. For example, to use the standard
+Adam optimizer:
 
 .. code:: yaml
 
