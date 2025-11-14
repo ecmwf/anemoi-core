@@ -30,9 +30,8 @@ example, to use the standard Adam optimizer:
 
    optimizer:
       _target_: torch.optim.Adam
-      kwargs:
-         betas: [0.9, 0.95]
-         weight_decay: 0.1
+      betas: [0.9, 0.95]
+      weight_decay: 0.1
 
 The ``BaseGraphModule`` automatically injects the learning rate from
 ``config.training.lr``. The optimizer configuration can therefore focus
@@ -88,13 +87,11 @@ An example configuration for using ``AdEMAMix`` is shown below:
 
    optimizer:
       _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix
-      zero: False
-      kwargs:
-        betas: [0.9, 0.999, 0.9999]
-        alpha: 2.0
-        weight_decay: 0.01
-        beta3_warmup: 1000
-        alpha_warmup: 1000
+      betas: [0.9, 0.999, 0.9999]
+      alpha: 2.0
+      weight_decay: 0.01
+      beta3_warmup: 1000
+      alpha_warmup: 1000
 
 **************************
  Implementation Reference
