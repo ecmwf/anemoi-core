@@ -40,11 +40,10 @@ swa:
 # Optimizer settings
 optimizer:
   _target_: torch.optim.AdamW
-  zero: False
-  kwargs:
-    weight_decay: 0.1
-    betas: [0.9, 0.95]
-    eps: 1e-7
+  #zero: False
+  weight_decay: 0.1
+  betas: [0.9, 0.95]
+  eps: 1e-7
 
 # select model
 model_task: anemoi.training.train.tasks.GraphDiffusionForecaster

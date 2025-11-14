@@ -23,6 +23,7 @@ from pydantic import field_validator
 from pydantic import model_validator
 from typing_extensions import Self
 
+from pydantic import BaseModel as PydanticBaseModel
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
@@ -78,12 +79,11 @@ class LR(BaseModel):
     "Number of warm up iteration. Default to 1000."
 
 
-class OptimizerSchema(BaseModel):
+class OptimizerSchema(PydanticBaseModel):
+    """Choosing the PydanticBaseModel to allow extra inputs"""
+
     target_: str = Field(..., alias="_target_")
     """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
-
-    zero: bool = Field(False, description="Use Zero optimiser.")
-    kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExplicitTimes(BaseModel):
