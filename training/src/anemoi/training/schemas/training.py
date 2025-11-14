@@ -370,6 +370,8 @@ class BaseTrainingSchema(BaseModel):
     "Optimizer configuration."
     metrics: list[str]
     "List of metrics"
+    ensemble_size_per_device: PositiveInt = 1
+    "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
 class ForecasterSchema(BaseTrainingSchema):
@@ -382,8 +384,6 @@ class ForecasterSchema(BaseTrainingSchema):
 class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
-    ensemble_size_per_device: PositiveInt = Field(example=1)
-    "Number of ensemble member per device"
 
 
 class DiffusionForecasterSchema(ForecasterSchema):
