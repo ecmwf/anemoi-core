@@ -29,7 +29,7 @@ class NormaliserMixin:
             statistics = (torch.norm(values),)
 
         elif self.norm == "unit-max":
-            statistics = (torch.amax(values), )
+            statistics = (torch.amax(values),)
 
         elif self.norm == "unit-range":
             statistics = torch.amin(values), torch.amax(values)
@@ -41,10 +41,10 @@ class NormaliserMixin:
                 return (1,)
 
             statistics = (std,)
-            
-        assert statistics[-1] != 0, (
-            f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
-        )
+
+        assert (
+            statistics[-1] != 0
+        ), f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
         return statistics
 
     def compute_grouped_statistics(
@@ -94,9 +94,9 @@ class NormaliserMixin:
             group_std[group_std == 0] = 1
             group_statistics = (group_std[index],)
 
-        assert torch.all(group_statistics[-1] != 0), (
-            f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
-        )
+        assert torch.all(
+            group_statistics[-1] != 0
+        ), f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
         return group_statistics
 
     def normalise(self, values: torch.Tensor, *args) -> torch.Tensor:
