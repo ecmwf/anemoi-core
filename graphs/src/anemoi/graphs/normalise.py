@@ -21,25 +21,31 @@ class NormaliserMixin:
     Supported normalisation methods: None, 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std'.
     """
 
-    def compute_nongrouped_statistics(self, values: torch.Tensor, *_args) -> tuple[torch.Tensor, ...]:
+    def compute_nongrouped_statistics(self, values: torch.Tensor, *_args) -> tuple[float, ...]:
         if self.norm == "l1":
-            return (torch.sum(values),)
+            statistics = (torch.sum(values),)
 
         elif self.norm == "l2":
-            return (torch.norm(values),)
+            statistics = (torch.norm(values),)
 
         elif self.norm == "unit-max":
-            return (torch.amax(values),)
+            statistics = (torch.amax(values),)
 
         elif self.norm == "unit-range":
-            return torch.amin(values), torch.amax(values)
+            statistics = torch.amin(values), torch.amax(values)
 
         elif self.norm == "unit-std":
             std = torch.std(values)
             if std == 0:
                 LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalisation is skipped.")
                 return (1,)
-            return (std,)
+
+            statistics = (std,)
+
+        assert (
+            statistics[-1] != 0
+        ), f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
+        return statistics
 
     def compute_grouped_statistics(
         self, values: torch.Tensor, index: torch.Tensor, num_groups: int, dtype, device
@@ -47,18 +53,18 @@ class NormaliserMixin:
         if self.norm == "l1":
             group_sum = torch.zeros(num_groups, values.shape[1], dtype=dtype, device=device)
             group_sum = group_sum.index_add(0, index, values)
-            return (group_sum[index],)
+            group_statistics = (group_sum[index],)
 
         elif self.norm == "l2":
             group_sq = torch.zeros(num_groups, values.shape[1], dtype=dtype, device=device)
             group_sq = group_sq.index_add(0, index, values**2)
             group_norm = torch.sqrt(group_sq)
-            return (group_norm[index],)
+            group_statistics = (group_norm[index],)
 
         elif self.norm == "unit-max":
             group_max = torch.full((num_groups, values.shape[1]), float("-inf"), dtype=dtype, device=device)
             group_max = group_max.index_reduce(0, index, values, reduce="amax")
-            return (group_max[index],)
+            group_statistics = (group_max[index],)
 
         elif self.norm == "unit-range":
             group_min = torch.full((num_groups, values.shape[1]), float("inf"), dtype=dtype, device=device)
@@ -67,7 +73,7 @@ class NormaliserMixin:
             group_max = group_max.index_reduce(0, index, values, reduce="amax")
             denom = group_max - group_min
             denom[denom == 0] = 1  # avoid division by zero
-            return group_min[index], denom[index]
+            group_statistics = group_min[index], denom[index]
 
         elif self.norm == "unit-std":
             # Compute mean
@@ -86,7 +92,12 @@ class NormaliserMixin:
             group_std = torch.sqrt(group_var)
             # Avoid division by zero
             group_std[group_std == 0] = 1
-            return (group_std[index],)
+            group_statistics = (group_std[index],)
+
+        assert torch.all(
+            group_statistics[-1] != 0
+        ), f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
+        return group_statistics
 
     def normalise(self, values: torch.Tensor, *args) -> torch.Tensor:
         """Normalise the given values.
