@@ -28,6 +28,9 @@ from anemoi.training.diagnostics.callbacks.plot_ens import PlotSpectrum
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
 default_config = """
+training:
+    model_task: anemoi.training.train.tasks.GraphEnsForecaster
+
 diagnostics:
   callbacks: []
 
