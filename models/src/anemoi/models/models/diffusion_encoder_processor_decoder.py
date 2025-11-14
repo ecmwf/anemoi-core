@@ -545,10 +545,27 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     """Diffusion model for tendency prediction."""
 
+    def __init__(
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+    ) -> None:
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+        )
+        self.condition_on_residual = model_config.model.condition_on_residual
+
     def _calculate_input_dim(self):
         input_dim = self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
         input_dim += self.num_output_channels  # noised targets
-        input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
+        if self.condition_on_residual:
+            input_dim += len(self.data_indices.model.input.prognostic)  # truncated input state
         return input_dim
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
@@ -572,10 +589,13 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 einops.rearrange(y_noised, "batch ensemble grid vars -> (batch ensemble grid) vars"),
                 node_attributes_data,
-                einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars"),
             ),
             dim=-1,  # feature dimension
         )
+        if self.condition_on_residual:
+            x_data_latent = torch.cat(
+                (x_data_latent, einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars")), dim=-1
+            )
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )

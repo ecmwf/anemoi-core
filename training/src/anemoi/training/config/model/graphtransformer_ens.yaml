@@ -1,4 +1,5 @@
 num_channels: 1024
+condition_on_residual: False
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 cpu_offload: False
