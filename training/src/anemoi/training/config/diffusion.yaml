@@ -2,7 +2,6 @@ defaults:
 - data: zarr
 - dataloader: native_grid
 - diagnostics: evaluation
-- datamodule: single
 - hardware: example
 - graph: multi_scale
 - model: graphtransformer_diffusion
