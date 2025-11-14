@@ -21,7 +21,6 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
-from torch.distributed.optim import ZeroRedundancyOptimizer
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
@@ -751,11 +750,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
             opt_cfg = opt_cfg.model_dump(by_alias=True)
         # elif hasattr(opt_cfg, "dict"):
         #     opt_cfg = opt_cfg.dict()
-        
+
         # # 🔧 fix alias
         # if "target_" in opt_cfg and "_target_" not in opt_cfg:
         #     opt_cfg["_target_"] = opt_cfg.pop("target_")
-        #use_zero = opt_cfg.pop("zero", False)
+        # use_zero = opt_cfg.pop("zero", False)
 
         # Flatten kwargs into top-level config
         # kwargs = opt_cfg.pop("kwargs", {}) or {}
