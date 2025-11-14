@@ -66,7 +66,6 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -
             "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix",  # Replace AdEMAMix with torch Adam for test
             "betas": [0.9, 0.95, 0.9999],
             "weight_decay": 0.1,
-
         },
     )
 
