@@ -1366,4 +1366,5 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     fig,
                     epoch=epoch,
                     tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_
+                    exp_log_tag=f"pred_val_histo_{dataset_name}_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                )

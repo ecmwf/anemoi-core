@@ -1,0 +1,125 @@
+# Multi-dataset data configuration for debugging with era5 and era5_copy
+format: zarr
+# Time frequency requested from dataset
+frequency: 6h
+# Time step of model (must be multiple of frequency)
+timestep: 6h
+
+# Dataset-specific configurations
+datasets:
+  era5:
+    # ERA5 inherits from default configuration
+    # Could override specific settings here if needed
+    forcing:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "insolation"
+    - "lsm"
+    - "sdor"
+    - "slor"
+    - "z"
+    diagnostic: [tp, cp]
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          - "tp"
+          min-max:
+          max:
+          - "sdor"
+          - "slor"
+          - "z"
+          none:
+          - "cos_latitude"
+          - "cos_longitude"
+          - "sin_latitude"
+          - "sin_longitude"
+          - "cos_julian_day"
+          - "cos_local_time"
+          - "sin_julian_day"
+          - "sin_local_time"
+          - "insolation"
+          - "lsm"
+  mw_t:
+    forcing:
+    - "mw_t_cos_latitude"
+    - "mw_t_cos_longitude"
+    - "mw_t_sin_latitude"
+    - "mw_t_sin_longitude"
+    - "mw_t_cos_julian_day"
+    - "mw_t_cos_local_time"
+    - "mw_t_sin_julian_day"
+    - "mw_t_sin_local_time"
+    - "mw_t_cos_vza"
+    - "mw_t_sin_vza"
+    - "mw_t_reportype"
+    diagnostic: null
+    processors:
+      const_imputer:
+        _target_: anemoi.models.preprocessing.imputer.InputImputer
+        config:
+          default: "mean"  # TODO: try a constant imputer, e.g. 0 or -1
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+          none:
+          - "mw_t_cos_latitude"
+          - "mw_t_cos_longitude"
+          - "mw_t_sin_latitude"
+          - "mw_t_sin_longitude"
+          - "mw_t_cos_julian_day"
+          - "mw_t_cos_local_time"
+          - "mw_t_sin_julian_day"
+          - "mw_t_sin_local_time"
+          - "mw_t_cos_vza"
+          - "mw_t_sin_vza"
+  surface:
+    forcing:
+    - "conv_cos_julian_day"
+    - "conv_cos_local_time"
+    - "conv_sin_julian_day"
+    - "conv_sin_local_time"
+    - "conv_cos_sza"
+    - "conv_reportype"
+    - "lsm"
+    - "z"
+    prognostic: null
+    diagnostic:
+    - "10u"
+    - "10v"
+    - "2t"
+    - "msl"
+    - "sp"
+    processors:
+      const_imputer:
+        _target_: anemoi.models.preprocessing.imputer.InputImputer
+        config:
+          default: "mean"  # TODO: try a constant imputer, e.g. 0 or -1
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+          none:
+          - "conv_cos_julian_day"
+          - "conv_cos_local_time"
+          - "conv_sin_julian_day"
+          - "conv_sin_local_time"
+          - "conv_cos_sza"
+
+# Values set in the code
+num_features: null # number of features in the forecast state
