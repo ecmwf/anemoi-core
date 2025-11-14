@@ -15,15 +15,15 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
+from anemoi.training.diagnostics.callbacks.plot import PlotLoss
+from anemoi.training.diagnostics.callbacks.plot import PlotSample
+from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.plots import plot_histogram
 from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
-from anemoi.training.diagnostics.callbacks.plot import PlotLoss
-from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
-from anemoi.training.diagnostics.callbacks.plot import PlotSample
-from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
 from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class PlotInterpLoss(PlotLoss):
 
         interpolator_times = len(self.config.training.explicit_times.target)
 
-        if  pl_module.rollout > 1:
+        if pl_module.rollout > 1:
             LOGGER.info("Time interpolator plots only currently work for rollout 1")
             return
 
@@ -156,7 +156,7 @@ class PlotInterpSample(PlotSample):
         local_rank = pl_module.local_rank
         interpolator_times = len(self.config.training.explicit_times.target)
 
-        if  pl_module.rollout > 1:
+        if pl_module.rollout > 1:
             LOGGER.info("Time interpolator plots only currently work for rollout 1")
             return
 
@@ -242,7 +242,7 @@ class PlotInterpSpectrum(PlotSpectrum):
 
         interpolator_times = len(self.config.training.explicit_times.target)
 
-        if  pl_module.rollout > 1:
+        if pl_module.rollout > 1:
             LOGGER.info("Time interpolator plots only currently work for rollout 1")
             return
 
@@ -314,7 +314,7 @@ class PlotInterpHistogram(PlotHistogram):
         data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
         data = data.numpy()
 
-        return data, output_tensor    
+        return data, output_tensor
 
     @rank_zero_only
     def _plot(
@@ -333,7 +333,7 @@ class PlotInterpHistogram(PlotHistogram):
 
         interpolator_times = len(self.config.training.explicit_times.target)
 
-        if  pl_module.rollout > 1:
+        if pl_module.rollout > 1:
             LOGGER.info("Time interpolator plots only currently work for rollout 1")
             return
 

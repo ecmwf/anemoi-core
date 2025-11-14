@@ -45,7 +45,7 @@ plot:
       - tp
       - 2t
       - 10u
-      - 10v      
+      - 10v
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training
