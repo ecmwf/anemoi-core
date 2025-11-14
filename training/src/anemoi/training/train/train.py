@@ -179,6 +179,7 @@ class AnemoiTrainer(ABC):
         Loads truncation data.
         """
         truncation_data = {}
+        # for reference field truncation
         if self.config.hardware.files.truncation is not None:
             truncation_data["down"] = load_npz(
                 Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation),
