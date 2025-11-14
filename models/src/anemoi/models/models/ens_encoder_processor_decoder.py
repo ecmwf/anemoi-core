@@ -53,7 +53,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def _calculate_input_dim(self, model_config):
         base_input_dim = super()._calculate_input_dim(model_config)
-        base_input_dim += 1 # for forecast step, fcstep
+        base_input_dim += 1  # for forecast step, fcstep
         if self.condition_on_residual:
             base_input_dim += self.num_input_channels_prognostic
         return base_input_dim
@@ -83,7 +83,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
         if self.condition_on_residual:
             x_data_latent = torch.cat(
-                (x_data_latent, einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) vars",)),
+                (
+                    x_data_latent,
+                    einops.rearrange(
+                        x,
+                        "batch time ensemble grid vars -> (batch ensemble grid) vars",
+                    ),
+                ),
                 dim=-1,
             )
 
