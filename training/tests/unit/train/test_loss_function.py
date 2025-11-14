@@ -455,7 +455,7 @@ def test_filtered_loss() -> None:
     """Test that loss function can be instantiated."""
     data_config = {"data": {"forcing": [], "diagnostic": []}}
     name_to_index = {"tp": 0, "other_var": 1}
-    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
+    data_indices = IndexCollection(DictConfig(data_config["data"]), name_to_index)
     loss = get_loss_function(
         DictConfig(
             {

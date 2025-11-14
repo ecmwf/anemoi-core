@@ -56,18 +56,27 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self._truncation_data = truncation_data
+        self._truncation_data = truncation_data  # todo needs to be a dict as well ; we leave it for now
 
         model_config = DotDict(model_config)
-        self._graph_name_data = model_config.graph.data
-        self._graph_name_hidden = model_config.graph.hidden
+        self._graph_name_data = (
+            model_config.graph.data
+        )  # assumed to be all the same because this is how we construct the graphs
+        self._graph_name_hidden = (
+            model_config.graph.hidden
+        )  # assumed to be all the same because this is how we construct the graphs
         self.multi_step = model_config.training.multistep_input
         self.num_channels = model_config.model.num_channels
 
-        self.node_attributes = NamedNodesAttributes(model_config.model.trainable_parameters.hidden, self._graph_data)
+        self.node_attributes = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.node_attributes[dataset_name] = NamedNodesAttributes(
+                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
+            )
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
+        self._assert_consistent_hidden_graphs()
 
         # build networks
         self._build_networks(model_config)
@@ -76,28 +85,78 @@ class BaseGraphModel(nn.Module):
         self.truncation = BaseTruncation(self._truncation_data)
 
         # build boundings
+        # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
+        # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        self.num_input_channels = len(data_indices.model.input)
-        self.num_output_channels = len(data_indices.model.output)
-        self.num_input_channels_prognostic = len(data_indices.model.input.prognostic)
-        self._internal_input_idx = data_indices.model.input.prognostic
-        self._internal_output_idx = data_indices.model.output.prognostic
-        self.input_dim = self._calculate_input_dim()
-        self.input_dim_latent = self._calculate_input_dim_latent()
+        # Multi-dataset: create dictionaries for each property
+        self.num_input_channels = {}
+        self.num_output_channels = {}
+        self.num_input_channels_prognostic = {}
+        self._internal_input_idx = {}
+        self._internal_output_idx = {}
+
+        for dataset_name, dataset_indices in data_indices.items():
+            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
+            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
+            self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
+            self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
-        assert len(self._internal_output_idx) == len(data_indices.model.output.full) - len(
-            data_indices.model.output.diagnostic
-        ), (
-            f"Mismatch between the internal data indices ({len(self._internal_output_idx)}) and "
-            f"the output indices excluding diagnostic variables "
-            f"({len(data_indices.model.output.full) - len(data_indices.model.output.diagnostic)})",
-        )
-        assert len(self._internal_input_idx) == len(
-            self._internal_output_idx,
-        ), f"Model indices must match {self._internal_input_idx} != {self._internal_output_idx}"
+        # Multi-dataset: check assertions for each dataset
+        for dataset_name, dataset_indices in data_indices.items():
+            dataset_internal_output_idx = self._internal_output_idx[dataset_name]
+            dataset_internal_input_idx = self._internal_input_idx[dataset_name]
+
+            assert len(dataset_internal_output_idx) == len(dataset_indices.model.output.full) - len(
+                dataset_indices.model.output.diagnostic
+            ), (
+                f"Dataset '{dataset_name}': Mismatch between the internal data indices ({len(dataset_internal_output_idx)}) and "
+                f"the output indices excluding diagnostic variables "
+                f"({len(dataset_indices.model.output.full) - len(dataset_indices.model.output.diagnostic)})",
+            )
+            assert len(dataset_internal_input_idx) == len(
+                dataset_internal_output_idx,
+            ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
+
+    def _assert_consistent_hidden_graphs(self) -> None:
+        """Assert that all datasets have identical hidden-to-hidden graph structures.
+
+        This is required because the processor is shared between datasets and operates
+        on the hidden state, so all datasets must have the same hidden graph topology.
+        """
+        if isinstance(self._graph_data, dict) and len(self._graph_data) > 1:
+            dataset_names = list(self._graph_data.keys())
+            reference_dataset = dataset_names[0]
+            reference_graph = self._graph_data[reference_dataset]
+            reference_hidden_graph = reference_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
+
+            # Check hidden graph structure consistency across all datasets
+            for dataset_name in dataset_names[1:]:
+                dataset_graph = self._graph_data[dataset_name]
+                dataset_hidden_graph = dataset_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
+
+                # Compare edge indices
+                assert torch.equal(reference_hidden_graph.edge_index, dataset_hidden_graph.edge_index), (
+                    f"Hidden-to-hidden graph edge structure mismatch between reference dataset '{reference_dataset}' "
+                    f"and dataset '{dataset_name}'. All datasets must have identical hidden graph topology "
+                    f"for the shared processor to work correctly."
+                )
+
+                # Compare number of nodes (should be same for hidden graphs)
+                ref_num_hidden_nodes = self.node_attributes[reference_dataset].num_nodes[self._graph_name_hidden]
+                dataset_num_hidden_nodes = self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden]
+                assert ref_num_hidden_nodes == dataset_num_hidden_nodes, (
+                    f"Hidden node count mismatch between reference dataset '{reference_dataset}' ({ref_num_hidden_nodes} nodes) "
+                    f"and dataset '{dataset_name}' ({dataset_num_hidden_nodes} nodes). "
+                    f"All datasets must have the same number of hidden nodes for the shared processor."
+                )
+
+            LOGGER.info(
+                "All datasets have consistent hidden-to-hidden graph structures (required for shared processor)"
+            )
 
     def _assert_valid_sharding(
         self,
@@ -119,11 +178,24 @@ class BaseGraphModel(nn.Module):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
-    def _calculate_input_dim(self):
-        return self.multi_step * self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
+    @property
+    def input_dim(self) -> dict[str, int]:
+        # Multi-dataset: create dictionary for input_dim
+        input_dim = {}
+        for dataset_name in self.num_input_channels.keys():
+            input_dim[dataset_name] = (
+                self.multi_step * self.num_input_channels[dataset_name]
+                + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+            )
+        return input_dim
 
-    def _calculate_input_dim_latent(self):
-        return self.node_attributes.attr_ndims[self._graph_name_hidden]
+    @property
+    def input_dim_latent(self) -> dict[str, int]:
+        # Multi-dataset: create dictionary for input_dim_latent
+        input_dim_latent = {}
+        for dataset_name in self.node_attributes.keys():
+            input_dim_latent[dataset_name] = self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
+        return input_dim_latent
 
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:

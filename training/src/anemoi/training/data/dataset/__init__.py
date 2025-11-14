@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .ensdataset import EnsNativeGridDataset
+from .multidataset import MultiDataset
 from .singledataset import NativeGridDataset
 
-__all__ = ["EnsNativeGridDataset", "NativeGridDataset"]
+__all__ = ["EnsNativeGridDataset", "MultiDataset", "NativeGridDataset"]
