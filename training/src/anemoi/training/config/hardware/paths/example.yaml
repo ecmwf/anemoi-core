@@ -1,5 +1,5 @@
 data: ???
-grids: ???
+grids: ''
 output: ???
 logs:
   base: ${hardware.paths.output}logs/

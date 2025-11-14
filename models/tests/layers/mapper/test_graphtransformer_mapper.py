@@ -7,11 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import asdict
+from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
 from torch import nn
 from torch_geometric.data import HeteroData
 
@@ -19,6 +20,27 @@ from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
+
+
+@dataclass
+class MapperConfig:
+    in_channels_src: int = 3
+    in_channels_dst: int = 3
+    hidden_dim: int = 256
+    trainable_size: int = 6
+    num_chunks: int = 2
+    num_heads: int = 16
+    mlp_hidden_ratio: int = 7
+    src_grid_size: int = 0
+    dst_grid_size: int = 0
+    qk_norm: bool = True
+    cpu_offload: bool = False
+    layer_kernels: field(default_factory=DotDict) = None
+    shard_strategy: str = "edges"
+
+    def __post_init__(self):
+        self.layer_kernels = load_layer_kernels(instance=False)
 
 
 class TestGraphTransformerBaseMapper:
@@ -27,144 +49,54 @@ class TestGraphTransformerBaseMapper:
     NUM_EDGES: int = 150
     NUM_SRC_NODES: int = 100
     NUM_DST_NODES: int = 200
+    OUT_CHANNELS_DST: int = 5
 
     @pytest.fixture
-    def layer_kernels(self):
-        kernel_config = OmegaConf.create(
-            {
-                "LayerNorm": {
-                    "_target_": "torch.nn.LayerNorm",
-                    "_partial_": True,
-                },
-                "Linear": {"_target_": "torch.nn.Linear", "_partial_": True, "bias": False},
-            }
-        )
-        layer_kernels = load_layer_kernels(kernel_config)
-        return instantiate(layer_kernels)
-
-    @pytest.fixture
-    def mapper_init(self, layer_kernels):
-        in_channels_src: int = 3
-        in_channels_dst: int = 3
-        hidden_dim: int = 256
-        out_channels_dst: int = 5
-        cpu_offload: bool = False
-        activation: str = "SiLU"
-        trainable_size: int = 6
-        num_heads: int = 16
-        mlp_hidden_ratio: int = 7
-        return (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            cpu_offload,
-            activation,
-            trainable_size,
-            num_heads,
-            mlp_hidden_ratio,
-            layer_kernels,
-        )
+    def mapper_init(self):
+        return MapperConfig()
 
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
-        (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            cpu_offload,
-            activation,
-            trainable_size,
-            num_heads,
-            mlp_hidden_ratio,
-            layer_kernels,
-        ) = mapper_init
         return GraphTransformerBaseMapper(
-            in_channels_src=in_channels_src,
-            in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
-            out_channels_dst=out_channels_dst,
-            cpu_offload=cpu_offload,
-            activation=activation,
-            sub_graph=fake_graph[("src", "to", "dst")],
+            **asdict(mapper_init),
+            out_channels_dst=self.OUT_CHANNELS_DST,
+            sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            trainable_size=trainable_size,
-            num_heads=num_heads,
-            mlp_hidden_ratio=mlp_hidden_ratio,
-            layer_kernels=layer_kernels,
         )
 
     @pytest.fixture
     def pair_tensor(self, mapper_init):
-        (
-            in_channels_src,
-            in_channels_dst,
-            _hidden_dim,
-            _out_channels_dst,
-            _cpu_offload,
-            _activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
         return (
-            torch.rand(self.NUM_SRC_NODES, in_channels_src),
-            torch.rand(self.NUM_DST_NODES, in_channels_dst),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.in_channels_src),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst),
         )
 
     @pytest.fixture
     def fake_graph(self) -> HeteroData:
         """Fake graph."""
         graph = HeteroData()
-        graph[("src", "to", "dst")].edge_index = torch.concat(
+        graph[("nodes", "to", "nodes")].edge_index = torch.concat(
             [
                 torch.randint(0, self.NUM_SRC_NODES, (1, self.NUM_EDGES)),
                 torch.randint(0, self.NUM_DST_NODES, (1, self.NUM_EDGES)),
             ],
             axis=0,
         )
-        graph[("src", "to", "dst")].edge_attr1 = torch.rand((self.NUM_EDGES, 1))
-        graph[("src", "to", "dst")].edge_attr2 = torch.rand((self.NUM_EDGES, 32))
+        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 1))
+        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 32))
         return graph
 
     def test_initialization(self, mapper, mapper_init):
-        (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            _cpu_offload,
-            activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
         assert isinstance(mapper, GraphTransformerBaseMapper)
-        assert mapper.in_channels_src == in_channels_src
-        assert mapper.in_channels_dst == in_channels_dst
-        assert mapper.hidden_dim == hidden_dim
-        assert mapper.out_channels_dst == out_channels_dst
-        assert mapper.activation == activation
-        assert mapper.emb_nodes_dst.bias is None
+        assert mapper.in_channels_src == mapper_init.in_channels_src
+        assert mapper.in_channels_dst == mapper_init.in_channels_dst
+        assert mapper.hidden_dim == mapper_init.hidden_dim
+        assert mapper.out_channels_dst == self.OUT_CHANNELS_DST
+        assert isinstance(mapper.activation, nn.Module)
 
-    def test_pre_process(self, mapper, mapper_init, pair_tensor):
+    def test_pre_process(self, mapper, pair_tensor):
         # Should be a no-op in the base class
         x = pair_tensor
-        (
-            _in_channels_src,
-            _in_channels_dst,
-            _hidden_dim,
-            _out_channels_dst,
-            _cpu_offload,
-            _activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
         x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(x, shard_shapes)
@@ -193,86 +125,43 @@ class TestGraphTransformerBaseMapper:
 class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
     """Test the GraphTransformerForwardMapper class."""
 
+    OUT_CHANNELS_DST = None
+
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
-        (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            cpu_offload,
-            activation,
-            trainable_size,
-            num_heads,
-            mlp_hidden_ratio,
-            layer_kernels,
-        ) = mapper_init
         return GraphTransformerForwardMapper(
-            in_channels_src=in_channels_src,
-            in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
-            out_channels_dst=out_channels_dst,
-            cpu_offload=cpu_offload,
-            activation=activation,
-            sub_graph=fake_graph[("src", "to", "dst")],
+            **asdict(mapper_init),
+            sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            trainable_size=trainable_size,
-            num_heads=num_heads,
-            mlp_hidden_ratio=mlp_hidden_ratio,
-            layer_kernels=layer_kernels,
         )
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         x = pair_tensor
-        (
-            _in_channels_src,
-            _in_channels_dst,
-            hidden_dim,
-            _out_channels_dst,
-            _cpu_offload,
-            _activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
         x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(x, shard_shapes)
-        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, hidden_dim]), (
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim]), (
             f"x_src.shape ({x_src.shape}) != torch.Size"
-            f"([self.NUM_SRC_NODES, hidden_dim]) ({torch.Size([self.NUM_SRC_NODES, hidden_dim])})"
+            f"([self.NUM_SRC_NODES, hidden_dim]) ({torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])})"
         )
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, hidden_dim]), (
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim]), (
             f"x_dst.shape ({x_dst.shape}) != torch.Size"
             "([self.NUM_DST_NODES, hidden_dim]) ({torch.Size([self.NUM_DST_NODES, hidden_dim])})"
         )
-        assert shapes_src == [[self.NUM_SRC_NODES, hidden_dim]]
-        assert shapes_dst == [[self.NUM_DST_NODES, hidden_dim]]
+        assert shapes_src == [[self.NUM_SRC_NODES, mapper_init.hidden_dim]]
+        assert shapes_dst == [[self.NUM_DST_NODES, mapper_init.hidden_dim]]
 
     def test_forward_backward(self, mapper_init, mapper, pair_tensor):
-        (
-            in_channels_src,
-            _in_channels_dst,
-            hidden_dim,
-            _out_channels_dst,
-            _cpu_offload,
-            _activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
         x = pair_tensor
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
         x_src, x_dst = mapper.forward(x, batch_size, shard_shapes)
-        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, in_channels_src])
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, hidden_dim])
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
         # Dummy loss
-        target = torch.rand(self.NUM_DST_NODES, hidden_dim)
+        target = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim)
         loss_fn = nn.MSELoss()
 
         loss = loss_fn(x_dst, target)
@@ -292,114 +181,90 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
 
+    def test_chunking(self, mapper, pair_tensor):
+        x = pair_tensor
+        batch_size = 1
+        shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
+
+        mapper.num_chunks = 4
+        x_src_c, x_dst_c = mapper.forward(x, batch_size, shard_shapes)
+
+        mapper.num_chunks = 1
+        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes)
+
+        assert torch.allclose(
+            x_src, x_src_c, atol=1e-4
+        ), f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed"
+        assert torch.allclose(
+            x_dst, x_dst_c, atol=1e-4
+        ), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
+
+    def test_strategy(self, mapper, pair_tensor):
+        x = pair_tensor
+        batch_size = 1
+        shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
+
+        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+
+        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+
+        assert torch.allclose(
+            out_heads, out_edges, atol=1e-4
+        ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+
 
 class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
     """Test the GraphTransformerBackwardMapper class."""
 
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
-        (
-            in_channels_src,
-            in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            cpu_offload,
-            activation,
-            trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            layer_kernels,
-        ) = mapper_init
         return GraphTransformerBackwardMapper(
-            in_channels_src=in_channels_src,
-            in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
-            out_channels_dst=out_channels_dst,
-            cpu_offload=cpu_offload,
-            activation=activation,
-            sub_graph=fake_graph[("src", "to", "dst")],
+            **asdict(mapper_init),
+            out_channels_dst=self.OUT_CHANNELS_DST,
+            sub_graph=fake_graph[("nodes", "to", "nodes")],
             sub_graph_edge_attributes=["edge_attr1", "edge_attr2"],
-            trainable_size=trainable_size,
-            layer_kernels=layer_kernels,
         )
 
     def test_pre_process(self, mapper, mapper_init, pair_tensor):
         x = pair_tensor
-        (
-            in_channels_src,
-            _in_channels_dst,
-            hidden_dim,
-            _out_channels_dst,
-            _cpu_offload,
-            _activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
         x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(x, shard_shapes)
-        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, in_channels_src]), (
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src]), (
             f"x_src.shape ({x_src.shape}) != torch.Size"
-            f"([self.NUM_SRC_NODES, in_channels_src]) ({torch.Size([self.NUM_SRC_NODES, in_channels_src])})"
+            f"([self.NUM_SRC_NODES, in_channels_src]) ({torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])})"
         )
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, hidden_dim]), (
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim]), (
             f"x_dst.shape ({x_dst.shape}) != torch.Size"
-            f"([self.NUM_DST_NODES, hidden_dim]) ({torch.Size([self.NUM_DST_NODES, hidden_dim])})"
+            f"([self.NUM_DST_NODES, hidden_dim]) ({torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])})"
         )
-        assert shapes_src == [[self.NUM_SRC_NODES, hidden_dim]]
-        assert shapes_dst == [[self.NUM_DST_NODES, hidden_dim]]
+        assert shapes_src == [[self.NUM_SRC_NODES, mapper_init.hidden_dim]]
+        assert shapes_dst == [[self.NUM_DST_NODES, mapper_init.hidden_dim]]
 
     def test_post_process(self, mapper, mapper_init):
-        (
-            _in_channels_src,
-            _in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            _cpu_offload,
-            _activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
-        x_dst = torch.rand(self.NUM_DST_NODES, hidden_dim)
+        x_dst = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim)
         shapes_dst = [list(x_dst.shape)]
 
         result = mapper.post_process(x_dst, shapes_dst)
         assert (
-            torch.Size([self.NUM_DST_NODES, out_channels_dst]) == result.shape
-        ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, out_channels_dst]}) != result.shape ({result.shape})"
+            torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST]) == result.shape
+        ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, self.OUT_CHANNELS_DST]}) != result.shape ({result.shape})"
 
     def test_forward_backward(self, mapper_init, mapper, pair_tensor):
-        (
-            in_channels_src,
-            _in_channels_dst,
-            hidden_dim,
-            out_channels_dst,
-            _cpu_offload,
-            _activation,
-            _trainable_size,
-            _num_heads,
-            _mlp_hidden_ratio,
-            _layer_kernels,
-        ) = mapper_init
-        pair_tensor
         shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
         batch_size = 1
 
         # Different size for x_dst, as the Backward mapper changes the channels in shape in pre-processor
         x = (
-            torch.rand(self.NUM_SRC_NODES, hidden_dim),
-            torch.rand(self.NUM_DST_NODES, in_channels_src),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
         )
 
         result = mapper.forward(x, batch_size, shard_shapes)
-        assert result.shape == torch.Size([self.NUM_DST_NODES, out_channels_dst])
+        assert result.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
 
         # Dummy loss
-        target = torch.rand(self.NUM_DST_NODES, out_channels_dst)
+        target = torch.rand(self.NUM_DST_NODES, self.OUT_CHANNELS_DST)
         loss_fn = nn.MSELoss()
 
         loss = loss_fn(result, target)
@@ -418,3 +283,37 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             assert (
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+    def test_chunking(self, mapper_init, mapper, pair_tensor):
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        batch_size = 1
+
+        x = (
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
+        )
+
+        mapper.num_chunks = 4
+        out_c = mapper.forward(x, batch_size, shard_shapes)
+
+        mapper.num_chunks = 1
+        out = mapper.forward(x, batch_size, shard_shapes)
+
+        assert torch.allclose(out, out_c, atol=1e-4), f"out ({out}) != out_c ({out_c}) when num_chunks is changed"
+
+    def test_strategy(self, mapper_init, mapper, pair_tensor):
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        batch_size = 1
+
+        x = (
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
+        )
+
+        out_heads = mapper.forward_with_heads_sharding(x, batch_size, shard_shapes)
+
+        out_edges = mapper.forward_with_edge_sharding(x, batch_size, shard_shapes)
+
+        assert torch.allclose(
+            out_heads, out_edges, atol=1e-4
+        ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"

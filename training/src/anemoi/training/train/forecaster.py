@@ -168,8 +168,15 @@ class GraphForecaster(pl.LightningModule):
         self.reader_group_id = 0
         self.reader_group_rank = 0
 
+        self.grid_shard_shapes = None
+        self.grid_shard_slice = None
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x, self.model_comm_group)
+        return self.model(
+            x,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
 
     # Future import breaks other type hints TODO Harrison Cook
     @staticmethod

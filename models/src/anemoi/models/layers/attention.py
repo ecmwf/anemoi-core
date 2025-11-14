@@ -277,6 +277,22 @@ class FlashAttentionWrapper(nn.Module):
         return out
 
 
+class MultiHeadCrossAttention(MultiHeadSelfAttention):
+    """Multi Head Cross Attention Pytorch Layer."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(
+        self, x: PairTensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+    ) -> Tensor:
+        query = self.lin_q(x[1])
+        key = self.lin_k(x[0])
+        value = self.lin_v(x[0])
+
+        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
+
+
 def get_alibi_slopes(num_heads: int) -> Tensor:
     """Calculates linearly decreasing slopes for alibi attention.
 
