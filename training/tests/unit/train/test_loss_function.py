@@ -50,10 +50,10 @@ def functionalloss() -> type[FunctionalLoss]:
 @pytest.fixture
 def loss_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fixture for loss inputs."""
-    tensor_shape = [1, 1, 4, 2]
+    tensor_shape = [1, 1, 1, 4, 2]
 
     pred = torch.zeros(tensor_shape)
-    pred[0, 0, 0] = torch.tensor([1.0, 1.0])
+    pred[0, 0, 0, 0] = torch.tensor([1.0, 1.0])
     target = torch.zeros(tensor_shape)
 
     # With only one "grid point" differing by 1 in all
@@ -211,12 +211,13 @@ def test_grid_invariance(
     loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> None:
     """Test for batch invariance."""
+    gdim = TensorDim.GRID
     pred_coarse, target_coarse, _ = loss_inputs
-    pred_fine = torch.cat([pred_coarse, pred_coarse], dim=2)
-    target_fine = torch.cat([target_coarse, target_coarse], dim=2)
+    pred_fine = torch.cat([pred_coarse, pred_coarse], dim=gdim)
+    target_fine = torch.cat([target_coarse, target_coarse], dim=gdim)
 
-    num_points_coarse = pred_coarse.shape[2]
-    num_points_fine = pred_fine.shape[2]
+    num_points_coarse = pred_coarse.shape[gdim]
+    num_points_fine = pred_fine.shape[gdim]
 
     functionalloss_with_scaler.update_scaler("test", torch.ones((num_points_coarse,)) / num_points_coarse)
     functionalloss_with_scaler_fine.update_scaler("test", torch.ones((num_points_fine,)) / num_points_fine)
@@ -417,10 +418,10 @@ def test_logfft2dist_loss() -> None:
     assert hasattr(loss, "x_dim")
     assert hasattr(loss, "y_dim")
 
-    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
     loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
-    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
-    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    assert loss_value.shape == torch.Size((6, 1, 1, 710 * 640, 2)), "Loss output shape should match input shape"
+    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
     with pytest.raises(AssertionError):
         loss.calculate_difference(*wrong_shaped_pred_output_pair)
 
@@ -441,10 +442,10 @@ def test_fcl_loss() -> None:
     assert hasattr(loss, "x_dim")
     assert hasattr(loss, "y_dim")
 
-    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
     loss_value = loss.calculate_difference(*right_shaped_pred_output_pair)
-    assert loss_value.shape == torch.Size((6, 1, 710 * 640, 2)), "Loss output shape should match input shape"
-    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    assert loss_value.shape == torch.Size((6, 1, 1, 710 * 640, 2)), "Loss output shape should match input shape"
+    wrong_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
     with pytest.raises(AssertionError):
         loss.calculate_difference(*wrong_shaped_pred_output_pair)
 
@@ -482,7 +483,7 @@ def test_filtered_loss() -> None:
 
     assert loss.predicted_variables == ["tp"]
 
-    right_shaped_pred_output_pair = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    right_shaped_pred_output_pair = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
     loss_value = loss(*right_shaped_pred_output_pair, squash=False)
     assert loss_value.shape[0] == len(
         name_to_index.keys(),

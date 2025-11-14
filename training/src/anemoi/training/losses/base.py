@@ -176,6 +176,7 @@ class BaseLoss(nn.Module, ABC):
             grid_summed,
             dim=(
                 TensorDim.BATCH_SIZE,
+                TensorDim.TIME,
                 TensorDim.ENSEMBLE_DIM,
             ),
         )
