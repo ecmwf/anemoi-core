@@ -1070,93 +1070,6 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
 
-class PlotInterpolatorSample(PlotSample):
-    """Plots a post-processed sample: input, target and prediction."""
-
-    def process(
-        self,
-        pl_module: pl.LightningModule,
-        outputs: list,
-        batch: torch.Tensor,
-    ) -> tuple[np.ndarray, np.ndarray]:
-
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
-
-        target_times = len(pl_module.config.training.explicit_times.target)
-        input_tensor = (
-            batch[
-                :,
-                pl_module.multi_step - 1 : pl_module.multi_step + target_times + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data = self.post_processors(input_tensor)[self.sample_idx]
-        output_tensor = torch.cat(
-            tuple(
-                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
-                for x in outputs[1]
-            ),
-        )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
-
-        return data, output_tensor
-
-    @rank_zero_only
-    def _plot(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        outputs: list[torch.Tensor],
-        batch: torch.Tensor,
-        batch_idx: int,
-        epoch: int,
-    ) -> None:
-        logger = trainer.logger
-
-        # Build dictionary of indices and parameters to be plotted
-        diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
-        plot_parameters_dict = {
-            pl_module.data_indices.model.output.name_to_index[name]: (
-                name,
-                name not in diagnostics,
-            )
-            for name in self.parameters
-        }
-
-        data, output_tensor = self.process(pl_module, outputs, batch)
-
-        local_rank = pl_module.local_rank
-        interpolator_times = len(self.config.training.explicit_times.target)
-
-        for interp in range(interpolator_times):
-            fig = plot_predicted_multilevel_flat_sample(
-                plot_parameters_dict,
-                self.per_sample,
-                self.latlons,
-                self.accumulation_levels_plot,
-                data[0, ...].squeeze(),
-                data[interp + 1, ...].squeeze(),
-                output_tensor[interp, ...],
-                datashader=self.datashader_plotting,
-                precip_and_related_fields=self.precip_and_related_fields,
-                colormaps=self.colormaps,
-            )
-
-            self._output_figure(
-                logger,
-                fig,
-                epoch=epoch,
-                tag=f"pred_val_sample_istep{interp+1:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
-                exp_log_tag=f"val_pred_sample_istep{interp+1:02d}_rank{local_rank:01d}",
-            )
-
-
 class PlotSpectrum(BasePlotAdditionalMetrics):
     """Plots TP related metric comparing target and prediction.
 
@@ -1208,7 +1121,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         rollout = getattr(pl_module, "rollout", 0)
         for rollout_step in range(rollout):
-            # Build dictionary of inidicies and parameters to be plotted
+            # Build dictionary of indices and parameters to be plotted
 
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
             plot_parameters_dict_spectrum = {
@@ -1296,7 +1209,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         for rollout_step in range(rollout):
 
-            # Build dictionary of inidicies and parameters to be plotted
+            # Build dictionary of indicies and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
 
             plot_parameters_dict_histogram = {
