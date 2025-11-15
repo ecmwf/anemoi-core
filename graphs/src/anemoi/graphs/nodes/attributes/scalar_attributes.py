@@ -19,9 +19,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class CosLatitude(BaseNodeAttribute):
-    """
-    Computes the cosine of node latitudes. Node coordinates are expected to be in radians.
-    """
+    """Computes the cosine of node latitudes. Node coordinates are expected to be in radians."""
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         lat = nodes.x[:, 0]
@@ -29,9 +27,7 @@ class CosLatitude(BaseNodeAttribute):
 
 
 class CosLongitude(BaseNodeAttribute):
-    """
-    Computes the cosine of node longitudes. Node coordinates are expected to be in radians.
-    """
+    """Computes the cosine of node longitudes. Node coordinates are expected to be in radians."""
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         lon = nodes.x[:, 1]
@@ -39,9 +35,7 @@ class CosLongitude(BaseNodeAttribute):
 
 
 class SinLatitude(BaseNodeAttribute):
-    """
-    Computes the sine of node latitudes. Node coordinates are expected to be in radians.
-    """
+    """Computes the sine of node latitudes. Node coordinates are expected to be in radians."""
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         lat = nodes.x[:, 0]
@@ -49,9 +43,7 @@ class SinLatitude(BaseNodeAttribute):
 
 
 class SinLongitude(BaseNodeAttribute):
-    """
-    Computes the sine of node longitudes. Node coordinates are expected to be in radians.
-    """
+    """Computes the sine of node longitudes. Node coordinates are expected to be in radians."""
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         lon = nodes.x[:, 1]
