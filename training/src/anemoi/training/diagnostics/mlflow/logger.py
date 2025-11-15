@@ -346,16 +346,16 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
 
         self.tracking_uri = tracking_uri
-        if (self._resumed or self._forked) and self.offline:
-            self.tracking_uri = save_dir
-
         # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
         if self.offline:
-            # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
-            self.tracking_uri = None
-            if save_dir is None:
-                # otherwise, by default we create a dir called "None"... not ideal
-                save_dir = "./mlruns"
+            if self._resumed or self._forked:
+                self.tracking_uri = save_dir
+            else:
+                # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
+                self.tracking_uri = None
+                if save_dir is None:
+                    # otherwise, by default we create a dir called "None"... not ideal
+                    save_dir = "./mlruns"
 
         else:
             # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
