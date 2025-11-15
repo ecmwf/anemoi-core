@@ -12,12 +12,11 @@ import logging
 from functools import cached_property
 
 import torch
-from einops import rearrange
 from torch.utils.data import IterableDataset
 from rich.console import Console
 from rich.tree import Tree
 
-from anemoi.training.data.dataset.singledataset import NativeGridDataset
+from anemoi.training.data.dataset import NativeGridDataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -181,32 +180,8 @@ class MultiDataset(IterableDataset):
             shuffled_chunk_indices[:10],
         )
         # TODO: improve this...
-        dataset_iterators = {}
-        for name, dataset in self.datasets.items():
-            dataset_iterators[name] = self._build_dataset_iterator(dataset, shuffled_chunk_indices)
-
-        for _ in shuffled_chunk_indices:
-            sample_dict = {}
-            for name in self.dataset_names:
-                sample_dict[name] = next(dataset_iterators[name])
-            yield sample_dict
-
-    def _build_dataset_iterator(self, dataset: NativeGridDataset, indices):  # type: ignore[no-untyped-def]
-        """Create an iterator for a dataset using the provided indices."""
-        for i in indices:
-            start = i + dataset.relative_date_indices[0]
-            end = i + dataset.relative_date_indices[-1] + 1
-            timeincrement = dataset.relative_date_indices[1] - dataset.relative_date_indices[0]
-
-            grid_shard_indices = dataset.grid_indices.get_shard_indices(dataset.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                x = dataset.data[start:end:timeincrement, :, :, grid_shard_indices]
-            else:
-                x = dataset.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]
-
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-            yield torch.from_numpy(x)
+        for i in shuffled_chunk_indices:
+            yield {name: dataset._get_sample(i) for name, dataset in self.datasets.items()}
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
