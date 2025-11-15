@@ -18,6 +18,8 @@ import numpy as np
 import torch
 from einops import rearrange
 from torch.utils.data import IterableDataset
+from rich.tree import Tree
+from rich.console import Console
 
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
@@ -346,8 +348,17 @@ class NativeGridDataset(IterableDataset):
             yield torch.from_numpy(x)
 
     def __repr__(self) -> str:
-        return f"""
-            {super().__repr__()}
-            Dataset: {self.data}
-            Relative dates: {self.relative_date_indices}
-        """
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " +  f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Timestep: {self.timestep}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Relative dates: {self.relative_date_indices}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree.add(f"Num samples: {len(self.valid_date_indices)}")
+        return tree

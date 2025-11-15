@@ -14,6 +14,8 @@ from functools import cached_property
 import torch
 from einops import rearrange
 from torch.utils.data import IterableDataset
+from rich.console import Console
+from rich.tree import Tree
 
 from anemoi.training.data.dataset.singledataset import NativeGridDataset
 
@@ -207,10 +209,14 @@ class MultiDataset(IterableDataset):
             yield torch.from_numpy(x)
 
     def __repr__(self) -> str:
-        dataset_info = "\n".join([f"  {name}: {dataset.data}" for name, dataset in self.datasets.items()])
-        return f"""
-            {super().__repr__()}
-            Datasets:
-{dataset_info}
-            Relative dates: {self.primary_dataset.relative_date_indices}
-        """
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self) -> Tree:
+        tree = Tree(f"{self.__class__.__name__}")
+        for name, dataset in self.datasets.items():
+            subtree = dataset.tree(prefix=name)
+            tree.add(subtree)
+        return tree
