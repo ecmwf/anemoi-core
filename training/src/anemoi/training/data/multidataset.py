@@ -91,85 +91,64 @@ class MultiDataset(IterableDataset):
             primary_count,
         )
 
+    def _collect(self, attr_name: str) -> dict:
+        """Helper method to collect attributes from all datasets."""
+        combined_attr = {}
+        for name, dataset in self.datasets.items():
+            combined_attr[name] = getattr(dataset, attr_name)
+        return combined_attr
+
+    def _apply_to_all_datasets(self, method_name: str, *args, **kwargs) -> None:
+        """Call a method by name with given arguments on all datasets."""
+        for dataset in self.datasets.values():
+            getattr(dataset, method_name)(*args, **kwargs)
+
     @cached_property
     def statistics(self) -> dict:
         """Return combined statistics from all datasets."""
-        combined_stats = {}
-        for name, dataset in self.datasets.items():
-            combined_stats[name] = dataset.statistics
-        return combined_stats
+        return self._collect("statistics")
 
     @cached_property
     def statistics_tendencies(self) -> dict:
         """Return combined tendency statistics from all datasets."""
-        combined_stats = {}
-        for name, dataset in self.datasets.items():
-            stats = dataset.statistics_tendencies
-            if stats is not None:
-                combined_stats[name] = stats
-        return combined_stats if combined_stats else None
+        return self._collect("statistics_tendencies")
 
     @cached_property
     def metadata(self) -> dict:
         """Return combined metadata from all datasets."""
-        combined_metadata = {}
-        for name, dataset in self.datasets.items():
-            combined_metadata[name] = dataset.metadata
-        return combined_metadata
+        return self._collect("metadata")
 
     @cached_property
     def supporting_arrays(self) -> dict:
         """Return combined supporting arrays from all datasets."""
-        combined_arrays = {}
-        for name, dataset in self.datasets.items():
-            combined_arrays[name] = dataset.supporting_arrays
-        return combined_arrays
+        return self._collect("supporting_arrays")
 
     @cached_property
     def name_to_index(self) -> dict:
         """Return combined name_to_index mapping from all datasets."""
-        combined_mapping = {}
-        for name, dataset in self.datasets.items():
-            combined_mapping[name] = dataset.name_to_index
-        return combined_mapping
+        return self._collect("name_to_index")
 
     @cached_property
     def resolution(self) -> dict:
         """Return combined resolution from all datasets."""
-        combined_resolution = {}
-        for name, dataset in self.datasets.items():
-            combined_resolution[name] = dataset.resolution
-        return combined_resolution
+        return self._collect("resolution")
 
     @property
     def data(self) -> dict:
         """Return data from all datasets as dictionary."""
-        return {name: dataset.data for name, dataset in self.datasets.items()}
+        return self._collect("data")
 
-    def set_comm_group_info(
-        self,
-        global_rank: int,
-        model_comm_group_id: int,
-        model_comm_group_rank: int,
-        model_comm_num_groups: int,
-        reader_group_rank: int,
-        reader_group_size: int,
-    ) -> None:
+    def set_comm_group_info(self, *args, **kwargs) -> None:
         """Set communication group information for all datasets."""
-        for dataset in self.datasets.values():
-            dataset.set_comm_group_info(
-                global_rank,
-                model_comm_group_id,
-                model_comm_group_rank,
-                model_comm_num_groups,
-                reader_group_rank,
-                reader_group_size,
-            )
+        self._apply_to_all_datasets("set_comm_group_info", *args, **kwargs)
 
-    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
+    def set_ens_comm_group_info(self, *args, **kwargs) -> None:
+        """Set ensemble communication group information for all datasets."""
+        self._apply_to_all_datasets("set_ens_comm_group_info", *args, **kwargs)
+
+    def per_worker_init(self, *args, **kwargs) -> None:
         """Initialize all datasets for this worker."""
-        for dataset in self.datasets.values():
-            dataset.per_worker_init(n_workers, worker_id)
+        self._apply_to_all_datasets("per_worker_init", *args, **kwargs)
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.

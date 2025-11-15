@@ -109,7 +109,7 @@ class NativeGridDataset(IterableDataset):
         return self.data.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
+    def statistics_tendencies(self) -> dict | None:
         """Return dataset tendency statistics."""
         try:
             return self.data.statistics_tendencies(self.timestep)
