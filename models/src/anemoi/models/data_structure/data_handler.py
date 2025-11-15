@@ -214,15 +214,23 @@ class DataHandler:
                     raise KeyError(f"Duplicate group '{g}' found in data handlers")
                 self.data_handlers[g] = dh
 
+    def dispatch(self, group: str) -> OneDatasetDataHandler:
+        try:
+            return self.data_handlers[group]
+        except KeyError:
+            raise KeyError(
+                f"Group '{group}' not found in any data handler. Available groups: {list(self.data_handlers.keys())}"
+            )
+
     def static(self, *requests):
-        return [self.data_handlers[group].static((group, variables)) for group, variables in requests]
+        return [self.dispatch(group).static((group, variables)) for group, variables in requests]
 
     def dynamic(self, *requests):
         # potential optimisation: group by data_handler to reduce number of reads
-        return [self.data_handlers[group].dynamic((i, group, variables)) for i, group, variables in requests]
+        return [self.dispatch(group).dynamic((i, group, variables)) for i, group, variables in requests]
 
     def dates_block(self, group):
-        return self.data_handlers[group].dates_block(group)
+        return self.dispatch(group).dates_block(group)
 
     def _tree(self, prefix=""):
         # for pretty printing of dicts

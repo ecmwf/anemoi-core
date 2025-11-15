@@ -100,49 +100,6 @@ def test_gridded():
                         {default: 'mean-std', 'mean-std': [tp, 2t]}
                       normalisation: "normalisation-config-todo"
 
-                  - dataset: aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8
-                    data_group: era5_o96
-                    extra_configs:
-                      normalisation:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      graph:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      other_config:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      normalisation: "normalisation-config-todo"
-
-                  - dataset: aifs-ea-an-oper-0001-mars-o48-1979-2022-6h-v6
-                    data_group: era5_o48
-                    extra_configs:
-                      normalisation:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      graph:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      other_config:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      normalisation: "normalisation-config-todo"
-
-                  # unused in this example: era5 n320 resolution
-                  - dataset: aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8
-                    data_group: era5_highres
-                    extra_configs:
-                      normalisation:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      graph:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      other_config:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      normalisation: "normalisation-config-todo"
-
-                  # unused in this example
-                  - dataset: cerra-rr-an-oper-0001-mars-5p0-2017-2017-6h-v1
-                    data_group: cerra
-                    extra_configs:
-                      normalisation:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      graph:
-                        {default: 'mean-std', 'mean-std': [tp, 2t]}
-                      other_config: {}
                """
     )
 
@@ -165,11 +122,11 @@ def test_observations():
         """sample_provider:
              frequency: 3h
              groups:
-                aeolus_aladin_mie:
+                msg_combined_seviri_o256:
                   variables:
-                    forcings: ["los_0", "vert_length"]
-                    prognostics: ["sin_vaa"]
-                    diagnostics: ["cos_vaa"]
+                    forcings: ["cos_latitude", "sin_latitude"]
+                    prognostics: []
+                    diagnostics: []
                   dimensions: [["offsets"], "values", "variables"]
                   offsets: ["-6h", "+0h"]
                     # input: ["-3h", "+0h"]
@@ -188,8 +145,8 @@ def test_observations():
                search_path: null
                sources:
                  - dataset:
-                      # contains: aeolus_aladin_mie
-                      dataset: observations-2021-10days-6h-v1-zeta
+                      # contains:  ...
+                      dataset: observations-2021-10days-6h-v1-eta
                       frequency: 3h
              aliases: "is ignored"
            """
