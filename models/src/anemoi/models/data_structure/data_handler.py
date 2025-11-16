@@ -196,7 +196,7 @@ class OneDatasetDataHandler:
             data=data,
             latitudes=record.latitudes[group],
             longitudes=record.longitudes[group],
-            timedeltas=record.timedeltas[group],
+            timedeltas=record.timedeltas[group].astype("datetime64[ms]").astype("int64"),
             date_str=cache["dates"][j].astype(datetime.datetime).isoformat(),
         )
 
