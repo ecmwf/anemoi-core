@@ -11,6 +11,7 @@
 import logging
 from functools import cached_property
 
+import numpy as np
 import torch
 from torch.utils.data import IterableDataset
 from rich.console import Console
@@ -53,6 +54,7 @@ class MultiDataset(IterableDataset):
             label for the dataset, by default "multi"
         """
         self.label = label
+        self.shuffle = shuffle
         self.dataset_names = list(datasets_config.keys())
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
@@ -67,7 +69,7 @@ class MultiDataset(IterableDataset):
                 grid_indices=grid_indices_config[name],
                 relative_date_indices=relative_date_indices,
                 timestep=timestep,
-                shuffle=shuffle,  # Will be overridden in __iter__
+                shuffle=self.shuffle,  # Will be overridden in __iter__
                 label=f"{label}_{name}",
             )
 
@@ -105,34 +107,45 @@ class MultiDataset(IterableDataset):
             getattr(dataset, method_name)(*args, **kwargs)
 
     @cached_property
-    def statistics(self) -> dict:
+    def statistics(self) -> dict[str, dict]:
         """Return combined statistics from all datasets."""
         return self._collect("statistics")
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
+    def statistics_tendencies(self) -> dict[str, dict | None]:
         """Return combined tendency statistics from all datasets."""
         return self._collect("statistics_tendencies")
 
     @cached_property
-    def metadata(self) -> dict:
+    def metadata(self) -> dict[str, dict]:
         """Return combined metadata from all datasets."""
         return self._collect("metadata")
 
     @cached_property
-    def supporting_arrays(self) -> dict:
+    def supporting_arrays(self) -> dict[str, dict]:
         """Return combined supporting arrays from all datasets."""
         return self._collect("supporting_arrays")
 
     @cached_property
-    def name_to_index(self) -> dict:
+    def name_to_index(self) -> dict[str, dict]:
         """Return combined name_to_index mapping from all datasets."""
         return self._collect("name_to_index")
 
     @cached_property
-    def resolution(self) -> dict:
+    def resolution(self) -> dict[str, str]:
         """Return combined resolution from all datasets."""
         return self._collect("resolution")
+
+    @cached_property
+    def valid_date_indices(self) -> np.ndarray:
+        """Return valid date indices from all datasets."""
+        valid_date_indices = self._collect("valid_date_indices")
+        reference_indices = None
+        for name, indices in valid_date_indices.items():
+            if reference_indices is None:
+                reference_indices = indices
+            assert indices == reference_indices, (f"Dataset '{name}' has different valid_date_indices than other datasets")
+        return reference_indices
 
     @property
     def data(self) -> dict:
@@ -151,6 +164,9 @@ class MultiDataset(IterableDataset):
         """Initialize all datasets for this worker."""
         self._apply_to_all_datasets("per_worker_init", *args, **kwargs)
 
+    def _get_sample(self, index: int) -> dict[str, torch.Tensor]:
+        return {name: dataset._get_sample(index) for name, dataset in self.datasets.items()}
+
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
 
@@ -164,24 +180,25 @@ class MultiDataset(IterableDataset):
         # All datasets will use the same shuffled indices for synchronization
         primary_dataset = self.primary_dataset
 
-        if primary_dataset.shuffle:
+        if self.shuffle:
             shuffled_chunk_indices = primary_dataset.rng.choice(
-                primary_dataset.valid_date_indices,
-                size=len(primary_dataset.valid_date_indices),
+                self.valid_date_indices,
+                size=len(self.valid_date_indices),
                 replace=False,
             )[primary_dataset.chunk_index_range]
         else:
-            shuffled_chunk_indices = primary_dataset.valid_date_indices[primary_dataset.chunk_index_range]
+            shuffled_chunk_indices = self.valid_date_indices[primary_dataset.chunk_index_range]
 
         LOGGER.debug(
-            "MultiDataset worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
+            "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
+            self.__class__.__name__,
             primary_dataset.worker_id,
             primary_dataset.worker_id,
             shuffled_chunk_indices[:10],
         )
         # TODO: improve this...
         for i in shuffled_chunk_indices:
-            yield {name: dataset._get_sample(i) for name, dataset in self.datasets.items()}
+            yield self._get_sample(i)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
