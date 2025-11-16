@@ -1,7 +1,6 @@
 defaults:
 - data: zarr
 - dataloader: native_grid
-- datamodule: ens
 - diagnostics: evaluation_ens
 - hardware: example
 - graph: encoder_decoder_only
