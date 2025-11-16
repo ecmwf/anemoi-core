@@ -392,7 +392,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
+        step: int | None = None,
         validation_mode: bool = False,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
@@ -404,9 +404,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        rollout_step : int
-            Current rollout step
-        validation_mode : bool
+        step : int, optional
+            Current step
+        validation_mode : bool, optional
             Whether to compute validation metrics
         **kwargs
             Additional arguments to pass to loss computation
@@ -437,11 +437,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metrics_next = self.calculate_val_metrics(
                 y_pred_full,
                 y_full,
-                rollout_step,
+                step,
                 grid_shard_slice=grid_shard_slice,
             )
 
-        return loss, metrics_next
+        return loss, metrics_next, y_pred_full
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -559,7 +559,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int = 0,
+        step: int | None = None,
         grid_shard_slice: slice | None = None,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -570,8 +570,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Predicted ensemble
         y: torch.Tensor
             Ground truth (target).
-        rollout_step: int
-            Rollout step
+        step: int, optional
+            Step number
 
         Returns
         -------
@@ -582,14 +582,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_postprocessed = self.model.post_processors(y, in_place=False)
         y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
 
+        suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric{suffix}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():
-                metric_step_name = f"{metric_name}_metric/{mkey}/{rollout_step + 1}"
+                metric_step_name = f"{metric_name}_metric/{mkey}{suffix}"
                 if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"

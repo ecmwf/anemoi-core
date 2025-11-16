@@ -128,56 +128,20 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
-    def gather_and_compute_loss(
+    def compute_loss_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        loss: torch.nn.Module,
-        ens_comm_subgroup_size: int,
-        ens_comm_subgroup: ProcessGroup,
-        model_comm_group: ProcessGroup,
-        return_pred_ens: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        """Gather the ensemble members from all devices in my group.
-
-        Eliminate duplicates (if any) and compute the loss.
-
-        Args:
-            y_pred: torch.Tensor
-                Predicted state tensor, calculated on self.device
-            y: torch.Tensor
-                Ground truth
-            loss: torch.nn.Module
-                Loss function
-            ens_comm_group_size: int
-                Size of the ensemble communication group
-            ens_comm_subgroup: ProcessGroup
-                Ensemble communication subgroup
-            model_comm_group: ProcessGroup
-                Model communication group
-            return_pred_ens: bool
-                Validation flag: if True, we return the predicted ensemble (post-gather)
-
-        Returns
-        -------
-            loss_inc:
-                Loss
-            y_pred_ens:
-                Predictions if validation mode
-        """
-        # gather ensemble members,
-        # full ensemble is only materialised on GPU in checkpointed region
+        *args,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=1,
-            shapes=[y_pred.shape] * ens_comm_subgroup_size,
-            mgroup=ens_comm_subgroup,
+            shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
+            mgroup=self.ens_comm_subgroup,
         )
-
-        # compute the loss
-        loss_inc = loss(y_pred_ens, y, squash=True, grid_shard_slice=self.grid_shard_slice, group=model_comm_group)
-
-        return loss_inc, y_pred_ens if return_pred_ens else None
+        return super().compute_loss_metrics(y_pred_ens, y, *args, model_comm_group=self.model_comm_group, **kwargs)
 
     def rollout_step(
         self,
@@ -218,16 +182,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
         LOGGER.debug("Shapes: x.shape = %s", list(x.shape))
-        # Stack the analysis nens_per_device times along an ensemble dimension
-        x = batch[
-            :,
-            0 : self.multi_step,
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, ms, ens_dummy, latlon, nvar)
-
-        x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
-        LOGGER.debug("Shapes: x.shape = %s", list(x.shape))
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -239,9 +193,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         msg = (
             "Batch length not sufficient for requested multi_step length!"
             f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
         )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
         assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
@@ -257,51 +209,15 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss, y_pred_ens_group = checkpoint(
-                self.gather_and_compute_loss,
+            loss, metrics_next, y_pred_ens_group = checkpoint(
+                self.compute_loss_metrics,
                 y_pred,
                 y,
-                self.loss,
-                self.ens_comm_subgroup_size,
-                self.ens_comm_subgroup,
-                self.model_comm_group,
+                rollout_step,
                 validation_mode,
                 use_reentrant=False,
             )
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
-                    y_pred_ens_group,
-                    y,
-                    rollout_step,
-                    grid_shard_slice=self.grid_shard_slice,
-                )
-            yield loss, metrics_next, y_pred_ens_group if validation_mode else [], x if validation_mode else None
-
-    def _step(
-        self,
-        batch: tuple[torch.Tensor, ...],
-        validation_mode: bool = False,
-    ) -> tuple:
-        """Training / validation step."""
-        LOGGER.debug("SHAPES: batch.shape = %s, multi_step = %d", list(batch.shape), self.multi_step)
-
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
-
-        for loss_next, metrics_next, y_preds_next, _ens_ic in self.rollout_step(
-            batch,
-            rollout=self.rollout,
-            validation_mode=validation_mode,
-        ):
-            loss += loss_next
-            metrics.update(metrics_next)
-            y_preds.append(y_preds_next)
-
-        loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds, _ens_ic
+            yield loss, metrics_next, y_pred_ens_group
