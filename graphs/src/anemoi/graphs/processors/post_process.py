@@ -454,6 +454,6 @@ class StackScalarFeatures(PostProcessor):
 
     def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
         nodes = graph[self.nodes_name]
-        stacked_features = torch.cat([nodes[self.feature_name] for self.feature_name in self.feature_names], dim=-1)
+        stacked_features = torch.cat([nodes[feature_name] for feature_name in self.feature_names], dim=-1)
         nodes[self.stacked_feature_name] = stacked_features
         return graph
