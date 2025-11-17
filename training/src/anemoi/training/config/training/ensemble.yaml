@@ -75,7 +75,6 @@ training_loss:
   weights:
     - 1.0
     - 1.0
-    - 1.0
   keep_batch_sharded: ${model.keep_batch_sharded}
 
   internal_loss:
@@ -113,7 +112,6 @@ validation_metrics:
     filenames: ${hardware.files.truncation_loss}
     keep_batch_sharded: ${model.keep_batch_sharded}
     weights:
-     - 1.0
      - 1.0
      - 1.0
 
