@@ -14,7 +14,6 @@ from pathlib import Path
 import einops
 import torch
 from scipy.sparse import load_npz
-from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import gather_channels
@@ -27,14 +26,15 @@ from anemoi.training.losses.base import BaseLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class MultiscaleLossWrapper(nn.Module):
+class MultiscaleLossWrapper(BaseLoss):
 
     name: str = "MultiscaleLossWrapper"
 
     def __init__(
         self,
         truncation_path: Path | str,
-        filenames: list[Path | str],
+        filenames: list[Path | str] | None,
+        weights: list[float],
         keep_batch_sharded: bool,
         internal_loss: BaseLoss,
     ) -> None:
@@ -44,19 +44,42 @@ class MultiscaleLossWrapper(nn.Module):
         ----------
         truncation_path : Path | str
             Path to the truncation matrices
-        filenames : Path | str
+        filenames : list[Path | str] | None
             Filenames of the truncation matrices
-        loss : BaseLoss
+        weights : list[float]
+            Per-scale loss weights
+        keep_batch_sharded : bool
+            Whether to keep the batch sharded during loss computation
+        internal_loss : BaseLoss
             Loss to be used at each scale
         """
         super().__init__()
 
         self.truncation_matrices = self.load_loss_truncation_matrices(truncation_path, filenames)
         self.num_scales = len(self.truncation_matrices)
+        assert (
+            len(weights) == self.num_scales
+        ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
+        self.weights = weights
         self.loss = internal_loss
         self.scaler = self.loss.scaler
         self.keep_batch_sharded = keep_batch_sharded
         self.supports_sharding = True
+        self.mloss = None
+
+    def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
+        """Update the scaler values for the internal loss.
+
+        Parameters
+        ----------
+        name : str
+            Name of the scaler to update
+        scaler : torch.Tensor
+            New scaler values
+        override : bool, optional
+            Whether to override existing scaler values, by default False
+        """
+        self.loss.update_scaler(name=name, scaler=scaler, override=override)
 
     def init_loss_scales(self, dtype: torch.dtype, device: torch.device) -> None:
         self.mloss = [torch.zeros(1, dtype=dtype, device=device, requires_grad=False) for _ in range(self.num_scales)]
@@ -64,19 +87,26 @@ class MultiscaleLossWrapper(nn.Module):
     def load_loss_truncation_matrices(
         self,
         truncation_path: Path | str,
-        filenames: Path | str,
+        filenames: list[Path | str] | None,
     ) -> list[torch.Tensor | None]:
 
         # for loss decomposition
         truncation_matrices = []
+
+        # Handle None, empty list, or falsy values - default to single scale with no truncation
+        if not filenames:
+            LOGGER.info("No truncation files specified, using single scale without truncation")
+            return [None]
+
         for interp_data_loss in filenames:
-            if interp_data_loss != "None":
+            # Skip None, False, or the string "None"
+            if interp_data_loss is None or interp_data_loss is False or interp_data_loss == "None":
+                truncation_matrices.append(None)
+                LOGGER.info("Loss truncation: %s", None)
+            else:
                 truncation_matrix = load_npz(Path(truncation_path, interp_data_loss))
                 truncation_matrices.append(make_truncation_matrix(truncation_matrix))
                 LOGGER.info("Loss truncation: %s %s", truncation_matrix.shape[0], truncation_matrix.shape[1])
-            else:
-                truncation_matrices.append(None)
-                LOGGER.info("Loss truncation: %s", None)
 
         return truncation_matrices
 
@@ -136,13 +166,12 @@ class MultiscaleLossWrapper(nn.Module):
         y: torch.Tensor,
         squash: bool = True,  # noqa: ARG002
         grid_shard_slice: tuple | None = None,
-        model_comm_group: ProcessGroup | None = None,
-        **kwargs,
+        group: ProcessGroup | None = None,
+        model_comm_group_size: int | None = None,
+        grid_dim: int | None = None,
+        grid_shard_shapes: list | None = None,
+        **_kwargs,
     ) -> list[torch.Tensor]:
-
-        model_comm_group_size = kwargs.pop("model_comm_group_size", None)
-        grid_dim = kwargs.pop("grid_dim", None)
-        grid_shard_shapes = kwargs.pop("grid_shard_shapes", None)
 
         shard_shapes, shard_shapes_y = None, None
         if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
@@ -150,7 +179,7 @@ class MultiscaleLossWrapper(nn.Module):
             y_pred_ens_for_interp, y_for_interp, shard_shapes, shard_shapes_y = self._prepare_for_truncation(
                 y_pred_ens,
                 y,
-                model_comm_group,
+                group,
                 grid_dim,
                 grid_shard_shapes,
             )
@@ -172,9 +201,9 @@ class MultiscaleLossWrapper(nn.Module):
             # interpolate / smooth the predictions and the truth for loss computation
             y_pred_ens_tmp, y_tmp = self._interp_for_loss(y_pred_ens_for_interp, y_for_interp, i)
 
-            if model_comm_group and model_comm_group_size > 1 and self.keep_batch_sharded:
-                y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, model_comm_group)
-                y_tmp = gather_channels(y_tmp, shard_shapes_y, model_comm_group)
+            if group and model_comm_group_size > 1 and self.keep_batch_sharded:
+                y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, group)
+                y_tmp = gather_channels(y_tmp, shard_shapes_y, group)
 
             # save for next loss scale
             y_preds_ens.append(y_pred_ens_tmp)
@@ -191,10 +220,11 @@ class MultiscaleLossWrapper(nn.Module):
                     y_tmp,
                     squash=True,
                     grid_shard_slice=grid_shard_slice,
-                    group=model_comm_group,
+                    group=group,
                 ),
             )
 
-        loss = torch.stack(loss_inc).sum()
-        self.mloss = [x.detach() for x in loss_inc]
+        weighted_losses = [w * loss_val for w, loss_val in zip(self.weights, loss_inc, strict=True)]
+        loss = torch.stack(weighted_losses).sum()
+        self.mloss = [x.detach() for x in weighted_losses]
         return loss
