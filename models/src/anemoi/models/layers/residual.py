@@ -1,4 +1,12 @@
-from abc import abstractmethod
+# (C) Copyright 2025 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import einops
@@ -12,14 +20,14 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.sparse_projector import build_sparse_projector
 
 
-class BaseResidualConnection(nn.Module):
+class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
     def __init__(self) -> None:
         super().__init__()
 
     @abstractmethod
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Define the residual connection operation.
 
         Should be overridden by subclasses.
@@ -39,7 +47,7 @@ class SkipConnection(BaseResidualConnection):
         super().__init__()
         self.step = step
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
@@ -50,7 +58,7 @@ class NoConnection(BaseResidualConnection):
     This module returns a zero tensor with the same shape as the last timestep.
     """
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Return a zero tensor with the same shape as the last timestep."""
         return torch.zeros_like(x[:, 0, ...], device=x.device, dtype=x.dtype)
 
