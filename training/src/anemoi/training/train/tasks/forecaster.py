@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -135,23 +134,17 @@ class GraphForecaster(BaseGraphModule):
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
-        training_mode: bool = True,
         validation_mode: bool = False,
     ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
         """Rollout step for the forecaster.
 
-        Will run pre_processors on batch, but not post_processors on predictions.
-
         Parameters
         ----------
         batch : torch.Tensor
-            Batch to use for rollout
+            Normalized batch to use for rollout (assumed to be already preprocessed)
         rollout : Optional[int], optional
             Number of times to rollout for, by default None
             If None, will use self.rollout
-        training_mode : bool, optional
-            Whether in training mode and to calculate the loss, by default True
-            If False, loss will be None
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
@@ -162,15 +155,6 @@ class GraphForecaster(BaseGraphModule):
             Loss value, metrics, and predictions (per step)
 
         """
-        batch = self.model.pre_processors(batch)  # normalized in-place
-
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
-
         # start rollout of preprocessed batch
         x = batch[
             :,
@@ -195,7 +179,6 @@ class GraphForecaster(BaseGraphModule):
                 y_pred,
                 y,
                 rollout_step,
-                training_mode,
                 validation_mode,
                 use_reentrant=False,
             )
@@ -207,10 +190,8 @@ class GraphForecaster(BaseGraphModule):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-        del batch_idx
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -219,7 +200,6 @@ class GraphForecaster(BaseGraphModule):
         for loss_next, metrics_next, y_preds_next in self.rollout_step(
             batch,
             rollout=self.rollout,
-            training_mode=True,
             validation_mode=validation_mode,
         ):
             loss += loss_next

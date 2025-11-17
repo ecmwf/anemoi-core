@@ -1,80 +1,59 @@
-num_channels: 512
+num_channels: 1024
+cpu_offload: False
 
 keep_batch_sharded: True
 
 model:
-  _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
-
-noise_injector:
-  _target_: anemoi.models.layers.ensemble.NoiseConditioning
-  _convert_: all
-  noise_std: 1
-  noise_channels_dim: 4
-  noise_mlp_hidden_dim: 32
-  inject_noise: True
-  layer_kernels:
-    Activation:
-      _target_: torch.nn.GELU
-
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
-    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
-    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    _target_: torch.nn.LayerNorm
   Linear:
     _target_: torch.nn.Linear
   Activation:
     _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
 
 processor:
-  _target_: anemoi.models.layers.processor.GNNProcessor
-  _convert_: all
+  _target_: anemoi.models.layers.processor.PointWiseMLPProcessor
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
-  mlp_extra_layers: 0
-  layer_kernels:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      normalized_shape: ${model.num_channels}
-      condition_shape: ${model.noise_injector.noise_channels_dim}
-      w_one_bias_zero_init: True
-      autocast: false
-    Linear:
-      _target_: torch.nn.Linear
-    Activation:
-      _target_: torch.nn.GELU
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
 
 encoder:
-  _target_: anemoi.models.layers.mapper.GNNForwardMapper
-  _convert_: all
-  trainable_size: ${model.trainable_parameters.data2hidden}
+  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 1
-  mlp_extra_layers: 0
+  cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
 
 decoder:
-  _target_: anemoi.models.layers.mapper.GNNBackwardMapper
-  _convert_: all
-  trainable_size: ${model.trainable_parameters.hidden2data}
+  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 1
-  mlp_extra_layers: 0
+  initialise_data_extractor_zero: False
+  cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
-
-trainable_parameters:
-  data: 8
-  hidden: 8
-  data2hidden: 8
-  hidden2data: 8
-  hidden2hidden: 8
-
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
+
+trainable_parameters:
+  data: 0
+  hidden: 0
+  data2hidden: 0
+  hidden2data: 0
+  hidden2hidden: 0 # GNN and GraphTransformer Processor only
+
 
 attributes:
   edges:

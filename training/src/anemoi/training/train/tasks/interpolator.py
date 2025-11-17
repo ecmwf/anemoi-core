@@ -18,7 +18,6 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 LOGGER = logging.getLogger(__name__)
@@ -88,23 +87,12 @@ class GraphInterpolator(BaseGraphModule):
     def _step(
         self,
         batch: torch.Tensor,
-        batch_idx: int,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
-        del batch_idx
 
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
-
-        batch = self.model.pre_processors(batch)
-
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
         x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
             ...,
@@ -137,7 +125,6 @@ class GraphInterpolator(BaseGraphModule):
                 y_pred,
                 y,
                 interp_step - 1,
-                training_mode=True,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )

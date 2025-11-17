@@ -93,6 +93,55 @@ def get_tmp_paths(temporary_directory_for_test_data: TemporaryDirectoryForTestDa
 
 @pytest.fixture(
     params=[
+        ["config_validation=True", "diagnostics.log.mlflow.enabled=True", "diagnostics.log.mlflow.offline=True"],
+        ["config_validation=True", "diagnostics.log.mlflow.enabled=False"],
+        [
+            "config_validation=False",
+            "diagnostics.log.mlflow.enabled=True",
+            "hardware.files.graph=null",
+            "diagnostics.log.mlflow.offline=True",
+        ],
+        ["config_validation=False", "diagnostics.log.mlflow.enabled=False", "hardware.files.graph=null"],
+    ],
+)
+def base_global_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_paths: GetTmpPaths,
+) -> tuple[DictConfig, str, str]:
+    overrides = request.param
+    model_architecture = overrides[0].split("=")[1]
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+        template = compose(
+            config_name="config",
+            overrides=overrides,
+        )  # apply architecture overrides to template since they override a default
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_config.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
+    use_case_modifications.hardware.paths.data = tmp_dir
+    use_case_modifications.hardware.files.dataset = rel_paths[0]
+
+    # Add the imputer here as it's not part of the default config
+    imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
+
+    OmegaConf.set_struct(template.data, False)  # allow adding new keys to the template to add the imputer
+    cfg = OmegaConf.merge(
+        template,
+        testing_modifications_with_temp_dir,
+        use_case_modifications,
+        imputer_modifications,
+        OmegaConf.from_dotlist(overrides),
+    )
+
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, dataset_urls[0], model_architecture
+
+
+@pytest.fixture(
+    params=[
         ["model=gnn"],
         ["model=graphtransformer"],
     ],
@@ -250,6 +299,54 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_paths: G
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, dataset_urls[0]
+
+
+@pytest.fixture(
+    params=[  # selects different test cases
+        "lam",
+        "graphtransformer",
+        "stretched",
+        "ensemble_crps",
+    ],
+)
+def benchmark_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: OmegaConf,
+) -> tuple[OmegaConf, str]:
+    test_case = request.param
+    base_config = "config"  # which config we start from in anemoi/training/configs/
+    # base_config="config" =>  anemoi/training/configs/config.yaml
+    # LAM and Stretched need different base configs
+
+    # change configs based on test case
+    if test_case == "graphtransformer":
+        overrides = ["model=graphtransformer", "graph=multi_scale"]
+    elif test_case == "stretched":
+        overrides = []
+        base_config = "stretched"
+    elif test_case == "lam":
+        overrides = []
+        base_config = "lam"
+    elif test_case == "ensemble_crps":
+        overrides = ["model=graphtransformer", "graph=multi_scale"]
+        base_config = "ensemble_crps"
+    else:
+        msg = f"Error. Unknown benchmark configuration: {test_case}"
+        raise ValueError(msg)
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
+        template = compose(config_name=base_config, overrides=overrides)
+
+    # Settings for benchmarking in general (sets atos paths, enables profiling, disables plotting etc)
+    base_benchmark_config = OmegaConf.load(Path.cwd() / Path("training/tests/integration/config/benchmark/base.yaml"))
+
+    # Settings for the specific benchmark test case
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
+    )
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
+    OmegaConf.resolve(cfg)
+    return cfg, test_case
 
 
 @pytest.fixture(scope="session")

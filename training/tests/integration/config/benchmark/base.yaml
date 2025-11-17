@@ -1,0 +1,59 @@
+# base config which defines settings shared across all benchmarks
+
+hardware:
+  accelerator: cuda
+  num_gpus_per_node: 2
+  num_nodes: 1
+  paths:
+    data:  /home/mlx/ai-ml/datasets/
+    graph: ./ #store locally so graph will be reused by non-zero processes
+
+dataloader:
+  num_workers:
+    training: 8
+    validation: 8
+  limit_batches:
+    training: 200
+    validation: 0
+  batch_size:
+    training: 1
+    validation: 1
+
+graph:
+  overwrite: False
+
+model:
+  encoder:
+    num_chunks: 2
+  decoder:
+    num_chunks: 2
+  processor:
+    num_chunks: 2
+  num_channels: 512
+
+training:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+
+diagnostics:
+  callbacks: []
+  enable_checkpointing: False
+  print_memory_summary: true
+  benchmark_profiler:
+    memory:
+      enabled: true
+    time:
+      verbose: true
+    model_summary:
+      enabled: false
+    snapshot:
+      enabled: true
+    system:
+      enabled: false #some error about metric key in extract_gpu_metrics being invalid
+  log:
+    mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
+      enabled: true
+      offline: True
+      tracking_uri: ""
+    interval: 1

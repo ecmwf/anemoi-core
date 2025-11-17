@@ -12,6 +12,8 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
+from typing import Iterable
+from typing import Union
 
 import torch
 from hydra.utils import instantiate
@@ -26,6 +28,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class PostProcessor(ABC):
+    """Base PostProcessor class."""
 
     @abstractmethod
     def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
@@ -37,46 +40,62 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
 
     def __init__(
         self,
-        nodes_name: str,
+        nodes_name: Union[str, Iterable[str]],
         save_mask_indices_to_attr: str | None = None,
     ) -> None:
-        self.nodes_name = nodes_name
+        self.nodes_names = (nodes_name,) if isinstance(nodes_name, str) else tuple(nodes_name)
         self.save_mask_indices_to_attr = save_mask_indices_to_attr
-        self.mask: torch.Tensor = None
+        super().__init__()
 
-    def removing_nodes(self, graph: HeteroData) -> HeteroData:
+    def removing_nodes(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> HeteroData:
         """Remove nodes based on the mask passed."""
-        for attr_name in graph[self.nodes_name].node_attrs():
-            graph[self.nodes_name][attr_name] = graph[self.nodes_name][attr_name][self.mask]
+        for attr_name in graph[nodes_name].node_attrs():
+            graph[nodes_name][attr_name] = graph[nodes_name][attr_name][mask]
 
         return graph
 
-    def create_indices_mapper_from_mask(self) -> dict[int, int]:
-        return dict(zip(torch.where(self.mask)[0].tolist(), list(range(self.mask.sum()))))
+    def remove_edges(self, graph: HeteroData, mask: torch.Tensor, edges_name: tuple[str, str, str]) -> HeteroData:
+        """Remove edges based on the mask passed."""
+        for attr_name in graph[edges_name].edge_attrs():
+            if attr_name == "edge_index":
+                graph[edges_name][attr_name] = graph[edges_name][attr_name][:, mask]
+            else:
+                graph[edges_name][attr_name] = graph[edges_name][attr_name][mask]
 
-    def update_edge_indices(self, graph: HeteroData) -> HeteroData:
+        return graph
+
+    def create_indices_mapper_from_mask(self, mask: torch.Tensor) -> dict[int, int]:
+        return dict(zip(torch.where(mask)[0].tolist(), list(range(mask.sum()))))
+
+    def update_edge_indices(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> HeteroData:
         """Update the edge indices to the new position of the nodes."""
-        idx_mapping = self.create_indices_mapper_from_mask()
+        idx_mapping = self.create_indices_mapper_from_mask(mask)
         for edges_name in graph.edge_types:
-            if edges_name[0] == self.nodes_name:
+            if edges_name[0] == nodes_name:
+                valid_edges_mask = mask[graph[edges_name].edge_index[0].cpu()]
+                if valid_edges_mask.any():
+                    graph = self.remove_edges(graph, valid_edges_mask, edges_name)
                 graph[edges_name].edge_index[0] = graph[edges_name].edge_index[0].cpu().apply_(idx_mapping.get)
 
-            if edges_name[2] == self.nodes_name:
+            if edges_name[2] == nodes_name:
+                valid_edges_mask = mask[graph[edges_name].edge_index[1].cpu()]
+                if valid_edges_mask.any():
+                    graph = self.remove_edges(graph, valid_edges_mask, edges_name)
                 graph[edges_name].edge_index[1] = graph[edges_name].edge_index[1].cpu().apply_(idx_mapping.get)
 
         return graph
 
     @abstractmethod
-    def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
+    def compute_mask(self, graph: HeteroData, nodes_name: str) -> torch.Tensor: ...
 
-    def add_attribute(self, graph: HeteroData) -> HeteroData:
+    def add_attribute(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> HeteroData:
         """Add an attribute of the mask indices as node attribute."""
         if self.save_mask_indices_to_attr is not None:
             LOGGER.info(
                 f"An attribute {self.save_mask_indices_to_attr} has been added with the indices to mask the nodes from the original graph."
             )
-            mask_indices = torch.where(self.mask)[0].reshape((graph[self.nodes_name].num_nodes, -1))
-            graph[self.nodes_name][self.save_mask_indices_to_attr] = mask_indices
+            mask_indices = torch.where(mask)[0].reshape((graph[nodes_name].num_nodes, -1))
+            graph[nodes_name][self.save_mask_indices_to_attr] = mask_indices
 
         return graph
 
@@ -95,11 +114,12 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
         HeteroData
             The post-processed graph.
         """
-        self.mask = self.compute_mask(graph)
-        LOGGER.info(f"Removing {(~self.mask).sum()} nodes from {self.nodes_name}.")
-        graph = self.removing_nodes(graph)
-        graph = self.update_edge_indices(graph)
-        graph = self.add_attribute(graph)
+        for nodes_name in self.nodes_names:
+            mask = self.compute_mask(graph, nodes_name).cpu()
+            LOGGER.info(f"Removing {(~mask).sum()} nodes from {nodes_name}.")
+            graph = self.removing_nodes(graph, mask, nodes_name)
+            graph = self.update_edge_indices(graph, mask, nodes_name)
+            graph = self.add_attribute(graph, mask, nodes_name)
         return graph
 
 
@@ -108,7 +128,7 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
 
     Attributes
     ----------
-    nodes_name: str
+    nodes_name: str | Iterable[str]
         Name of the unconnected nodes to remove.
     ignore: str, optional
         Name of an attribute to ignore when removing nodes. Nodes with
@@ -131,16 +151,16 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
 
     def __init__(
         self,
-        nodes_name: str,
+        nodes_name: Union[str, Iterable[str]],
         save_mask_indices_to_attr: str | None = None,
         ignore: str | None = None,
     ) -> None:
         super().__init__(nodes_name, save_mask_indices_to_attr)
         self.ignore = ignore
 
-    def compute_mask(self, graph: HeteroData) -> torch.Tensor:
+    def compute_mask(self, graph: HeteroData, nodes_name: str) -> torch.Tensor:
         """Compute the mask of connected nodes."""
-        nodes = graph[self.nodes_name]
+        nodes = graph[nodes_name]
         connected_mask = torch.zeros(nodes.num_nodes, dtype=torch.bool)
 
         if self.ignore is not None:
@@ -148,13 +168,78 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
             connected_mask[nodes[self.ignore].bool().squeeze()] = True
 
         for (source_name, _, target_name), edges in graph.edge_items():
-            if source_name == self.nodes_name:
+            if source_name == nodes_name:
                 connected_mask[edges.edge_index[0]] = True
 
-            if target_name == self.nodes_name:
+            if target_name == nodes_name:
                 connected_mask[edges.edge_index[1]] = True
 
         return connected_mask
+
+
+class SubsetNodesInArea(BaseNodeMaskingProcessor):
+    """Remove unconnected nodes in the graph.
+
+    Attributes
+    ----------
+    nodes_name : str | Iterable[str]
+        Name of the unconnected nodes to remove.
+    area : tuple[float, float, float, float]
+        Area of interest to crop the nodes, (north, west, south, east).
+    save_mask_indices_to_attr : str, optional
+        Name of the attribute to save the mask indices. If provided,
+        the indices of the kept nodes will be saved in this attribute.
+
+    Methods
+    -------
+    compute_mask(graph)
+        Compute the mask of the connected nodes.
+    prune_graph(graph, mask)
+        Prune the nodes with the specified mask.
+    add_attribute(graph, mask)
+        Add an attribute of the mask indices as node attribute.
+    update_graph(graph)
+        Post-process the graph.
+    """
+
+    def __init__(
+        self,
+        nodes_name: Union[str, Iterable[str]],
+        area: tuple[float, float, float, float],
+        save_mask_indices_to_attr: str | None = None,
+    ) -> None:
+        super().__init__(nodes_name, save_mask_indices_to_attr)
+        self.north, self.west, self.south, self.east = area
+
+        # Convert area limits to [-90, 90]x[0,360]
+        self.west, self.east = self.west % 360, (self.east - 1) % 360 + 1
+        assert (self.west - self.east) % 360 != 0, "West and East limits must be different."
+
+    def points_inside_area(
+        self,
+        lats: torch.Tensor,
+        lons: torch.Tensor,
+    ) -> torch.Tensor:
+        # Convert lat & lons to [-90, 90]x[0,360)
+        lons %= 360
+
+        assert (-90 <= lats).all() and (lats <= 90).all(), "Latitude values must be in the range [-90, 90]."
+        assert (0 <= lons).all() and (lons <= 360).all(), "Longitude values must be in the range [0, 360]."
+
+        in_lat_range = (lats >= self.south) & (lats <= self.north)
+        if self.west < self.east:
+            in_lon_range = (lons >= self.west) & (lons <= self.east)
+        else:
+            # e.g: W=-10,E=10. They will be mapped to west=350, east=10.
+            in_lon_range = (lons >= self.west) | (lons <= self.east)
+        return in_lat_range & in_lon_range
+
+    def compute_mask(self, graph: HeteroData, nodes_name: str) -> torch.Tensor:
+        """Compute the mask of connected nodes."""
+        latlons = torch.rad2deg(graph[nodes_name].x)
+        mask = self.points_inside_area(lats=latlons[:, 0], lons=latlons[:, 1])
+        assert mask.any(), f"The area selected does not contain any {nodes_name} node."
+        return mask
 
 
 class BaseSortEdgeIndex(PostProcessor, ABC):
@@ -165,6 +250,7 @@ class BaseSortEdgeIndex(PostProcessor, ABC):
     def __init__(self, descending: bool = True) -> None:
         assert self.nodes_axis is not None, f"{self.__class__.__name__} must define the nodes_axis class attribute."
         self.descending = descending
+        super().__init__()
 
     def get_sorting_mask(self, edges: dict) -> torch.Tensor:
         sort_indices = torch.sort(edges["edge_index"], descending=self.descending, dim=1)
@@ -228,15 +314,15 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self.source_name = source_name
         self.target_name = target_name
         self.edges_name = (self.source_name, "to", self.target_name)
-        self.mask: torch.Tensor = None
+        super().__init__()
 
-    def removing_edges(self, graph: HeteroData) -> HeteroData:
+    def removing_edges(self, graph: HeteroData, mask: torch.Tensor) -> HeteroData:
         """Remove edges based on the mask passed."""
         for attr_name in graph[self.edges_name].edge_attrs():
             if attr_name == "edge_index":
-                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][:, self.mask]
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name].cpu()[:, mask]
             else:
-                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name][self.mask, :]
+                graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name].cpu()[mask, :]
 
         return graph
 
@@ -268,9 +354,9 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         HeteroData
             The post-processed graph.
         """
-        self.mask = self.compute_mask(graph)
-        LOGGER.info(f"Removing {(~self.mask).sum()} edges from {self.edges_name}.")
-        graph = self.removing_edges(graph)
+        mask = self.compute_mask(graph).cpu()
+        LOGGER.info(f"Removing {(~mask).sum()} edges from {self.edges_name}.")
+        graph = self.removing_edges(graph, mask)
         graph_config = kwargs.get("graph_config", {})
         graph = self.recompute_attributes(graph, graph_config)
         return graph
@@ -315,7 +401,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         target_nodes = graph[self.target_name]
         edge_index = graph[self.edges_name].edge_index
         lengths = EARTH_RADIUS * EdgeLength()(x=(source_nodes, target_nodes), edge_index=edge_index)
-        mask = torch.where(lengths > self.treshold, False, True).squeeze()
+        mask = torch.where(lengths > self.treshold, False, True).squeeze().cpu()
         cases = [
             (self.source_mask_attr_name, source_nodes, 0),
             (self.target_mask_attr_name, target_nodes, 1),
@@ -323,6 +409,6 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         for mask_attr_name, nodes, i in cases:
             if mask_attr_name:
                 attr_mask = nodes[mask_attr_name].squeeze()
-                edge_mask = attr_mask[edge_index[i]]
+                edge_mask = attr_mask[edge_index[i]].cpu()
                 mask = torch.logical_or(mask, ~edge_mask)
         return mask

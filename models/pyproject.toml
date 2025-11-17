@@ -34,7 +34,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -49,7 +48,7 @@ dependencies = [
   "torch-geometric>=2.3",
 ]
 
-optional-dependencies.all = [  ]
+optional-dependencies.all = [ "anemoi-models[migrations]" ]
 
 optional-dependencies.dev = [
   "anemoi-models[all,docs,tests]",

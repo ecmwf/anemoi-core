@@ -24,6 +24,7 @@ from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.chunk import GNNProcessorChunk
 from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
+from anemoi.models.layers.chunk import PointWiseMLPProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mapper import GraphEdgeMixin
@@ -54,6 +55,8 @@ class BaseProcessor(nn.Module, ABC):
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
+        self._has_dropout = kwargs.get("dropout_p", 0.0) > 0 if "dropout_p" in kwargs else False
+
         assert (
             num_layers % num_chunks == 0
         ), f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
@@ -82,7 +85,68 @@ class BaseProcessor(nn.Module, ABC):
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
+
+        if (model_comm_group := kwargs.get("model_comm_group", None)) is not None:
+            assert (
+                model_comm_group.size() == 1 or not self._has_dropout
+            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
+
         x = self.run_layers((x,), *args, **kwargs)
+        return x
+
+
+class PointWiseMLPProcessor(BaseProcessor):
+    """Point-wise MLP Processor."""
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        num_channels: int,
+        num_chunks: int,
+        mlp_hidden_ratio: int,
+        cpu_offload: bool = False,
+        dropout_p: float = 0.0,
+        layer_kernels: DotDict,
+        **kwargs,
+    ):
+        super().__init__(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
+        )
+
+        self.build_layers(
+            PointWiseMLPProcessorChunk,
+            num_channels=num_channels,
+            num_layers=self.chunk_size,
+            layer_kernels=self.layer_factory,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            dropout_p=dropout_p,
+        )
+
+        self.offload_layers(cpu_offload)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_shapes: list[list[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
+        if model_comm_group:
+            assert (
+                model_comm_group.size() == 1 or batch_size == 1
+            ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
+
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+
         return x
 
 
@@ -149,6 +213,7 @@ class TransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
+            dropout_p=dropout_p,
         )
 
         self.build_layers(
@@ -172,7 +237,7 @@ class TransformerProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], ...],
+        shard_shapes: list[list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -266,7 +331,7 @@ class GNNProcessor(GraphEdgeMixin, BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: list[list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -375,7 +440,7 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
+        shard_shapes: list[list[int]],
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
