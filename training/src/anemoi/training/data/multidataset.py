@@ -13,9 +13,9 @@ from functools import cached_property
 
 import numpy as np
 import torch
-from torch.utils.data import IterableDataset
 from rich.console import Console
 from rich.tree import Tree
+from torch.utils.data import IterableDataset
 
 from anemoi.training.data.dataset import NativeGridDataset
 
@@ -144,7 +144,9 @@ class MultiDataset(IterableDataset):
         for name, indices in valid_date_indices.items():
             if reference_indices is None:
                 reference_indices = indices
-            assert indices == reference_indices, (f"Dataset '{name}' has different valid_date_indices than other datasets")
+            assert (
+                indices == reference_indices
+            ), f"Dataset '{name}' has different valid_date_indices than other datasets"
         return reference_indices
 
     @property

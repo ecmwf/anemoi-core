@@ -17,9 +17,9 @@ from functools import cached_property
 import numpy as np
 import torch
 from einops import rearrange
-from torch.utils.data import IterableDataset
-from rich.tree import Tree
 from rich.console import Console
+from rich.tree import Tree
+from torch.utils.data import IterableDataset
 
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
@@ -292,26 +292,26 @@ class NativeGridDataset(IterableDataset):
         )
 
     def _get_sample(self, index: int) -> torch.Tensor:
-            start = index + self.relative_date_indices[0]
-            end = index + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
+        start = index + self.relative_date_indices[0]
+        end = index + self.relative_date_indices[-1] + 1
+        timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+        # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
+        # data[start...] will be replaced with data[self.relative_date_indices + i]
 
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+        grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+        if isinstance(grid_shard_indices, slice):
+            # Load only shards into CPU memory
+            x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
 
-            else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+        else:
+            # Load full grid in CPU memory, select grid_shard after
+            # Note that anemoi-datasets currently doesn't support slicing + indexing
+            # in the same operation.
+            x = self.data[start:end:timeincrement, :, :, :]
+            x = x[..., grid_shard_indices]  # select the grid shard
+        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
 
-            return torch.from_numpy(x)
+        return torch.from_numpy(x)
 
     def __iter__(self) -> torch.Tensor:
         """Return an iterator over the dataset.
@@ -356,7 +356,7 @@ class NativeGridDataset(IterableDataset):
         return capture.get()
 
     def tree(self, prefix: str = "") -> Tree:
-        tree = Tree(prefix + " 💾 " +  f"{self.__class__.__name__}")
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
         tree.add(f"Dataset: {self.data}")
         tree.add(f"Timestep: {self.timestep}")
         tree.add(f"Resolution: {self.resolution}")
