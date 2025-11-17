@@ -818,6 +818,6 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Truncated tensor with same shape as input
         """
         bs, ens, _, _ = x.shape
-        x_trunc = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
-        x_trunc = self.residual(x_trunc, grid_shard_shapes, model_comm_group)
-        return einops.rearrange(x_trunc, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
+        x_skip = einops.rearrange(x, "bs ens latlon nvar -> (bs ens) latlon nvar")
+        x_skip = self.residual(x_skip, grid_shard_shapes, model_comm_group)
+        return einops.rearrange(x_skip, "(bs ens) latlon nvar -> bs ens latlon nvar", bs=bs, ens=ens)
