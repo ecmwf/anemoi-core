@@ -61,7 +61,7 @@ class NoConnection(BaseResidualConnection):
         return torch.zeros_like(x[:, 0, ...], device=x.device, dtype=x.dtype)
 
 
-class TruncatedConnection(nn.Module):
+class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection
 
     This connection applies a coarse-graining and reconstruction of input features using sparse 
