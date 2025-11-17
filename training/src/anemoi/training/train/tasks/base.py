@@ -637,7 +637,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     y_postprocessed,
                     grid_shard_slice=grid_shard_slice,
                     group=self.model_comm_group,
-                    model_comm_group=self.model_comm_group,
                     model_comm_group_size=self.model_comm_group_size,
                     grid_dim=self.grid_dim,
                     grid_shard_shapes=self.grid_shard_shapes,
