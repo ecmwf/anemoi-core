@@ -17,7 +17,7 @@ class SparseProjector(torch.nn.Module):
     """Constructs and applies a sparse projection matrix for mapping features between grids.
 
     The projection matrix is constructed from edge indices and edge attributes (e.g., distances),
-    with optional row normalization.
+    with optional row normalisation.
 
     Parameters
     ----------
