@@ -24,7 +24,7 @@ from anemoi.models.layers.sparse_projector import build_sparse_projector
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
-    def __init__(self, graph: HeteroData = None) -> None:
+    def __init__(self, graph: HeteroData | None = None) -> None:
         super().__init__()
 
     @abstractmethod
@@ -48,7 +48,7 @@ class SkipConnection(BaseResidualConnection):
         super().__init__()
         self.step = step
 
-    def forward(self, x: torch.Tensor, **_) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
@@ -59,7 +59,7 @@ class NoConnection(BaseResidualConnection):
     This module returns a zero tensor with the same shape as the last timestep.
     """
 
-    def forward(self, x: torch.Tensor, **_) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Return a zero tensor with the same shape as the last timestep."""
         return torch.zeros_like(x[:, 0, ...], device=x.device, dtype=x.dtype)
 
