@@ -34,13 +34,14 @@ class SkipConnection(BaseResidualConnection):
 
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
+
     def __init__(self, step: int = -1, *args, **kwargs):
         super().__init__()
         self.step = step
 
     def forward(self, x, *args, **kwargs):
         """Return the last timestep of the input sequence."""
-        return x[:, self.step, ...] # x shape: (batch, time, ens, nodes, features)
+        return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
 
 class NoConnection(BaseResidualConnection):
