@@ -3,6 +3,7 @@ overwrite: True
 
 data: "data"
 hidden: "hidden"
+graph: "int"
 
 nodes:
   # Data nodes
@@ -53,7 +54,7 @@ edges:
   attributes: ${graph.attributes.edges}
   # Truncated connection -> down
 - source_name: ${graph.data}
-  target_name: ${graph.truncation}
+  target_name: "int"
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
     num_nearest_neighbours: 5
@@ -64,7 +65,7 @@ edges:
       _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
       norm: l1
   # Truncated connection -> up
-- source_name: ${graph.truncation}
+- source_name: "int"
   target_name: ${graph.data}
   edge_builders:
   - _target_: anemoi.graphs.edges.KNNEdges
