@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class AnemoiDatasetReader:
     """Data reader for anemoi-datasets."""
 
