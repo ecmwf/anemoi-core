@@ -15,11 +15,11 @@ from anemoi.models.layers.sparse_projector import build_sparse_projector
 class BaseResidualConnection(nn.Module):
     """Base class for residual connection modules."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self) -> None:
         super().__init__()
 
     @abstractmethod
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Define the residual connection operation.
 
         Should be overridden by subclasses.
@@ -35,11 +35,11 @@ class SkipConnection(BaseResidualConnection):
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(self, step: int = -1, *args, **kwargs):
+    def __init__(self, step: int = -1) -> None:
         super().__init__()
         self.step = step
 
-    def forward(self, x, *args, **kwargs):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
@@ -50,7 +50,7 @@ class NoConnection(BaseResidualConnection):
     This module returns a zero tensor with the same shape as the last timestep.
     """
 
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return a zero tensor with the same shape as the last timestep."""
         return torch.zeros_like(x[:, 0, ...], device=x.device, dtype=x.dtype)
 
@@ -179,7 +179,7 @@ class TruncatedConnection(nn.Module):
             up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Apply truncated skip connection."""
         batch_size = x.shape[0]
         x = x[:, -1, ...]  # pick latest step
