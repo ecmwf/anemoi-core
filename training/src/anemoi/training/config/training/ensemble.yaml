@@ -130,12 +130,6 @@ validation_metrics:
       no_autocast: True
       alpha: 1.0
 
-  # afkcrps:
-  #   _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-  #   scalers: ['node_weights']
-  #   ignore_nans: False
-  #   no_autocast: True
-  #   alpha: 1.0
 
 # Variable groups definition for scaling
 # The variable level scaling methods are defined under training/scalers
