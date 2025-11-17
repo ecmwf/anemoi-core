@@ -16,11 +16,9 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from .forecaster import GraphForecaster
+from .base import BaseGraphModule
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
@@ -29,8 +27,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphDiffusionForecaster(GraphForecaster):
-    """Graph neural network forecaster for diffusion."""
+class BaseDiffusionForecaster(BaseGraphModule):
+    """Base class for diffusion forecasters."""
 
     def __init__(
         self,
@@ -103,84 +101,6 @@ class GraphDiffusionForecaster(GraphForecaster):
             group=self.model_comm_group,
         )
 
-    def rollout_step(
-        self,
-        batch: torch.Tensor,
-        rollout: int | None = None,
-        validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
-        """Rollout step for the forecaster.
-
-        Will run pre_processors on batch, but not post_processors on predictions.
-
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Normalized batch to use for rollout (assumed to be already preprocessed).
-        rollout : Optional[int], optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
-        validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
-
-        Yields
-        ------
-        Generator[tuple[Union[torch.Tensor, None], dict, torch.Tensor], None, None]
-            Loss value, metrics, and predictions (per step)
-
-        """
-        # start rollout of preprocessed batch
-        x = batch[
-            :,
-            0 : self.multi_step,
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, multi_step, ens, latlon, nvar)
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
-
-        for rollout_step in range(rollout or self.rollout):
-
-            # get noise level and associated loss weights
-            sigma, noise_weights = self._get_noise_level(
-                shape=(x.shape[0],) + (1,) * (x.ndim - 2),
-                sigma_max=self.model.model.sigma_max,
-                sigma_min=self.model.model.sigma_min,
-                sigma_data=self.model.model.sigma_data,
-                rho=self.rho,
-                device=x.device,
-            )
-
-            # get targets and noised targets
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
-            y_noised = self._noise_target(y, sigma)
-
-            # prediction, fwd_with_preconditioning
-            y_pred = self(
-                x,
-                y_noised,
-                sigma,
-            )  # shape is (bs, ens, latlon, nvar)
-
-            # Use checkpoint for compute_loss_metrics
-            loss, metrics_next = checkpoint(
-                self.compute_loss_metrics,
-                y_pred,
-                y,
-                rollout_step,
-                validation_mode,
-                weights=noise_weights,
-                use_reentrant=False,
-            )
-
-            x = self.advance_input(x, y_pred, batch, rollout_step)
-
-            yield loss, metrics_next, y_pred
-
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Add noise to the state."""
         return x + torch.randn_like(x) * sigma
@@ -200,32 +120,79 @@ class GraphDiffusionForecaster(GraphForecaster):
         return sigma, weight
 
 
-class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
-    """Graph neural network forecaster for diffusion tendency prediction."""
+class GraphDiffusionForecaster(BaseDiffusionForecaster):
+    """Graph neural network forecaster for diffusion."""
 
-    def __init__(
+    def _step(
         self,
-        *,
-        config: BaseSchema,
-        graph_data: HeteroData,
-        truncation_data: dict,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict,
-        supporting_arrays: dict,
-    ) -> None:
+        batch: torch.Tensor,
+        validation_mode: bool = False,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+        """Step for the forecaster.
 
-        super().__init__(
-            config=config,
-            graph_data=graph_data,
-            truncation_data=truncation_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+        Will run pre_processors on batch, but not post_processors on predictions.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Normalized batch to use for rollout (assumed to be already preprocessed).
+        rollout : Optional[int], optional
+            Number of times to rollout for, by default None
+            If None, will use self.rollout
+        validation_mode : bool, optional
+            Whether in validation mode, and to calculate validation metrics, by default False
+            If False, metrics will be empty
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict, torch.Tensor]
+            Loss value, metrics, and predictions (per step)
+        """
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+
+        # start rollout of preprocessed batch
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]  # (bs, multi_step, ens, latlon, nvar)
+        msg = f"Batch length not sufficient for requested multi_step length!, {batch.shape[1]} !>= {self.multi_step}"
+        assert batch.shape[1] >= self.multi_step, msg
+
+        # get noise level and associated loss weights
+        sigma, noise_weights = self._get_noise_level(
+            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            sigma_max=self.model.model.sigma_max,
+            sigma_min=self.model.model.sigma_min,
+            sigma_data=self.model.model.sigma_data,
+            rho=self.rho,
+            device=x.device,
         )
+
+        # get targets and noised targets
+        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
+        y_noised = self._noise_target(y, sigma)
+
+        # prediction, fwd_with_preconditioning
+        y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
+
+        # Use checkpoint for compute_loss_metrics
+        loss, metrics = checkpoint(
+            self.compute_loss_metrics,
+            y_pred,
+            y,
+            0,
+            validation_mode,
+            weights=noise_weights,
+            use_reentrant=False,
+        )
+
+        return loss, metrics, y_pred
+
+
+class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
+    """Graph neural network forecaster for diffusion tendency prediction."""
 
     def compute_loss_metrics(
         self,
@@ -294,13 +261,12 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
 
         return loss, metrics_next
 
-    def rollout_step(
+    def _step(
         self,
         batch: torch.Tensor,
-        rollout: int | None = None,
         validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, torch.Tensor], None, None]:
-        """Rollout step for the tendency-based diffusion forecaster.
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+        """Step for the tendency-based diffusion forecaster.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
@@ -308,24 +274,19 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         ----------
         batch : torch.Tensor
             Normalized batch to use for rollout (assumed to be already preprocessed).
-        rollout : Optional[int], optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
         validation_mode : bool, optional
             Whether in validation mode, and to calculate validation metrics, by default False
             If False, metrics will be empty
 
-        Yields
-        ------
-        Generator[tuple[Union[torch.Tensor, None], dict, torch.Tensor], None, None]
+        Returns
+        -------
+        tuple[torch.Tensor, dict, torch.Tensor]
             Loss value, metrics, and predictions (per step)
-
         """
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
+
+        msg = f"Batch length not sufficient for requested multi_step length!, {batch.shape[1]} !>= {self.multi_step}"
+        assert batch.shape[1] >= self.multi_step, msg
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None:
@@ -343,71 +304,65 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             self.data_indices.data.input.full,
         ]  # (bs, multi_step, ens, latlon, nvar)
 
-        for rollout_step in range(rollout or self.rollout):
+        x_ref = batch[:, self.multi_step, ...]
+        x_ref = self.model.model.apply_reference_state_truncation(
+            x_ref,
+            self.grid_shard_shapes,
+            self.model_comm_group,
+        )
 
-            assert rollout_step < 1, "multi-step rollout not supported"
+        tendency_target = self.model.model.compute_tendency(
+            batch[:, self.multi_step, ...],
+            x_ref,
+            self.model.pre_processors,
+            self.model.pre_processors_tendencies,
+            input_post_processor=self.model.post_processors,
+        )
 
-            x_ref = batch[:, self.multi_step + rollout_step - 1, ...]
-            x_ref = self.model.model.apply_reference_state_truncation(
-                x_ref,
-                self.grid_shard_shapes,
-                self.model_comm_group,
-            )
+        # get noise level and associated loss weights
+        sigma, noise_weights = self._get_noise_level(
+            shape=(x.shape[0],) + (1,) * (x.ndim - 2),
+            sigma_max=self.model.model.sigma_max,
+            sigma_min=self.model.model.sigma_min,
+            sigma_data=self.model.model.sigma_data,
+            rho=self.rho,
+            device=x.device,
+        )
 
-            tendency_target = self.model.model.compute_tendency(
-                batch[:, self.multi_step + rollout_step, ...],
-                x_ref,
-                self.model.pre_processors,
-                self.model.pre_processors_tendencies,
-                input_post_processor=self.model.post_processors,
-            )
+        tendency_target_noised = self._noise_target(tendency_target, sigma)
 
-            # get noise level and associated loss weights
-            sigma, noise_weights = self._get_noise_level(
-                shape=(x.shape[0],) + (1,) * (x.ndim - 2),
-                sigma_max=self.model.model.sigma_max,
-                sigma_min=self.model.model.sigma_min,
-                sigma_data=self.model.model.sigma_data,
-                rho=self.rho,
-                device=x.device,
-            )
+        # prediction, fwd_with_preconditioning
+        tendency_pred = self(
+            x,
+            tendency_target_noised,
+            sigma,
+        )  # shape is (bs, ens, latlon, nvar)
 
-            tendency_target_noised = self._noise_target(tendency_target, sigma)
+        # re-construct predicted state, de-normalised
+        y_pred = self.model.model.add_tendency_to_state(
+            x_ref[..., self.data_indices.data.input.full],
+            tendency_pred,
+            self.model.post_processors,
+            self.model.post_processors_tendencies,
+            output_pre_processor=self.model.pre_processors,
+        )
 
-            # prediction, fwd_with_preconditioning
-            tendency_pred = self(
-                x,
-                tendency_target_noised,
-                sigma,
-            )  # shape is (bs, ens, latlon, nvar)
+        y = None
+        if validation_mode:
+            # metrics calculation and plotting expects normalised states
+            y = batch[:, self.multi_step + 1, ..., self.data_indices.data.output.full]
 
-            # re-construct predicted state, de-normalised
-            y_pred = self.model.model.add_tendency_to_state(
-                x_ref[..., self.data_indices.data.input.full],
-                tendency_pred,
-                self.model.post_processors,
-                self.model.post_processors_tendencies,
-                output_pre_processor=self.model.pre_processors,
-            )
+        # compute_loss_metrics
+        loss, metrics = checkpoint(
+            self.compute_loss_metrics,
+            tendency_pred,
+            tendency_target,
+            0,
+            validation_mode,
+            y_pred,
+            y,
+            weights=noise_weights,
+            use_reentrant=False,
+        )
 
-            y = None
-            if validation_mode:
-                # metrics calculation and plotting expects normalised states
-                y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
-
-            # compute_loss_metrics
-            loss, metrics_next = checkpoint(
-                self.compute_loss_metrics,
-                tendency_pred,
-                tendency_target,
-                rollout_step,
-                validation_mode,
-                y_pred,
-                y,
-                weights=noise_weights,
-                use_reentrant=False,
-            )
-
-            x = self.advance_input(x, y_pred, batch, rollout_step)
-
-            yield loss, metrics_next, y_pred
+        return loss, metrics, y_pred
