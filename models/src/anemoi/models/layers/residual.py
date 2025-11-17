@@ -18,10 +18,6 @@ class BaseResidualConnection(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
 
-    def get_last_timestep(self, x):
-        # x shape: (batch, time, ens, nodes, features)
-        return x[:, -1, ...]  # pick current date
-
     @abstractmethod
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """Define the residual connection operation.
@@ -38,10 +34,13 @@ class SkipConnection(BaseResidualConnection):
 
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
+    def __init__(self, step: int = -1, *args, **kwargs):
+        super().__init__()
+        self.step = step
 
     def forward(self, x, *args, **kwargs):
         """Return the last timestep of the input sequence."""
-        return self.get_last_timestep(x)
+        return x[:, self.step, ...] # x shape: (batch, time, ens, nodes, features)
 
 
 class NoConnection(BaseResidualConnection):
@@ -52,8 +51,7 @@ class NoConnection(BaseResidualConnection):
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """Return a zero tensor with the same shape as the last timestep."""
-        x = self.get_last_timestep(x)
-        return torch.zeros_like(x, device=x.device, dtype=x.dtype)
+        return torch.zeros_like(x[:, 0, ...], device=x.device, dtype=x.dtype)
 
 
 class TruncatedConnection(nn.Module):
