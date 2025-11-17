@@ -24,6 +24,9 @@ from anemoi.models.layers.sparse_projector import build_sparse_projector
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
+    def __init__(self, graph: HeteroData = None) -> None:
+        super().__init__()
+
     @abstractmethod
     def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Define the residual connection operation.
@@ -41,7 +44,7 @@ class SkipConnection(BaseResidualConnection):
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(self, step: int = -1) -> None:
+    def __init__(self, step: int = -1, **_) -> None:
         super().__init__()
         self.step = step
 
