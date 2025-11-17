@@ -250,11 +250,15 @@ class NoiseInjectorSchema(BaseModel):
 class EnsModelSchema(BaseModelSchema):
     noise_injector: NoiseInjectorSchema = Field(default_factory=list)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+    condition_on_residual: bool = Field(default=False)
+    "Whether to condition the noise injection on the residual connection."
 
 
 class DiffusionModelSchema(BaseModelSchema):
     model: DiffusionModel = Field(default_factory=DiffusionModel)
     "Diffusion Model schema"
+    condition_on_residual: bool = Field(default=False)
+    "Whether to condition the noise injection on the residual connection."
 
     @model_validator(mode="after")
     def validate_no_bounding_for_diffusion(self) -> "DiffusionModelSchema":

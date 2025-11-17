@@ -571,9 +571,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         return input_dim
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
-        x_trunc = x[:, -1, :, :, self._internal_input_idx]
-        x_trunc = einops.rearrange(x_trunc, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_trunc = self.residual(x_trunc, grid_shard_shapes, model_comm_group)
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[...,  self._internal_input_idx]
+        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
 
         # Get node attributes
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
@@ -596,13 +595,13 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
         if self.condition_on_residual:
             x_data_latent = torch.cat(
-                (x_data_latent, einops.rearrange(x_trunc, "bse grid vars -> (bse grid) vars")), dim=-1
+                (x_data_latent, einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars")), dim=-1
             )
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
-        return x_data_latent, None, shard_shapes_data
+        return x_data_latent, x_skip, shard_shapes_data
 
     def compute_tendency(
         self,

@@ -87,10 +87,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_data_latent = torch.cat(
                 (
                     x_data_latent,
-                    einops.rearrange(
-                        x,
-                        "batch time ensemble grid vars -> (batch ensemble grid) vars",
-                    ),
+                    einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble grid) vars"),
                 ),
                 dim=-1,
             )
