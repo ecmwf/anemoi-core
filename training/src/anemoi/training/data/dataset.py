@@ -156,9 +156,6 @@ class NativeGridDataset(IterableDataset):
         model_comm_group_id: int,
         model_comm_group_rank: int,
         model_comm_num_groups: int,
-        ens_comm_group_id: int,
-        ens_comm_group_rank: int,
-        ens_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
     ) -> None:
@@ -174,12 +171,6 @@ class NativeGridDataset(IterableDataset):
             Model communication group rank
         model_comm_num_groups : int
             Number of model communication groups
-        ens_comm_group_id : int
-            Ensemble communication group ID
-        ens_comm_group_rank : int
-            Ensemble communication group rank
-        ens_comm_num_groups : int
-            Number of ensemble communication groups
         reader_group_rank : int
             Reader group rank
         reader_group_size : int
@@ -189,9 +180,6 @@ class NativeGridDataset(IterableDataset):
         self.model_comm_group_id = model_comm_group_id
         self.model_comm_group_rank = model_comm_group_rank
         self.model_comm_num_groups = model_comm_num_groups
-        self.ens_comm_group_id = ens_comm_group_id
-        self.ens_comm_group_rank = ens_comm_group_rank
-        self.ens_comm_num_groups = ens_comm_num_groups
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
