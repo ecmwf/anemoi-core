@@ -23,9 +23,6 @@ from anemoi.models.layers.sparse_projector import build_sparse_projector
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
-    def __init__(self) -> None:
-        super().__init__()
-
     @abstractmethod
     def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Define the residual connection operation.
@@ -38,7 +35,7 @@ class BaseResidualConnection(nn.Module, ABC):
 class SkipConnection(BaseResidualConnection):
     """Skip connection module
 
-    It selects the most recent timestep from the input sequence.
+    This layer returns the most recent timestep from the input sequence.
 
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
@@ -47,7 +44,7 @@ class SkipConnection(BaseResidualConnection):
         super().__init__()
         self.step = step
 
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **_) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
@@ -58,7 +55,7 @@ class NoConnection(BaseResidualConnection):
     This module returns a zero tensor with the same shape as the last timestep.
     """
 
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **_) -> torch.Tensor:
         """Return a zero tensor with the same shape as the last timestep."""
         return torch.zeros_like(x[:, 0, ...], device=x.device, dtype=x.dtype)
 
@@ -66,8 +63,8 @@ class NoConnection(BaseResidualConnection):
 class TruncatedConnection(nn.Module):
     """Truncated skip connection
 
-    It applies a coarse-graining and reconstruction of input features using sparse projections to
-    truncate high frequency features.
+    This connection applies a coarse-graining and reconstruction of input features using sparse 
+    projections to truncate high frequency features.
 
     This module uses two projection operators: one to map features from the full-resolution
     grid to a truncated (coarse) grid, and another to project back to the original resolution.
