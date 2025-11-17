@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -27,6 +26,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 
 LOGGER = logging.getLogger(__name__)

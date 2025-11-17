@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    import torch
 
 
 LOGGER = logging.getLogger(__name__)

@@ -99,16 +99,15 @@ def test_ensemble_plot_mixin_handle_batch_and_output():
     # Mock ensemble output
     loss = torch.tensor(0.5)
     y_preds = [torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)]
-    ens_ic = torch.randn(2, 3)
-    output = [loss, y_preds, ens_ic]
+    output = [loss, y_preds]
 
     # Mock batch
-    batch = [torch.randn(2, 10, 4, 5), torch.randn(2, 10, 4, 5)]
+    batch = torch.randn(2, 10, 4, 5)
 
     processed_batch, processed_output = mixin._handle_ensemble_batch_and_output(pl_module, output, batch)
 
-    # Check that batch[0] is returned
-    assert torch.equal(processed_batch, batch[0])
+    # Check that batch is returned
+    assert torch.equal(processed_batch, batch)
     # Check that output is restructured as [loss, y_preds]
     assert len(processed_output) == 2
     assert torch.equal(processed_output[0], loss)
