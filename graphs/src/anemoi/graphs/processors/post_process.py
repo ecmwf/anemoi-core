@@ -412,3 +412,48 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
                 edge_mask = attr_mask[edge_index[i]].cpu()
                 mask = torch.logical_or(mask, ~edge_mask)
         return mask
+
+
+class StackScalarFeatures(PostProcessor):
+   """
+    Combine multiple scalar node features into a single stacked feature tensor.
+
+    This post-processor reads a list of scalar features stored on the specified
+    node type and concatenates them along the last dimension to produce a dense
+    feature vector. The result is stored under ``stacked_feature_name`` on the
+    same node storage.
+
+    Parameters
+    ----------
+    nodes_name : str
+        Name of the node type in the ``HeteroData`` object.
+    feature_names : list[str]
+        Names of the scalar node features to stack.
+    stacked_feature_name : str, optional
+        Name of the output tensor containing the concatenated feature vector.
+        Defaults to ``"features"``.
+
+    Notes
+    -----
+    This is useful when scalar attributes (e.g., sin/cos latitude/longitude)
+    are produced independently via the attribute system but the downstream
+    model expects a single consolidated feature vector.
+
+    """
+
+    def __init__(
+        self,
+        nodes_name: str,
+        feature_names: list[str],
+        stacked_feature_name: str = "features",
+    ) -> None:
+        super().__init__()
+        self.nodes_name = nodes_name
+        self.feature_names = feature_names
+        self.stacked_feature_name = stacked_feature_name
+
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
+        nodes = graph[self.nodes_name]
+        stacked_features = torch.cat([nodes[self.feature_name] for self.feature_name in self.feature_names], dim=-1)
+        nodes[self.stacked_feature_name] = stacked_features
+        return graph
