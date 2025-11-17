@@ -98,7 +98,7 @@ class BaseProcessor(nn.Module, ABC):
 
         return data
 
-    def run_layers(self, data: tuple, *args, **kwargs) -> Tensor:
+    def run_layers(self, data: tuple, *args, **kwargs) -> tuple:
         """Run Layers with checkpoints around chunks."""
         for chunk_start in range(0, self.num_layers, self.chunk_size):
             data = checkpoint(self.run_layer_chunk, chunk_start, data, *args, **kwargs, use_reentrant=False)
