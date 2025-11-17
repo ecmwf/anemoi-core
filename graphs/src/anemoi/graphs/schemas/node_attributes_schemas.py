@@ -48,7 +48,7 @@ class SphericalAreaWeightSchema(BaseModel):
     "Value to fill the empty regions."
 
 
-class AreaMaskSchema(BaseModel):
+class CutOutMaskSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.CutOutMask", "anemoi.graphs.nodes.attributes.LimitedAreaMask"] = (
         Field(..., alias="_target_")
     )
@@ -76,7 +76,7 @@ SingleAttributeSchema = (
     PlanarAreaWeightSchema
     | MaskedPlanarAreaWeightsSchema
     | SphericalAreaWeightSchema
-    | AreaMaskSchema
+    | CutOutMaskSchema
     | GridsMaskSchema
     | NonmissingAnemoiDatasetVariableSchema
 )
