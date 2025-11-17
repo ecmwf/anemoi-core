@@ -14,7 +14,6 @@ from pathlib import Path
 import einops
 import torch
 from scipy.sparse import load_npz
-from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import gather_channels
@@ -27,7 +26,7 @@ from anemoi.training.losses.base import BaseLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class MultiscaleLossWrapper(nn.Module):
+class MultiscaleLossWrapper(BaseLoss):
 
     name: str = "MultiscaleLossWrapper"
 
