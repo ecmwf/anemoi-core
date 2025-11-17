@@ -1,0 +1,2 @@
+- hardware.num_gpus_per_model=4
+- hardware.num_gpus_per_node=4

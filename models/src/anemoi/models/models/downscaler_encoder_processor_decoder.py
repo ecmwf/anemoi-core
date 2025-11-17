@@ -596,6 +596,15 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         return state_outp
 
+    def correction_bug_to_delete(self, out, y_pred_residuals, post_processors_state):
+        """Temporary fix to correct a bug in the addition of residuals to state"""
+        out = out - 2 * post_processors_state(
+            y_pred_residuals,
+            dataset="output",
+            in_place=False,
+        )
+        return out
+
     def _after_sampling(
         self,
         out: torch.Tensor,
@@ -617,12 +626,18 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             raise ValueError("Expected before_sampling_data to contain x_in_interp")
 
         # Convert tendency to state
+        residuals = out.clone()
         out = self.add_interp_to_state(
             x_in_interp,
             out,
             post_processors,
             post_processors_tendencies,
         )
+        """
+        out = self.correction_bug_to_delete(
+            out, residuals, post_processors
+        )  # to be deleted
+        """
 
         # Gather if needed
         if gather_out and model_comm_group is not None:
