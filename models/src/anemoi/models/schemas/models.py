@@ -208,8 +208,6 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
-    grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
-    "Index of grid residual connection, or use none. Currently only in interpolator."
     processor: Union[
         GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema, PointWiseMLPProcessorSchema
     ] = Field(
