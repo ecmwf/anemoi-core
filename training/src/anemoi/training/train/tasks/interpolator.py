@@ -135,4 +135,3 @@ class GraphInterpolator(BaseGraphModule):
 
         loss *= 1.0 / len(self.interp_times)
         return loss, metrics, y_preds
-

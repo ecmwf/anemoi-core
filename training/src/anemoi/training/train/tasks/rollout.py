@@ -11,7 +11,8 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 from typing import TYPE_CHECKING
 
 import torch
@@ -21,6 +22,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
