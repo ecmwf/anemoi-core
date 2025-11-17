@@ -282,4 +282,6 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Number of message passing steps at each level"
 
 
-ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema]
+ModelSchema = Union[
+    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+]
