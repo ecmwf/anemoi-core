@@ -529,8 +529,8 @@ class AnemoiTrainer:
             LOGGER.info(f"'config.hardware.paths.cache_dir' given. Caching dataset under '{self.config.hardware.paths.cache_dir}'")
             #import pdb
             #breakpoint()
-            dataset_path=f"{self.config.hardware.paths.data}/{self.config.hardware.files.dataset}"
-            self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.hardware.paths.cache_dir, dataset_path=dataset_path)
+            #dataset_path=f"{self.config.hardware.paths.data}/{self.config.hardware.files.dataset}"
+            #self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.hardware.paths.cache_dir, dataset_path=dataset_path)
             #self.datamodule.ds_train = DatasetCache(ds=self.datamodule.ds_train, cache_root=self.config.hardware.paths.cache_dir, dataset_path=self.config.hardware.paths.data)
 
         LOGGER.debug("Starting training..")
@@ -545,7 +545,6 @@ class AnemoiTrainer:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
 
         LOGGER.debug("---- DONE. ----")
-
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:
