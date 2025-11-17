@@ -415,7 +415,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
 
 
 class StackScalarFeatures(PostProcessor):
-   """
+    """
     Combine multiple scalar node features into a single stacked feature tensor.
 
     This post-processor reads a list of scalar features stored on the specified
