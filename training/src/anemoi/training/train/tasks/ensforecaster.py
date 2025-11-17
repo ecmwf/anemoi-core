@@ -374,8 +374,13 @@ class GraphEnsForecaster(BaseGraphModule):
                 for i in range(len(mloss)):
                     mloss[i] += mloss_next[i]
 
+        if mloss is not None:
+            for i in range(len(mloss)):
+                mloss[i] *= 1.0 / self.rollout
+
         loss *= 1.0 / self.rollout
-        return loss, metrics, y_preds, _ens_ic
+
+        return loss, mloss, metrics, y_preds, _ens_ic
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         batch[0] = super().allgather_batch(batch[0])
