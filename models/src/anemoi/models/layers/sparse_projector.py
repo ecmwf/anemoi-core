@@ -71,7 +71,7 @@ class SparseProjector(torch.nn.Module):
 
         Parameters
         ----------
-        graph : networkx.Graph
+        graph : HeteroData
             The input graph.
         edge_name : str
             The name/identifier for the edge set to use.
