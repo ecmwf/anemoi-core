@@ -141,7 +141,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
-        return super().compute_loss_metrics(y_pred_ens, y, *args, model_comm_group=self.model_comm_group, **kwargs)
+        return super().compute_loss_metrics(y_pred_ens, y, *args, **kwargs)
 
     def rollout_step(
         self,

@@ -181,7 +181,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.save_hyperparameters()
 
-        self.latlons_data = graph_data[config.graph.data].x
         self.statistics_tendencies = statistics_tendencies
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled

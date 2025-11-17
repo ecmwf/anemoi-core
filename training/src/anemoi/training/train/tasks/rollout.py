@@ -19,6 +19,7 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.train.tasks.base import BaseGraphModule
 
 if TYPE_CHECKING:
     from collections.abc import Generator
