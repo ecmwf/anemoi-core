@@ -60,7 +60,6 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         )
 
         self.latent_skip = model_config.model.latent_skip
-        self.grid_skip = model_config.model.grid_skip
 
     # Overwrite base class
     def _calculate_input_dim(self):
@@ -91,10 +90,7 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
 
-        if self.grid_skip is not None:
-            x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[..., self.grid_skip]
-        else:
-            x_skip = None
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)
 
         return x_data_latent, x_skip, shard_shapes_data
 

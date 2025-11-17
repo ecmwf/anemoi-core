@@ -553,8 +553,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         statistics: dict,
         graph_data: HeteroData,
     ) -> None:
-        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
+        model_config_local = DotDict(model_config)
 
+        self.condition_on_residual = model_config_local.model.condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
