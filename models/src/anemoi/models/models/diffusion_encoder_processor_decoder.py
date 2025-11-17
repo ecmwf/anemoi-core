@@ -571,7 +571,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         return input_dim
 
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
-        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[...,  self._internal_input_idx]
+        x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[..., self._internal_input_idx]
         x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
 
         # Get node attributes
