@@ -2,7 +2,7 @@
  Area mask
 ###########
 
-The `LimitedAreaMask` node attribte builder creates a mask over the
+The `LimitedAreaMask` node attribute builder creates a mask over the
 nodes covering the limited area.
 
 The configuration for these masks, is specified in the YAML file:
