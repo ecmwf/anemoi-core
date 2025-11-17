@@ -134,10 +134,10 @@ class RolloutEvalEns(RolloutEval):
         batch: torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
         """
-        loss = torch.zeros(1, dtype=batch[0].dtype, device=pl_module.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=batch.dtype, device=pl_module.device, requires_grad=False)
         assert (
-            batch[0].shape[1] >= self.rollout + pl_module.multi_step
-        ), "Batch length not sufficient for requested rollout length!"
+            batch.shape[1] >= self.rollout + pl_module.multi_step
+        ), f"Batch length ({batch.shape[1]}) not sufficient for requested rollout length!"
 
         metrics = {}
         with torch.no_grad():
@@ -151,7 +151,7 @@ class RolloutEvalEns(RolloutEval):
 
             # scale loss
             loss *= 1.0 / self.rollout
-            self._log(pl_module, loss, metrics, batch[0].shape[0])
+            self._log(pl_module, loss, metrics, batch.shape[0])
 
     def on_validation_batch_end(
         self,
@@ -169,9 +169,7 @@ class RolloutEvalEns(RolloutEval):
             }
             prec = trainer.precision
             dtype = precision_mapping.get(prec)
-            context = (
-                torch.autocast(device_type=batch[0].device.type, dtype=dtype) if dtype is not None else nullcontext()
-            )
+            context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
 
             with context:
                 self._eval(pl_module, batch)
