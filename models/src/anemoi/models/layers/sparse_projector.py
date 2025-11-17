@@ -123,9 +123,7 @@ class SparseProjector(torch.nn.Module):
         self.projection_matrix = self.projection_matrix.to(x.device)
 
         out = []
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-
-        with torch.amp.autocast(device_type=device_type, enabled=self.autocast):
+        with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
             for i in range(x.shape[0]):
                 out.append(torch.sparse.mm(self.projection_matrix, x[i, ...]))
         return torch.stack(out)
