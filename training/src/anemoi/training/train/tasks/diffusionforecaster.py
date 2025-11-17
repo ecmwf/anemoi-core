@@ -304,9 +304,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             self.data_indices.data.input.full,
         ]  # (bs, multi_step, ens, latlon, nvar)
 
-        x_ref = batch[:, self.multi_step, ...]
         x_ref = self.model.model.apply_reference_state_truncation(
-            x_ref,
+            x,
             self.grid_shard_shapes,
             self.model_comm_group,
         )
@@ -338,19 +337,18 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             sigma,
         )  # shape is (bs, ens, latlon, nvar)
 
-        # re-construct predicted state, de-normalised
-        y_pred = self.model.model.add_tendency_to_state(
-            x_ref[..., self.data_indices.data.input.full],
-            tendency_pred,
-            self.model.post_processors,
-            self.model.post_processors_tendencies,
-            output_pre_processor=self.model.pre_processors,
-        )
-
-        y = None
+        y_pred, y = None, None
         if validation_mode:
+            # re-construct predicted state, de-normalised
+            y_pred = self.model.model.add_tendency_to_state(
+                x_ref[..., self.data_indices.data.input.full],
+                tendency_pred,
+                self.model.post_processors,
+                self.model.post_processors_tendencies,
+                output_pre_processor=self.model.pre_processors,
+            )
             # metrics calculation and plotting expects normalised states
-            y = batch[:, self.multi_step + 1, ..., self.data_indices.data.output.full]
+            y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
 
         # compute_loss_metrics
         loss, metrics = checkpoint(
