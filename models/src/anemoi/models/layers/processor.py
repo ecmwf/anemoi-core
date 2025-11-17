@@ -458,7 +458,6 @@ class GraphTransformerProcessor(GraphEdgeMixin, BaseProcessor):
             hidden_dim=(mlp_hidden_ratio * num_channels),
             out_channels=num_channels,
             num_heads=num_heads,
-            num_chunks=1,
             edge_dim=self.edge_dim,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
