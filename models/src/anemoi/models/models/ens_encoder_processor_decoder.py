@@ -37,13 +37,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         statistics: dict,
         graph_data: HeteroData,
     ) -> None:
+        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
         )
-        self.condition_on_residual = model_config.model.condition_on_residual
 
     def _build_networks(self, model_config):
         super()._build_networks(model_config)
