@@ -54,7 +54,7 @@ class BaseProcessor(nn.Module, ABC):
         num_channels : int
             Number of channels, i.e. feature dimension of the processor state.
         num_chunks: int
-            Number of chunks of the processor. The num_chunks and num_layers, defines how many layers are grouped together for checkpointing, i.e. chunk_size = num_layers/ num_chunks. 
+            Number of chunks of the processor. The num_chunks and num_layers, defines how many layers are grouped together for checkpointing, i.e. chunk_size = num_layers/ num_chunks.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
