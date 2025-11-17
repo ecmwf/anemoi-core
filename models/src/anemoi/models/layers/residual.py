@@ -64,7 +64,7 @@ class NoConnection(BaseResidualConnection):
 class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection
 
-    This connection applies a coarse-graining and reconstruction of input features using sparse 
+    This connection applies a coarse-graining and reconstruction of input features using sparse
     projections to truncate high frequency features.
 
     This module uses two projection operators: one to map features from the full-resolution
