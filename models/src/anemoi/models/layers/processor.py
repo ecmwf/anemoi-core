@@ -45,7 +45,24 @@ class BaseProcessor(nn.Module, ABC):
         layer_kernels: DotDict,
         **kwargs,
     ) -> None:
-        """Initialize BaseProcessor."""
+        """Initialize BaseProcessor.
+
+        Parameters
+        ----------
+        num_layers : int
+            Number of processor layers.
+        num_channels : int
+            Number of channels, i.e. feature dimension of the processor state.
+        num_chunks: int
+            Number of chunks of the processor. The num_chunks and num_layers, defines how many layers are grouped together for checkpointing, i.e. chunk_size = num_layers/ num_chunks. 
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        **kwargs : dict
+            Additional keyword arguments
+        """
         super().__init__()
 
         self.num_layers = num_layers
