@@ -1,7 +1,6 @@
 defaults:
 - data: multi
 - dataloader: multi
-- datamodule: single
 - diagnostics: evaluation
 - hardware: example
 - graph: multi_scale
