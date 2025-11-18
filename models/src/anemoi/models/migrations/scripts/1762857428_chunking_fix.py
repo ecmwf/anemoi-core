@@ -33,7 +33,6 @@ def migrate(ckpt: CkptType) -> CkptType:
     CkptType
         The migrated checkpoint dict.
     """
-    print("\n\nApplying chunking fix migration.\n\n")
     num_layers = ckpt["hyper_parameters"]["config"].model.processor.num_layers
     num_chunks = ckpt["hyper_parameters"]["config"].model.processor.num_chunks
     state_dict = ckpt["state_dict"]
@@ -43,7 +42,7 @@ def migrate(ckpt: CkptType) -> CkptType:
 
     for key in [k for k in list(state_dict.keys()) if "processor.proc" in k]:
         parts = key.split(".")
-        if not parts[5] == "blocks":
+        if not parts[5] == "blocks":  # expecting format model.model.processor.proc.i.blocks.j....
             continue
 
         chunk_idx = int(parts[4])
@@ -51,6 +50,7 @@ def migrate(ckpt: CkptType) -> CkptType:
 
         flat_idx = chunk_idx * blocks_per_chunk + block_idx
         rest = [""] + parts[7:]
+        # reconstruct new key: model.model.processor.proc.<flat_idx>.<rest>
         new_key = "model.model.processor.proc." + str(flat_idx) + ".".join(rest)
 
         updates[new_key] = state_dict[key]

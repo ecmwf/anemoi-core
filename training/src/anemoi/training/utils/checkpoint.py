@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import importlib
 import io
 import logging
 import pickle
@@ -23,6 +24,8 @@ from pytorch_lightning import Trainer
 from anemoi.models.migrations import Migrator
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
+
+chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +82,9 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
+
+    # apply chunking migration (fails silently otherwise leading to hard to debug issues)
+    checkpoint = chunking_fix_migration(checkpoint)
 
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
