@@ -285,7 +285,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 y_state,
                 validation_mode,
             )
-            metrics_next = self._compute_metrics(
+            metrics_next = self.calculate_val_metrics(
                 y_pred_state_full,
                 y_state_full,
                 rollout_step,

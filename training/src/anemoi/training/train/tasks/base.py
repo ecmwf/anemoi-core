@@ -399,7 +399,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         step: int | None = None,
         validation_mode: bool = False,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
