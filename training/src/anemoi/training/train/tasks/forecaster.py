@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 class GraphForecaster(BaseRolloutGraphModule):
     """Graph neural network forecaster for PyTorch Lightning."""
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
@@ -70,7 +70,9 @@ class GraphForecaster(BaseRolloutGraphModule):
             y_pred = self(x)
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
+            LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
             # y includes the auxiliary variables, so we must leave those out when computing the loss
+
             loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
@@ -80,6 +82,6 @@ class GraphForecaster(BaseRolloutGraphModule):
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred

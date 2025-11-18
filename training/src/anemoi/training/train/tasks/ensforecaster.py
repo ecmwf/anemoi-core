@@ -129,12 +129,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
     def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
-        return self.model(
-            x,
-            fcstep=fcstep,
-            model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
-        )
+        return super().forward(x, fcstep=fcstep)
 
     def compute_loss_metrics(
         self,
@@ -151,7 +146,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         )
         return super().compute_loss_metrics(y_pred_ens, y, *args, **kwargs)
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
@@ -207,16 +202,11 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, rollout_step)
-            y = batch[
-                :,
-                self.multi_step + rollout_step,
-                0,
-                :,
-                self.data_indices.data.output.full,
-            ]  # self.data_indices.data.output.full
-            LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
 
+            y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full]
+            LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
             # y includes the auxiliary variables, so we must leave those out when computing the loss
+
             loss, metrics_next, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
@@ -226,6 +216,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred_ens_group

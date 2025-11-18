@@ -84,7 +84,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
-    def advance_input(
+    def _advance_input(
         self,
         x: torch.Tensor,
         y_pred: torch.Tensor,
@@ -153,7 +153,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         return loss, metrics, y_preds
 
     @abstractmethod
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,

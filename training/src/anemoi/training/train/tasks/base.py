@@ -297,9 +297,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = None
         self.grid_shard_slice = None
 
-    def forward(self, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """For
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            _description_
+
+        Returns
+        -------
+        torch.Tensor
+            _description_
+        """
         return self.model(
-            *args,
+            x,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
             **kwargs,
