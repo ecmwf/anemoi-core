@@ -3,7 +3,6 @@ overwrite: True
 
 data: "data"
 hidden: "hidden"
-graph: "int"
 
 nodes:
   # Data nodes
