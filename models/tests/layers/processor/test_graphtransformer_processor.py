@@ -89,7 +89,8 @@ class TestGraphTransformerProcessor:
         shard_shapes = [list(x.shape)]
 
         # Run forward pass of processor
-        output = graphtransformer_processor.forward(x, batch_size, shard_shapes, graph_provider)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
+        output = graphtransformer_processor.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
         assert output.shape == (self.NUM_NODES, graphtransformer_init.num_channels)
 
         # Generate dummy target and loss function

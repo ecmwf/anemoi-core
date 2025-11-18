@@ -175,7 +175,8 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
-        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes, graph_provider)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
+        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
         assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])
         assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
@@ -205,11 +206,13 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
+        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
+
         mapper.num_chunks = 4
-        x_src_c, x_dst_c = mapper.forward(x, batch_size, shard_shapes, graph_provider)
+        x_src_c, x_dst_c = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         mapper.num_chunks = 1
-        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes, graph_provider)
+        x_src, x_dst = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         assert torch.allclose(
             x_src, x_src_c, atol=1e-4
@@ -223,9 +226,11 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         batch_size = 1
         shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
 
-        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes, graph_provider)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
 
-        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes, graph_provider)
+        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes, edge_attr, edge_index)
+
+        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
@@ -279,7 +284,8 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
         )
 
-        result = mapper.forward(x, batch_size, shard_shapes, graph_provider)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
+        result = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
         assert result.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
 
         # Dummy loss
@@ -312,11 +318,13 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
         )
 
+        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
+
         mapper.num_chunks = 4
-        out_c = mapper.forward(x, batch_size, shard_shapes, graph_provider)
+        out_c = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         mapper.num_chunks = 1
-        out = mapper.forward(x, batch_size, shard_shapes, graph_provider)
+        out = mapper.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         assert torch.allclose(out, out_c, atol=1e-4), f"out ({out}) != out_c ({out_c}) when num_chunks is changed"
 
@@ -329,9 +337,11 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src),
         )
 
-        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes, graph_provider)
+        edge_attr, edge_index = graph_provider.get_edges(batch_size=batch_size)
 
-        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes, graph_provider)
+        out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_shapes, edge_attr, edge_index)
+
+        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_shapes, edge_attr, edge_index)
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
