@@ -298,17 +298,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_slice = None
 
     def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        """For
+        """Forward method.
 
-        Parameters
-        ----------
-        x : torch.Tensor
-            _description_
-
-        Returns
-        -------
-        torch.Tensor
-            _description_
+        This method calls the model's forward method with the appropriate
+        communication group and sharding information.
         """
         return self.model(
             x,
