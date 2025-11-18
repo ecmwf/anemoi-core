@@ -34,7 +34,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -48,7 +47,8 @@ dependencies = [
   "torch>=2.3",
   "torch-geometric>=2.3",
 ]
-optional-dependencies.all = [  ]
+
+optional-dependencies.all = [ "anemoi-models[migrations]" ]
 
 optional-dependencies.dev = [
   "anemoi-models[all,docs,tests]",
@@ -61,6 +61,12 @@ optional-dependencies.docs = [
   "sphinx<8.2",          # Fixed until nbsphinx updates
   "sphinx-argparse<0.5",
   "sphinx-rtd-theme",
+]
+
+optional-dependencies.migrations = [
+  "cloudpickle>=3.1",
+  "jinja2>=3.1",
+  "rich",
 ]
 
 optional-dependencies.tests = [ "hypothesis>=6.11", "pytest>=8" ]

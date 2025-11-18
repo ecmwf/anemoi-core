@@ -237,16 +237,7 @@ This can be enabled in the diagnostics configuration:
        mlflow:
            system: true
 
-4. Use PyTorch Profiler
-=======================
-
-Leverage PyTorch's built-in profiler to identify performance
-bottlenecks:
-
-We are currently updating the Anemoi profiler to use modern Pytorch
-profiling tools.
-
-5. Gradient Checking
+4. Gradient Checking
 ====================
 
 If you suspect issues with backpropagation, consider implementing

@@ -1,0 +1,111 @@
+num_channels: 1024
+cpu_offload: False
+
+keep_batch_sharded: True
+
+model:
+  _target_: anemoi.models.models.AnemoiDiffusionTendModelEncProcDec
+  # Diffusion parameters
+  diffusion:
+    sigma_data: 1.0
+    noise_channels: 32
+    noise_cond_dim: 16
+    sigma_max: 100.0
+    sigma_min: 0.02
+    rho: 7.0
+    noise_embedder:
+      _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
+      num_channels: ${model.model.diffusion.noise_channels}
+      max_period: 1000
+    inference_defaults:
+      noise_scheduler:
+        schedule_type: "karras"
+        sigma_max: 100.0
+        sigma_min: 0.02
+        rho: 7.0
+        num_steps: 50
+      diffusion_sampler:
+        sampler: "heun"
+        S_churn: 0.0
+        S_min: 0.0
+        S_max: .inf
+        S_noise: 1.0
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+    normalized_shape: ${model.num_channels}
+    condition_shape: 16
+    w_one_bias_zero_init: True
+    autocast: false
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+processor:
+  _target_: anemoi.models.layers.processor.TransformerProcessor
+  num_layers: 16
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  window_size: 512
+  dropout_p: 0.0 # GraphTransformer
+  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  qk_norm: True # Transformer and GraphTransformer only
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
+  cpu_offload: ${model.cpu_offload}
+  use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
+
+encoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  trainable_size: ${model.trainable_parameters.data2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+
+
+decoder:
+  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  trainable_size: ${model.trainable_parameters.hidden2data}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  num_heads: 16 # GraphTransformer or Transformer only
+  initialise_data_extractor_zero: True
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask
+
+trainable_parameters:
+  data: 8
+  hidden: 8
+  data2hidden: 8
+  hidden2data: 8
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+# Bounding configuration
+bounding: []

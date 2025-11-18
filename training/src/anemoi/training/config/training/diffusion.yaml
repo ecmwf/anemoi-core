@@ -1,0 +1,147 @@
+---
+defaults:
+  - scalers: global
+
+# resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
+run_id: null
+fork_run_id: null
+transfer_learning: False # activate to perform transfer learning
+load_weights_only: False # only load model weights, do not restore optimiser states etc.
+
+# run in deterministic mode ; slows down
+deterministic: False
+
+# miscellaneous
+precision: bf16-mixed
+
+# multistep input
+# 1 = single step scheme, X(t-1) used to predict X(t)
+# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
+# Deepmind use k = 2 in their model
+multistep_input: 2
+
+# gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
+# the effective batch size becomes num-devices * batch_size * k
+accum_grad_batches: 1
+
+num_sanity_val_steps: 6
+
+# clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
+gradient_clip:
+  val: 1.
+  algorithm: norm
+
+# stochastic weight averaging
+# https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
+swa:
+  enabled: False
+  lr: 1.e-4
+
+# Optimizer settings
+optimizer:
+  zero: False
+  kwargs:
+    weight_decay: 0.1
+    betas: [0.9, 0.95]
+    eps: 1e-7
+
+# select model
+model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
+
+# select strategy
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  read_group_size: ${dataloader.read_group_size}
+
+# loss functions
+
+# dynamic rescaling of the loss gradient
+# see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
+# don't enable this by default until it's been tested and proven beneficial
+loss_gradient_scaling: False
+
+# loss function for the model
+training_loss:
+  # loss class to initialise
+  _target_: anemoi.training.losses.WeightedMSELoss
+  # Scalers to include in loss calculation
+  # A selection of available scalers are listed in training/scalers.
+  # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+  # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+  scalers: ['pressure_level', 'general_variable', 'node_weights']
+  ignore_nans: False
+
+# Validation metrics calculation,
+# This may be a list, in which case all metrics will be calculated
+# and logged according to their name.
+# These metrics are calculated in the output model space, and thus
+# have undergone postprocessing.
+validation_metrics:
+  # loss class to initialise
+  mse:
+    _target_: anemoi.training.losses.MSELoss
+    # Scalers to include in loss calculation
+    # Cannot scale over the variable dimension due to possible remappings.
+    # Available scalers include:
+    # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
+    # Use the `scale_validation_metrics` section to variable scale.
+    scalers: ['node_weights']
+    # other kwargs
+    ignore_nans: True
+
+# Variable groups definition for scaling
+# The variable level scaling methods are defined under training/scalers
+# A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
+# Variables are assigned to a group by their param if contained in the metadata, else by their name.
+
+# If more complex grouping is required, groups can be defined as a dictionary, such that all
+# keys must be evaluate to True.
+# .e.g.:
+#   variable_groups:
+#     default: sfc
+#     pl:
+#        is_pressure_level: True
+# See `anemoi.transform.variables.Variable` for the available metadata.
+# Note that the former formulation of
+# :
+# variable_groups:
+#  default: sfc
+#  pl: [q, t, u, v, w, z]
+#
+# still works
+
+variable_groups:
+  default: sfc
+  pl:
+     param: [q, t, u, v, w, z]
+
+metrics:
+- z_500
+- t_850
+- u_850
+- v_850
+
+# length of the "rollout" window (see Keisler's paper)
+rollout:
+  start: 1
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  max: 1
+
+# Set max_epochs or max_steps. Training stops at the first limit reached.
+max_epochs: null
+max_steps: 1000000
+
+lr:
+  warmup: 1000 # number of warmup iterations
+  rate: 0.625e-4 #local_lr
+  iterations: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
+  min: 3e-7 #Not scaled by #GPU
+
+# Changes in per-gpu batch_size should come with a rescaling of the local_lr
+# in order to keep a constant global_lr
+# global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
+
+submodules_to_freeze: []

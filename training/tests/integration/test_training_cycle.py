@@ -13,8 +13,10 @@ from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -26,23 +28,43 @@ LOGGER = logging.getLogger(__name__)
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_architecture_configs(
-    architecture_config: tuple[DictConfig, str],
+    architecture_config: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = architecture_config
+    cfg, url, _ = architecture_config
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = architecture_config
+def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = architecture_config
     BaseSchema(**cfg)
 
 
+def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, str, str]) -> None:
+    from anemoi.training.diagnostics.logger import get_mlflow_logger
+    from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
+
+    config, _, _ = base_global_config
+    if config.config_validation:
+        OmegaConf.resolve(config)
+        config = BaseSchema(**config)
+        assert config.diagnostics.log.mlflow.target_ == "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
+    else:
+        config = OmegaConf.to_object(config)
+        config = UnvalidatedBaseSchema(**DictConfig(config))
+
+    logger = get_mlflow_logger(config)
+
+    assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.hardware.paths.logs.mlflow)
+    if config.diagnostics.log.mlflow.enabled:
+        assert isinstance(logger, AnemoiMLflowLogger)
+
+
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_without_config_validation(
     gnn_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
@@ -56,7 +78,7 @@ def test_training_cycle_without_config_validation(
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_stretched(
     stretched_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
@@ -73,7 +95,7 @@ def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[st
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_archive: GetTestArchive) -> None:
     cfg, urls = lam_config
     for url in urls:
@@ -82,7 +104,7 @@ def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_a
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_lam_with_existing_graph(
     lam_config_with_graph: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
@@ -99,7 +121,7 @@ def test_config_validation_lam(lam_config: DictConfig) -> None:
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = ensemble_config
     get_test_archive(url)
@@ -112,7 +134,7 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_hierarchical(
     hierarchical_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
@@ -129,7 +151,7 @@ def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, l
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = gnn_config
     get_test_archive(url)
@@ -156,18 +178,29 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
 
 
 @skip_if_offline
-@pytest.mark.longtests
+def test_loading_checkpoint(
+    architecture_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    cfg, url = architecture_config_with_checkpoint
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.model
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_restart_from_existing_checkpoint(
-    gnn_config_with_checkpoint: tuple[DictConfig, str],
+    architecture_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = gnn_config_with_checkpoint
+    cfg, url = architecture_config_with_checkpoint
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
 @skip_if_offline
-@pytest.mark.longtests
+@pytest.mark.slow
 def test_training_cycle_interpolator(
     interpolator_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
@@ -181,4 +214,17 @@ def test_training_cycle_interpolator(
 def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
     """Schema-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = diffusion_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = diffusion_config
     BaseSchema(**cfg)

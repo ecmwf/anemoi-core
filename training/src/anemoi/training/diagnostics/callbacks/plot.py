@@ -451,14 +451,13 @@ class LongRolloutPlots(BasePlotCallback):
             # collect min and max values for each variable for the colorbar
             vmin, vmax = (np.inf * np.ones(len(plot_parameters_dict)), -np.inf * np.ones(len(plot_parameters_dict)))
 
-        # Plot for each rollout step# Plot for each rollout step
+        # Plot for each rollout step
         with torch.no_grad():
             for rollout_step, (_, _, y_pred) in enumerate(
                 pl_module.rollout_step(
                     batch,
                     rollout=self.max_rollout,
-                    validation_mode=False,
-                    training_mode=False,
+                    validation_mode=True,
                 ),
             ):
                 # plot only if the current rollout step is in the list of rollout steps
@@ -544,8 +543,8 @@ class LongRolloutPlots(BasePlotCallback):
             logger,
             fig,
             epoch=epoch,
-            tag=f"gnn_pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank0",
-            exp_log_tag=f"val_pred_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
+            tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_batch{batch_idx:04d}_rank{pl_module.local_rank:01d}",
+            exp_log_tag=f"pred_val_sample_rstep{rollout_step + 1:03d}_rank{pl_module.local_rank:01d}",
         )
 
     def _store_video_frame_data(
@@ -561,8 +560,8 @@ class LongRolloutPlots(BasePlotCallback):
         output_tensor = self.post_processors(y_pred.detach().cpu())[self.sample_idx : self.sample_idx + 1]
         data_over_time.append(output_tensor[0, 0, :, np.array(list(plot_parameters_dict.keys()))])
         # update min and max values for each variable for the colorbar
-        vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=1))
-        vmax[:] = np.maximum(vmax, np.nanmax(data_over_time[-1], axis=1))
+        vmin[:] = np.minimum(vmin, np.nanmin(data_over_time[-1], axis=0))
+        vmax[:] = np.maximum(vmax, np.nanmax(data_over_time[-1], axis=0))
         return data_over_time, vmin, vmax
 
     @rank_zero_only
@@ -604,7 +603,7 @@ class LongRolloutPlots(BasePlotCallback):
             for frame_data in data_over_time:
                 ax, scatter_frame = get_scatter_frame(
                     ax,
-                    frame_data[idx],
+                    frame_data[:, idx],
                     self.latlons,
                     cmap=cmap,
                     vmin=vmin[idx],
@@ -619,7 +618,7 @@ class LongRolloutPlots(BasePlotCallback):
                 fig,
                 anim,
                 epoch=epoch,
-                tag=f"gnn_pred_val_animation_{variable_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
+                tag=f"pred_val_animation_{variable_name}_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
             )
 
     def on_validation_batch_end(
@@ -875,7 +874,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             metadata_variables=self.metadata_variables,
         )
         self.parameter_names = [self.parameter_names[i] for i in argsort_indices]
-        if not isinstance(pl_module.loss, BaseLoss):
+        if not isinstance(self.loss, BaseLoss):
             LOGGER.warning(
                 "Loss function must be a subclass of BaseLoss, or provide `squash`.",
                 RuntimeWarning,
@@ -891,7 +890,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
-            loss = pl_module.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
+            loss = self.loss(y_hat, y_true, squash=False).detach().cpu().numpy()
 
             sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group
             loss = loss[argsort_indices]
@@ -905,8 +904,73 @@ class PlotLoss(BasePerBatchPlotCallback):
                 exp_log_tag=f"loss_sample_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
             )
 
+    def on_validation_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        output: list[torch.Tensor],
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
 
-class PlotSample(BasePerBatchPlotCallback):
+        if batch_idx % self.every_n_batches == 0:
+
+            self.loss = copy.deepcopy(pl_module.loss)
+
+            # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+            if (
+                hasattr(self.loss.scaler, "nan_mask_weights")
+                and self.loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+            ):
+                self.loss.scaler.nan_mask_weights = pl_module.allgather_batch(self.loss.scaler.nan_mask_weights)
+
+            super().on_validation_batch_end(
+                trainer,
+                pl_module,
+                output,
+                batch,
+                batch_idx,
+            )
+
+
+class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
+    """Base processing class for additional metrics."""
+
+    def process(
+        self,
+        pl_module: pl.LightningModule,
+        outputs: list,
+        batch: torch.Tensor,
+    ) -> tuple[np.ndarray, np.ndarray]:
+
+        if self.latlons is None:
+            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
+
+        input_tensor = (
+            batch[
+                :,
+                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+                ...,
+                pl_module.data_indices.data.output.full,
+            ]
+            .detach()
+            .cpu()
+        )
+        data = self.post_processors(input_tensor)[self.sample_idx]
+        output_tensor = torch.cat(
+            tuple(
+                self.post_processors(x[:, ...].detach().cpu(), in_place=False)[self.sample_idx : self.sample_idx + 1]
+                for x in outputs[1]
+            ),
+        )
+        output_tensor = pl_module.output_mask.apply(output_tensor, dim=2, fill_value=np.nan).numpy()
+        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
+        data = data.numpy()
+
+        return data, output_tensor
+
+
+class PlotSample(BasePlotAdditionalMetrics):
     """Plots a post-processed sample: input, target and prediction."""
 
     def __init__(
@@ -979,32 +1043,10 @@ class PlotSample(BasePerBatchPlotCallback):
             for name in self.parameters
         }
 
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
+        data, output_tensor = self.process(pl_module, outputs, batch)
+
         local_rank = pl_module.local_rank
-
-        input_tensor = (
-            batch[
-                :,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data = self.post_processors(input_tensor)[self.sample_idx]
-
-        output_tensor = self.post_processors(
-            torch.cat(tuple(x[:, ...].detach().cpu() for x in outputs[1])),
-            in_place=False,
-        )[self.sample_idx : self.sample_idx + 1]
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
-
         rollout = getattr(pl_module, "rollout", 0)
-
         for rollout_step in range(rollout):
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
@@ -1023,42 +1065,9 @@ class PlotSample(BasePerBatchPlotCallback):
                 logger,
                 fig,
                 epoch=epoch,
-                tag=f"gnn_pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank0",
+                tag=f"pred_val_sample_rstep{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
                 exp_log_tag=f"val_pred_sample_rstep{rollout_step:02d}_rank{local_rank:01d}",
             )
-
-
-class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
-    """Base processing class for additional metrics."""
-
-    def process(
-        self,
-        pl_module: pl.LightningModule,
-        outputs: list,
-        batch: torch.Tensor,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
-
-        input_tensor = (
-            batch[
-                :,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
-                ...,
-                pl_module.data_indices.data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
-        data = self.post_processors(input_tensor)[self.sample_idx]
-        output_tensor = self.post_processors(
-            torch.cat(tuple(x[self.sample_idx : self.sample_idx + 1, ...].detach().cpu() for x in outputs[1])),
-            in_place=False,
-        )
-        output_tensor = pl_module.output_mask.apply(output_tensor, dim=1, fill_value=np.nan).numpy()
-        data[1:, ...] = pl_module.output_mask.apply(data[1:, ...], dim=2, fill_value=np.nan)
-        data = data.numpy()
-        return data, output_tensor
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
@@ -1136,8 +1145,8 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 logger,
                 fig,
                 epoch=epoch,
-                tag=f"gnn_pred_val_spec_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank0",
-                exp_log_tag=f"val_pred_spec_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                tag=f"pred_val_spec_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                exp_log_tag=f"pred_val_spec_rstep_{rollout_step:02d}_rank{local_rank:01d}",
             )
 
 
@@ -1153,6 +1162,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         sample_idx: int,
         parameters: list[str],
         precip_and_related_fields: list[str] | None = None,
+        log_scale: bool = False,
         every_n_batches: int | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback.
@@ -1174,6 +1184,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.precip_and_related_fields = precip_and_related_fields
+        self.log_scale = log_scale
         LOGGER.info(
             "Using precip histogram plotting method for fields: %s.",
             self.precip_and_related_fields,
@@ -1215,12 +1226,13 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 self.precip_and_related_fields,
+                self.log_scale,
             )
 
             self._output_figure(
                 logger,
                 fig,
                 epoch=epoch,
-                tag=f"gnn_pred_val_histo_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank0",
-                exp_log_tag=f"val_pred_histo_rstep_{rollout_step:02d}_rank{local_rank:01d}",
+                tag=f"pred_val_histo_rstep_{rollout_step:02d}_batch{batch_idx:04d}_rank{local_rank:01d}",
+                exp_log_tag=f"pred_val_histo_rstep_{rollout_step:02d}_rank{local_rank:01d}",
             )

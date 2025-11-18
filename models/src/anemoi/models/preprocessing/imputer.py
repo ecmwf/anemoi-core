@@ -14,6 +14,8 @@ from abc import ABC
 from typing import Optional
 
 import torch
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
@@ -92,7 +94,7 @@ class BaseImputer(BasePreprocessor, ABC):
                 # if the variable is not in inference input (diagnostic variable), we cannot place NaNs in its inference output
                 if method != self.default:
                     LOGGER.warning(
-                        f"Placement of NaNs for diagnostic variables in inference output is not supported: {name}"
+                        f"If placement of NaNs for diagnostic variables in inference output is desired, this needs to be handled by postprocessors: {name}"
                     )
 
             self.index_training_input.append(name_to_index_training_input[name])
@@ -285,6 +287,8 @@ class InputImputer(BaseImputer):
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
+        if isinstance(statistics, DictConfig):
+            statistics = OmegaConf.to_container(statistics, resolve=True)
         self._create_imputation_indices(statistics)
 
         self._validate_indices()

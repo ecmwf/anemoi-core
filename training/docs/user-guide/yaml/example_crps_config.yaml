@@ -20,10 +20,6 @@ hardware:
   num_nodes: 1
   num_gpus_per_model: 1
 
-# Changes in datamodule
-datamodule:
-  _target_: anemoi.training.data.datamodule.AnemoiEnsDatasetsDataModule
-
 data:
   resolution: o96
 

@@ -1,0 +1,13 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- hardware: example
+- graph: multi_scale
+- model: graphtransformer_diffusion
+- training: diffusion
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: True

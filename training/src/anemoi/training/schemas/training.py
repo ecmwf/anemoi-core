@@ -136,6 +136,8 @@ class VariableMaskingScalerSchema(BaseModel):
 
 class NaNMaskScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
+    use_processors_tendencies: bool = Field(default=False)
+    "Flag to include processors for tendencies when building the loss mask."
 
 
 class TendencyScalerTargets(str, Enum):
@@ -214,6 +216,7 @@ class ImplementedLossesUsingBaseLossSchema(str, Enum):
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
+    weighted_mse = "anemoi.training.losses.WeightedMSELoss"
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
@@ -342,7 +345,7 @@ class BaseTrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations."
-    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str]]]
+    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
     "Groups for variable loss scaling"
     max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
@@ -354,6 +357,8 @@ class BaseTrainingSchema(BaseModel):
     "Optimizer configuration."
     metrics: list[str]
     "List of metrics"
+    ensemble_size_per_device: PositiveInt = 1
+    "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
 class ForecasterSchema(BaseTrainingSchema):
@@ -363,13 +368,22 @@ class ForecasterSchema(BaseTrainingSchema):
     "Rollout configuration."
 
 
-class ForecasterEnsSchema(BaseTrainingSchema):
+class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
-    ensemble_size_per_device: PositiveInt = Field(example=1)
-    "Number of ensemble member per device"
+
+
+class DiffusionForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+    "Training objective."
+
+
+class DiffusionTendForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
+        ...,
+        alias="model_task",
+    )
+    "Training objective."
 
 
 class InterpolationSchema(BaseTrainingSchema):
@@ -382,6 +396,10 @@ class InterpolationSchema(BaseTrainingSchema):
 
 
 TrainingSchema = Annotated[
-    ForecasterSchema | ForecasterEnsSchema | InterpolationSchema,
+    ForecasterSchema
+    | ForecasterEnsSchema
+    | InterpolationSchema
+    | DiffusionForecasterSchema
+    | DiffusionTendForecasterSchema,
     Discriminator("model_task"),
 ]

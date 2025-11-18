@@ -13,7 +13,7 @@ from __future__ import annotations
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
-from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC001
+from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC002
 
 
 class DataSchema(PydanticBaseModel):
@@ -35,6 +35,8 @@ class DataSchema(PydanticBaseModel):
         The list of features that are only part of the forecast state.
     processors : Dict[str, Processor]
         The Processors configuration.
+    target : list[str], optional
+        The list of features used to compute the loss against forecasted variables.
     num_features : int, optional
         The number of features in the forecast state. To be set in the code.
     """
@@ -48,9 +50,15 @@ class DataSchema(PydanticBaseModel):
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \
             Processors including imputers and normalizers are applied in order of definition."
-    forcing: list[str]
+    forcing: list[str] = Field(default_factory=list)
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
-    diagnostic: list[str]
+    diagnostic: list[str] = Field(default_factory=list)
     "Features that are only part of the forecast state and are not used as an input to the model."
+    target: list[str] | None = None
+    (
+        "Features used to compute the loss against forecasted variables. "
+        "Cannot be prognostic or diagnostic, can have the same name as forcing variables "
+        "but have a different role. Such that: prognostic = diagnostic - forcing.union(target)."
+    )
     num_features: int | None
     "Number of features in the forecast state. To be set in the code."

@@ -48,12 +48,16 @@ the loss function, if the scaler is included in
 the nan mask to ignore the imputed values in the loss calculation. This
 mask is updated for every batch during training.
 
-For diagnostic variables, NaN locations are not available during
-inference, as these fields are not included in the model input. As a
-result, no NaNs are reintroduced into the diagnostic output fields. In
-contrast, during training, diagnostic variables are included in the
-batch, also for input timesteps. Therefore, any NaNs in the target data
-are imputed to enable proper loss computation.
+During training, diagnostic variables are included in each batch, and
+therefore at the input timesteps. Any NaNs in the target data are
+weighted by zero to enable proper loss computation. During inference,
+however, NaN locations for diagnostic variables are not available (those
+fields aren not part of the model input) so the imputer cannot
+reintroduces NaNs into the diagnostic output. To insert NaNs into
+diagnostic variables, the postprocessor
+``anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor``
+has to be used. This masks diagnostic variable entries by setting them
+to NaN wherever the chosen (prognostic) masking variable is NaN.
 
 The dynamic imputers are used to impute NaNs in the input data and do
 not replace the imputed values with NaNs in the output data. Therefore,

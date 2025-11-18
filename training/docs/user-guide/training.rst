@@ -315,7 +315,6 @@ locations change in time.
    processors:
    imputer:
       _target_: anemoi.models.preprocessing.imputer.InputImputer
-      _convert_: all
       config: ${data.imputer}
 
 ****************
@@ -340,6 +339,8 @@ For ensemble training, the following loss functions are available:
    density estimation
 -  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
    the number of ensemble members used.
+
+.. _loss-function-scaling:
 
 ***********************
  Loss function scaling
