@@ -175,7 +175,7 @@ class GraphDiffusionForecaster(GraphForecaster):
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
 
@@ -404,6 +404,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
