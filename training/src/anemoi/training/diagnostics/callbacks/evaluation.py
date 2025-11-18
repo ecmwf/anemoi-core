@@ -60,7 +60,7 @@ class RolloutEval(Callback):
         )
 
         with torch.no_grad():
-            for loss_next, metrics_next, _ in pl_module.rollout_step(
+            for loss_next, metrics_next, _ in pl_module._rollout_step(
                 batch,
                 rollout=self.rollout,
                 validation_mode=True,

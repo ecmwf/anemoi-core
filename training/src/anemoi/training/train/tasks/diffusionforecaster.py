@@ -103,7 +103,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             group=self.model_comm_group,
         )
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
@@ -294,7 +294,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
 
         return loss, metrics_next
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
