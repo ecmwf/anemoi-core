@@ -20,7 +20,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.data.dataset.multidataset import MultiDataset
+from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
@@ -197,13 +197,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(self.train_dataloader_config.datasets, shuffle=True, label="training")
+        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
         """Create multi-dataset for validation."""
         return self._get_dataset(
-            self.valid_dataloader_config.datasets,
+            self.valid_dataloader_config,
             shuffle=False,
             val_rollout=self.config.dataloader.validation_rollout,
             label="validation",
@@ -212,7 +212,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_test(self) -> MultiDataset:
         """Create multi-dataset for testing."""
-        return self._get_dataset(self.test_dataloader_config.datasets, shuffle=False, label="test")
+        return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
 
     def _get_dataset(
         self,
@@ -228,7 +228,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             data_readers[name] = data_reader
 
         return MultiDataset(
-            data_reader=data_readers,
+            data_readers=data_readers,
             relative_date_indices=self.relative_date_indices(val_rollout),
             timestep=self.config.data.timestep,
             shuffle=shuffle,

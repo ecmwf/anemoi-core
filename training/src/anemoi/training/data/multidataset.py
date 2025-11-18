@@ -27,12 +27,13 @@ class MultiDataset(IterableDataset):
 
     def __init__(
         self,
-        datasets_config: dict,
-        grid_indices_config: dict,
+        data_readers: dict,
+        grid_indices: dict,
         relative_date_indices: list,
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
+        **kwargs,
     ) -> None:
         """Initialize multi-dataset with synchronized datasets.
 
@@ -55,43 +56,33 @@ class MultiDataset(IterableDataset):
         """
         self.label = label
         self.shuffle = shuffle
-        self.dataset_names = list(datasets_config.keys())
+        self.dataset_names = list(data_readers.keys())
 
         # Create individual NativeGridDataset for each dataset with its own grid_indices
         self.datasets = {}
-        for name, data_reader in datasets_config.items():
-            if name not in grid_indices_config:
+        for name, data_reader in data_readers.items():
+            if name not in grid_indices:
                 msg = f"No grid_indices configuration found for dataset '{name}'"
                 raise ValueError(msg)
 
             self.datasets[name] = NativeGridDataset(
                 data_reader=data_reader,
-                grid_indices=grid_indices_config[name],
+                grid_indices=grid_indices[name],
                 relative_date_indices=relative_date_indices,
                 timestep=timestep,
                 shuffle=self.shuffle,  # Will be overridden in __iter__
                 label=f"{label}_{name}",
+                **kwargs,
             )
 
         # Use the first dataset as the primary for shared properties
         self.primary_dataset = next(iter(self.datasets.values()))
 
-        # Verify all datasets have the same number of valid indices
-        primary_count = len(self.primary_dataset.valid_date_indices)
-        for name, dataset in self.datasets.items():
-            dataset_count = len(dataset.valid_date_indices)
-            if dataset_count != primary_count:
-                msg = (
-                    f"Dataset '{name}' has {dataset_count} valid indices, "
-                    f"but expected {primary_count} to match other datasets"
-                )
-                raise ValueError(msg)
-
         LOGGER.info(
             "MultiDataset initialized with %d datasets (%s), %d valid indices each",
             len(self.datasets),
             ", ".join(self.dataset_names),
-            primary_count,
+            len(self.valid_date_indices),
         )
 
     def _collect(self, attr_name: str) -> dict:
@@ -144,7 +135,7 @@ class MultiDataset(IterableDataset):
         for name, indices in valid_date_indices.items():
             if reference_indices is None:
                 reference_indices = indices
-            assert (
+            assert all(
                 indices == reference_indices
             ), f"Dataset '{name}' has different valid_date_indices than other datasets"
         return reference_indices
