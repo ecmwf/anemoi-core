@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.7.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.1...graphs-0.7.2) (2025-11-17)
+
+
+### Features
+
+* **graphs:** Add LimitedAreaMask for stretched hidden nodes ([#671](https://github.com/ecmwf/anemoi-core/issues/671)) ([f155f3c](https://github.com/ecmwf/anemoi-core/commit/f155f3c065ca9ebfe4b1ca713b6c7f59dc02d279))
+* **graphs:** New edge attributes and faster graph cleaning ([#617](https://github.com/ecmwf/anemoi-core/issues/617)) ([8659de9](https://github.com/ecmwf/anemoi-core/commit/8659de9238f95c301df42989a62a46ca7f702276))
+* New interactive graph visualization ([#609](https://github.com/ecmwf/anemoi-core/issues/609)) ([5b5ede4](https://github.com/ecmwf/anemoi-core/commit/5b5ede4afd5c4a1d4a7ddc11d0dcc4a4e614af1b))
+
+
+### Bug Fixes
+
+* **graphs,normalisation:** Add assert when dividing by 0 ([#676](https://github.com/ecmwf/anemoi-core/issues/676)) ([01b7034](https://github.com/ecmwf/anemoi-core/commit/01b7034b7dd2898a41d64071255fa27a71156be5))
+* **graphs,schemas:** Missing type for mask_attr_name in schema ([#664](https://github.com/ecmwf/anemoi-core/issues/664)) ([f021017](https://github.com/ecmwf/anemoi-core/commit/f021017545ebac20b6bafb9e1bedbb312e7c7e29))
+* **graphs,tests:** New test and fix anemoi-graphs tests with gpu ([#637](https://github.com/ecmwf/anemoi-core/issues/637)) ([ca1b542](https://github.com/ecmwf/anemoi-core/commit/ca1b54248c0efda74cc48544be1479e5984c1c13))
+* **graphs:** Remove wrong argument from og.Figure ([#616](https://github.com/ecmwf/anemoi-core/issues/616)) ([abd37eb](https://github.com/ecmwf/anemoi-core/commit/abd37eba46dee06287788ae60405d7c019f189ef))
+* **graphs:** Unit-range normalisation ([#665](https://github.com/ecmwf/anemoi-core/issues/665)) ([6de4778](https://github.com/ecmwf/anemoi-core/commit/6de4778c5abd02437ff4649d2f26ac16b99c37fc))
+* Update readmes ([#655](https://github.com/ecmwf/anemoi-core/issues/655)) ([a58aa64](https://github.com/ecmwf/anemoi-core/commit/a58aa640212cdc6d5de6e38a6d11725d32d662b5))
+
 ## [0.7.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.0...graphs-0.7.1) (2025-10-20)
 
 

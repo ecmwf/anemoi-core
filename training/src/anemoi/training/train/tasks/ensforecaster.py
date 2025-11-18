@@ -17,7 +17,6 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.tasks.base import BaseGraphModule
-from anemoi.training.utils.inicond import EnsembleInitialConditions
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -110,8 +109,6 @@ class GraphEnsForecaster(BaseGraphModule):
         self.ens_comm_group_rank = None
         self.ens_comm_num_groups = None
         self.ens_comm_group_size = None
-
-        self.ensemble_ic_generator = EnsembleInitialConditions(config=config, data_indices=data_indices)
 
     def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
         return self.model(
@@ -231,31 +228,6 @@ class GraphEnsForecaster(BaseGraphModule):
         ]
         return x
 
-    def _normalize_batch(self, batch: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
-        """Normalize batch for training and validation before every step.
-
-        For the GraphEnsForecaster, the batch is a tuple were we need to normalize
-        the batch for the ensemble members and the EDA initial conditions.
-
-        Parameters
-        ----------
-        batch : tuple[torch.Tensor, ...]
-            Batch to transfer (tuple for ensemble)
-
-        Returns
-        -------
-        tuple[torch.Tensor, ...]
-            Normalized batch
-        """
-        # Apply preprocessing (normalization) to the ensemble batch
-        batch[0] = self.model.pre_processors(batch[0])  # normalized in-place
-
-        # If we have EDA initial conditions, preprocess them too
-        if len(batch) == 2:
-            batch[1] = self.model.pre_processors(batch[1])
-
-        return batch
-
     def rollout_step(
         self,
         batch: torch.Tensor,
@@ -285,11 +257,16 @@ class GraphEnsForecaster(BaseGraphModule):
         None
             None
         """
-        x = self.ensemble_ic_generator(
-            batch[0],
-            batch[1] if len(batch) == 2 else None,
-        )
-        LOGGER.debug("Shapes: batch[0][0].shape = %s, ens_ic.shape = %s", list(batch[0][0].shape), list(x.shape))
+        # Stack the analysis nens_per_device times along an ensemble dimension
+        x = batch[
+            :,
+            0 : self.multi_step,
+            ...,
+            self.data_indices.data.input.full,
+        ]  # (bs, ms, ens_dummy, latlon, nvar)
+
+        x = torch.cat([x] * self.nens_per_device, dim=2)  # shape == (bs, ms, nens_per_device, latlon, nvar)
+        LOGGER.debug("Shapes: x.shape = %s", list(x.shape))
 
         assert len(x.shape) == 5, f"Expected a 5-dimensional tensor and got {len(x.shape)} dimensions, shape {x.shape}!"
         assert (x.shape[1] == self.multi_step) and (x.shape[2] == self.nens_per_device), (
@@ -300,14 +277,14 @@ class GraphEnsForecaster(BaseGraphModule):
 
         msg = (
             "Batch length not sufficient for requested multi_step length!"
-            f", {batch[0].shape[1]} !>= {rollout + self.multi_step}"
+            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
         )
-        assert batch[0].shape[1] >= rollout + self.multi_step, msg
+        assert batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
             y_pred = self(x, rollout_step)
-            y = batch[0][
+            y = batch[
                 :,
                 self.multi_step + rollout_step,
                 0,
@@ -329,7 +306,7 @@ class GraphEnsForecaster(BaseGraphModule):
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch[0], rollout_step)
+            x = self.advance_input(x, y_pred, batch, rollout_step)
 
             metrics_next = {}
             if validation_mode:
@@ -347,13 +324,9 @@ class GraphEnsForecaster(BaseGraphModule):
         validation_mode: bool = False,
     ) -> tuple:
         """Training / validation step."""
-        LOGGER.debug(
-            "SHAPES: batch[0].shape = %s, batch[1].shape == %s",
-            list(batch[0].shape),
-            list(batch[1].shape) if len(batch) == 2 else "n/a",
-        )
+        LOGGER.debug("SHAPES: batch.shape = %s", list(batch.shape))
 
-        loss = torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
@@ -368,12 +341,6 @@ class GraphEnsForecaster(BaseGraphModule):
 
         loss *= 1.0 / self.rollout
         return loss, metrics, y_preds, _ens_ic
-
-    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
-        batch[0] = super().allgather_batch(batch[0])
-        if len(batch) == 2:
-            batch[1] = super().allgather_batch(batch[1])
-        return batch
 
     def training_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> torch.Tensor | dict:
         """Run one training step.
@@ -402,7 +369,7 @@ class GraphEnsForecaster(BaseGraphModule):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch[0].shape[0],
+            batch_size=batch.shape[0],
             sync_dist=True,
         )
         self.log(
@@ -450,7 +417,7 @@ class GraphEnsForecaster(BaseGraphModule):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch[0].shape[0],
+            batch_size=batch.shape[0],
             sync_dist=True,
         )
         for mname, mvalue in metrics.items():
@@ -461,7 +428,7 @@ class GraphEnsForecaster(BaseGraphModule):
                 on_step=False,
                 prog_bar=False,
                 logger=self.logger_enabled,
-                batch_size=batch[0].shape[0],
+                batch_size=batch.shape[0],
                 sync_dist=True,
             )
 

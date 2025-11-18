@@ -1,13 +1,12 @@
 defaults:
-  - data: zarr
-  - dataloader: native_grid
-  - datamodule: ens
-  - diagnostics: evaluation
-  - system: example
-  - graph: encoder_decoder_only
-  - model: transformer_ens
-  - training: ensemble
-  - _self_
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation_ens
+- system: example
+- graph: encoder_decoder_only
+- model: transformer_ens
+- training: ensemble
+- _self_
 
 config_validation: True
 

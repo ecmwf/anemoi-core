@@ -34,7 +34,6 @@ from anemoi.utils.schemas.errors import convert_errors
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
 from .data import DataSchema
 from .dataloader import DataLoaderSchema
-from .datamodule import DataModuleSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
 from .training import TrainingSchema
@@ -99,8 +98,6 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Data configuration."""
     dataloader: DataLoaderSchema
     """Dataloader configuration."""
-    datamodule: DataModuleSchema
-    """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
     system: SystemSchema
@@ -145,8 +142,6 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Data configuration."""
     dataloader: Any
     """Dataloader configuration."""
-    datamodule: Any
-    """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
     system: Any
