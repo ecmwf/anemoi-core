@@ -9,20 +9,21 @@
 
 
 import logging
+from collections.abc import Callable
 from functools import cached_property
 
+import numpy as np
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
+from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
-from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.tasks.base import BaseTask
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.worker_init import worker_init_func
-from anemoi.utils.dates import frequency_to_string
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,28 +62,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
 
+        # if self.config.training.get("rollout", {}).get("max") is not None:
+        #     max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
+        #     mr_len = self.config.dataloader.model_run_info.length
+        #     if max_rollout_index >= mr_len:
+        #         msg = (
+        #             f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}. "
+        #             "Please adjust the training rollout max or model run length.",
+        #         )
+        #         raise ValueError(msg)
+
     @cached_property
     def statistics(self) -> dict:
         """Return statistics from all training datasets."""
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict[str, dict | None] | None:
+    def statistics_tendencies(self) -> dict:
         """Return tendency statistics from all training datasets."""
-        lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
-
-        stats_by_dataset: dict[str, dict | None] = {}
-        for dataset_name, dataset in self.ds_train.data_readers.items():
-            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
-            if all(stats is None for stats in stats_by_lead.values()):
-                stats_by_dataset[dataset_name] = None
-                continue
-            stats_by_lead["lead_times"] = lead_times
-            stats_by_dataset[dataset_name] = stats_by_lead
-
-        if not any(stats is not None for stats in stats_by_dataset.values()):
-            return None
-        return stats_by_dataset
+        return self.ds_train.statistics_tendencies
 
     @cached_property
     def metadata(self) -> dict:
@@ -92,18 +90,108 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def supporting_arrays(self) -> dict:
         """Return supporting arrays from all training datasets."""
+        # Each dataset has its own supporting arrays, no assumptions about sharing
         return self.ds_train.supporting_arrays
 
     @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:
         """Return data indices for each dataset."""
+        from anemoi.training.utils.config_utils import get_dataset_data_config
+
         indices = {}
-        data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.dataset_names:
             name_to_index = self.ds_train.name_to_index[dataset_name]
             # Get dataset-specific data config
-            indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
+            data_config = get_dataset_data_config(self.config, dataset_name)
+            indices[dataset_name] = IndexCollection(data_config, name_to_index)
         return indices
+
+    def relative_date_indices(self, val_rollout: int = 1) -> list:
+        """Determine a list of relative time indices to load for each batch."""
+        if hasattr(self.config.training, "explicit_times"):
+            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
+
+        # Calculate indices using multistep, timeincrement and rollout
+        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
+
+        rollout_max = getattr(rollout_cfg, "max", None)
+        rollout_start = getattr(rollout_cfg, "start", 1)
+        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
+
+        rollout_value = rollout_start
+        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
+            rollout_value = rollout_max
+        else:
+            LOGGER.warning("Falling back rollout to: %s", rollout_value)
+
+        rollout = max(rollout_value, val_rollout)
+        multi_step = self.config.training.multistep_input
+        return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
+
+    def add_trajectory_ids(self, data_reader: Callable) -> Callable:
+        """Add trajectory IDs to data reader for forecast trajectory tracking."""
+        if not hasattr(self.config.dataloader, "model_run_info"):
+            data_reader.trajectory_ids = None
+            return data_reader
+
+        mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
+        mr_len = self.config.dataloader.model_run_info.length
+
+        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
+            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
+            assert (
+                max_rollout_index < mr_len
+            ), f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}"
+
+        data_reader.trajectory_ids = (data_reader.dates - mr_start) // np.timedelta64(
+            mr_len * frequency_to_seconds(self.config.data.frequency),
+            "s",
+        )
+        return data_reader
+
+    @cached_property
+    def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
+        """Initialize grid indices for spatial sharding for each dataset."""
+        reader_group_size = self.config.dataloader.read_group_size
+
+        grid_indices_dict = {}
+
+        # Each dataset can have its own grid indices configuration
+        grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
+        for dataset_name, grid_config in grid_indices_config.items():
+            grid_indices = instantiate(grid_config, reader_group_size=reader_group_size)
+            grid_indices.setup(self.graph_data[dataset_name])
+            grid_indices_dict[dataset_name] = grid_indices
+
+        return grid_indices_dict
+
+    @cached_property
+    def timeincrement(self) -> int:
+        """Determine the step size relative to the data frequency."""
+        try:
+            frequency = frequency_to_seconds(self.config.data.frequency)
+        except ValueError as e:
+            msg = f"Error in data frequency, {self.config.data.frequency}"
+            raise ValueError(msg) from e
+
+        try:
+            timestep = frequency_to_seconds(self.config.data.timestep)
+        except ValueError as e:
+            msg = f"Error in timestep, {self.config.data.timestep}"
+            raise ValueError(msg) from e
+
+        assert timestep % frequency == 0, (
+            f"Timestep ({self.config.data.timestep} == {timestep}) isn't a "
+            f"multiple of data frequency ({self.config.data.frequency} == {frequency})."
+        )
+
+        LOGGER.info(
+            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
+            timestep // frequency,
+            frequency,
+            timestep,
+        )
+        return timestep // frequency
 
     @cached_property
     def ds_train(self) -> MultiDataset:
@@ -124,16 +212,23 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self,
         config: dict[str, dict],
         shuffle: bool = True,
+        val_rollout: int = 1,
         label: str = "generic",
     ) -> MultiDataset:
-        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
-        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+        data_readers = {}
+        for name, dataset_config in datasets.items():
+            data_reader = open_dataset(dataset_config)
+            data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
+            data_readers[name] = data_reader
 
         return MultiDataset(
             data_readers=data_readers,
-            relative_date_indices=relative_date_indices,
+            relative_date_indices=self.relative_date_indices(val_rollout),
+            timestep=self.config.data.timestep,
             shuffle=shuffle,
             label=label,
+            num_gpus_per_ens=getattr(self.config.hardware, "num_gpus_per_ensemble", 1),
+            num_gpus_per_model=self.config.hardware.num_gpus_per_model,
         )
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
@@ -172,31 +267,3 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         """Return test dataloader."""
         return self._get_dataloader(self.ds_test, "test")
-
-    def fill_metadata(self, metadata: dict) -> None:
-        """Fill metadata dictionary with dataset metadata."""
-        datasets_config = self.metadata.copy()
-        metadata["dataset"] = datasets_config
-        data_indices = self.data_indices.copy()
-        metadata["data_indices"] = data_indices
-
-        metadata["metadata_inference"]["dataset_names"] = self.dataset_names
-
-        for dataset_name in self.dataset_names:
-            metadata["metadata_inference"][dataset_name] = {}
-
-            name_to_index = {
-                "input": data_indices[dataset_name].model.input.name_to_index,
-                "output": data_indices[dataset_name].model.output.name_to_index,
-            }
-            metadata["metadata_inference"][dataset_name]["data_indices"] = name_to_index
-
-            input_data_indices = data_indices[dataset_name].data.input.todict()
-            input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
-            variable_types = {
-                "forcing": [input_index_to_name[int(index)] for index in input_data_indices["forcing"]],
-                "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
-                "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
-                "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
-            }
-            metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
