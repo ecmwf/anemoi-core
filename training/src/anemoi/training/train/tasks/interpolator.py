@@ -117,7 +117,7 @@ class GraphInterpolator(BaseGraphModule):
                     self.boundary_times[-1] - self.boundary_times[-2]
                 )
 
-            y_pred = self(x_bound, target_forcing=target_forcing)
+            y_pred = self(x_bound, target_forcing)
             y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
 
             loss_step, metrics_next = checkpoint(
@@ -135,3 +135,11 @@ class GraphInterpolator(BaseGraphModule):
 
         loss *= 1.0 / len(self.interp_times)
         return loss, metrics, y_preds
+
+    def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
+        return self.model(
+            x,
+            target_forcing=target_forcing,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
