@@ -178,7 +178,7 @@ def test_rollout_eval_ens_eval():
     pl_module = MagicMock()
     pl_module.device = torch.device("cpu")
     pl_module.multi_step = 1
-    pl_module.rollout_step.return_value = [
+    pl_module._rollout_step.return_value = [
         (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None, None),
         (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None, None),
     ]

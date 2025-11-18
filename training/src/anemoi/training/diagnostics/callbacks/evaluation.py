@@ -141,7 +141,7 @@ class RolloutEvalEns(RolloutEval):
 
         metrics = {}
         with torch.no_grad():
-            for loss_next, metrics_next, *_ in pl_module.rollout_step(
+            for loss_next, metrics_next, *_ in pl_module._rollout_step(
                 batch=batch,
                 rollout=self.rollout,
                 validation_mode=True,
