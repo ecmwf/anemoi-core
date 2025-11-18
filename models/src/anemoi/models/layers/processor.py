@@ -17,6 +17,7 @@ from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
+from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
@@ -24,8 +25,8 @@ from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.chunk import GNNProcessorChunk
 from anemoi.models.layers.chunk import GraphTransformerProcessorChunk
+from anemoi.models.layers.chunk import PointWiseMLPProcessorChunk
 from anemoi.models.layers.chunk import TransformerProcessorChunk
-from anemoi.models.layers.graph_providers import BaseGraphProvider
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -98,6 +99,66 @@ class BaseProcessor(nn.Module, ABC):
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
         x = self.run_layers((x,), *args, **kwargs)
+        return x
+
+
+class PointWiseMLPProcessor(BaseProcessor):
+    """Point-wise MLP Processor."""
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        num_channels: int,
+        num_chunks: int,
+        mlp_hidden_ratio: int,
+        cpu_offload: bool = False,
+        dropout_p: float = 0.0,
+        layer_kernels: DotDict,
+        **kwargs,
+    ):
+        super().__init__(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+        )
+
+        self.build_layers(
+            PointWiseMLPProcessorChunk,
+            num_channels=num_channels,
+            num_layers=self.chunk_size,
+            layer_kernels=self.layer_factory,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            dropout_p=dropout_p,
+        )
+
+        self.offload_layers(cpu_offload)
+
+        self._has_dropout = dropout_p > 0 if dropout_p else False
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_shapes: list[list[int]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
+        if model_comm_group:
+            assert (
+                model_comm_group.size() == 1 or batch_size == 1
+            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+
+            assert (
+                model_comm_group.size() > 1 and not self._has_dropout
+            ), "Dropout is not supported when model is sharded across GPUS"
+
+        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+
         return x
 
 
@@ -193,7 +254,9 @@ class TransformerProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], ...],
+        shard_shapes: list[list[int]],
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -272,15 +335,14 @@ class GNNProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
-        graph_provider: BaseGraphProvider,
+        shard_shapes: list[list[int]],
+        edge_attr: Tensor,
+        edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
     ) -> Tensor:
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-
-        edge_attr, edge_index = graph_provider.get_edges(batch_size)
 
         target_nodes = sum(x[0] for x in shape_nodes)
         edge_attr, edge_index, shapes_edge_attr, shapes_edge_idx = sort_edges_1hop_sharding(
@@ -368,8 +430,9 @@ class GraphTransformerProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: tuple[tuple[int], tuple[int]],
-        graph_provider: BaseGraphProvider,
+        shard_shapes: list[list[int]],
+        edge_attr: Tensor,
+        edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
@@ -377,8 +440,6 @@ class GraphTransformerProcessor(BaseProcessor):
         size = sum(x[0] for x in shard_shapes)
 
         shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-
-        edge_attr, edge_index = graph_provider.get_edges(batch_size)
 
         shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
         edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
