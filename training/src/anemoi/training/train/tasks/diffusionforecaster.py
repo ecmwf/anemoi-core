@@ -167,7 +167,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             )  # shape is (bs, ens, latlon, nvar)
 
             # Use checkpoint for compute_loss_metrics
-            loss, metrics_next = checkpoint(
+            loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,

@@ -140,7 +140,7 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         metrics = {}
         y_preds = []
 
-        for loss_next, metrics_next, y_preds_next in self.rollout_step(
+        for loss_next, metrics_next, y_preds_next in self._rollout_step(
             batch,
             rollout=self.rollout,
             validation_mode=validation_mode,
