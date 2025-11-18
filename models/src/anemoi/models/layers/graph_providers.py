@@ -80,13 +80,22 @@ class BaseGraphProvider(nn.Module, ABC):
     """
 
     @abstractmethod
-    def get_edges(self, batch_size: Optional[int] = None) -> tuple[Tensor, Adj]:
+    def get_edges(
+        self,
+        batch_size: Optional[int] = None,
+        src_coords: Optional[Tensor] = None,
+        dst_coords: Optional[Tensor] = None,
+    ) -> tuple[Tensor, Adj]:
         """Get edge information.
 
         Parameters
         ----------
         batch_size : int, optional
             Number of times to expand the edge index (used by static mode)
+        src_coords : Tensor, optional
+            Source node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
+        dst_coords : Tensor, optional
+            Destination node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
 
         Returns
         -------
@@ -180,6 +189,8 @@ class StaticGraphProvider(BaseGraphProvider):
     def get_edges(
         self,
         batch_size: int,
+        src_coords: Optional[Tensor] = None,
+        dst_coords: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj]:
         """Get edge attributes and expanded edge index for static graph.
 
@@ -187,6 +198,10 @@ class StaticGraphProvider(BaseGraphProvider):
         ----------
         batch_size : int
             Number of times to expand the edge index
+        src_coords : Tensor, optional
+            Source node coordinates (ignored for static graphs)
+        dst_coords : Tensor, optional
+            Destination node coordinates (ignored for static graphs)
 
         Returns
         -------
@@ -254,16 +269,21 @@ class DynamicGraphProvider(BaseGraphProvider):
     def get_edges(
         self,
         batch_size: Optional[int] = None,
+        src_coords: Optional[Tensor] = None,
+        dst_coords: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj]:
-        """Get dynamic edges.
+        """Get dynamic edges constructed from node coordinates.
 
-        This method will be implemented in the future to return edges
-        constructed on-the-fly via build_graph().
+        Calls build_graph() to construct edges on-the-fly using k-NN, radius graphs, etc.
 
         Parameters
         ----------
         batch_size : int, optional
             Batch size (currently unused, reserved for future implementation)
+        src_coords : Tensor, optional
+            Source node coordinates
+        dst_coords : Tensor, optional
+            Destination node coordinates
 
         Returns
         -------
@@ -272,7 +292,13 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         Raises
         ------
+        ValueError
+            If coordinates are not provided
         NotImplementedError
-            This functionality is not yet implemented
+            If build_graph() is not yet implemented
         """
-        raise NotImplementedError("Dynamic graph edge retrieval is not yet implemented. ")
+        if src_coords is None or dst_coords is None:
+            raise ValueError("DynamicGraphProvider requires (src_coords, dst_coords) to construct edges.")
+
+        # Build graph from coordinates
+        return self.build_graph(src_coords, dst_coords)
