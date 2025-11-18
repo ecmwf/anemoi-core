@@ -104,9 +104,6 @@ class AdEMAMix(Optimizer):
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        super().__setstate__(state)
-
     @torch.no_grad()
     def step(self, closure: Callable[[], float] | None = None) -> float | None:  # noqa: C901
         """Performs a single optimization step.
