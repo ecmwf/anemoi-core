@@ -23,7 +23,6 @@ metadata = MigrationMetadata(
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
 
-
     Parameters
     ----------
     ckpt : CkptType
@@ -42,9 +41,9 @@ def migrate(ckpt: CkptType) -> CkptType:
 
     return ckpt
 
+
 def rollback(ckpt: CkptType) -> CkptType:
     """Rollback the checkpoint.
-
 
     Parameters
     ----------
