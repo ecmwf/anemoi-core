@@ -486,8 +486,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
-        # self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
-
         self.projection = Linear(out_channels, out_channels)
 
         if self.qk_norm:

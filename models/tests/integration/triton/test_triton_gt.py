@@ -43,7 +43,7 @@ def max_abs_diff(a: torch.Tensor, b: torch.Tensor) -> float:
     return (a - b).abs().max().item()
 
 
-@pytest.mark.gpu
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
     [
@@ -73,7 +73,7 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     assert torch.isfinite(out_triton).all(), "Output contains NaN or Inf"
 
 
-@pytest.mark.gpu
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
     [
@@ -105,7 +105,7 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     assert edge_attr.grad is not None and torch.isfinite(edge_attr.grad).all()
 
 
-@pytest.mark.gpu
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
     [
