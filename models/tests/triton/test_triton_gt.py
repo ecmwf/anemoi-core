@@ -112,7 +112,6 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int, devi
 def test_graph_transformer_vs_reference(n_src: int, n_dst: int, h: int, d: int, device: str):
     """Test that triton GraphTransformerFunction matches reference implementation."""
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    degrees = torch.bincount(edge_index[1], minlength=n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
     # Custom implementation
