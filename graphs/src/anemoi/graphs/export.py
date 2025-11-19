@@ -63,9 +63,28 @@ class GraphExporter:
 
     @staticmethod
     def get_sparse_matrix(edge_index, edge_attribute, num_source_nodes, num_target_nodes):
-        # Create sparse matrix
+        """Create sparse matrix for y = A x.
+
+        x is defined on source nodes, and output is on target nodes.
+
+        Args:
+            edge_index: (2, E) tensor with rows: target nodes, cols: source nodes
+            edge_attribute: Edge weights/attributes
+            num_source_nodes: Number of source nodes (n_in)
+            num_target_nodes: Number of target nodes (n_out)
+
+        Returns:
+            Sparse COO tensor on target nodes
+        """
+        rows = edge_index[1]
+        cols = edge_index[0]
+        indices = torch.stack([rows, cols])
+
         A = torch.sparse_coo_tensor(
-            edge_index, edge_attribute, (num_source_nodes, num_target_nodes), device=edge_index.device
+            indices,
+            edge_attribute,
+            (num_target_nodes, num_source_nodes),
+            device=edge_index.device,
         )
         return A.coalesce()
 
