@@ -37,7 +37,7 @@ layer_kernels:
     _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
     normalized_shape: ${model.num_channels}
     condition_shape: 16
-    w_one_bias_zero_init: True
+    zero_init: True
     autocast: false
   Linear:
     _target_: torch.nn.Linear
@@ -76,6 +76,7 @@ encoder:
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
 
 
 decoder:
@@ -89,6 +90,7 @@ decoder:
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

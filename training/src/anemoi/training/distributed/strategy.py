@@ -535,11 +535,14 @@ class DDPEnsGroupStrategy(DDPStrategy):
             model_comm_group_id,
             model_comm_group_rank,
             model_comm_num_groups,
+            reader_group_rank,
+            self.read_group_size,
+        )
+
+        dataloader.dataset.set_ens_comm_group_info(
             ens_comm_group_id,
             ens_comm_group_rank,
             ens_comm_num_groups,
-            reader_group_rank,
-            self.read_group_size,
         )
 
         return dataloader

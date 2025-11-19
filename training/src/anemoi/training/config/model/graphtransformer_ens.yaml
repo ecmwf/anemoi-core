@@ -48,7 +48,7 @@ processor:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
       normalized_shape: ${model.num_channels}
       condition_shape: ${model.noise_injector.noise_channels_dim}
-      w_one_bias_zero_init: True
+      zero_init: True
       autocast: false
       #Any arguments to your chosen function go here
     Linear:
@@ -85,6 +85,7 @@ decoder:
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
 
 trainable_parameters:
   data: 8

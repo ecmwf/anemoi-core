@@ -20,19 +20,19 @@ repos:
   - id: no-commit-to-branch # Prevent committing to main / master
   - id: check-added-large-files # Check for large files added to git
   - id: check-merge-conflict # Check for files that contain merge conflict
--   repo: https://github.com/pre-commit/pygrep-hooks
-    rev: v1.10.0  # Use the ref you want to point at
-    hooks:
-    -   id: python-use-type-annotations # Check for missing type annotations
-    -   id: python-check-blanket-noqa # Check for # noqa: all
-    -   id: python-no-log-warn # Check for log.warn
+- repo: https://github.com/pre-commit/pygrep-hooks
+  rev: v1.10.0  # Use the ref you want to point at
+  hooks:
+  - id: python-use-type-annotations # Check for missing type annotations
+  - id: python-check-blanket-noqa # Check for # noqa: all
+  - id: python-no-log-warn # Check for log.warn
 - repo: https://github.com/psf/black-pre-commit-mirror
-  rev: 25.1.0
+  rev: 25.9.0
   hooks:
   - id: black
     args: [--line-length=120]
 - repo: https://github.com/pycqa/isort
-  rev: 6.0.1
+  rev: 7.0.0
   hooks:
   - id: isort
     args:
@@ -41,7 +41,7 @@ repos:
     - --profile black
     - --project anemoi
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.12.11
+  rev: v0.14.3
   hooks:
   - id: ruff
     args:
@@ -50,7 +50,7 @@ repos:
     - --exit-non-zero-on-fix
     - --exclude=docs/**/*_.py
 - repo: https://github.com/sphinx-contrib/sphinx-lint
-  rev: v1.0.0
+  rev: v1.0.1
   hooks:
   - id: sphinx-lint
 # For now, we use it. But it does not support a lot of sphinx features
@@ -65,20 +65,21 @@ repos:
   - id: docconvert
     args: ["numpy"]
 - repo: https://github.com/tox-dev/pyproject-fmt
-  rev: "v2.6.0"
+  rev: "v2.11.0"
   hooks:
   - id: pyproject-fmt
--   repo: https://github.com/jshwi/docsig # Check docstrings against function sig
-    rev: v0.71.0
-    hooks:
-    -   id: docsig
-        args:
-        - --ignore-no-params # Allow docstrings without parameters
-        - --check-dunders    # Check dunder methods
-        - --check-overridden # Check overridden methods
-        - --check-protected  # Check protected methods
-        - --check-class      # Check class docstrings
-        - --disable=SIG101,SIG102     # Disable empty docstrings
+    args: ["--max-supported-python", "3.12"]
+- repo: https://github.com/jshwi/docsig # Check docstrings against function sig
+  rev: v0.71.0
+  hooks:
+  - id: docsig
+    args:
+    - --ignore-no-params # Allow docstrings without parameters
+    - --check-dunders    # Check dunder methods
+    - --check-overridden # Check overridden methods
+    - --check-protected  # Check protected methods
+    - --check-class      # Check class docstrings
+    - --disable=SIG101,SIG102     # Disable empty docstrings
 ci:
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"

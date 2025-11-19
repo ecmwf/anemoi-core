@@ -18,7 +18,7 @@ from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 from torch_geometric.data import HeteroData
 
-from anemoi.datasets.data import open_dataset
+from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.dataset import NativeGridDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
@@ -227,6 +227,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             grid_indices=self.grid_indices,
             label=label,
+            num_gpus_per_ens=getattr(self.config.hardware, "num_gpus_per_ensemble", 1),
+            num_gpus_per_model=self.config.hardware.num_gpus_per_model,
         )
 
     def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:

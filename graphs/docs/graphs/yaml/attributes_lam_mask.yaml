@@ -1,0 +1,9 @@
+nodes:
+  data: ...
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.StretchedTriNodes
+      # ...
+    attributes:
+      cutout_mask:
+        _target_: anemoi.graphs.nodes.attributes.LimitedAreaMask

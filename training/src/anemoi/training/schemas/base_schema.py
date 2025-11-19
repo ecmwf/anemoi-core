@@ -32,7 +32,6 @@ from anemoi.utils.schemas.errors import convert_errors
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
 from .data import DataSchema
 from .dataloader import DataLoaderSchema
-from .datamodule import DataModuleSchema
 from .diagnostics import DiagnosticsSchema
 from .hardware import HardwareSchema
 from .training import TrainingSchema
@@ -49,8 +48,6 @@ class BaseSchema(BaseModel):
     """Data configuration."""
     dataloader: DataLoaderSchema
     """Dataloader configuration."""
-    datamodule: DataModuleSchema
-    """Datamodule configuration."""
     diagnostics: DiagnosticsSchema
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: HardwareSchema
@@ -79,6 +76,8 @@ class BaseSchema(BaseModel):
             not self.hardware.paths.logs or not self.hardware.paths.logs.mlflow
         ):
             logger.append("mlflow")
+        if self.diagnostics.log.mlflow.enabled and (not self.diagnostics.log.mlflow.save_dir):
+            self.diagnostics.log.mlflow.save_dir = str(self.hardware.paths.logs.mlflow)
         if self.diagnostics.log.tensorboard.enabled and (
             not self.hardware.paths.logs or not self.hardware.paths.logs.tensorboard
         ):
@@ -106,6 +105,7 @@ class BaseSchema(BaseModel):
                 error,
                 msg,
             )
+        return self
 
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
@@ -117,8 +117,6 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     """Data configuration."""
     dataloader: Any
     """Dataloader configuration."""
-    datamodule: Any
-    """Datamodule configuration."""
     diagnostics: Any
     """Diagnostics configuration such as logging, plots and metrics."""
     hardware: Any
@@ -132,8 +130,8 @@ class UnvalidatedBaseSchema(PydanticBaseModel):
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
 
-    def model_dump(self, by_alias: bool = False) -> dict:
-        dumped_model = super().model_dump(by_alias=by_alias)
+    def model_dump(self, by_alias: bool = False, **kwargs) -> dict:
+        dumped_model = super().model_dump(by_alias=by_alias, **kwargs)
         return DictConfig(dumped_model)
 
 
