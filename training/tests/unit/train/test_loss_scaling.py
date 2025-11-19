@@ -46,6 +46,7 @@ def fake_data(
                     "default": "sfc",
                     "pl": ["y"],
                 },
+                "multistep_output": [0, 1, 3, 6, 12],
                 "scalers": {
                     "builders": {
                         "additional_scaler": request.param,
@@ -235,7 +236,16 @@ reweighted_graph_node_scaler = {
     "weight_frac_of_total": 0.4,
     "norm": "unit-sum",
 }
-
+lead_time_decay_scaler = {
+    "_target_": "anemoi.training.losses.scalers.LeadTimeDecayScaler",
+    "output_lead_times": [0, 1, 3, 6, 12],
+    "decay_factor": 0.15,
+    "method": "linear",
+    "inverse": False,
+    "max_lead_time": 12,
+}
+expected_lead_time_decay_scaling = 1 - 0.15 * (torch.tensor([0, 1, 3, 6, 12]) / 12)
+expected_lead_time_decay_scaling = expected_lead_time_decay_scaling / torch.sum(expected_lead_time_decay_scaling)
 expected_linear_scaling = torch.Tensor(
     [
         50 / 1000 * 0.5,  # y_50
@@ -280,7 +290,6 @@ expected_polynomial_scaling = torch.Tensor(
         1,  # d
     ],
 )
-
 expected_no_tendency_scaling = torch.Tensor(
     [
         1 * 0.5,  # y_50
@@ -510,3 +519,29 @@ def test_variable_loss_scaling_val_complex_variable_groups(
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 
     assert torch.allclose(final_variable_scaling, expected_scaling)
+
+
+@pytest.mark.parametrize(
+    ("fake_data", "expected_scaling"),
+    [(lead_time_decay_scaler, expected_lead_time_decay_scaling)],
+    indirect=["fake_data"],
+)
+def test_lead_time_decay_loss_scaling(
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    expected_scaling: torch.Tensor,
+) -> None:
+    config, data_indices, _, _ = fake_data
+    metadata_extractor = ExtractVariableGroupAndLevel(
+        config.training.variable_groups,
+    )
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        group_config=config.training.variable_groups,
+        metadata_extractor=metadata_extractor,
+        output_mask=NoOutputMask(),
+    )
+    loss = get_loss_function(config.training.training_loss, scalers=scalers)
+
+    final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
+    assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)

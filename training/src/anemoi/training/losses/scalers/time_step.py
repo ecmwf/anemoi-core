@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
 
 import torch
@@ -44,3 +43,72 @@ class TimeStepScaler(BaseScaler):
 
     def get_scaling_values(self) -> torch.Tensor:
         return torch.tensor(self.weights, dtype=torch.float32)
+
+
+class LeadTimeDecayScaler(TimeStepScaler):
+    """Class to decrease the weight as a function of lead time."""
+
+    scale_dims = TensorDim.TIME
+
+    def __init__(
+        self,
+        output_lead_times: list[int],
+        decay_factor: float,
+        max_lead_time: int,
+        decay_type: str = "linear",
+        inverse: bool = False,
+        norm: str | None = None,
+        **kwargs,
+    ) -> None:
+        """Initialise Scaler.
+
+        Parameters
+        ----------
+        decay_factor : float
+           Decay factor for the lead time weights computation. Higher values lead to faster decay.
+        max_lead_time : int
+           Max predicted lead time relative to the current time step, i.e. 6 for 6 steps forwards.
+        decay_type : str, optional
+            Decay type to use for the decay weights. Options are "exponential" and "linear", by default "linear".
+        inverse : bool, optional
+            Whether to use the inverse of the weights, by default False.
+        norm : str, optional
+            Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
+        **kwargs : dict
+            Additional keyword arguments.
+        """
+        del kwargs
+        assert decay_type in ["exponential", "linear"], f"decay_type {decay_type} not supported"
+        self.decay_type = decay_type
+        self.decay_factor = torch.tensor(decay_factor)
+        self.inverse = inverse
+        self.output_lead_times = torch.tensor(output_lead_times) / max_lead_time
+        self.weights = self.get_weights()
+        super().__init__(weights=self.weights, norm=norm)
+
+    def scale_forward(self) -> torch.Tensor:
+        """Attributes the lead time weights to the target nodes."""
+        if self.decay_type == "exponential":
+            w = torch.exp(-self.decay_factor * self.output_lead_times)
+        elif self.decay_type == "linear":
+            w = 1 - self.decay_factor * self.output_lead_times
+        else:
+            msg = f"decay_type {self.decay_type} not supported"
+            raise NotImplementedError(msg)
+        return w / torch.sum(w)
+
+    def scale_backward(self) -> torch.Tensor:
+        """Same as forward weights but attributes an increasing weight to predicted tensors close to final lead time."""
+        if self.decay_type == "exponential":
+            w = 1 - torch.exp(-self.decay_factor * self.output_lead_times)
+        elif self.decay_type == "linear":
+            w = self.decay_factor * self.output_lead_times
+        else:
+            msg = f"decay_type {self.decay_type} not supported"
+            raise NotImplementedError(msg)
+        return w / torch.sum(w)
+
+    def get_weights(self) -> torch.Tensor:
+        if self.inverse:
+            return self.scale_backward()
+        return self.scale_forward()
