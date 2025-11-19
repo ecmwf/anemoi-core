@@ -271,3 +271,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         """Return test dataloader."""
         return self._get_dataloader(self.ds_test, "test")
+
+    def fill_metadata(self, metadata: dict) -> None:
+        """Fill metadata dictionary with dataset metadata."""
+        datasets_config = self.metadata.copy()
+        metadata["dataset"] = datasets_config
+        metadata["data_indices"] = self.data_indices.copy()
+        metadata["time_steps"] = {
+            "relative_date_indices_training": self.relative_date_indices(),
+            "timestep": self.config.data.timestep,
+        }
+
+        # TODO Can we add info about input/output time steps based on task here? At least for interpolator?

@@ -179,11 +179,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for mask in self.output_mask.values():
             combined_supporting_arrays.update(mask.supporting_arrays)
 
+        # Add information for inference to the model metadata
+        model_metadata = metadata.copy()
+        model_metadata["task"] = str(
+            config.training.model_task,
+        )  # adding this from the config for now, since we need to pass the metadata to the model interface at init time
+
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
+            metadata=model_metadata,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             truncation_data=truncation_data,

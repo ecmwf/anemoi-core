@@ -184,3 +184,9 @@ class AnemoiModelEncProcDecInterpolator(AnemoiModelEncProcDec):
         x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, x.dtype)
 
         return x_out
+
+    def fill_metadata(self, md_dict):
+        super().fill_metadata(md_dict)
+        # Overwrite input/output time steps info for interpolator
+        md_dict["time_steps"]["input_relative_date_indices"] = self.model_config.training.explicit_times.input
+        md_dict["time_steps"]["output_relative_date_indices"] = self.model_config.training.explicit_times.output

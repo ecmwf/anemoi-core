@@ -371,18 +371,21 @@ class AnemoiTrainer(ABC):
     @cached_property
     def metadata(self) -> dict:
         """Metadata and provenance information."""
-        return map_config_to_primitives(
-            {
-                "version": "2.0",
-                "config": convert_to_omegaconf(self.config),
-                "seed": self.initial_seed,
-                "run_id": self.run_id,
-                "dataset": self.datamodule.metadata,
-                "data_indices": self.datamodule.data_indices,
-                "provenance_training": gather_provenance_info(),
-                "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
-            },
-        )
+        md_dict = {
+            "version": "2.0",
+            "config": convert_to_omegaconf(self.config),
+            "seed": self.initial_seed,
+            "run_id": self.run_id,
+            "dataset": None,  # will be populated in DataModule
+            "data_indices": None,  # will be populated in DataModule
+            "provenance_training": gather_provenance_info(),
+            "timestamp": datetime.datetime.now(tz=datetime.timezone.utc),
+            "task": None,  # will be populated in BaseGraphModule
+            "shapes": None,  # will be populeted in BaseGraphModel (or subclasses)
+            "time_steps": None,  # will be populated in DataModule and in BaseGraphModel (or subclasses)
+        }
+        self.datamodule.fill_metadata(md_dict)
+        return map_config_to_primitives(md_dict)
 
     @cached_property
     def supporting_arrays(self) -> dict:

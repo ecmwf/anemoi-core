@@ -77,6 +77,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
         self._build_model()
+        self._update_metadata()
 
     def _build_processors_for_dataset(
         self, dataset_name: str, statistics: dict, data_indices: dict, statistics_tendencies: dict = None
@@ -203,3 +204,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)
+
+    def _update_metadata(self) -> None:
+        self.model.fill_metadata(self.metadata)
+        print(self.metadata)
