@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.processor import PointWiseMLPProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -52,6 +53,9 @@ def test_pointwisemlp_processor_init(pointwisemlp_processor, pointwisemlp_proces
         pointwisemlp_processor.chunk_size
         == pointwisemlp_processor_init.num_layers // pointwisemlp_processor_init.num_chunks
     )
+
+    def test_all_blocks(self, pointwisemlp_processor):
+        assert all(isinstance(block, PointWiseMLPProcessorBlock) for block in pointwisemlp_processor.proc)
 
 
 @pytest.fixture(params=[0.1, None])
