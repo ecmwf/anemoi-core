@@ -8,6 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.7.0](https://github.com/ecmwf/anemoi-core/compare/training-0.6.7...training-0.7.0) (2025-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** remove support for EDA ([#651](https://github.com/ecmwf/anemoi-core/issues/651))
+
+### Features
+
+* Callbacks for GraphEnsForecaster. ([#449](https://github.com/ecmwf/anemoi-core/issues/449)) ([39c2bfc](https://github.com/ecmwf/anemoi-core/commit/39c2bfc7d0c840d92516b139cc5f497bbe1296a0))
+* Mlflow azure ([#646](https://github.com/ecmwf/anemoi-core/issues/646)) ([27bd3dd](https://github.com/ecmwf/anemoi-core/commit/27bd3dd8648bac7ead5ec809b874faa962bddd05))
+* **training:** Remove support for EDA ([#651](https://github.com/ecmwf/anemoi-core/issues/651)) ([921e108](https://github.com/ecmwf/anemoi-core/commit/921e108b8467f1bcd4e69516927efee2f58f9e33))
+
+
+### Bug Fixes
+
+* Anemoi-datasets import ([#626](https://github.com/ecmwf/anemoi-core/issues/626)) ([65c8901](https://github.com/ecmwf/anemoi-core/commit/65c89017fbc38cfe84ce61f4cd6f5aeb59b91224))
+* Bug for mlflow offline logging ([#675](https://github.com/ecmwf/anemoi-core/issues/675)) ([fdce0f6](https://github.com/ecmwf/anemoi-core/commit/fdce0f6520e67e6d9039ed3417ff2fc0d76b002a))
+* Bug in sample plots. ([#632](https://github.com/ecmwf/anemoi-core/issues/632)) ([9e024f3](https://github.com/ecmwf/anemoi-core/commit/9e024f37510780c12980d280a8247553b6e18225))
+* Incorrect test for variable mask scaler ([#649](https://github.com/ecmwf/anemoi-core/issues/649)) ([d0f775e](https://github.com/ecmwf/anemoi-core/commit/d0f775e1054ead2c538d0e2391ef71f995123989))
+* Integration tests and drop missed reference for  profiler ([#630](https://github.com/ecmwf/anemoi-core/issues/630)) ([f352e17](https://github.com/ecmwf/anemoi-core/commit/f352e17eca68c0cd797fdb5bf5fcf9bd4a2b505d))
+* **training:** Provide more informative error when user specifies inexistent node attribute  ([#663](https://github.com/ecmwf/anemoi-core/issues/663)) ([dde3cb6](https://github.com/ecmwf/anemoi-core/commit/dde3cb6726a078115a086ba13bb846313fe29e41))
+* Update readmes ([#655](https://github.com/ecmwf/anemoi-core/issues/655)) ([a58aa64](https://github.com/ecmwf/anemoi-core/commit/a58aa640212cdc6d5de6e38a6d11725d32d662b5))
+
+## [0.6.7](https://github.com/ecmwf/anemoi-core/compare/training-0.6.6...training-0.6.7) (2025-10-20)
+
+
+### Features
+
+* **models:** Point-mlp proccesor ([#367](https://github.com/ecmwf/anemoi-core/issues/367)) ([ee2a067](https://github.com/ecmwf/anemoi-core/commit/ee2a067689b6efe18acb13ceac8ed0be512633d5))
+
+
+### Bug Fixes
+
+* CPU integration test - update AICON test to use anemoi-utils data download fixtures ([#608](https://github.com/ecmwf/anemoi-core/issues/608)) ([4c53c95](https://github.com/ecmwf/anemoi-core/commit/4c53c95e052afdbc89d03bea9c871b3e09046007))
+* Refactored paths to import from package directly ([#601](https://github.com/ecmwf/anemoi-core/issues/601)) ([f28bfd4](https://github.com/ecmwf/anemoi-core/commit/f28bfd4c453dd0cbe0d65e5a7dafdbf531e9db44))
+* **training:** Add default empty forcing list to DataSchema ([#602](https://github.com/ecmwf/anemoi-core/issues/602)) ([18a609b](https://github.com/ecmwf/anemoi-core/commit/18a609b5a5f59bfcd65c68ddb2177105317b6a18))
+* **training:** Nan mask weights gather for plots ([#537](https://github.com/ecmwf/anemoi-core/issues/537)) ([a293b99](https://github.com/ecmwf/anemoi-core/commit/a293b9963000eb8f31433f0327809fcf99e0a447))
+
+
+### Documentation
+
+* **training:** More explicit comment about order of preprocessors in config file ([#613](https://github.com/ecmwf/anemoi-core/issues/613)) ([bbd152d](https://github.com/ecmwf/anemoi-core/commit/bbd152d434c9388a9dfc9100c7608255d932f79a))
+
+## [0.6.6](https://github.com/ecmwf/anemoi-core/compare/training-0.6.5...training-0.6.6) (2025-10-09)
+
+
+### Features
+
+* Log variable scaling in mlflow ([#327](https://github.com/ecmwf/anemoi-core/issues/327)) ([1c4a966](https://github.com/ecmwf/anemoi-core/commit/1c4a96663c0b363fd81364d09dc7cd2f558acd7e))
+* **mlflow login:** Support for multiple servers ([#573](https://github.com/ecmwf/anemoi-core/issues/573)) ([7b23100](https://github.com/ecmwf/anemoi-core/commit/7b231000f054b27547335c2c8448329fa1d2354e))
+* Target indices ([#426](https://github.com/ecmwf/anemoi-core/issues/426)) ([d8db2a6](https://github.com/ecmwf/anemoi-core/commit/d8db2a6fc192bc49107df6c137ce4f56866ae4d4))
+
+
+### Bug Fixes
+
+* Allow int values in variable group schema ([#571](https://github.com/ecmwf/anemoi-core/issues/571)) ([a9ccc84](https://github.com/ecmwf/anemoi-core/commit/a9ccc84bc8d4f80a4d0e21829a09040528334a66))
+* Interactive mode ([#578](https://github.com/ecmwf/anemoi-core/issues/578)) ([42c0194](https://github.com/ecmwf/anemoi-core/commit/42c0194662cfbcc6d5ae09a2a590848d7169753f))
+* Make batch normalization explicit. ([#448](https://github.com/ecmwf/anemoi-core/issues/448)) ([6108f1d](https://github.com/ecmwf/anemoi-core/commit/6108f1d29fd78fc16549e28e59c18c0c50593043))
+* Make TimeLimit callback compliant with multiple nodes  ([#564](https://github.com/ecmwf/anemoi-core/issues/564)) ([c94164d](https://github.com/ecmwf/anemoi-core/commit/c94164d28e761e1eb52ff16dfec73a3ad61976d0))
+* Mask dimension number change ([#526](https://github.com/ecmwf/anemoi-core/issues/526)) ([e049e83](https://github.com/ecmwf/anemoi-core/commit/e049e839e3a1a1abf293ae5b7d8b2e9d7036efae))
+* Remove batch_idx when useless ([#528](https://github.com/ecmwf/anemoi-core/issues/528)) ([2b6c205](https://github.com/ecmwf/anemoi-core/commit/2b6c2055c0155b6cf5e58355f0358245dafd7705))
+* **training,schemas:** Pydantic model_validator in training/schemas/base_schema.py ([#562](https://github.com/ecmwf/anemoi-core/issues/562)) ([b64735d](https://github.com/ecmwf/anemoi-core/commit/b64735d6f895952c7976f39f61c2b653569fef4f))
+* **training:** Add default diagnostics to empty list ([#597](https://github.com/ecmwf/anemoi-core/issues/597)) ([e243f95](https://github.com/ecmwf/anemoi-core/commit/e243f950822b36e9e706fafcdea9d753c1fdbfb6))
+* **training:** Correct Imputer Doc ([#576](https://github.com/ecmwf/anemoi-core/issues/576)) ([e218652](https://github.com/ecmwf/anemoi-core/commit/e218652e3eb9e0881d942cc00c75c0b47f8f7b73))
+
 ## [0.6.5](https://github.com/ecmwf/anemoi-core/compare/training-0.6.4...training-0.6.5) (2025-09-09)
 
 

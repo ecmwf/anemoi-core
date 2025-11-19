@@ -14,8 +14,8 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.layers.attention import MultiHeadSelfAttention
-from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.normalization import ConditionalLayerNorm
+from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.utils.compile import _get_compile_entry
 from anemoi.models.utils.compile import _meets_library_versions_for_compile
 from anemoi.models.utils.compile import mark_for_compilation
@@ -36,14 +36,15 @@ def graphtransformer_compile_config() -> None:
 
 
 def layer_kernel_compile_config() -> None:
-    return OmegaConf.create({
+    return OmegaConf.create(
+        {
             "compile": [
                 {
                     "module": "torch.nn.Linear",
                 },
             ],
-        })
-
+        }
+    )
 
 
 def graphtransformer_ens_compile_config() -> None:
@@ -113,6 +114,7 @@ def test_compile() -> None:
     # check the result of the compiled function matches the uncompiled result
     assert torch.allclose(result, result_compiled)
 
+
 def test_compile_layer_kernel() -> None:
 
     # Skip this test if library versions aren't met
@@ -120,13 +122,13 @@ def test_compile_layer_kernel() -> None:
         LOGGER.warning("triton not installed. skipping 'test_compile.py::test_compile'")
         return
 
-    cfg =  layer_kernel_compile_config()
+    cfg = layer_kernel_compile_config()
     layer_kernels = load_layer_kernels(kernel_config={})
 
-    num_heads=1
-    embed_dim=64
-    dropout_p=0.0
-    batch_size=1
+    num_heads = 1
+    embed_dim = 64
+    dropout_p = 0.0
+    batch_size = 1
     mhsa = MultiHeadSelfAttention(
         num_heads,
         embed_dim,
@@ -134,7 +136,7 @@ def test_compile_layer_kernel() -> None:
         dropout_p=dropout_p,
         attention_implementation="scaled_dot_product_attention",
     )
-    mhsa_compiled  = mark_for_compilation(mhsa, cfg.compile)
+    mhsa_compiled = mark_for_compilation(mhsa, cfg.compile)
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
     shapes = [list(x.shape)]

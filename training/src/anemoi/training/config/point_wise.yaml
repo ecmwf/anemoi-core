@@ -1,0 +1,19 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- hardware: example
+- graph: point_wise
+- model: point_wise
+- training: default
+- _self_
+
+
+config_validation: True
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# hardware:
+#   num_gpus_per_node: 1

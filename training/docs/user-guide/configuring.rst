@@ -107,6 +107,7 @@ match the dataset you provide.
    - training: default
    - _self_
 
+   config_validation: True
    data:
       resolution: n320
 

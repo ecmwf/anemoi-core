@@ -345,7 +345,7 @@ class BaseTrainingSchema(BaseModel):
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: dict[str, LossSchemas]
     "List of validation metrics configurations."
-    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str]]]
+    variable_groups: dict[str, str | list[str] | dict[str, str | bool | list[str | int]]]
     "Groups for variable loss scaling"
     max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
@@ -359,6 +359,8 @@ class BaseTrainingSchema(BaseModel):
     "How many times torch.compile will recompile a function for a given input shape."
     metrics: list[str]
     "List of metrics"
+    ensemble_size_per_device: PositiveInt = 1
+    "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
 class ForecasterSchema(BaseTrainingSchema):
@@ -371,8 +373,6 @@ class ForecasterSchema(BaseTrainingSchema):
 class ForecasterEnsSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
     "Training objective."
-    ensemble_size_per_device: PositiveInt = Field(example=1)
-    "Number of ensemble member per device"
 
 
 class DiffusionForecasterSchema(ForecasterSchema):
