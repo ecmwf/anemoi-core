@@ -145,6 +145,7 @@ def build_sparse_projector(
     if file_path is not None:
         return SparseProjector.from_file(file_path=file_path, **kwargs)
     else:
+        assert edges_name in graph, f"The specified edges_name, {edges_name}, is not present in the graph."
         return SparseProjector.from_graph(
             graph=graph,
             edges_name=edges_name,

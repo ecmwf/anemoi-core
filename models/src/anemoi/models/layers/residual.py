@@ -6,6 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
@@ -53,17 +54,6 @@ class SkipConnection(BaseResidualConnection):
         return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
 
-class NoConnection(BaseResidualConnection):
-    """No-op connection
-
-    This module returns a zero tensor with the same shape as the last timestep.
-    """
-
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
-        """Return a zero tensor with the same shape as the last timestep."""
-        return torch.zeros_like(x[:, 0, ...], device=x.device, dtype=x.dtype)
-
-
 class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection
 
@@ -75,11 +65,11 @@ class TruncatedConnection(BaseResidualConnection):
 
     Parameters
     ----------
-    graph : HeteroData
+    graph : HeteroData, optional
         The graph containing the subgraphs for down and up projections.
-    data_nodes : str
+    data_nodes : str, optional
         Name of the nodes representing the data nodes.
-    truncation_nodes : str
+    truncation_nodes : str, optional
         Name of the nodes representing the truncated (coarse) nodes.
     edge_weight_attribute : str, optional
         Name of the edge attribute to use as weights for the projections.
