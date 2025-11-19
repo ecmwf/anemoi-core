@@ -8,12 +8,6 @@ from pydantic import model_validator
 from anemoi.utils.schemas import BaseModel
 
 
-class NoConnectionSchema(BaseModel):
-    """Schema for no connection residuals."""
-
-    target_: Literal["anemoi.models.layers.residual.NoConnection"] = Field(..., alias="_target_")
-
-
 class SkipConnectionSchema(BaseModel):
     """Schema for skip connection residuals."""
 
@@ -94,6 +88,6 @@ class TruncatedConnectionSchema(BaseModel):
 
 
 ResidualConnectionSchema = Annotated[
-    NoConnectionSchema | SkipConnectionSchema | TruncatedConnectionSchema,
+    SkipConnectionSchema | TruncatedConnectionSchema,
     Field(discriminator="target_"),
 ]
