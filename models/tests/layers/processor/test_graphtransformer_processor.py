@@ -35,6 +35,7 @@ class GraphTransformerProcessorConfig:
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
+    backend: str = "pyg"
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)

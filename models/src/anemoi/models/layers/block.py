@@ -704,6 +704,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             bias=bias,
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
+            backend=backend,
             **kwargs,
         )
 
