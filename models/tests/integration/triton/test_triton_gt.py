@@ -43,15 +43,16 @@ def max_abs_diff(a: torch.Tensor, b: torch.Tensor) -> float:
     return (a - b).abs().max().item()
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d,device",
+    "n_src,n_dst,h,d",
     [
-        (4, 10, 2, 4, "cuda" if torch.cuda.is_available() else "cpu"),
+        (4, 10, 2, 4),
     ],
 )
-def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int, device: str):
+def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     """Test forward pass of GraphTransformerFunction."""
-    if device == "cuda" and not torch.cuda.is_available():
+    if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
@@ -71,16 +72,16 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int, devic
     # Verify output is not NaN or Inf
     assert torch.isfinite(out_triton).all(), "Output contains NaN or Inf"
 
-
+@pytest.mark.gpu
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d,device",
+    "n_src,n_dst,h,d",
     [
-        (4, 10, 2, 4, "cuda" if torch.cuda.is_available() else "cpu"),
+        (4, 10, 2, 4),
     ],
 )
-def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int, device: str):
+def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     """Test backward pass of GraphTransformerFunction."""
-    if device == "cuda" and not torch.cuda.is_available():
+    if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
     edge_index, m = build_bipartite_graph(n_src, n_dst)
@@ -102,15 +103,18 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int, devi
     assert value.grad is not None and torch.isfinite(value.grad).all()
     assert edge_attr.grad is not None and torch.isfinite(edge_attr.grad).all()
 
-
+@pytest.mark.gpu
 @pytest.mark.parametrize(
-    "n_src,n_dst,h,d,device",
+    "n_src,n_dst,h,d",
     [
-        (4, 10, 2, 4, "cuda" if torch.cuda.is_available() else "cpu"),
+        (4, 10, 2, 4),
     ],
 )
-def test_graph_transformer_vs_reference(n_src: int, n_dst: int, h: int, d: int, device: str):
+def test_graph_transformer_vs_reference(n_src: int, n_dst: int, h: int, d: int):
     """Test that triton GraphTransformerFunction matches reference implementation."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
