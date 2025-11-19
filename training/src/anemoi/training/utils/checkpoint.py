@@ -84,6 +84,7 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
 
     # apply chunking migration (fails silently otherwise leading to hard to debug issues)
+    # this is due to loading with strict=False, planning to make this more robust in the future
     checkpoint = chunking_fix_migration(checkpoint)
 
     # Filter out layers with size mismatch
