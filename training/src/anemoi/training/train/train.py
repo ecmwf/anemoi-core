@@ -373,7 +373,7 @@ class AnemoiTrainer(ABC):
         """Metadata and provenance information."""
         return map_config_to_primitives(
             {
-                "version": "1.0",
+                "version": "2.0",
                 "config": convert_to_omegaconf(self.config),
                 "seed": self.initial_seed,
                 "run_id": self.run_id,
