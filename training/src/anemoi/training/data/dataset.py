@@ -37,6 +37,8 @@ class NativeGridDataset(IterableDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
+        num_gpus_per_ens: int = 1,
+        num_gpus_per_model: int = 1,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -54,6 +56,10 @@ class NativeGridDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
+        num_gpus_per_ens : int, optional
+            Number of GPUs per ensemble, by default 1
+        num_gpus_per_model : int, optional
+            Number of GPUs per model, by default 1
         """
         self.label = label
 
@@ -66,6 +72,9 @@ class NativeGridDataset(IterableDataset):
         self.n_samples_per_epoch_total: int = 0
         self.n_samples_per_epoch_per_worker: int = 0
 
+        self.num_gpus_per_ens = num_gpus_per_ens
+        self.num_gpus_per_model = num_gpus_per_model
+
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
         self.model_comm_num_groups = 1
@@ -77,6 +86,10 @@ class NativeGridDataset(IterableDataset):
 
         self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
         self.sample_comm_group_id = 0
+
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_id = 0
 
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
@@ -173,9 +186,9 @@ class NativeGridDataset(IterableDataset):
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
 
-        assert self.reader_group_size >= 1, "reader_group_size must be positive"
+        assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
-        LOGGER.debug(
+        LOGGER.info(
             "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
             "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
             global_rank,
@@ -183,6 +196,37 @@ class NativeGridDataset(IterableDataset):
             model_comm_group_rank,
             model_comm_num_groups,
             reader_group_rank,
+        )
+
+    def set_ens_comm_group_info(
+        self,
+        ens_comm_group_id: int,
+        ens_comm_group_rank: int,
+        ens_comm_num_groups: int,
+    ) -> None:
+        """Set ensemble communication group information (called by DDPGroupStrategy).
+
+        Parameters
+        ----------
+        ens_comm_group_id : int
+            Ensemble communication group ID
+        ens_comm_group_rank : int
+            Ensemble communication group rank
+        ens_comm_num_groups : int
+            Number of ensemble communication groups
+        """
+        self.ens_comm_group_id = ens_comm_group_id
+        self.ens_comm_group_rank = ens_comm_group_rank
+        self.ens_comm_num_groups = ens_comm_num_groups
+
+        LOGGER.info(
+            "NativeGridDataset.set_group_info(): global_rank %d, ens_comm_group_id %d, "
+            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d",
+            self.global_rank,
+            ens_comm_group_id,
+            ens_comm_group_rank,
+            ens_comm_num_groups,
+            self.reader_group_rank,
         )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
