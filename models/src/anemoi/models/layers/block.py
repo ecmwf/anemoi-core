@@ -90,8 +90,8 @@ class PointWiseMLPProcessorBlock(BaseBlock):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
-    ) -> Tensor:
-        return self.mlp(x)
+    ) -> tuple[Tensor]:
+        return (self.mlp(x),)
 
 
 class TransformerProcessorBlock(BaseBlock):
@@ -146,7 +146,7 @@ class TransformerProcessorBlock(BaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         **layer_kwargs,
-    ) -> Tensor:
+    ) -> tuple[Tensor]:
 
         # In case we have conditionings we pass these to the layer norm
         cond_kwargs = {"cond": cond} if cond is not None else {}
@@ -160,7 +160,7 @@ class TransformerProcessorBlock(BaseBlock):
                 **cond_kwargs,
             )
         )
-        return x
+        return (x,)
 
 
 class TransformerMapperBlock(TransformerProcessorBlock):
@@ -222,7 +222,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         shapes: list,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> Tensor:
+    ) -> tuple[Tensor, Tensor]:
         x_src = self.layer_norm_attention_src(x[0])
         x_dst = self.layer_norm_attention_dst(x[1])
         x_dst = x_dst + self.attention((x_src, x_dst), shapes, batch_size, model_comm_group=model_comm_group)
@@ -242,6 +242,7 @@ class GraphConvBaseBlock(BaseBlock):
         mlp_extra_layers: int = 0,
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
+        edge_dim: Optional[int] = None,
         **kwargs,
     ) -> None:
         """Initialize GNNBlock.
@@ -263,6 +264,17 @@ class GraphConvBaseBlock(BaseBlock):
             Defined in config/models/<model>.yaml
         """
         super().__init__(**kwargs)
+
+        if edge_dim:
+            self.emb_edges = MLP(
+                in_features=edge_dim,
+                hidden_dim=out_channels,
+                out_features=out_channels,
+                layer_kernels=layer_kernels,
+                n_extra_layers=mlp_extra_layers,
+            )
+        else:
+            self.emb_edges = None
 
         self.update_src_nodes = update_src_nodes
         self.num_chunks = num_chunks
@@ -306,6 +318,8 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         size: Optional[Size] = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
+        if self.emb_edges is not None:
+            edge_attr = self.emb_edges(edge_attr)
 
         x_in = sync_tensor(x, 0, shapes[1], model_comm_group)
 
@@ -424,7 +438,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         hidden_dim: int,
         out_channels: int,
         num_heads: int,
-        num_chunks: int,
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
@@ -442,8 +455,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Number of output channels.
         num_heads : int,
             Number of heads
-        num_chunks : int,
-            Number of chunks
         edge_dim : int,
             Edge dimension
         bias : bool, by default True,
@@ -463,7 +474,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.out_channels_conv = out_channels // num_heads
         self.num_heads = num_heads
         self.qk_norm = qk_norm
-        self.num_chunks = num_chunks
 
         Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
@@ -662,7 +672,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             bias=bias,
-            num_chunks=1,
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             **kwargs,
@@ -777,7 +786,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         hidden_dim: int,
         out_channels: int,
         num_heads: int,
-        num_chunks: int,
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
@@ -795,8 +803,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             Number of output channels.
         num_heads : int,
             Number of heads
-        num_chunks : int,
-            Number of chunks
         edge_dim : int,
             Edge dimension
         bias : bool
@@ -819,7 +825,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             num_heads=num_heads,
             bias=bias,
             qk_norm=qk_norm,
-            num_chunks=num_chunks,
             update_src_nodes=update_src_nodes,
             **kwargs,
         )
@@ -851,7 +856,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
+        # "inner" chunking for memory reductions in inference, controlled via env variable:
+        num_chunks = 1 if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
 
