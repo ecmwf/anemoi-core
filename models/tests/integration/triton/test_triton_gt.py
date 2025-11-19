@@ -72,6 +72,7 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     # Verify output is not NaN or Inf
     assert torch.isfinite(out_triton).all(), "Output contains NaN or Inf"
 
+
 @pytest.mark.gpu
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
@@ -102,6 +103,7 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     assert key.grad is not None and torch.isfinite(key.grad).all()
     assert value.grad is not None and torch.isfinite(value.grad).all()
     assert edge_attr.grad is not None and torch.isfinite(edge_attr.grad).all()
+
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(
