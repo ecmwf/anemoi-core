@@ -586,6 +586,10 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
+        recompile_limit=32
+        torch._dynamo.config.cache_size_limit = int(recompile_limit)
+        torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(recompile_limit), 256)
+        LOGGER.info("Recompile limit set to %d", recompile_limit)
 
         trainer.fit(
             self.model,

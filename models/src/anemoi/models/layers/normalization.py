@@ -14,6 +14,7 @@ from typing import Union
 from torch import Size
 from torch import Tensor
 from torch import nn
+from torch import compile
 
 
 class AutocastLayerNorm(nn.LayerNorm):
@@ -29,6 +30,13 @@ class AutocastLayerNorm(nn.LayerNorm):
         precision.
         """
         return super().forward(x).type_as(x)
+    
+class CompiledAutocastLayerNorm(AutocastLayerNorm):
+    """ Compiled version of the AutoCastLayerNorm """
+
+    def forward(self, x: Tensor) -> Tensor:
+        fn = compile(super().forward) #dynamic=False)
+        return fn(x)
 
 
 class ConditionalLayerNorm(nn.Module):
@@ -77,3 +85,10 @@ class ConditionalLayerNorm(nn.Module):
         out = self.norm(x)
         out = out * (scale + 1.0) + bias
         return out.type_as(x) if self.autocast else out
+
+class CompiledConditionalLayerNorm(ConditionalLayerNorm):
+    """ Compiled version of the ConditionalLayerNorm """
+
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+        fn = compile(super().forward) #dynamic=False)
+        return fn(x, cond)

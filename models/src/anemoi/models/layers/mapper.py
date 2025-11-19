@@ -79,6 +79,7 @@ class BaseMapper(nn.Module, ABC):
         if cpu_offload:
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
 
+    @torch.compile()
     def pre_process(
         self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False
     ) -> tuple[Tensor, Tensor, tuple[int], tuple[int]]:
@@ -124,6 +125,7 @@ class BackwardMapperPostProcessMixin:
 class ForwardMapperPreProcessMixin:
     """Pre-processing for Forward Mapper from data -> hidden."""
 
+    @torch.compile
     def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
         x_src, x_dst, shapes_src, shapes_dst = super().pre_process(
             x, shard_shapes, model_comm_group, x_src_is_sharded, x_dst_is_sharded

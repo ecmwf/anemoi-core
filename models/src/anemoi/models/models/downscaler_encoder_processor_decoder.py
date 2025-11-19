@@ -43,6 +43,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
     """Downscaling Model."""
 
+    @torch.compile()
     def compute_residuals(
         self,
         y: torch.Tensor,
@@ -71,7 +72,8 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         # to deal with residuals or direct prediction, see compute_tendency
         # in diffusion_encoder_processor_decoder.py
         return residuals
-
+    
+    @torch.compile()
     def _interpolate_to_high_res(
         self, x, grid_shard_shapes=None, model_comm_group=None
     ):
