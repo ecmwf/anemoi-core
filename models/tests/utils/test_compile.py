@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from pathlib import Path
-from functools import cached_property
 
 import torch
 from omegaconf import DictConfig
@@ -24,14 +22,18 @@ from anemoi.models.utils.compile import mark_for_compilation
 
 LOGGER = logging.getLogger(__name__)
 
+
 def graphtransformer_compile_config() -> None:
-    return OmegaConf.create({
+    return OmegaConf.create(
+        {
             "compile": [
                 {
                     "module": "anemoi.models.layers.conv.GraphTransformerConv",
                 },
             ],
-        })
+        }
+    )
+
 
 def layer_kernel_compile_config() -> None:
     return OmegaConf.create({
@@ -45,7 +47,8 @@ def layer_kernel_compile_config() -> None:
 
 
 def graphtransformer_ens_compile_config() -> None:
-    return OmegaConf.create({
+    return OmegaConf.create(
+        {
             "compile": [
                 {
                     "module": "anemoi.models.layers.conv.GraphTransformerConv",
@@ -57,7 +60,9 @@ def graphtransformer_ens_compile_config() -> None:
                     },
                 },
             ],
-        })
+        }
+    )
+
 
 def test_compile_config_no_match() -> None:
     """Tests that _get_compile_entry() returns None when no match is found."""
@@ -97,7 +102,7 @@ def test_compile() -> None:
     cond = torch.randn(cond_shape)
     result = ln.forward(x_in, cond)
 
-    cfg =  graphtransformer_ens_compile_config()
+    cfg = graphtransformer_ens_compile_config()
     ln_compiled = mark_for_compilation(ln, cfg.compile)
 
     result_compiled = ln_compiled.forward(x_in, cond)
