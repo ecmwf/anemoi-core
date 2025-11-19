@@ -355,6 +355,8 @@ class BaseTrainingSchema(BaseModel):
     "Learning rate configuration."
     optimizer: OptimizerSchema = Field(default_factory=OptimizerSchema)
     "Optimizer configuration."
+    recompile_limit: PositiveInt = 32
+    "How many times torch.compile will recompile a function for a given input shape."
     metrics: list[str]
     "List of metrics"
 
