@@ -238,9 +238,8 @@ training:
     enabled: false
     lr: 0.0001
   optimizer:
-    zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-    kwargs:
-      betas: [0.9, 0.95]
+    _target_: torch.optim.AdamW # or anemoi.training.optimizers.AdEMAMix.AdEMAMix
+    betas: [0.9, 0.95]
   # select strategy
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
