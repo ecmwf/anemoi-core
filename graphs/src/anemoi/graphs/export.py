@@ -67,13 +67,20 @@ class GraphExporter:
 
         x is defined on source nodes, and output is on target nodes.
 
-        Args:
-            edge_index: (2, E) tensor with rows: target nodes, cols: source nodes
-            edge_attribute: Edge weights/attributes
-            num_source_nodes: Number of source nodes (n_in)
-            num_target_nodes: Number of target nodes (n_out)
+        Arguments
+        ---------
+        edge_index : torch.Tensor
+            (2, E) tensor with rows: target nodes, cols: source nodes
+        edge_attribute : torch.Tensor
+            Edge weights/attributes
+        num_source_nodes : int
+            Number of source nodes (n_in)
+        num_target_nodes : int
+            Number of target nodes (n_out)
 
-        Returns:
+        Returns
+        -------
+        torch.sparse_coo_tensor
             Sparse COO tensor on target nodes
         """
         rows = edge_index[1]
@@ -92,9 +99,10 @@ class GraphExporter:
     def convert_to_scipy_sparse(A):
         """Convert PyTorch sparse tensor to SciPy sparse matrix and save.
 
-        Args:
-            A: PyTorch sparse COO tensor
-            filename: Output filename (.npz extension)
+        Arguments
+        ---------
+        A : torch.sparse_coo_tensor
+            Sparse tensor
         """
         # Get indices and values from PyTorch sparse tensor
         indices = A.indices().cpu().numpy()
