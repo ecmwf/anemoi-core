@@ -46,7 +46,7 @@ class TimeStepScaler(BaseScaler):
 
 
 class LeadTimeDecayScaler(TimeStepScaler):
-    """Class to decrease the weight as a function of lead time."""
+    """Class to decrease (default) or increase (optional) the weight as a function of lead time."""
 
     scale_dims = TensorDim.TIME
 
