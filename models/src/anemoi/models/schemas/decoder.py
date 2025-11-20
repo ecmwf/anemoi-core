@@ -22,7 +22,7 @@ from .common_components import InterpolationModelComponent
 
 
 class InterpolationDecoderSchema(InterpolationModelComponent):
-    target_: Literal["anemoi.models.layers.mapper.InterpolationBackwardMapper"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.mapper.GraphInterpolationBackwardMapper"] = Field(..., alias="_target_")
     "Interpolation decoder object from anemoi.models.layers.mapper."
 
 

@@ -22,7 +22,7 @@ from .common_components import InterpolationModelComponent
 
 
 class InterpolationEncoderSchema(InterpolationModelComponent):
-    target_: Literal["anemoi.models.layers.mapper.InterpolationForwardMapper"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.mapper.GraphInterpolationForwardMapper"] = Field(..., alias="_target_")
     "Interpolation encoder object from anemoi.models.layers.mapper."
 
 

@@ -32,11 +32,11 @@ processor:
   layer_kernels: ${model.layer_kernels}
 
 encoder:
-  _target_: anemoi.models.layers.mapper.InterpolationForwardMapper
+  _target_: anemoi.models.layers.mapper.GraphInterpolationForwardMapper
   edge_weight_attribute: edge_length
 
 decoder:
-  _target_: anemoi.models.layers.mapper.InterpolationBackwardMapper
+  _target_: anemoi.models.layers.mapper.GraphInterpolationBackwardMapper
   edge_weight_attribute: edge_length
 
 residual:

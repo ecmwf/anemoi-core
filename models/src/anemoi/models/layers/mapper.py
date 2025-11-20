@@ -1510,7 +1510,7 @@ class BaseTruncationMapper(nn.Module):
         return x
 
 
-class InterpolationForwardMapper(BaseTruncationMapper):
+class GraphInterpolationForwardMapper(BaseTruncationMapper):
     """Truncated forward mapper"""
 
     def __init__(
@@ -1553,7 +1553,7 @@ class InterpolationForwardMapper(BaseTruncationMapper):
         return x[0], x_dst
 
 
-class InterpolationBackwardMapper(BaseTruncationMapper):
+class GraphInterpolationBackwardMapper(BaseTruncationMapper):
     """Truncated backward mapper"""
 
     def __init__(
