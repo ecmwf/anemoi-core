@@ -72,6 +72,7 @@ trainable_parameters:
   hidden2data: 8
   hidden2hidden: 8 # GNN and GraphTransformer Processor only
 
+
 attributes:
   edges:
     - edge_length

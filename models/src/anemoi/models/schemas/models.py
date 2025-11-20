@@ -34,7 +34,6 @@ from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
-from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -224,12 +223,7 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "GNN decoder schema.",
-    residual: ResidualConnectionSchema = Field(
-        ...,
-        discriminator="target_",
-    )
-    "Residual connection schema."
+    "GNN decoder schema."
 
 
 class NoiseInjectorSchema(BaseModel):

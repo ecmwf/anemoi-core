@@ -30,12 +30,11 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     del logger_config["enabled"]
 
     # backward compatibility to not break configs
-    logger_config["_target_"] = getattr(
-        logger_config,
-        "_target",
+    logger_config["_target_"] = logger_config.get(
+        "_target_",
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
-    logger_config["save_dir"] = getattr(logger_config, "save_dir", str(config.hardware.paths.logs.mlflow))
+    logger_config["save_dir"] = logger_config.get("save_dir", str(config.hardware.paths.logs.mlflow))
 
     logger = instantiate(
         logger_config,

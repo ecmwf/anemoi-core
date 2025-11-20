@@ -45,6 +45,10 @@ residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
 
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
+
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 
