@@ -32,7 +32,6 @@ __all__ = [
     "NaNMaskScaler",
     "NoTendencyScaler",
     "NoVariableLevelScaler",
-    "OutputStepScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
