@@ -8,9 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+
 import torch
-from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from torch_geometric.data.storage import NodeStorage
+
+from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,14 +24,14 @@ class HEALPixNNEdges(BaseEdgeBuilder):
         """Compute the edge index for HEALPix nearest neighbour edges."""
         from anemoi.graphs.generate.healpix import get_healpix_edgeindex
 
-        resolution  = source_nodes["_resolution"]
+        resolution = source_nodes["_resolution"]
         edges_index, prev_res = None, None
         for res in range(1, resolution + 1):
             new_edge_index = get_healpix_edgeindex(res)
             LOGGER.debug(f"Resolution: {res}, Edge index shape: {new_edge_index.shape}")
             if edges_index is None:
                 edges_index = new_edge_index
-            else:  
+            else:
                 edges_index = torch.cat([4 ** (res - prev_res) * edges_index, new_edge_index], dim=1)
             prev_res = res
 
