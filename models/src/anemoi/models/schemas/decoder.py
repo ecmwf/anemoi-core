@@ -17,8 +17,8 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
-from .common_components import TransformerModelComponent
 from .common_components import InterpolationModelComponent
+from .common_components import TransformerModelComponent
 
 
 class InterpolationDecoderSchema(InterpolationModelComponent):
