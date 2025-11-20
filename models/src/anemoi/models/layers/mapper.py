@@ -1421,7 +1421,7 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         return x_src, x_dst, shapes_src, shapes_dst
 
 
-class BaseGraphInterpolationMapper(nn.Module):
+class GraphInterpolationBaseMapper(nn.Module):
     """Graph interpolation mapper.
 
     Arguments
@@ -1500,7 +1500,7 @@ class BaseGraphInterpolationMapper(nn.Module):
         return x
 
 
-class GraphInterpolationForwardMapper(BaseGraphInterpolationMapper):
+class GraphInterpolationForwardMapper(GraphInterpolationBaseMapper):
     """Graph interpolation forward mapper"""
 
     def __init__(
@@ -1539,7 +1539,7 @@ class GraphInterpolationForwardMapper(BaseGraphInterpolationMapper):
         return x[0], x_dst
 
 
-class GraphInterpolationBackwardMapper(BaseGraphInterpolationMapper):
+class GraphInterpolationBackwardMapper(GraphInterpolationBaseMapper):
     """Graph interpolation backward mapper"""
 
     def __init__(
