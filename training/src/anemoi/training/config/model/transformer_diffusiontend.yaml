@@ -1,4 +1,5 @@
 num_channels: 1024
+condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
@@ -78,7 +79,6 @@ encoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
 
-
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
@@ -91,6 +91,10 @@ decoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
+
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
