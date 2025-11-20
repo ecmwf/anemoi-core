@@ -75,7 +75,7 @@ class KernelCRPS(BaseLoss):
 
         assert ens_size > 1, "Ensemble size must be greater than 1."
 
-        coef = -1.0 / (ens_size * (ens_size - 1)) if self.fair else -1.0 / (ens_size**2)
+        coef = 1.0 / (ens_size * (ens_size - 1)) if self.fair else 1.0 / (ens_size**2)
 
         ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
         for i in range(ens_size):  # loop version to reduce memory usage
@@ -98,7 +98,7 @@ class KernelCRPS(BaseLoss):
         kCRPS : torch.Tensor
             The point-wise kernel CRPS, shape (batch_size, n_vars, latlon).
         """
-        return self._mae(preds, targets) + self._ens_var(preds)
+        return self._mae(preds, targets) - self._ens_var(preds)
 
     def forward(
         self,
