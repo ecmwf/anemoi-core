@@ -136,7 +136,7 @@ class MultiDataset(IterableDataset):
             if reference_indices is None:
                 reference_indices = indices
             assert all(
-                indices == reference_indices
+                indices == reference_indices,
             ), f"Dataset '{name}' has different valid_date_indices than other datasets"
         return reference_indices
 
