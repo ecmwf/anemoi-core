@@ -13,6 +13,7 @@ import os
 from abc import ABC
 from typing import Optional
 
+import einops
 import numpy as np
 import torch
 from torch import Tensor
@@ -24,12 +25,15 @@ from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
 
+from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.khop_edges import bipartite_subgraph
 from anemoi.models.distributed.khop_edges import drop_unconnected_src_nodes
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_sharding
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import change_channels_in_shape
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.block import GraphConvMapperBlock
@@ -37,7 +41,7 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.sparse_projector import build_sparse_projector
+from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -1417,54 +1421,35 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         return x_src, x_dst, shapes_src, shapes_dst
 
 
-
 class BaseTruncationMapper(nn.Module):
     """Truncated mapper.
 
     Parameters
     ----------
-    graph : HeteroData
+    sub_graph : HeteroData
         The graph containing the subgraphs for down and up projections.
-    source_nodes_name : str
-        Name of the source nodes.
-    target_nodes_name : str
-        Name of the target nodes.
     edge_weight_attribute : str, optional
         Name of the edge attribute to use as weights for the projections.
-    src_node_weight_attribute : str, optional
-        Name of the source node attribute to use as weights for the projections.
-    truncation_file_path : str, optional
-        File path (.npz) to load the projection matrix from.
     autocast : bool, default False
         Whether to use automatic mixed precision for the projections.
     """
 
     def __init__(
         self,
-        graph: Optional[HeteroData] = None,
-        source_nodes_name: Optional[str] = None,
-        target_nodes_name: Optional[str] = None,
+        sub_graph: Optional[HeteroData] = None,
         edge_weight_attribute: Optional[str] = None,
-        src_node_weight_attribute: Optional[str] = None,
-        truncation_file_path: Optional[str] = None,
+        src_grid_size: Optional[int] = None,
+        dst_grid_size: Optional[int] = None,
         autocast: bool = False,
         **kwargs,  # accept not needed extra arguments
     ) -> None:
         super().__init__()
-        edges_name = self._get_edges_name(
-            graph,
-            source_nodes_name,
-            target_nodes_name,
-            truncation_file_path,
-            edge_weight_attribute,
-        )
-
-        self.project = build_sparse_projector(
-            graph=graph,
-            edges_name=edges_name,
-            edge_weight_attribute=edge_weight_attribute,
-            src_node_weight_attribute=src_node_weight_attribute,
-            file_path=truncation_file_path,
+        self.project = SparseProjector(
+            edge_index=sub_graph.edge_index,
+            weights=getattr(sub_graph, edge_weight_attribute).squeeze(),
+            src_size=src_grid_size,
+            dst_size=dst_grid_size,
+            row_normalize=True,
             autocast=autocast,
         )
 
@@ -1477,9 +1462,9 @@ class BaseTruncationMapper(nn.Module):
         edge_weight_attribute: Optional[str],
     ) -> Optional[tuple[str, str, str]]:
         if truncation_file_path is not None:
-            assert source_nodes_name is None and target_nodes_name is None and edge_weight_attribute is None, (
-                "If file paths are specified, node and attribute names should not be provided."
-            )
+            assert (
+                source_nodes_name is None and target_nodes_name is None and edge_weight_attribute is None
+            ), "If file paths are specified, node and attribute names should not be provided."
             return None  # Not used when loading from files
 
         assert graph is not None, "graph must be provided if file paths are not specified."
@@ -1488,24 +1473,29 @@ class BaseTruncationMapper(nn.Module):
         edges_name = (target_nodes_name, "to", source_nodes_name)
         assert edges_name in graph.edge_types, f"Graph must contain edges {edges_name} for up-projection."
         return edges_name
-        
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None, *args, **kwargs) -> torch.Tensor:
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        batch_size: int = None,
+        grid_shard_shapes=None,
+        shard_shapes=None,
+        model_comm_group=None,
+        *args,
+        **kwargs,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply truncation."""
-        batch_size = x.shape[0]
-        ensemble_size = x.shape[2]
+        x, _ = x
 
-        shard_shapes = apply_shard_shapes(x, 0, grid_shard_shapes) if grid_shard_shapes is not None else None
+        if shard_shapes is None:
+            shard_shapes = apply_shard_shapes(x, 0, grid_shard_shapes) if grid_shard_shapes is not None else None
 
-        x = einops.rearrange(x, "batch time ensemble grid features -> (batch time ensemble) grid features")
+        x = einops.rearrange(x, "(batch grid) features -> batch grid features", batch=batch_size)
         x = self._to_channel_shards(x, shard_shapes, model_comm_group)
         x = self.project(x)
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
         x = self.emb_nodes(x)
-        x = einops.rearrange(
-            x, 
-            "(batch time ensemble) grid features -> batch time ensemble grid features", 
-            batch=batch_size, ensemble=ensemble_size
-        )
+        x = einops.rearrange(x, "batch grid features -> (batch grid) features", batch=batch_size)
 
         return x
 
@@ -1523,6 +1513,7 @@ class BaseTruncationMapper(nn.Module):
 
 class TruncationForwardMapper(BaseTruncationMapper):
     """Truncated forward mapper"""
+
     def __init__(
         self,
         in_channels_src: int,
@@ -1548,9 +1539,24 @@ class TruncationForwardMapper(BaseTruncationMapper):
         )
         self.emb_nodes = nn.Linear(in_channels_src, hidden_dim) if in_channels_src != hidden_dim else nn.Identity()
 
+    def forward(
+        self,
+        x: torch.Tensor,
+        batch_size: int = None,
+        grid_shard_shapes=None,
+        shard_shapes=None,
+        model_comm_group=None,
+        *args,
+        **kwargs,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply truncation."""
+        x_dst = super().forward(x, batch_size, grid_shard_shapes, shard_shapes, model_comm_group, *args, **kwargs)
+        return x[0], x_dst
+
 
 class TruncationBackwardMapper(BaseTruncationMapper):
     """Truncated backward mapper"""
+
     def __init__(
         self,
         hidden_dim: int,
