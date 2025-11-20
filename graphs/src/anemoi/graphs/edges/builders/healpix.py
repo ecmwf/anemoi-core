@@ -41,9 +41,11 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge index for HEALPix multi scale edges."""
+        assert source_nodes.node_type == "HEALPixNodes", f"{self.__class__.__name__} only supports HEALPixNodes."
+
         from anemoi.graphs.generate.healpix import get_healpix_edgeindex
 
-        scale_resolutions = self.scale_resolutions or source_nodes["_resolutions"]
+        scale_resolutions = self.scale_resolutions or list(range(1, source_nodes["_resolution"]+1))
         edges_index, prev_res = None, None
         for res in list(sorted(scale_resolutions)):
             new_edge_index = get_healpix_edgeindex(res)
