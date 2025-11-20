@@ -18,6 +18,12 @@ from pydantic import model_validator
 
 from .common_components import GNNModelComponent
 from .common_components import TransformerModelComponent
+from .common_components import InterpolationModelComponent
+
+
+class InterpolationDecoderSchema(InterpolationModelComponent):
+    target_: Literal["anemoi.models.layers.mapper.InterpolationBackwardMapper"] = Field(..., alias="_target_")
+    "Interpolation decoder object from anemoi.models.layers.mapper."
 
 
 class GNNDecoderSchema(GNNModelComponent):
