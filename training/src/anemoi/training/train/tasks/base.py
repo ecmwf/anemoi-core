@@ -14,13 +14,13 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+from typing import Any
 
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler import CosineLRScheduler
-from torch.distributed.optim import ZeroRedundancyOptimizer
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
@@ -687,37 +687,31 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict]]:
-        """Configure the optimizers and learning rate scheduler.
+    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+        """Create optimizer and LR scheduler based on Hydra config."""
+        optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
+        scheduler = self._create_scheduler(optimizer)
+        return [optimizer], [scheduler]
 
-        Returns
-        -------
-        tuple[list[torch.optim.Optimizer], list[dict]]
-            List of optimizers and list of dictionaries containing the
-            learning rate scheduler
-        """
-        if self.optimizer_settings.zero:
-            optimizer = ZeroRedundancyOptimizer(
-                self.trainer.model.parameters(),
-                lr=self.lr,
-                optimizer_class=torch.optim.AdamW,
-                **self.optimizer_settings.kwargs,
-            )
-        else:
-            optimizer = torch.optim.AdamW(
-                self.trainer.model.parameters(),
-                lr=self.lr,
-                **self.optimizer_settings.kwargs,
-            )
+    def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
+        """Instantiate optimizer directly via Hydra config (_target_ style)."""
+        params = filter(lambda p: p.requires_grad, self.parameters())
 
+        # Convert schema to dict if needed
+        if hasattr(opt_cfg, "model_dump"):
+            opt_cfg = opt_cfg.model_dump(by_alias=True)
+
+        return instantiate(opt_cfg, params=params, lr=self.lr)
+
+    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
+        """Helper to create the cosine LR scheduler."""
         scheduler = CosineLRScheduler(
             optimizer,
             lr_min=self.lr_min,
             t_initial=self.lr_iterations,
             warmup_t=self.lr_warmup,
         )
-
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+        return {"scheduler": scheduler, "interval": "step"}
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
