@@ -2,12 +2,13 @@
 hardware:
   paths:
     data: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
-    truncation: null
+    truncation: https://object-store.os-api.cci1.ecmwf.int/ml-tests/test-data/samples
   files:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
     truncation: null
     truncation_inv: null
     graph: null
+    truncation_loss: ["anemoi-integration-tests/training/assets/trunc_o48-o32.npz",  None]
 
 dataloader:
   training:
