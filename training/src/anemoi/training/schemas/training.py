@@ -190,6 +190,22 @@ class TimeStepScalerSchema(BaseModel):
     "Weights for each time step"
 
 
+class LeadTimeDecayScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.LeadTimeDecayScaler"] = Field(..., alias="_target_")
+    output_lead_times: list[int] = Field(example=[0, 6, 12, 18, 24])
+    "Lead times corresponding to each output step."
+    decay_factor: float = Field(example=0.1)
+    "Decay factor for the lead time weights."
+    max_lead_time: int = Field(example=24)
+    "Maximum lead time for decay calculation."
+    decay_type: Literal["linear", "exponential"] = Field(example="linear")
+    "Type of decay to apply."
+    inverse: bool = Field(example=False)
+    "If true, weights increase with lead time."
+    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
+    "Normalisation method applied to the weights."
+
+
 class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler"] = Field(
         ...,
