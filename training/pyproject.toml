@@ -64,6 +64,7 @@ dependencies = [
 ]
 
 optional-dependencies.all = [  ]
+optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow", "strenum" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
   "pre-commit>=3.3.3",
@@ -94,8 +95,8 @@ optional-dependencies.profile = [
   "tabulate>=0.9",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",            # required to load the gnn checkpoint as part of the tests
-  "anemoi-training[mlflow,wandb]",
+  "anemoi-graphs[tri]",                  # required to load the gnn checkpoint as part of the tests
+  "anemoi-training[azure,mlflow,wandb]",
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",

@@ -15,37 +15,17 @@ import einops
 import torch
 from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
-
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-        truncation_data: dict,
-    ) -> None:
-
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            truncation_data=truncation_data,
-        )
 
     def _calculate_input_dim(self):
         base_input_dim = super()._calculate_input_dim()
@@ -112,7 +92,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[tuple] = None,
+        grid_shard_shapes: Optional[list] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Forward operator.

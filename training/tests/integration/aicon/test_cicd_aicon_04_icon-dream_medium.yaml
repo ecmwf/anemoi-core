@@ -106,9 +106,6 @@ graph:
         _target_: anemoi.graphs.edges.attributes.EdgeDirection
         norm: unit-std
 
-datamodule:
-  _target_: anemoi.training.data.datamodule.AnemoiDatasetsDataModule
-
 
 data:
   resolution: mrl${data.refinement}
@@ -338,6 +335,7 @@ diagnostics:
     tensorboard:
       enabled: false
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
       offline: True
       authentication: False

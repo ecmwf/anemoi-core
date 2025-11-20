@@ -1,9 +1,41 @@
 # anemoi-core
 
-**DISCLAIMER**
-This project is **BETA** and will be **Experimental** for the foreseeable future.
-Interfaces and functionality are likely to change, and the project itself may be scrapped.
-**DO NOT** use this software in any project/software that is operational.
+<p align="center">
+  <a href="https://github.com/ecmwf/codex/raw/refs/heads/main/Project Maturity">
+    <img src="https://github.com/ecmwf/codex/raw/refs/heads/main/Project Maturity/incubating_badge.svg" alt="Maturity Level">
+  </a>
+  <a href="https://opensource.org/licenses/apache-2-0">
+    <img src="https://img.shields.io/badge/Licence-Apache 2.0-blue.svg" alt="Licence">
+  </a>
+</p>
+<p align="center">
+  <!-- Individual package releases -->
+  <a href="https://github.com/ecmwf/anemoi-training/releases">
+    <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-training?color=orange&label=Training%20Release" alt="Anemoi Training Release">
+  </a>
+  <a href="https://github.com/ecmwf/anemoi-models/releases">
+    <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-models?color=orange&label=Models%20Release" alt="Anemoi Models Release">
+  </a>
+  <a href="https://github.com/ecmwf/anemoi-graphs/releases">
+    <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-graphs?color=orange&label=Graphs%20Release" alt="Anemoi Graphs Release">
+  </a>
+</p>
+<p align="center">
+  <!-- documentation badges -->
+  <a href="https://anemoi-training.readthedocs.io/en/latest/">
+    <img src="https://img.shields.io/readthedocs/anemoi-training/latest?label=Docs%20(Training)&color=green" alt="Anemoi Training Docs">
+  </a>
+  <a href="https://anemoi-models.readthedocs.io/en/latest/">
+    <img src="https://img.shields.io/readthedocs/anemoi-models/latest?label=Docs%20(Models)&color=green" alt="Anemoi Models Docs">
+  </a>
+  <a href="https://anemoi-graphs.readthedocs.io/en/latest/">
+    <img src="https://img.shields.io/readthedocs/anemoi-graphs/latest?label=Docs%20(Graphs)&color=green" alt="Anemoi Graphs Docs">
+  </a>
+</p>
+
+> \[!IMPORTANT\]
+> This software is **Incubating** and subject to ECMWF's guidelines on [Software Maturity](https://github.com/ecmwf/codex/raw/refs/heads/main/Project%20Maturity).
+
 
 A mono-repo containing core training and modelling functionality for Anemoi, providing the packages `anemoi-training`, `anemoi-models`, and `anemoi-graphs`.
 

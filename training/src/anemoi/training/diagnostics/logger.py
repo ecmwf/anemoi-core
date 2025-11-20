@@ -9,11 +9,10 @@
 
 
 import logging
-import os
-from pathlib import Path
 from typing import Any
 
 import pytorch_lightning as pl
+from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -34,82 +33,26 @@ def get_mlflow_logger(
         LOGGER.debug("MLFlow logging is disabled.")
         return None
 
-    # 35 retries allow for 1 hour of server downtime
-    http_max_retries = diagnostics_config.log.mlflow.http_max_retries
+    logger_config = OmegaConf.to_container(convert_to_omegaconf(config).diagnostics.log.mlflow)
+    del logger_config["enabled"]
 
-    os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(http_max_retries)
-    os.environ["_MLFLOW_HTTP_REQUEST_MAX_RETRIES_LIMIT"] = str(http_max_retries + 1)
-    # these are the default values, but set them explicitly in case they change
-    os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR"] = "2"
-    os.environ["MLFLOW_HTTP_REQUEST_BACKOFF_JITTER"] = "1"
-
-    from anemoi.training.diagnostics.mlflow import LOG_MODEL
-    from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
-    from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
-
-    resumed = run_id is not None
-    forked = fork_run_id is not None
-
-    save_dir = paths.logs.mlflow
-
-    offline = diagnostics_config.log.mlflow.offline
-    if not offline:
-        tracking_uri = diagnostics_config.log.mlflow.tracking_uri
-        LOGGER.info("AnemoiMLFlow logging to %s", tracking_uri)
-    else:
-        tracking_uri = None
-
-    if (resumed or forked) and (offline):  # when resuming or forking offline -
-        # tracking_uri = ${hardware.paths.logs.mlflow}
-        tracking_uri = str(save_dir)
-    # create directory if it does not exist
-    Path(paths.logs.mlflow).mkdir(parents=True, exist_ok=True)
-
-    log_hyperparams = True
-    if resumed and not diagnostics_config.log.mlflow.on_resume_create_child:
-        LOGGER.info(
-            (
-                "Resuming run without creating child run - MLFlow logs will not update the"
-                "initial runs hyperparameters with those of the resumed run."
-                "To update the initial run's hyperparameters, set "
-                "`diagnostics.log.mlflow.on_resume_create_child: True`."
-            ),
-        )
-        log_hyperparams = False
-
-    max_params_length = getattr(diagnostics_config.log.mlflow, "max_params_length", MAX_PARAMS_LENGTH)
-    LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
-    log_model = getattr(diagnostics_config.log.mlflow, "log_model", LOG_MODEL)
-
-    # Expand keys for better visibility
-    expand_keys = OmegaConf.select(
-        convert_to_omegaconf(config),
-        "diagnostics.log.mlflow.expand_hyperparams",
-        default=["config"],
+    # backward compatibility to not break configs
+    logger_config["_target_"] = getattr(
+        logger_config,
+        "_target",
+        "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
+    logger_config["save_dir"] = getattr(logger_config, "save_dir", str(paths.logs.mlflow))
 
-    logger = AnemoiMLflowLogger(
-        experiment_name=diagnostics_config.log.mlflow.experiment_name,
-        project_name=diagnostics_config.log.mlflow.project_name,
-        tracking_uri=tracking_uri,
-        save_dir=save_dir,
-        run_name=diagnostics_config.log.mlflow.run_name,
+    logger = instantiate(
+        logger_config,
         run_id=run_id,
         fork_run_id=fork_run_id,
-        log_model=log_model,
-        offline=offline,
-        resumed=resumed,
-        forked=forked,
-        log_hyperparams=log_hyperparams,
-        authentication=diagnostics_config.log.mlflow.authentication,
-        on_resume_create_child=diagnostics_config.log.mlflow.on_resume_create_child,
-        max_params_length=max_params_length,
-        expand_keys=expand_keys,
     )
 
-    if diagnostics_config.log.mlflow.terminal:
+    if logger.log_terminal:
         logger.log_terminal_output(artifact_save_dir=paths.plots)
-    if diagnostics_config.log.mlflow.system:
+    if logger.log_system:
         logger.log_system_metrics()
 
     return logger
