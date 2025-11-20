@@ -26,15 +26,6 @@ in Anemoi.
    :no-undoc-members:
    :show-inheritance:
 
-***************
- No Connection
-***************
-
-.. autoclass:: anemoi.models.layers.residual.NoConnection
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
 **********************
  Truncated Connection
 **********************

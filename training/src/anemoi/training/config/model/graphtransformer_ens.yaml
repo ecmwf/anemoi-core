@@ -1,4 +1,5 @@
 num_channels: 1024
+condition_on_residual: False
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
 cpu_offload: False
@@ -48,7 +49,7 @@ processor:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
       normalized_shape: ${model.num_channels}
       condition_shape: ${model.noise_injector.noise_channels_dim}
-      w_one_bias_zero_init: True
+      zero_init: True
       autocast: false
       #Any arguments to your chosen function go here
     Linear:
@@ -88,7 +89,8 @@ decoder:
   shard_strategy: "edges"
 
 residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, NoConnection, TruncatedConnection
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
 #  _target_: anemoi.models.layers.residual.TruncatedConnection
 #  truncation_up_file_path: ${hardware.paths.truncation}/${hardware.files.truncation}
 #  truncation_down_file_path:  ${hardware.paths.truncation}/${hardware.files.truncation_inv}

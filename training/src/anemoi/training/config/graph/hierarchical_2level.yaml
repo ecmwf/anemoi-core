@@ -5,7 +5,6 @@ data: "data"
 hidden:
  - "hidden_1"
  - "hidden_2"
-truncation: null
 
 
 nodes:

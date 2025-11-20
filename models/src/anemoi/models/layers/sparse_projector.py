@@ -1,5 +1,5 @@
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -17,7 +17,7 @@ class SparseProjector(torch.nn.Module):
     """Constructs and applies a sparse projection matrix for mapping features between grids.
 
     The projection matrix is constructed from edge indices and edge attributes (e.g., distances),
-    with optional row normalization.
+    with optional row normalisation.
 
     Parameters
     ----------
@@ -71,7 +71,7 @@ class SparseProjector(torch.nn.Module):
 
         Parameters
         ----------
-        graph : networkx.Graph
+        graph : HeteroData
             The input graph.
         edge_name : str
             The name/identifier for the edge set to use.
@@ -123,9 +123,7 @@ class SparseProjector(torch.nn.Module):
         self.projection_matrix = self.projection_matrix.to(x.device)
 
         out = []
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-
-        with torch.amp.autocast(device_type=device_type, enabled=self.autocast):
+        with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
             for i in range(x.shape[0]):
                 out.append(torch.sparse.mm(self.projection_matrix, x[i, ...]))
         return torch.stack(out)
@@ -147,6 +145,7 @@ def build_sparse_projector(
     if file_path is not None:
         return SparseProjector.from_file(file_path=file_path, **kwargs)
     else:
+        assert edges_name in graph.edge_types, f"The specified edges_name, {edges_name}, is not present in the graph."
         return SparseProjector.from_graph(
             graph=graph,
             edges_name=edges_name,

@@ -15,17 +15,35 @@ import einops
 import torch
 from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
+
+    def __init__(
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+    ) -> None:
+        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+        )
 
     def _build_networks(self, model_config):
         super()._build_networks(model_config)
@@ -35,9 +53,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             num_channels=self.num_channels,
         )
 
-    def _calculate_input_dim(self, model_config):
-        base_input_dim = super()._calculate_input_dim(model_config)
-        return base_input_dim + self.num_input_channels_prognostic + 1
+    def _calculate_input_dim(self) -> int:
+        base_input_dim = super()._calculate_input_dim()
+        base_input_dim += 1  # for forecast step, fcstep
+        if self.condition_on_residual:
+            base_input_dim += self.num_input_channels_prognostic
+        return base_input_dim
 
     def _assemble_input(self, x, fcstep, batch_ens_size, grid_shard_shapes=None, model_comm_group=None):
         x_skip = self.residual(x, grid_shard_shapes, model_comm_group)[..., self._internal_input_idx]
@@ -54,7 +75,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(x_skip, "batch_ens_size grid vars -> (batch_ens_size grid) vars"),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -63,6 +83,15 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             (x_data_latent, torch.ones(x_data_latent.shape[:-1], device=x_data_latent.device).unsqueeze(-1) * fcstep),
             dim=-1,
         )
+        if self.condition_on_residual:
+            x_data_latent = torch.cat(
+                (
+                    x_data_latent,
+                    einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble grid) vars"),
+                ),
+                dim=-1,
+            )
+
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )

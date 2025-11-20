@@ -1,4 +1,5 @@
 num_channels: 1024
+condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
@@ -37,7 +38,7 @@ layer_kernels:
     _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
     normalized_shape: ${model.num_channels}
     condition_shape: 16
-    w_one_bias_zero_init: True
+    zero_init: True
     autocast: false
   Linear:
     _target_: torch.nn.Linear
@@ -92,7 +93,8 @@ decoder:
   shard_strategy: "edges"
 
 residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, NoConnection, TruncatedConnection
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

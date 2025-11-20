@@ -1,31 +1,38 @@
+# (C) Copyright 2025 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+
+from abc import ABC
 from abc import abstractmethod
 from typing import Optional
 
 import einops
 import torch
 from torch import nn
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.sparse_projector import build_sparse_projector
-from torch_geometric.data import HeteroData
 
 
-class BaseResidualConnection(nn.Module):
+class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, graph: HeteroData | None = None) -> None:
         super().__init__()
 
-    def get_last_timestep(self, x):
-        # x shape: (batch, time, ens, nodes, features)
-        return x[:, -1, ...]  # pick current date
-
     @abstractmethod
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Define the residual connection operation.
-        
+
         Should be overridden by subclasses.
         """
         pass
@@ -34,44 +41,36 @@ class BaseResidualConnection(nn.Module):
 class SkipConnection(BaseResidualConnection):
     """Skip connection module
 
-    It selects the most recent timestep from the input sequence.
+    This layer returns the most recent timestep from the input sequence.
 
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def forward(self, x, *args, **kwargs):
+    def __init__(self, step: int = -1, **_) -> None:
+        super().__init__()
+        self.step = step
+
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
-        return self.get_last_timestep(x)
+        return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
 
-class NoConnection(BaseResidualConnection):
-    """No-op connection
-
-    This module returns a zero tensor with the same shape as the last timestep.
-    """
-
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        """Return a zero tensor with the same shape as the last timestep."""
-        x = self.get_last_timestep(x)
-        return torch.zeros_like(x, device=x.device, dtype=x.dtype)
-
-
-class TruncatedConnection(nn.Module):
+class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection
 
-    It applies a coarse-graining and reconstruction of input features using sparse projections to
-    truncate high frequency features.
+    This connection applies a coarse-graining and reconstruction of input features using sparse
+    projections to truncate high frequency features.
 
     This module uses two projection operators: one to map features from the full-resolution
     grid to a truncated (coarse) grid, and another to project back to the original resolution.
 
     Parameters
     ----------
-    graph : HeteroData
+    graph : HeteroData, optional
         The graph containing the subgraphs for down and up projections.
-    data_nodes : str
+    data_nodes : str, optional
         Name of the nodes representing the data nodes.
-    truncation_nodes : str
+    truncation_nodes : str, optional
         Name of the nodes representing the truncated (coarse) nodes.
     edge_weight_attribute : str, optional
         Name of the edge attribute to use as weights for the projections.
@@ -166,19 +165,21 @@ class TruncatedConnection(nn.Module):
         if not are_files_specified:
             assert graph is not None, "graph must be provided if file paths are not specified."
             assert data_nodes is not None, "data nodes name must be provided if file paths are not specified."
-            assert truncation_nodes is not None, "truncation nodes name must be provided if file paths are not specified."
+            assert (
+                truncation_nodes is not None
+            ), "truncation nodes name must be provided if file paths are not specified."
             up_edges = (truncation_nodes, "to", data_nodes)
             down_edges = (data_nodes, "to", truncation_nodes)
             assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."
             assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."
         else:
-            assert data_nodes is None or truncation_nodes is None or edge_weight_attribute is None, (
-                "If file paths are specified, node and attribute names should not be provided."
-            )
+            assert (
+                data_nodes is None or truncation_nodes is None or edge_weight_attribute is None
+            ), "If file paths are specified, node and attribute names should not be provided."
             up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Apply truncated skip connection."""
         batch_size = x.shape[0]
         x = x[:, -1, ...]  # pick latest step
