@@ -1421,21 +1421,26 @@ class TransformerBackwardMapper(BackwardMapperPostProcessMixin, TransformerBaseM
         return x_src, x_dst, shapes_src, shapes_dst
 
 
-class BaseTruncationMapper(nn.Module):
-    """Truncated mapper.
-    Parameters
-    ----------
+class BaseGraphInterpolationMapper(nn.Module):
+    """Graph interpolation mapper.
+
+    Arguments
+    ---------
     sub_graph : HeteroData
         The graph containing the subgraphs for down and up projections.
     edge_weight_attribute : str, optional
         Name of the edge attribute to use as weights for the projections.
+    src_grid_size : int, optional
+        Size of the source grid.
+    dst_grid_size : int, optional
+        Size of the destination grid.
     autocast : bool, default False
         Whether to use automatic mixed precision for the projections.
     """
 
     def __init__(
         self,
-        sub_graph: Optional[HeteroData] = None,
+        sub_graph: Optional[HeteroData],
         edge_weight_attribute: Optional[str] = None,
         src_grid_size: Optional[int] = None,
         dst_grid_size: Optional[int] = None,
@@ -1443,46 +1448,31 @@ class BaseTruncationMapper(nn.Module):
         **kwargs,  # accept not needed extra arguments
     ) -> None:
         super().__init__()
+        if edge_weight_attribute is None:
+            LOGGER.info(f"No edge weight attribute provided, using uniform weights for {self.__class__.__name__}.")
+            weights = torch.ones(sub_graph.num_edges, device=sub_graph.edge_index.device)
+        else:
+            weights = getattr(sub_graph, edge_weight_attribute).squeeze()
+
         self.project = SparseProjector(
             edge_index=sub_graph.edge_index,
-            weights=getattr(sub_graph, edge_weight_attribute).squeeze(),
+            weights=weights,
             src_size=src_grid_size,
             dst_size=dst_grid_size,
             row_normalize=True,
             autocast=autocast,
         )
 
-    def _get_edges_name(
-        self,
-        graph: HeteroData,
-        source_nodes_name: Optional[str],
-        target_nodes_name: Optional[str],
-        truncation_file_path: Optional[str],
-        edge_weight_attribute: Optional[str],
-    ) -> Optional[tuple[str, str, str]]:
-        if truncation_file_path is not None:
-            assert (
-                source_nodes_name is None and target_nodes_name is None and edge_weight_attribute is None
-            ), "If file paths are specified, node and attribute names should not be provided."
-            return None  # Not used when loading from files
-
-        assert graph is not None, "graph must be provided if file paths are not specified."
-        assert source_nodes_name is not None, "source nodes name must be provided if file paths are not specified."
-        assert target_nodes_name is not None, "target nodes name must be provided if file paths are not specified."
-        edges_name = (target_nodes_name, "to", source_nodes_name)
-        assert edges_name in graph.edge_types, f"Graph must contain edges {edges_name} for up-projection."
-        return edges_name
-
     def forward(
         self,
         x: torch.Tensor,
-        batch_size: int = None,
+        batch_size: Optional[int] = None,
         grid_shard_shapes=None,
         shard_shapes=None,
         model_comm_group=None,
         *args,
         **kwargs,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         """Apply truncation."""
         x, _ = x
 
@@ -1510,29 +1500,25 @@ class BaseTruncationMapper(nn.Module):
         return x
 
 
-class GraphInterpolationForwardMapper(BaseTruncationMapper):
-    """Truncated forward mapper"""
+class GraphInterpolationForwardMapper(BaseGraphInterpolationMapper):
+    """Graph interpolation forward mapper"""
 
     def __init__(
         self,
         in_channels_src: int,
         hidden_dim: int,
-        graph: Optional[HeteroData] = None,
-        source_nodes_name: Optional[str] = None,
-        target_nodes_name: Optional[str] = None,
+        sub_graph: Optional[HeteroData] = None,
+        src_grid_size: Optional[int] = None,
+        dst_grid_size: Optional[int] = None,
         edge_weight_attribute: Optional[str] = None,
-        src_node_weight_attribute: Optional[str] = None,
-        truncation_file_path: Optional[str] = None,
         autocast: bool = False,
         **kwargs,  # accept not needed extra arguments
     ) -> None:
         super().__init__(
-            graph=graph,
-            source_nodes_name=source_nodes_name,
-            target_nodes_name=target_nodes_name,
+            sub_graph=sub_graph,
             edge_weight_attribute=edge_weight_attribute,
-            src_node_weight_attribute=src_node_weight_attribute,
-            truncation_file_path=truncation_file_path,
+            src_grid_size=src_grid_size,
+            dst_grid_size=dst_grid_size,
             autocast=autocast,
             **kwargs,
         )
@@ -1553,29 +1539,25 @@ class GraphInterpolationForwardMapper(BaseTruncationMapper):
         return x[0], x_dst
 
 
-class GraphInterpolationBackwardMapper(BaseTruncationMapper):
-    """Truncated backward mapper"""
+class GraphInterpolationBackwardMapper(BaseGraphInterpolationMapper):
+    """Graph interpolation backward mapper"""
 
     def __init__(
         self,
         hidden_dim: int,
         out_channels_dst: int,
-        graph: Optional[HeteroData] = None,
-        source_nodes_name: Optional[str] = None,
-        target_nodes_name: Optional[str] = None,
+        sub_graph: Optional[HeteroData] = None,
+        src_grid_size: Optional[int] = None,
+        dst_grid_size: Optional[int] = None,
         edge_weight_attribute: Optional[str] = None,
-        src_node_weight_attribute: Optional[str] = None,
-        truncation_file_path: Optional[str] = None,
         autocast: bool = False,
         **kwargs,  # accept not needed extra arguments
     ) -> None:
         super().__init__(
-            graph=graph,
-            source_nodes_name=source_nodes_name,
-            target_nodes_name=target_nodes_name,
+            sub_graph=sub_graph,
             edge_weight_attribute=edge_weight_attribute,
-            src_node_weight_attribute=src_node_weight_attribute,
-            truncation_file_path=truncation_file_path,
+            src_grid_size=src_grid_size,
+            dst_grid_size=dst_grid_size,
             autocast=autocast,
             **kwargs,
         )
