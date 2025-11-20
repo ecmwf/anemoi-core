@@ -45,7 +45,7 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
 
         from anemoi.graphs.generate.healpix import get_healpix_edgeindex
 
-        scale_resolutions = self.scale_resolutions or list(range(1, source_nodes["_resolution"]+1))
+        scale_resolutions = self.scale_resolutions or list(range(1, source_nodes["_resolution"] + 1))
         edges_index, prev_res = None, None
         for res in list(sorted(scale_resolutions)):
             new_edge_index = get_healpix_edgeindex(res)

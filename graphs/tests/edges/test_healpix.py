@@ -7,12 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
 import pytest
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import HEALPixMultiScaleEdges
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
 from anemoi.graphs.nodes import HEALPixNodes
 
 
@@ -20,8 +18,12 @@ class TestMultiScaleEdgesInit:
     def test_init(self):
         """Test MultiScaleEdges initialization."""
         assert isinstance(HEALPixMultiScaleEdges("test_nodes", "test_nodes", None), HEALPixMultiScaleEdges)
-        assert isinstance(HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=4), HEALPixMultiScaleEdges)
-        assert isinstance(HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=[1, 2, 3]), HEALPixMultiScaleEdges)
+        assert isinstance(
+            HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=4), HEALPixMultiScaleEdges
+        )
+        assert isinstance(
+            HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=[1, 2, 3]), HEALPixMultiScaleEdges
+        )
 
     @pytest.mark.parametrize("scale_resolutions", [0, -1, [0], [-1], "invalid"])
     def test_fail_init_invalid_scale_resolutions(self, scale_resolutions):

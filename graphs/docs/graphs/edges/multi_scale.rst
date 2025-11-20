@@ -58,13 +58,13 @@ included in the edge computation:
    :file: ./tri_refined_edges.csv
    :header-rows: 1
 
-=============
+*********************************
  HEALPix Multi-scale connections
-=============
+*********************************
 
-A similar edge builder is available for the HEALPix grid when using the ``HEALPixNodes`` builder. 
+A similar edge builder is available for the HEALPix grid when using the
+``HEALPixNodes`` builder.
 
-This edge builder, ``HEALPixMultiScaleEdges``, uses the same parameters as the
-multi-scale edge builder, except for ``x_hops``, which is currently always set to 1,
-and cannot be changed.
-
+This edge builder, ``HEALPixMultiScaleEdges``, uses the same parameters
+as the multi-scale edge builder, except for ``x_hops``, which is
+currently always set to 1, and cannot be changed.
