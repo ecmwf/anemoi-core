@@ -184,7 +184,7 @@ class GraphNodeAttributeScalerSchema(BaseModel):
 
 class TimeStepScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.TimeStepScaler"] = Field(..., alias="_target_")
-    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
+    norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
     "Normalisation method applied to the weights."
     weights: list[float] = Field(example=[1.0, 1.0])
     "Weights for each time step"
@@ -198,11 +198,11 @@ class LeadTimeDecayScalerSchema(BaseModel):
     "Decay factor for the lead time weights."
     max_lead_time: int = Field(example=24)
     "Maximum lead time for decay calculation."
-    decay_type: Literal["linear", "exponential"] = Field(example="linear")
+    decay_type: Literal["linear", "exponential"] | None = Field(default="linear", example="linear")
     "Type of decay to apply."
-    inverse: bool = Field(example=False)
+    inverse: bool | None = Field(default=False, example=False)
     "If true, weights increase with lead time."
-    norm: Literal["unit-max", "unit-sum"] | None = Field(example="unit-sum")
+    norm: Literal["unit-max", "unit-sum"] | None = Field(default="unit-sum", example="unit-sum")
     "Normalisation method applied to the weights."
 
 
@@ -232,6 +232,7 @@ ScalerSchema = (
     | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
+    | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
 )
 
