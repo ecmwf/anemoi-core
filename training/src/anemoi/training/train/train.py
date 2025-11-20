@@ -28,6 +28,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
 
+from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -462,6 +463,14 @@ class AnemoiTrainer(ABC):
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
+    def prepare_compilation(self) -> None:
+        if hasattr(self.config.model, "compile"):
+            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
+        if hasattr(self.config.training, "recompile_limit"):
+            torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
+            LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
+
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
@@ -500,6 +509,8 @@ class AnemoiTrainer(ABC):
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
+        self.prepare_compilation()
+
         LOGGER.debug("Starting training..")
 
         trainer.fit(
@@ -509,7 +520,7 @@ class AnemoiTrainer(ABC):
         )
 
         if self.config.diagnostics.print_memory_summary:
-            LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
+            LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
 
         LOGGER.debug("---- DONE. ----")
 
