@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
