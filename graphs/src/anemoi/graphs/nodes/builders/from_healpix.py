@@ -46,6 +46,7 @@ class HEALPixNodes(BaseNodeBuilder):
         """Initialize the HEALPixNodes builder."""
         self.resolution = resolution
         super().__init__(name)
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution"}
 
         assert isinstance(resolution, int), "Resolution must be an integer."
         assert resolution > 0, "Resolution must be positive."
