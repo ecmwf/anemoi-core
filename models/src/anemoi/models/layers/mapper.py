@@ -1498,8 +1498,7 @@ class BaseTruncationMapper(nn.Module):
 
         x = einops.rearrange(x, "batch time ensemble grid features -> (batch time ensemble) grid features")
         x = self._to_channel_shards(x, shard_shapes, model_comm_group)
-        x = self.project_down(x)
-        x = self.project_up(x)
+        x = self.project(x)
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
         x = self.emb_nodes(x)
         x = einops.rearrange(
