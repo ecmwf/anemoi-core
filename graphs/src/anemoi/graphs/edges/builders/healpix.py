@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import Optional
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -17,16 +18,34 @@ from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 LOGGER = logging.getLogger(__name__)
 
 
-class HEALPixNNEdges(BaseEdgeBuilder):
-    """HEALPix Nearest Neighbour Edges."""
+class HEALPixMultiScaleEdges(BaseEdgeBuilder):
+    """HEALPix Multi Scale Edges."""
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+        scale_resolutions: Optional[int | list[int]] = None,
+        **kwargs,
+    ):
+        super().__init__(source_name, target_name)
+        assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
+        if isinstance(scale_resolutions, int):
+            assert scale_resolutions > 0, "The scale_resolutions argument only supports positive integers."
+            scale_resolutions = list(range(1, scale_resolutions + 1))
+        assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
+        assert (
+            scale_resolutions is None or min(scale_resolutions) > 0
+        ), "The scale_resolutions argument only supports positive integers."
+        self.scale_resolutions = scale_resolutions
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        """Compute the edge index for HEALPix nearest neighbour edges."""
+        """Compute the edge index for HEALPix multi scale edges."""
         from anemoi.graphs.generate.healpix import get_healpix_edgeindex
 
-        resolution = source_nodes["_resolution"]
+        scale_resolutions = self.scale_resolutions or source_nodes["_resolutions"]
         edges_index, prev_res = None, None
-        for res in range(1, resolution + 1):
+        for res in list(sorted(scale_resolutions)):
             new_edge_index = get_healpix_edgeindex(res)
             LOGGER.debug(f"Resolution: {res}, Edge index shape: {new_edge_index.shape}")
             if edges_index is None:
