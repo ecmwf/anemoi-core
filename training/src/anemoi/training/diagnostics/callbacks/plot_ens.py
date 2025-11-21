@@ -153,10 +153,10 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
 
-            if self.config['training']['model_task']=='anemoi.training.train.tasks.GraphInterpolator':
-                time_out = (len(self.config.training.explicit_times.target), 'time_interp')
+            if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
+                time_out = (len(self.config.training.explicit_times.target), "time_interp")
             else:
-                time_out = (getattr(pl_module, "rollout", 0), 'forecast')
+                time_out = (getattr(pl_module, "rollout", 0), "forecast")
 
             self.plot(
                 trainer,
