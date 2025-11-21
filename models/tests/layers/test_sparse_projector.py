@@ -20,5 +20,5 @@ def test_sparse_projector(edge_index):
 
 
 def test_fail_no_weights(edge_index):
-    with pytest.raises(ValueError, match="Weights must be provided for SparseProjector."):
+    with pytest.raises(TypeError, match="Weights must be provided for SparseProjector."):
         SparseProjector(edge_index=edge_index, src_size=4, dst_size=2)
