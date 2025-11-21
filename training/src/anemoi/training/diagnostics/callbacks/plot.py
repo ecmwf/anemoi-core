@@ -737,7 +737,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     @rank_zero_only
     def on_validation_epoch_end(
         self,
-	trainer: pl.Trainer,
+        trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         **kwargs,
     ) -> None:
