@@ -1,7 +1,6 @@
 defaults:
 - data: multi_debug
 - dataloader: multi_dataset
-- datamodule: multi
 - diagnostics: evaluation
 - hardware: example
 - graph: multi_scale
