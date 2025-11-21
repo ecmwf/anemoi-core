@@ -17,6 +17,8 @@ from functools import cached_property
 import numpy as np
 import torch
 from einops import rearrange
+from rich.console import Console
+from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.training.data.grid_indices import BaseGridIndices
@@ -37,6 +39,8 @@ class NativeGridDataset(IterableDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
+        num_gpus_per_ens: int = 1,
+        num_gpus_per_model: int = 1,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -54,6 +58,10 @@ class NativeGridDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
+        num_gpus_per_ens : int, optional
+            Number of GPUs per ensemble, by default 1
+        num_gpus_per_model : int, optional
+            Number of GPUs per model, by default 1
         """
         self.label = label
 
@@ -66,6 +74,9 @@ class NativeGridDataset(IterableDataset):
         self.n_samples_per_epoch_total: int = 0
         self.n_samples_per_epoch_per_worker: int = 0
 
+        self.num_gpus_per_ens = num_gpus_per_ens
+        self.num_gpus_per_model = num_gpus_per_model
+
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
         self.model_comm_num_groups = 1
@@ -77,6 +88,10 @@ class NativeGridDataset(IterableDataset):
 
         self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
         self.sample_comm_group_id = 0
+
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_id = 0
 
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
@@ -96,7 +111,7 @@ class NativeGridDataset(IterableDataset):
         return self.data.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
+    def statistics_tendencies(self) -> dict | None:
         """Return dataset tendency statistics."""
         try:
             return self.data.statistics_tendencies(self.timestep)
@@ -114,12 +129,12 @@ class NativeGridDataset(IterableDataset):
         return self.data.supporting_arrays()
 
     @cached_property
-    def name_to_index(self) -> dict:
+    def name_to_index(self) -> dict[str, int]:
         """Return dataset statistics."""
         return self.data.name_to_index
 
     @cached_property
-    def resolution(self) -> dict:
+    def resolution(self) -> str:
         """Return dataset resolution."""
         return self.data.resolution
 
@@ -173,9 +188,9 @@ class NativeGridDataset(IterableDataset):
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
 
-        assert self.reader_group_size >= 1, "reader_group_size must be positive"
+        assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
-        LOGGER.debug(
+        LOGGER.info(
             "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
             "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
             global_rank,
@@ -183,6 +198,37 @@ class NativeGridDataset(IterableDataset):
             model_comm_group_rank,
             model_comm_num_groups,
             reader_group_rank,
+        )
+
+    def set_ens_comm_group_info(
+        self,
+        ens_comm_group_id: int,
+        ens_comm_group_rank: int,
+        ens_comm_num_groups: int,
+    ) -> None:
+        """Set ensemble communication group information (called by DDPGroupStrategy).
+
+        Parameters
+        ----------
+        ens_comm_group_id : int
+            Ensemble communication group ID
+        ens_comm_group_rank : int
+            Ensemble communication group rank
+        ens_comm_num_groups : int
+            Number of ensemble communication groups
+        """
+        self.ens_comm_group_id = ens_comm_group_id
+        self.ens_comm_group_rank = ens_comm_group_rank
+        self.ens_comm_num_groups = ens_comm_num_groups
+
+        LOGGER.info(
+            "NativeGridDataset.set_group_info(): global_rank %d, ens_comm_group_id %d, "
+            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d",
+            self.global_rank,
+            ens_comm_group_id,
+            ens_comm_group_rank,
+            ens_comm_num_groups,
+            self.reader_group_rank,
         )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
@@ -245,6 +291,28 @@ class NativeGridDataset(IterableDataset):
             sanity_rnd,
         )
 
+    def _get_sample(self, index: int) -> torch.Tensor:
+        start = index + self.relative_date_indices[0]
+        end = index + self.relative_date_indices[-1] + 1
+        timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+        # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
+        # data[start...] will be replaced with data[self.relative_date_indices + i]
+
+        grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+        if isinstance(grid_shard_indices, slice):
+            # Load only shards into CPU memory
+            x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+
+        else:
+            # Load full grid in CPU memory, select grid_shard after
+            # Note that anemoi-datasets currently doesn't support slicing + indexing
+            # in the same operation.
+            x = self.data[start:end:timeincrement, :, :, :]
+            x = x[..., grid_shard_indices]  # select the grid shard
+        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+
+        return torch.from_numpy(x)
+
     def __iter__(self) -> torch.Tensor:
         """Return an iterator over the dataset.
 
@@ -279,31 +347,20 @@ class NativeGridDataset(IterableDataset):
         )
 
         for i in shuffled_chunk_indices:
-            start = i + self.relative_date_indices[0]
-            end = i + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
-
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
-
-            else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-            self.ensemble_dim = 1
-
-            yield torch.from_numpy(x)
+            yield self._get_sample(i)
 
     def __repr__(self) -> str:
-        return f"""
-            {super().__repr__()}
-            Dataset: {self.data}
-            Relative dates: {self.relative_date_indices}
-        """
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Timestep: {self.timestep}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Relative dates: {self.relative_date_indices}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree.add(f"Num samples: {len(self.valid_date_indices)}")
+        return tree

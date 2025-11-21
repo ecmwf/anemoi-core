@@ -20,8 +20,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.data.dataset.multidataset import MultiDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
+from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.worker_init import worker_init_func
@@ -49,6 +49,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self.graph_data = graph_data
         self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
         self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
+        self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
 
         self.dataset_names = list(self.train_dataloader_config.keys())
         LOGGER.info("Initializing multi-dataset module with datasets: %s", self.dataset_names)
@@ -196,55 +197,45 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        datasets_config = {}
-        for name, dataset_config in self.train_dataloader_config.items():
-            data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)
-            datasets_config[name] = data_reader
-
-        return MultiDataset(
-            datasets_config=datasets_config,
-            grid_indices_config=self.grid_indices,
-            relative_date_indices=self.relative_date_indices(),
-            timestep=self.config.data.timestep,
-            shuffle=True,
-            label="train",
-        )
+        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
         """Create multi-dataset for validation."""
-        datasets_config = {}
-        for name, dataset_config in self.valid_dataloader_config.items():
-            data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)
-            datasets_config[name] = data_reader
-
-        return MultiDataset(
-            datasets_config=datasets_config,
-            grid_indices_config=self.grid_indices,
-            relative_date_indices=self.relative_date_indices(self.config.dataloader.validation_rollout),
-            timestep=self.config.data.timestep,
+        return self._get_dataset(
+            self.valid_dataloader_config,
             shuffle=False,
+            val_rollout=self.config.dataloader.validation_rollout,
             label="validation",
         )
 
     @cached_property
     def ds_test(self) -> MultiDataset:
         """Create multi-dataset for testing."""
-        datasets_config = {}
-        for name, dataset_config in self.config.dataloader.test.datasets.items():
+        return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
+
+    def _get_dataset(
+        self,
+        datasets: dict[str, dict],
+        shuffle: bool = True,
+        val_rollout: int = 1,
+        label: str = "generic",
+    ) -> MultiDataset:
+        data_readers = {}
+        for name, dataset_config in datasets.items():
             data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)
-            datasets_config[name] = data_reader
+            data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
+            data_readers[name] = data_reader
 
         return MultiDataset(
-            datasets_config=datasets_config,
-            grid_indices_config=self.grid_indices,
-            relative_date_indices=self.relative_date_indices(),
+            data_readers=data_readers,
+            relative_date_indices=self.relative_date_indices(val_rollout),
             timestep=self.config.data.timestep,
-            shuffle=False,
-            label="test",
+            shuffle=shuffle,
+            grid_indices=self.grid_indices,
+            label=label,
+            num_gpus_per_ens=getattr(self.config.hardware, "num_gpus_per_ensemble", 1),
+            num_gpus_per_model=self.config.hardware.num_gpus_per_model,
         )
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:

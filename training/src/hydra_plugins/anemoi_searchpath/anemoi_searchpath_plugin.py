@@ -68,4 +68,14 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
                 )
                 LOGGER.info("Prepending current user directory (%s) to the search path.", cwd_path)
                 LOGGER.debug("Search path is now: %s", search_path)
+
+        # Add package config path as lowest priority fallback (issue #570)
+        # This enables discovery of default configs like 'training/default'
+        # Appended (not prepended) so user configs maintain higher priority
+        search_path.append(
+            provider="anemoi-package-searchpath-plugin",
+            path="pkg://anemoi.training/config",
+        )
+        LOGGER.debug("Appended package config path (pkg://anemoi.training/config) to search path.")
+
         LOGGER.info("Search path is now: %s", search_path)
