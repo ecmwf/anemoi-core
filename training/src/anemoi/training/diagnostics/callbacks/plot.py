@@ -704,7 +704,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         epoch: int,
-        time_out: tuple,
+        **kwargs: Any,
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
