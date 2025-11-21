@@ -1,6 +1,7 @@
-from anemoi.models.layers.sparse_projector import SparseProjector
-import torch
 import pytest
+import torch
+
+from anemoi.models.layers.sparse_projector import SparseProjector
 
 
 @pytest.fixture

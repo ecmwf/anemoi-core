@@ -21,6 +21,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
@@ -226,6 +227,7 @@ class BaseGraphModel(nn.Module):
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
-                y_hat = gather_tensor(y_hat, -2, grid_shard_shapes, model_comm_group)
+                y_hat_shard_shapes = apply_shard_shapes(y_hat, -2, grid_shard_shapes)
+                y_hat = gather_tensor(y_hat, -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
