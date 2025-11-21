@@ -57,8 +57,9 @@ class BaseLoss(nn.Module, ABC):
 
         self.add_module("scaler", ScaleTensor())
 
-        self.avg_function = torch.nanmean if ignore_nans else torch.mean
-        self.sum_function = torch.nansum if ignore_nans else torch.sum
+        self.avg_function = torch.mean
+        self.sum_function = torch.sum
+        self.ignore_nans = ignore_nans
 
         self.supports_sharding = True
 
@@ -150,6 +151,8 @@ class BaseLoss(nn.Module, ABC):
             Mode to use for squashing the variable dimension, by default "avg"
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
+        group : ProcessGroup, optional
+            Distributed group to reduce over, by default None
 
         Returns
         -------
@@ -282,7 +285,10 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
+        if self.ignore_nans:
+            nan_mask = torch.isnan(target)
+            target = target.masked_fill(nan_mask, 0.0)
+            pred = pred.masked_fill(nan_mask, 0.0)
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
         return self.reduce(out, squash, group=group if is_sharded else None)

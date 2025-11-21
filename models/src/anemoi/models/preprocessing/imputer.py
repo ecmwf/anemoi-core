@@ -165,10 +165,12 @@ class BaseImputer(BasePreprocessor, ABC):
         ----------
         x : torch.Tensor
             Input tensor
-        index : list
+        index_x : list
             List of indices for the variables to be imputed
         nan_locations : torch.Tensor
             Tensor with NaN locations
+        index_nl : list
+            List of indices for the variables to be imputed
 
         Returns
         -------
@@ -520,3 +522,205 @@ class DynamicCopyImputer(DynamicMixin, CopyImputer):
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         return DynamicMixin.inverse_transform(self, x, in_place)
+
+
+class InputOnlyImputer(BasePreprocessor):
+    """Lightweight imputer that only fills NaNs in inputs, not targets.
+    Output NaNs are handled by the loss function with ignore_nans: True.
+
+    This class is intentionally simple and stateless:
+    - No NaN location tracking across forward/backward passes
+    - No loss mask creation
+    - No inverse transform (outputs left untouched)
+    - Imputes only input timesteps, leaving target timesteps with NaNs
+
+    Configuration example:
+    ```
+    default: "none"
+    mean:
+        - var1
+        - var2
+    0.0:
+        - var3
+    multi_step: 2  # Number of input timesteps (optional, defaults to 2)
+    ```
+    """
+
+    def __init__(
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
+    ) -> None:
+        """Initialize the simple input-only imputer.
+
+        Parameters
+        ----------
+        config : DotDict
+            Configuration object with imputation methods.
+            Can include 'multi_step' to specify number of input timesteps.
+        data_indices : IndexCollection
+            Data indices for input variables
+        statistics : dict
+            Data statistics dictionary (e.g., mean, min, max)
+        """
+        super().__init__(config, data_indices, statistics)
+
+        if isinstance(statistics, DictConfig):
+            statistics = OmegaConf.to_container(statistics, resolve=True)
+
+        # Get multi_step from config, default to 2 if not specified
+        # This determines how many timesteps are inputs vs targets
+        self.multi_step = getattr(config, "multi_step", 2) if config is not None else 2
+        LOGGER.info(
+            f"InputOnlyImputer: will impute first {self.multi_step} timesteps only (inputs), "
+            f"leaving remaining timesteps (targets) with NaNs for loss to ignore"
+        )
+
+        self._create_imputation_values(statistics)
+
+    def _create_imputation_values(self, statistics: Optional[dict] = None) -> None:
+        """Create the imputation values for each input variable.
+
+        Parameters
+        ----------
+        statistics : dict, optional
+            Statistics dictionary containing mean, min, max, etc.
+        """
+        name_to_index = self.data_indices.data.input.name_to_index
+
+        # Store expected input shapes for validation
+        self.num_training_input_vars = len(self.data_indices.data.input.name_to_index)
+        self.num_inference_input_vars = len(self.data_indices.model.input.name_to_index)
+
+        # Get list of forcing variable names
+        forcing_names = set(getattr(self.data_indices, "forcing", []))
+
+        # Pre-allocate imputation value tensors for fast indexing
+        # These will be registered as buffers so they move to the correct device
+        imputation_values = torch.full((self.num_training_input_vars,), float("nan"), dtype=torch.float32)
+
+        # Track which variables are forcing vs non-forcing
+        forcing_indices = []
+        non_forcing_indices = []
+
+        for name, idx in name_to_index.items():
+            method = self.methods.get(name, self.default)
+
+            if method == "none":
+                LOGGER.debug(f"InputOnlyImputer: skipping {name} as no imputation method specified")
+                continue
+
+            # Determine the imputation value
+            if statistics is not None and method in statistics:
+                # Use statistical value (e.g., mean, min, max)
+                value = statistics[method][idx]
+            else:
+                # Use constant value directly
+                try:
+                    value = float(method)
+                except (ValueError, TypeError):
+                    raise ValueError(
+                        f"Method '{method}' for variable '{name}' is not a valid statistic "
+                        f"or constant value. Available statistics: {list(statistics.keys()) if statistics else 'none'}"
+                    )
+
+            imputation_values[idx] = value
+
+            # Track indices by type for efficient slicing
+            if name in forcing_names:
+                forcing_indices.append(idx)
+                LOGGER.info(
+                    f"InputOnlyImputer: replacing NaNs in forcing variable {name} "
+                    f"across ALL timesteps with value {value}"
+                )
+            else:
+                non_forcing_indices.append(idx)
+                LOGGER.info(
+                    f"InputOnlyImputer: replacing NaNs in prognostic/diagnostic variable {name} "
+                    f"in first {self.multi_step} timesteps only with value {value}"
+                )
+
+        # Register as buffers for automatic device management
+        self.register_buffer("imputation_values", imputation_values, persistent=False)
+        self.register_buffer("forcing_indices", torch.tensor(forcing_indices, dtype=torch.long), persistent=False)
+        self.register_buffer(
+            "non_forcing_indices", torch.tensor(non_forcing_indices, dtype=torch.long), persistent=False
+        )
+
+    def transform(self, x: torch.Tensor, in_place: bool = True, **kwargs) -> torch.Tensor:
+        """Impute NaNs in input tensor ONLY, with special handling for forcing variables.
+        Handles dynamic NaN locations that can change per-sample, per-batch,
+
+        - Prognostic/diagnostic variables: imputed only in first `multi_step` timesteps
+        - Forcing variables: imputed across ALL timesteps (needed for rollout)
+        - Target timesteps keep NaNs in prognostic variables for loss to ignore
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape (batch, time, ..., grid, variable)
+        in_place : bool, optional
+            Whether to modify the input tensor in place (default: True)
+        kwargs : dict
+            Additional keyword arguments
+
+        Returns
+        -------
+        torch.Tensor
+            Tensor with NaNs filled appropriately per variable type
+        """
+        # Validate this is an input tensor, not an output tensor
+        if x.shape[-1] not in (self.num_training_input_vars, self.num_inference_input_vars):
+            raise ValueError(
+                f"InputOnlyImputer.transform() called on tensor with {x.shape[-1]} variables, "
+                f"but expected input tensor with {self.num_training_input_vars} (training) or "
+                f"{self.num_inference_input_vars} (inference) variables. "
+                f"This imputer should ONLY be used on inputs, not outputs."
+            )
+
+        if not in_place:
+            x = x.clone()
+
+        # Detect NaNs - only compute mask once
+        nan_mask = torch.isnan(x)
+
+        # Determine which timesteps to impute for non-forcing variables
+        training_mode = x.ndim >= 2 and x.shape[1] > self.multi_step
+
+        # Vectorized imputation using advanced indexing - much faster than loops
+        if len(self.forcing_indices) > 0:
+            # Impute forcing variables across ALL timesteps
+            # Use nan_to_num with custom nan replacement per variable
+            forcing_slice = x[..., self.forcing_indices]
+            forcing_mask = nan_mask[..., self.forcing_indices]
+            forcing_values = self.imputation_values[self.forcing_indices]
+            # Broadcast imputation values to match tensor shape
+            forcing_values = forcing_values.view(*([1] * (forcing_slice.ndim - 1)), -1)
+            x[..., self.forcing_indices] = torch.where(forcing_mask, forcing_values, forcing_slice)
+
+        if len(self.non_forcing_indices) > 0:
+            if training_mode:
+                # Impute non-forcing variables only in first multi_step timesteps
+                non_forcing_slice = x[:, : self.multi_step, ..., self.non_forcing_indices]
+                non_forcing_mask = nan_mask[:, : self.multi_step, ..., self.non_forcing_indices]
+                non_forcing_values = self.imputation_values[self.non_forcing_indices]
+                # Broadcast imputation values to match tensor shape
+                non_forcing_values = non_forcing_values.view(*([1] * (non_forcing_slice.ndim - 1)), -1)
+                x[:, : self.multi_step, ..., self.non_forcing_indices] = torch.where(
+                    non_forcing_mask, non_forcing_values, non_forcing_slice
+                )
+            else:
+                # Inference mode: impute all timesteps
+                non_forcing_slice = x[..., self.non_forcing_indices]
+                non_forcing_mask = nan_mask[..., self.non_forcing_indices]
+                non_forcing_values = self.imputation_values[self.non_forcing_indices]
+                # Broadcast imputation values to match tensor shape
+                non_forcing_values = non_forcing_values.view(*([1] * (non_forcing_slice.ndim - 1)), -1)
+                x[..., self.non_forcing_indices] = torch.where(non_forcing_mask, non_forcing_values, non_forcing_slice)
+
+        return x
+
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+        """No-op: outputs are not modified, NaNs handled by loss function."""
+        return x
