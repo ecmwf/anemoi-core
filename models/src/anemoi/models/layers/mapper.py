@@ -1514,6 +1514,8 @@ class GraphInterpolationForwardMapper(GraphInterpolationBaseMapper):
         autocast: bool = False,
         **kwargs,  # accept not needed extra arguments
     ) -> None:
+        self.in_channels_src = in_channels_src
+        self.hidden_dim = hidden_dim
         super().__init__(
             sub_graph=sub_graph,
             edge_weight_attribute=edge_weight_attribute,
@@ -1553,6 +1555,8 @@ class GraphInterpolationBackwardMapper(GraphInterpolationBaseMapper):
         autocast: bool = False,
         **kwargs,  # accept not needed extra arguments
     ) -> None:
+        self.hidden_dim = hidden_dim
+        self.out_channels_dst = out_channels_dst
         super().__init__(
             sub_graph=sub_graph,
             edge_weight_attribute=edge_weight_attribute,
