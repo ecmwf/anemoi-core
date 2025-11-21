@@ -40,6 +40,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
                 nodes_coords_rad=nodes["x"],
                 resolutions=scale_resolutions,
                 node_ordering=nodes["_node_ordering"],
+                area_mask_builder=nodes.get("_area_mask_builder", None),
             )
             nodes["_multiscale_edges"] = multiscale_edges
         else:
@@ -50,7 +51,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
                 x_hops=x_hops,
                 area_mask_builder=nodes.get("_area_mask_builder", None),
             )
-            return nodes
+        return nodes
 
 
 class HexNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):

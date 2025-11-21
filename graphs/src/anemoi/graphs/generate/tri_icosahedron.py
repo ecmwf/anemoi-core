@@ -137,7 +137,12 @@ def create_nx_graph_from_tri_coords(coords_rad: np.ndarray, node_ordering: np.nd
     return graph
 
 
-def add_edges_hop_1(nodes_coords_rad, resolutions: list[int], node_ordering: list[int]) -> np.ndarray:
+def add_edges_hop_1(
+        nodes_coords_rad,
+        resolutions: list[int], 
+        node_ordering: list[int],
+        area_mask_builder: KNNAreaMaskBuilder | None = None,
+) -> np.ndarray:
     """Adds edges for x_hops = 1 relying on trimesh only."""
 
     hop_1_edges = []
@@ -154,9 +159,16 @@ def add_edges_hop_1(nodes_coords_rad, resolutions: list[int], node_ordering: lis
     multiscale_edges = np.transpose(np.concatenate(hop_1_edges, axis=0), (1, 0))
 
     # Map the edges to the node ordering
-    inverse_ordering = np.empty_like(node_ordering)
-    inverse_ordering[node_ordering] = np.arange(len(node_ordering))
-    multiscale_edges = inverse_ordering[multiscale_edges]
+    if area_mask_builder is not None:
+        inverse_ordering = np.full(coords_rad.shape[0], -1, dtype=int)
+        inverse_ordering[node_ordering] = np.arange(len(node_ordering))
+        updated_edges = inverse_ordering[multiscale_edges]
+        valid_edges_mask = np.all(updated_edges >= 0, axis=0)
+        multiscale_edges = updated_edges[:, valid_edges_mask]
+    else:
+        inverse_ordering = np.empty_like(node_ordering)
+        inverse_ordering[node_ordering] = np.arange(len(node_ordering))
+        multiscale_edges = inverse_ordering[multiscale_edges]
 
     LOGGER.debug("multiscale_edges_shape: %s", multiscale_edges.shape)
     return multiscale_edges
