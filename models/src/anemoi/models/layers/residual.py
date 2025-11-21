@@ -20,7 +20,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_providers import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 
 
@@ -31,24 +31,12 @@ class BaseResidualConnection(nn.Module, ABC):
         super().__init__()
 
     @abstractmethod
-    def forward(
-        self,
-        x: torch.Tensor,
-        grid_shard_shapes=None,
-        model_comm_group=None,
-        n_step_output: int | None = None,
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Define the residual connection operation.
 
         Should be overridden by subclasses.
         """
         pass
-
-    @staticmethod
-    def _expand_time(x: torch.Tensor, n_step_output: int | None) -> torch.Tensor:
-        if n_step_output is None:
-            return x
-        return x.unsqueeze(1).expand(-1, n_step_output, -1, -1, -1)
 
 
 class SkipConnection(BaseResidualConnection):
@@ -63,16 +51,9 @@ class SkipConnection(BaseResidualConnection):
         super().__init__()
         self.step = step
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        grid_shard_shapes=None,
-        model_comm_group=None,
-        n_step_output: int | None = None,
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
-        x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
-        return self._expand_time(x_skip, n_step_output)
+        return x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
 
 
 class TruncatedConnection(BaseResidualConnection):
@@ -102,8 +83,6 @@ class TruncatedConnection(BaseResidualConnection):
         File path (.npz) to load the up-projection matrix from.
     truncation_down_file_path : str, optional
         File path (.npz) to load the down-projection matrix from.
-    row_normalize : bool, optional
-        Whether to normalize weights per row (target node) so each row sums to 1
 
     Example
     -------
@@ -145,7 +124,6 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_up_file_path: Optional[str] = None,
         truncation_down_file_path: Optional[str] = None,
         autocast: bool = False,
-        row_normalize: bool = False,
     ) -> None:
         super().__init__()
         up_edges, down_edges = self._get_edges_name(
@@ -163,7 +141,6 @@ class TruncatedConnection(BaseResidualConnection):
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_down_file_path,
-            row_normalize=row_normalize,
         )
 
         self.provider_up = ProjectionGraphProvider(
@@ -172,7 +149,6 @@ class TruncatedConnection(BaseResidualConnection):
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_up_file_path,
-            row_normalize=row_normalize,
         )
 
         self.projector = SparseProjector(autocast=autocast)
@@ -204,13 +180,7 @@ class TruncatedConnection(BaseResidualConnection):
             up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        grid_shard_shapes=None,
-        model_comm_group=None,
-        n_step_output: int | None = None,
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
         """Apply truncated skip connection."""
         batch_size = x.shape[0]
         x = x[:, -1, ...]  # pick latest step
@@ -223,7 +193,7 @@ class TruncatedConnection(BaseResidualConnection):
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
-        return self._expand_time(x, n_step_output)
+        return x
 
     def _to_channel_shards(self, x, shard_shapes=None, model_comm_group=None):
         return self._reshard(x, shard_channels, shard_shapes, model_comm_group)
