@@ -266,10 +266,10 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
 
-            if self.config['training']['model_task']=='anemoi.training.train.tasks.GraphInterpolator':
-                time_out = (len(self.config.training.explicit_times.target), 'time_interp')
+            if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
+                time_out = (len(self.config.training.explicit_times.target), "time_interp")
             else:
-                time_out = (getattr(pl_module, "rollout", 0), 'forecast')
+                time_out = (getattr(pl_module, "rollout", 0), "forecast")
 
             self.plot(
                 trainer,
@@ -308,10 +308,10 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
-            if self.config['training']['model_task']=='anemoi.training.train.tasks.GraphInterpolator':
-                time_out = (len(self.config.training.explicit_times.target), 'time_interp')
+            if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
+                time_out = (len(self.config.training.explicit_times.target), "time_interp")
             else:
-                time_out = (getattr(pl_module, "rollout", 0), 'forecast')
+                time_out = (getattr(pl_module, "rollout", 0), "forecast")
 
             self.plot(trainer, pl_module, epoch=trainer.current_epoch, time_out=time_out, **kwargs)
 
@@ -893,7 +893,6 @@ class PlotLoss(BasePerBatchPlotCallback):
                 RuntimeWarning,
             )
 
-
         for rollout_step in range(time_out[0]):
             y_hat = outputs[1][rollout_step]
             y_true = batch[
@@ -1062,7 +1061,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
 
         for rollout_step in range(time_out[0]):
-            if time_out[1] == 'time_interp':
+            if time_out[1] == "time_interp":
                 init = rollout_step
             else:
                 init = 0
@@ -1151,7 +1150,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if time_out[1] == 'time_interp':
+            if time_out[1] == "time_interp":
                 init = rollout_step
             else:
                 init = 0
@@ -1243,7 +1242,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if time_out[1] == 'time_interp':
+            if time_out[1] == "time_interp":
                 init = rollout_step
             else:
                 init = 0
