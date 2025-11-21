@@ -36,6 +36,7 @@ from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
+from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -209,8 +210,6 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
-    grid_skip: Union[int, None] = 0  # !TODO set default to -1 if added to standard forecaster.
-    "Index of grid residual connection, or use none. Currently only in interpolator."
     processor: Union[
         GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema, PointWiseMLPProcessorSchema
     ] = Field(
@@ -227,7 +226,12 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "GNN decoder schema."
+    "GNN decoder schema.",
+    residual: ResidualConnectionSchema = Field(
+        ...,
+        discriminator="target_",
+    )
+    "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
 
@@ -250,6 +254,8 @@ class NoiseInjectorSchema(BaseModel):
 class EnsModelSchema(BaseModelSchema):
     noise_injector: NoiseInjectorSchema = Field(default_factory=list)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+    condition_on_residual: bool = Field(default=False)
+    "Whether to condition the noise injection on the residual connection."
 
 
 class DiffusionModelSchema(BaseModelSchema):
@@ -268,6 +274,11 @@ class DiffusionModelSchema(BaseModelSchema):
         return self
 
 
+class DiffusionTendModelSchema(DiffusionModelSchema):
+    condition_on_residual: bool = Field(default=False)
+    "Whether to condition the noise injection on the residual connection."
+
+
 class HierarchicalModelSchema(BaseModelSchema):
     enable_hierarchical_level_processing: bool = Field(default=False)
     "Toggle to do message passing at every downscaling and upscaling step"
@@ -275,4 +286,6 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Number of message passing steps at each level"
 
 
-ModelSchema = Union[BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema]
+ModelSchema = Union[
+    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+]
