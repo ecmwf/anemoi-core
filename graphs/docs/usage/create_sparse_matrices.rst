@@ -74,7 +74,7 @@ For example, to export only the ``gauss_weight`` attribute for the
 
    % anemoi-graphs export_to_sparse graph_recipe.yaml output_dir/ \
        --edges-attributes-name gauss_weight \
-       --edges-name data->down
+       --edges-name data down
 
 You can specify multiple attributes or subgraphs by repeating the
 arguments:
@@ -84,8 +84,8 @@ arguments:
    % anemoi-graphs export_to_sparse graph_recipe.yaml output_dir/ \
        --edges-attributes-name gauss_weight \
        --edges-attributes-name another_weight \
-       --edges-name data->down \
-       --edges-name down->data
+       --edges-name data down \
+       --edges-name down data
 
 This flexibility allows you to generate only the sparse matrices you
 need for your application, reducing storage and processing time.
