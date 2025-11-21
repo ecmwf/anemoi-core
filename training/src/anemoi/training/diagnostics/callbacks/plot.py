@@ -704,7 +704,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         epoch: int,
-        **kwargs: Any,
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
@@ -734,6 +733,16 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             )
         else:
             LOGGER.warning("There are no trainable edge attributes to plot.")
+
+    @rank_zero_only
+    def on_validation_epoch_end(
+        self,
+	trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        **kwargs,
+    ) -> None:
+
+        self.plot(trainer, pl_module, epoch=trainer.current_epoch, **kwargs)
 
 
 class PlotLoss(BasePerBatchPlotCallback):
