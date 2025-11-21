@@ -31,7 +31,6 @@ class GraphInterpolator(BaseGraphModule):
         *,
         config: DictConfig,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -59,7 +58,6 @@ class GraphInterpolator(BaseGraphModule):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,

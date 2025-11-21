@@ -77,8 +77,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         Configuration object defining all parameters.
     graph_data : HeteroData
         Graph-structured input data containing node and edge features.
-    truncation_data : dict
-        Information for input/output truncation masks.
     statistics : dict
         Dictionary of training statistics (mean, std, etc.) used for normalization.
     statistics_tendencies : dict
@@ -135,7 +133,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -173,7 +170,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata=metadata,
             supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             config=convert_to_omegaconf(config),
         )
         self.config = config
