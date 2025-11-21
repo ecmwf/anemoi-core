@@ -1061,17 +1061,14 @@ class PlotSample(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
 
         for rollout_step in range(time_out[0]):
-            if time_out[1] == "time_interp":
-                init = rollout_step
-            else:
-                init = 0
+            init_step = rollout_step if time_out[1] == "time_interp" else 0
 
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
                 self.per_sample,
                 self.latlons,
                 self.accumulation_levels_plot,
-                data[init, ...].squeeze(),
+                data[init_step, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 datashader=self.datashader_plotting,
@@ -1150,15 +1147,12 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if time_out[1] == "time_interp":
-                init = rollout_step
-            else:
-                init = 0
+            init_step = rollout_step if time_out[1] == "time_interp" else 0
 
             fig = plot_power_spectrum(
                 plot_parameters_dict_spectrum,
                 self.latlons,
-                data[init, ...].squeeze(),
+                data[init_step, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 min_delta=self.min_delta,
@@ -1242,14 +1236,11 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            if time_out[1] == "time_interp":
-                init = rollout_step
-            else:
-                init = 0
+            init_step = rollout_step if time_out[1] == "time_interp" else 0
 
             fig = plot_histogram(
                 plot_parameters_dict_histogram,
-                data[init, ...].squeeze(),
+                data[init_step, ...].squeeze(),
                 data[rollout_step + 1, ...].squeeze(),
                 output_tensor[rollout_step, ...],
                 self.precip_and_related_fields,
