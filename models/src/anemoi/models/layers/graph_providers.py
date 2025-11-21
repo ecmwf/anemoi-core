@@ -10,7 +10,9 @@
 
 from abc import ABC
 from abc import abstractmethod
+from pathlib import Path
 from typing import Optional
+from typing import Union
 
 import numpy as np
 import torch
@@ -85,7 +87,7 @@ class BaseGraphProvider(nn.Module, ABC):
         batch_size: Optional[int] = None,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
-    ) -> tuple[Tensor, Adj]:
+    ) -> Union[tuple[Tensor, Adj], Tensor]:
         """Get edge information.
 
         Parameters
@@ -99,8 +101,9 @@ class BaseGraphProvider(nn.Module, ABC):
 
         Returns
         -------
-        tuple[Tensor, Adj]
-            Edge attributes and edge index
+        Union[tuple[Tensor, Adj], Tensor]
+            For standard providers: (edge_attr, edge_index) tuple
+            For sparse providers: sparse projection matrix
         """
         pass
 
@@ -109,6 +112,11 @@ class BaseGraphProvider(nn.Module, ABC):
     def edge_dim(self) -> int:
         """Return the edge dimension."""
         pass
+
+    @property
+    def is_sparse(self) -> bool:
+        """Whether this provider returns sparse matrices."""
+        return False
 
 
 class StaticGraphProvider(BaseGraphProvider):
@@ -302,3 +310,150 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         # Build graph from coordinates
         return self.build_graph(src_coords, dst_coords)
+
+
+class ProjectionGraphProvider(BaseGraphProvider):
+    """Provider for sparse projection matrices.
+
+    Builds and stores sparse projection matrix from graph or file.
+    """
+
+    def __init__(
+        self,
+        graph: Optional[HeteroData] = None,
+        edges_name: Optional[tuple[str, str, str]] = None,
+        edge_weight_attribute: Optional[str] = None,
+        src_node_weight_attribute: Optional[str] = None,
+        file_path: Optional[str | Path] = None,
+        row_normalize: bool = True,
+    ) -> None:
+        """Initialize ProjectionGraphProvider.
+
+        Parameters
+        ----------
+        graph : HeteroData, optional
+            Graph containing edges for projection
+        edges_name : tuple[str, str, str], optional
+            Edge type identifier (src, relation, dst)
+        edge_weight_attribute : str, optional
+            Edge attribute name for weights
+        src_node_weight_attribute : str, optional
+            Source node attribute name for weights
+        file_path : str | Path, optional
+            Path to .npz file with projection matrix
+        row_normalize : bool
+            Whether to normalize weights per destination node
+        """
+        super().__init__()
+
+        if file_path is not None:
+            self._build_from_file(file_path)
+        else:
+            assert (
+                graph is not None and edges_name is not None
+            ), "Must provide graph and edges_name if file_path not given"
+            self._build_from_graph(graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize)
+
+    def _build_from_file(self, file_path: str | Path) -> None:
+        """Load projection matrix from file."""
+        from scipy.sparse import load_npz
+
+        truncation_data = load_npz(file_path)
+        edge_index = torch.tensor(np.vstack(truncation_data.nonzero()), dtype=torch.long)
+        weights = torch.tensor(truncation_data.data, dtype=torch.float32)
+        src_size, dst_size = truncation_data.shape
+
+        self._create_matrix(edge_index, weights, src_size, dst_size, row_normalize=False)
+
+    def _build_from_graph(
+        self,
+        graph: HeteroData,
+        edges_name: tuple[str, str, str],
+        edge_weight_attribute: Optional[str],
+        src_node_weight_attribute: Optional[str],
+        row_normalize: bool,
+    ) -> None:
+        """Build projection matrix from graph."""
+        sub_graph = graph[edges_name]
+
+        if edge_weight_attribute:
+            weights = sub_graph[edge_weight_attribute].squeeze()
+        else:
+            weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+
+        if src_node_weight_attribute:
+            weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
+
+        self._create_matrix(
+            sub_graph.edge_index,
+            weights,
+            graph[edges_name[0]].num_nodes,
+            graph[edges_name[2]].num_nodes,
+            row_normalize,
+        )
+
+    def _create_matrix(
+        self, edge_index: Tensor, weights: Tensor, src_size: int, dst_size: int, row_normalize: bool
+    ) -> None:
+        """Create sparse projection matrix."""
+        if row_normalize:
+            weights = self._row_normalize_weights(edge_index, weights, dst_size)
+
+        self.projection_matrix = (
+            torch.sparse_coo_tensor(
+                edge_index,
+                weights,
+                (src_size, dst_size),
+                device=edge_index.device,
+            )
+            .coalesce()
+            .T
+        )
+        self._edge_dim = self.projection_matrix.shape[1]
+
+    @staticmethod
+    def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_target_nodes: int) -> Tensor:
+        """Normalize weights per destination node."""
+        total = torch.zeros(num_target_nodes, device=weights.device)
+        norm = total.scatter_add_(0, edge_index[1].long(), weights)
+        norm = norm[edge_index[1]]
+        return weights / (norm + 1e-8)
+
+    @property
+    def edge_dim(self) -> int:
+        """Return projection matrix shape."""
+        return self._edge_dim
+
+    @property
+    def is_sparse(self) -> bool:
+        """This provider returns sparse matrices."""
+        return True
+
+    def get_edges(
+        self,
+        batch_size: Optional[int] = None,
+        src_coords: Optional[Tensor] = None,
+        dst_coords: Optional[Tensor] = None,
+        device: Optional[torch.device] = None,
+    ) -> Tensor:
+        """Return the sparse projection matrix.
+
+        Parameters
+        ----------
+        batch_size : int, optional
+            Unused for sparse providers
+        src_coords : Tensor, optional
+            Unused for sparse providers
+        dst_coords : Tensor, optional
+            Unused for sparse providers
+        device : torch.device, optional
+            Target device for matrix
+
+        Returns
+        -------
+        Tensor
+            Sparse projection matrix
+        """
+        if device is not None:
+            self.projection_matrix = self.projection_matrix.to(device)
+        return self.projection_matrix
