@@ -129,7 +129,7 @@ def test_ensemble_plot_mixin_process():
     pl_module.latlons_data = torch.randn(100, 2)
 
     # Mock config
-    config["training"]["model_task"] = 'anemoi.training.train.tasks.GraphEnsForecaster'
+    config["training"]["model_task"] = "anemoi.training.train.tasks.GraphEnsForecaster"
     # Create test tensors
     # batch: bs, input_steps + forecast_steps, latlon, nvar
     batch = torch.randn(2, 6, 100, 5)
@@ -158,10 +158,9 @@ def test_ensemble_plot_mixin_process():
     mixin.post_processors = mock_post_processors
 
     if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-      time_out = (len(self.config.training.explicit_times.target), "time_interp")
+        time_out = (len(self.config.training.explicit_times.target), "time_interp")
     else:
-      time_out = (getattr(pl_module, "rollout", 0), "forecast")
-
+        time_out = (getattr(pl_module, "rollout", 0), "forecast")
 
     data, result_output_tensor = mixin.process(pl_module, outputs, batch, time_out=time_out, members=0)
 
