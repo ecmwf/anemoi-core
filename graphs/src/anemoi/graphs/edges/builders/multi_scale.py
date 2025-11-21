@@ -106,7 +106,9 @@ class MultiScaleEdges(BaseEdgeBuilder):
             )
 
         # Add edges
-        source_nodes = edge_builder_cls().add_edges(source_nodes, self.x_hops, scale_resolutions=scale_resolutions, new_method=self.new_method)
+        source_nodes = edge_builder_cls().add_edges(
+            source_nodes, self.x_hops, scale_resolutions=scale_resolutions, new_method=self.new_method
+        )
         if self.new_method:
             # If the new method is used, the edges are already computed and stored in the node storage
             edge_index = source_nodes["_multiscale_edges"]
@@ -114,6 +116,5 @@ class MultiScaleEdges(BaseEdgeBuilder):
             adjmat = nx.to_scipy_sparse_array(source_nodes["_nx_graph"], format="coo")
             # Get source & target indices of the edges
             edge_index = np.stack([adjmat.col, adjmat.row], axis=0)
-        
 
         return torch.from_numpy(edge_index).to(torch.int32)

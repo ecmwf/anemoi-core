@@ -8,12 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 
 from torch_geometric.data.storage import NodeStorage
-import logging
+
 LOGGER = logging.getLogger(__name__)
+
 
 class BaseIcosahedronEdgeStrategy(ABC):
     """Abstract base class for different edge-building strategies."""
@@ -25,7 +27,9 @@ class BaseIcosahedronEdgeStrategy(ABC):
 class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for TriNodes and LimitedAreaTriNodes."""
 
-    def add_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int], new_method: bool = False ) -> NodeStorage:
+    def add_edges(
+        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int], new_method: bool = False
+    ) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
 
         if new_method:
@@ -33,7 +37,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
             LOGGER.info("Using new strategy for x_hops=1 multiscale-edge building.")
             # Compute the multiscale edges directly and store them in the node storage
             multiscale_edges = tri_icosahedron.add_edges_hop_1(
-                nodes_coords_rad = nodes["x"],
+                nodes_coords_rad=nodes["x"],
                 resolutions=scale_resolutions,
                 node_ordering=nodes["_node_ordering"],
             )
