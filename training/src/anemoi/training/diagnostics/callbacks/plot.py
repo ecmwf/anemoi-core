@@ -715,10 +715,19 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         model: torch.nn.Module,
         dataset_name: str,
     ) -> dict[tuple[str, str], torch.Tensor]:
+
         trainable_modules = {
             (model._graph_name_data, model._graph_name_hidden): model.encoder[dataset_name],
             (model._graph_name_hidden, model._graph_name_data): model.decoder[dataset_name],
         }
+        # `_graph_name_data` and `_graph_name_hidden` above are the keys for different
+        # layers of nodes in the graphs obtained from the config (e.g., "data", "hidden").
+        # They are not themselves dictionaries; but the identifiers of the dictionaries
+        # of graphs. That is, the “dictionarification” happens one level down.
+        # Here, they are used as keys to track and label different parts of the model
+        # in the plots for one dataset.
+        # Therefore, we don't select `dataset_name` for the `_graph_name_xy`,
+        # but only for the modules (encoder/processor/decoder).
 
         if isinstance(model.processor, GraphEdgeMixin):
             trainable_modules[model._graph_name_hidden, model._graph_name_hidden] = model.processor
