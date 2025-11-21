@@ -12,6 +12,7 @@ from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProc
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .ensinterp import AnemoiModelEncProcDecEnsInterp
+from .ensinterpmulti import AnemoiModelEncProcDecEnsInterpMulti
 from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .interpolator import AnemoiModelEncProcDecInterpolator
 
@@ -23,4 +24,5 @@ __all__ = [
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiModelEncProcDecInterpolator",
     "AnemoiModelEncProcDecEnsInterp",
+    "AnemoiModelEncProcDecEnsInterpMulti",
 ]
