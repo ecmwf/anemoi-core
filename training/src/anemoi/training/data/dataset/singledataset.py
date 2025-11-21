@@ -22,9 +22,12 @@ from torch.utils.data import IterableDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
+import cProfile
+from concurrent.futures import ThreadPoolExecutor
 
 LOGGER = logging.getLogger(__name__)
 
+#TODO fix issue where cache is recreated each epoch
 
 class NativeGridDataset(IterableDataset):
     """Iterable dataset for AnemoI data on the arbitrary grids."""
@@ -90,16 +93,27 @@ class NativeGridDataset(IterableDataset):
         # relative index of dates to extract
         self.relative_date_indices = relative_date_indices
         
-        self.cache=DatasetCache(
-            cache_root=str(os.getenv("TMPDIR")),
-            dataset_path="/home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2022-6h-v6.zarr",
-            ds=self.data,
-            )
+        use_cache=True
+        if use_cache:
+            self.cache=DatasetCache(
+                cache_root=str(os.getenv("TMPDIR")),
+                dataset_path="/home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2022-6h-v6.zarr",
+                ds=self.data,
+                )
+        else:
+            self.cache = None
 
     @cached_property
     def statistics(self) -> dict:
         """Return dataset statistics."""
         return self.data.statistics
+
+    def __getitem__(self, index) -> np.ndarray:
+        if self.cache is not None:
+            #check the cache first, the cache will fallback to self.ds in the case of a miss
+            return self.cache[index]
+        else:
+            return self.data[index]
 
     @cached_property
     def statistics_tendencies(self) -> dict:
@@ -137,21 +151,21 @@ class NativeGridDataset(IterableDataset):
         for every relative_date_index i.
         """
         return get_usable_indices(
-            self.data.missing,
-            len(self.data),
-            np.array(self.relative_date_indices, dtype=np.int64),
-            self.data.trajectory_ids,
-        )
+                self.data.missing,
+                len(self.data),
+                np.array(self.relative_date_indices, dtype=np.int64),
+                self.data.trajectory_ids,
+                )
 
     def set_comm_group_info(
-        self,
-        global_rank: int,
-        model_comm_group_id: int,
-        model_comm_group_rank: int,
-        model_comm_num_groups: int,
-        reader_group_rank: int,
-        reader_group_size: int,
-    ) -> None:
+            self,
+            global_rank: int,
+            model_comm_group_id: int,
+            model_comm_group_rank: int,
+            model_comm_num_groups: int,
+            reader_group_rank: int,
+            reader_group_size: int,
+            ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
         Parameters
@@ -182,14 +196,14 @@ class NativeGridDataset(IterableDataset):
         assert self.reader_group_size >= 1, "reader_group_size must be positive"
 
         LOGGER.debug(
-            "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
-            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
-            global_rank,
-            model_comm_group_id,
-            model_comm_group_rank,
-            model_comm_num_groups,
-            reader_group_rank,
-        )
+                "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
+                "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
+                global_rank,
+                model_comm_group_id,
+                model_comm_group_rank,
+                model_comm_num_groups,
+                reader_group_rank,
+                )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Called by worker_init_func on each copy of dataset.
@@ -219,14 +233,14 @@ class NativeGridDataset(IterableDataset):
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
         LOGGER.info(
-            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
-            worker_id,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            low,
-            high,
-        )
+                "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
+                worker_id,
+                os.getpid(),
+                self.global_rank,
+                self.model_comm_group_id,
+                low,
+                high,
+                )
 
         base_seed = get_base_seed()
 
@@ -236,21 +250,21 @@ class NativeGridDataset(IterableDataset):
         sanity_rnd = self.rng.random(1)
 
         LOGGER.info(
-            (
-                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                "group_rank %d, seed group id %d, base_seed %d, sanity rnd %f)"
-            ),
-            worker_id,
-            self.label,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            base_seed,
-            sanity_rnd,
-        )
-        
+                (
+                    "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
+                    "group_rank %d, seed group id %d, base_seed %d, sanity rnd %f)"
+                    ),
+                worker_id,
+                self.label,
+                os.getpid(),
+                self.global_rank,
+                self.model_comm_group_id,
+                self.model_comm_group_rank,
+                self.sample_comm_group_id,
+                base_seed,
+                sanity_rnd,
+                )
+
     #def get(self, index):
     #    result = self.cache[index]
     #    if result is None:
@@ -269,27 +283,27 @@ class NativeGridDataset(IterableDataset):
         """
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
-                replace=False,
-            )[self.chunk_index_range]
+                    self.valid_date_indices,
+                    size=len(self.valid_date_indices),
+                    replace=False,
+                    )[self.chunk_index_range]
         else:
             shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
 
         LOGGER.debug(
-            (
-                "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
-            ),
-            os.getpid(),
-            self.label,
-            self.worker_id,
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            shuffled_chunk_indices[:10],
-        )
+                (
+                    "Worker pid %d, label %s, worker id %d, global_rank %d, "
+                    "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
+                    ),
+                os.getpid(),
+                self.label,
+                self.worker_id,
+                self.global_rank,
+                self.model_comm_group_id,
+                self.model_comm_group_rank,
+                self.sample_comm_group_id,
+                shuffled_chunk_indices[:10],
+                )
 
         for i in shuffled_chunk_indices:
             start = i + self.relative_date_indices[0]
@@ -301,19 +315,13 @@ class NativeGridDataset(IterableDataset):
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
                 # Load only shards into CPU memory
-                x = self.cache[start:end:timeincrement, :, :, grid_shard_indices] # check cache
-                if x is None: #cache miss
-                    x= self.data[start:end:timeincrement, :, :, grid_shard_indices]
-                    self.cache[start:end:timeincrement, :, :, grid_shard_indices] = x #update cache
+                x = self[start:end:timeincrement, :, :, grid_shard_indices] # check cache
 
             else:
                 # Load full grid in CPU memory, select grid_shard after
                 # Note that anemoi-datasets currently doesn't support slicing + indexing
                 # in the same operation.
-                x = self.cache[start:end:timeincrement, :, :, :]
-                if x is None: #cache miss
-                    x= self.data[start:end:timeincrement, :, :, :]
-                    self.cache[start:end:timeincrement, :, :, :] = x
+                x = self[start:end:timeincrement, :, :, :]
                 x = x[..., grid_shard_indices]  # select the grid shard
             x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
             self.ensemble_dim = 1
@@ -354,64 +362,116 @@ class DatasetCache():
         self.cache_root = Path(cache_root)
         self.dataset_path=Path(dataset_path)
         self.ds = ds
-        
+
         self.is_initalised = False
-    
+
+
+        #option to write async
+        self.write_async=False
+        if self.write_async:
+            self.chunk_writer = ThreadPoolExecutor(max_workers=4) #used to sync write chunks into cache, compressing is very slow ~3s for 200MB
 
     #split between init and setup to match distirbuted strategy from PL structure (we need the proccess group to be initalised)
     def setup(self) -> bool:
-        
+
         #use default global proc group if proc_group is none
         #TODO you should be able to use it if you only run on a single gpu
         if not dist.is_initialized(): #TODO and check proc_group is valid
             LOGGER.info("Torch distributed is not initalised, can't use distributed cache")
             return False
-        
+
         if self.is_initalised:
             return True
-        
+
         self.proc_group=dist.new_group(backend="cpu:gloo",group_desc="cache_proc_group")
-                
+
         self.rank = dist.get_rank(self.proc_group)
         self.local_rank = int(os.environ.get("SLURM_LOCALID", -1)) 
-        
+
         self.device = "cpu" #torch.device(f"cuda:{self.local_rank if self.local_rank != -1 else self.rank}" if torch.cuda.is_available() else "cpu")
         self.world_size = dist.get_world_size(self.proc_group)
         self.hostnames = self._get_all_hostnames()
 
         #data_dir = Path("/home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr")
-        
+
         #creates space under self.cache_dir
         self.filesystem= f"{self.dataset_path}" #TODO read from zarr metadata
-        
+
         # once the dataset is loaded, this will become an array of len(dates) where the value corresponds to which processes cache a file is in
         # -1 => filesystem
         self.global_cache_registry=None
         self.cache_registry=None
         self._init_cache()
-       
+
         self.root_port = 7100
         self.port = self.root_port + self.rank 
-        self._start_server(self.cache_root, self.port) #need to use cache root so that other local caches can be found
-        
+        if self.local_rank == 0:
+            self._start_server(self.cache_root, self.port) #need to use cache root so that other local caches can be found
+
         LOGGER.info(f"{self.rank=}: Initalised a cache under {self.cache_path}")
         self.is_initalised=True
         return True
-       
-    def _init_cache(self, delete_existing_cache=True):
-        
+
+
+    @staticmethod
+    def create_uncompressed_cache_array(src_array_path, dst_cache_path, array_name="data"):
+        """
+        Create a Zarr array at dst_cache_path using metadata from src_array_path,
+        but disable compression (compressor=None).
+        """
+        import json
+
+        src_array_path = Path(src_array_path)
+        dst_cache_path = Path(dst_cache_path)
+
+        # --- Read .zarray metadata from source ---
+        zarray_file = src_array_path / ".zarray"
+        if not zarray_file.exists():
+            raise FileNotFoundError(f"No .zarray metadata found in {src_array_path}")
+
+        with open(zarray_file, "r") as f:
+            meta = json.load(f)
+
+        shape     = tuple(meta["shape"])
+        chunks    = tuple(meta["chunks"])
+        dtype     = meta["dtype"]
+        order     = meta.get("order", "C")
+        fill      = meta.get("fill_value", None)
+        filters   = meta.get("filters", None)
+
+        # --- Create Zarr group for cache destination ---
+        cache_group = zarr.open(dst_cache_path, mode="a")
+
+        # --- Create dataset with same metadata but compressor=None ---
+        cache_array = cache_group.create_dataset(
+            array_name,
+            shape=shape,
+            chunks=chunks,
+            dtype=dtype,
+            order=order,
+            fill_value=fill,
+            filters=filters,
+            compressor=None,
+            overwrite=True,
+        )
+
+        return cache_array
+
+
+    def _init_cache(self, delete_existing_cache=False):
+
         if self.cache_root is None:
             LOGGER.info("Cache root not given, defaulting to $TMPDIR")
             self.cache_root=Path(os.getenv("TMPDIR"))
-            
+
         #create space under cache_root for cache
         assert self.cache_root.exists()
         self.cache_path = Path(f"{self.cache_root}/cache_rank_{self.rank}")
         if self.cache_path.exists() and delete_existing_cache:
             LOGGER.info(f"Existing cache found under {self.cache_path}. Deleting because {delete_existing_cache=}")
-            shutil.rmtree(self.cache_path)
+            shutil.rmtree(self.cache_path) #this breaks restarting after different epochs
         self.cache_path.mkdir(exist_ok=True)
-        
+
         #copy zarr metadata from filesystem
         # This is needed so we can load chunks from the cache like we would from the remote zarr
         # BUT we will have a lot of gaps in the local copy, so we will have a seperate list self.cache_registry of which elements are present or not
@@ -419,40 +479,54 @@ class DatasetCache():
         #shutil.copy2(f"{self.filesystem}/data/.zarray", self.cache_path)
         #shutil.copy2(f"{self.filesystem}/data/.zattrs", self.cache_path) #some datasets dont have, not sure if its needed tbh
         #shutil.copy2(f"{self.filesystem}/.zgroup", self.cache_path)
-        self.cache = zarr.open_like(self.ds, self.cache_path, mode="w")
+
+        disable_compression=True
+        if disable_compression:
+            self.cache = self.create_uncompressed_cache_array(f"{self.filesystem}/data", self.cache_path)
+
+        else:
+            #from numcodecs import Blosc
+
+            #compressor = Blosc(cname='zstd', clevel=0, shuffle=Blosc.NOSHUFFLE)
+            #has an error on 2md epoch bc path isnt empty
+            self.cache = zarr.open_like(self.ds, self.cache_path, mode="w") #, compression_opts=compressor) #ignored
         #self.cache = zarr.open(self.cache_path, mode="w")
-        
+
         dates = 100 #len(self) 
         #dates = self.ds.size
         #dates = self.ds.ds_train.data.shape[0]
-        
+
         if self.cache_registry is None:
             self.cache_registry=torch.zeros(dates, dtype=torch.int32, device=self.device)
             self.cache_registry[:] = -1
-            
+
         self.remote_cache_roots=self._get_all_cache_roots()
-        
-    
+
+
     def _start_server(self, directory, port):
         #directory = Path("/").resolve()
         directory = Path(self.cache_root).resolve()
         handler=http.server.SimpleHTTPRequestHandler
-        
+
         def no_logging(*args):
             return
         handler.log_message=no_logging #by default the http server LOGGER.infos a lot to stdout, this silences it
-        
+
         handler = partial(handler, directory=str(directory))
-       
-        LOGGER.info(f"{self.rank=}: Starting a server hosting {directory} on http://{self._get_hostname(self.rank)}:{port}")
-        httpd = socketserver.TCPServer(("", port), handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        
-        
+
+        try: 
+            LOGGER.info(f"{self.rank=}: Starting a server hosting {directory} on http://{self._get_hostname(self.rank)}:{port}")
+            httpd = socketserver.TCPServer(("", port), handler)
+            self.thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            self.thread.start()
+            #Need to either kill this thread after each epoch or kill and restart
+        except OSError:
+            LOGGER.info(f"{self.rank=}: {port=} already in use, naively assuming its an exisitng server and carrying on")
+
+
     def _get_hostname(self, rank):
         return self.hostnames[rank]
-    
+
     def _get_all_hostnames(self):
         """Gather the hostname of every rank into a list (length = world_size)."""
         my_host = socket.gethostname()
@@ -462,10 +536,10 @@ class DatasetCache():
         dist.all_gather_object(hostnames, my_host, self.proc_group)
         LOGGER.info(f"{self.rank=} {hostnames=}")
         return hostnames
-    
+
     def _get_all_cache_roots(self):
         """Gather the cache roots of every rank into a list (length = world_size).
-        
+
         needed bc $TMPDIR is different paths on different ranks
         """
         root = self.cache_root
@@ -474,7 +548,7 @@ class DatasetCache():
         roots = [None for _ in range(self.world_size)]
         dist.all_gather_object(roots, root, self.proc_group)
         return roots
-    
+
     def _shutdown_server(self):
         try: 
             if self.server_metadata is not None:
@@ -483,17 +557,17 @@ class DatasetCache():
                 thread.join()
         except AttributeError:
             pass
-    
+
     def __del__(self):
-       self._shutdown_server()
-            
+        self._shutdown_server()
+
     def update_global_view(self) -> None:
         """ Communicate with other procs and share who has what files in their caches. Should be called after an epoch."""
         all_gather_buffer = [torch.zeros_like(self.cache_registry) for _ in range(self.world_size)]
         dist.all_gather(all_gather_buffer, self.cache_registry, self.proc_group)
         self.global_cache_registry = torch.stack(all_gather_buffer)
-        
-            
+
+
     def _get_remote_cache_url(self, remote_rank):
         remote_host = self._get_hostname(remote_rank)
         port = self.root_port + remote_rank
@@ -502,7 +576,7 @@ class DatasetCache():
         #import pdb
         #breakpoint()
         return f"http://{remote_host}:{port}/{remote_cache_path}"
-        
+
     def check_cache(self, date) -> list[int]:
         """ checks either local or global registry. returns list of procs containing file in their SSD"""
         #if self.global_cache_registry is not None:
@@ -525,32 +599,52 @@ class DatasetCache():
         #cache_hits = [x for x in cache_subset if (x != -1).all()]
         return list(cache_hits)
 
+    #try to copy without uncompressing and recompressing
+    #doesnt work bc ds isnt a zarr
+    #@staticmethod
+    #def copy_chunk_raw(src_array, dst_array, index):
+    #    src_store = src_array.store
+    #    dst_store = dst_array.store
+
+    #    chunk_key = src_array._chunk_key(index)
+    #    dst_store[chunk_key] = src_store[chunk_key]
+
     #TODO make it so that it can return partial matches from cache and the rest from filesystem
     # e,g, cache_subset=array([ 0,  0, -1], dtype=int32); self.rank=0: cache_hits=[0, 0]
     def __getitem__(self, index) -> np.ndarray:
         """ Reads cache regsitry, based on result fetches file from local SSD, remote SSD or None if its a miss"""
-        
-        verbose=True
-        
+
+        verbose=False
+
+
         if not self.is_initalised:
             success = self.setup()
             if not success:
-                return None # try later
-        
+                return self.ds[index]
+
         cache_hits = self.check_cache(index[0])
         #LOGGER.info(f"{self.rank=}: {cache_hits=}")
         print(f"{self.rank=}: {cache_hits=}")
-        
+
+        #with cProfile.Profile() as pr:
         if len(cache_hits) == 0:
-        #if cache_hits.numel() == 0:
+            #if cache_hits.numel() == 0:
             #Cache miss
-            return None
+            data = self.ds[index]
+            if self.write_async:
+                self.chunk_writer.submit(lambda cache, index, data: cache[index].set(data), self.cache, index, data)
+
+            else:
+                self.cache[index] = data #VERY slow ~3s for 2MB chunks #what i truly need is a way to copy compressed chunks directly from filesystem to cache
+                #self.copy_chunk_raw(self.ds, self.cache, index)
+            if verbose:
+                LOGGER.info(f"{self.rank=}: cache miss on date {index=}")
             
         #elif (cache_hits == self.rank).any():
         elif self.rank in cache_hits:
             #Cache hit on local SSD
             
-            data = self.cache[index]            
+            data = self.cache[index]
             
             if verbose:
                 LOGGER.info(f"{self.rank=}: local cache hit on date {index}")
@@ -566,12 +660,12 @@ class DatasetCache():
             try:
                 data = zarr.open(remote_cache_url, mode="r")[index]
                 #TODO figure out why i get cache misses
+                if verbose:
+                    LOGGER.info(f"{self.rank=}: remote cache hit (rank {remote_rank}) on date {index}")
             except (PathNotFoundError, KeyError) as e:
                 LOGGER.info(f"Error loading remote date {index} from {remote_rank} to {self.rank}. full error: {e}. falling back to filesystem.")
-                return None
-            
-            if verbose:
-                LOGGER.info(f"{self.rank=}: remote cache hit (rank {remote_rank}) on date {index}")
+                data = self.ds[index]
+        #pr.print_stats()
             
         return data
 
