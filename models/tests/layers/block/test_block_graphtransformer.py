@@ -29,7 +29,6 @@ def init_proc():
     edge_dim = 11
     bias = True
     num_heads = 8
-    num_chunks = 2
     layer_kernels = load_layer_kernels()
     qk_norm = True
     return (
@@ -40,7 +39,6 @@ def init_proc():
         layer_kernels,
         bias,
         num_heads,
-        num_chunks,
         qk_norm,
     )
 
@@ -55,7 +53,6 @@ def block(init_proc):
         layer_kernels,
         bias,
         num_heads,
-        num_chunks,
         qk_norm,
     ) = init_proc
     return GraphTransformerProcessorBlock(
@@ -67,7 +64,6 @@ def block(init_proc):
         num_heads=num_heads,
         bias=bias,
         update_src_nodes=False,
-        num_chunks=num_chunks,
         qk_norm=qk_norm,
     )
 
@@ -81,7 +77,6 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
         _layer_kernels,
         _bias,
         num_heads,
-        num_chunks,
         _qk_norm,
     ) = init_proc
     assert isinstance(
@@ -91,7 +86,6 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
         block.out_channels_conv == out_channels // num_heads
     ), f"block.out_channels_conv ({block.out_channels_conv}) != out_channels // num_heads ({out_channels // num_heads})"
     assert block.num_heads == num_heads, f"block.num_heads ({block.num_heads}) != num_heads ({num_heads})"
-    assert block.num_chunks == num_chunks, f"block.num_chunks ({block.num_chunks}) != num_chunks ({num_chunks})"
     assert isinstance(block.lin_key, torch.nn.Linear), "block.lin_key is not an instance of torch.nn.Linear"
     assert isinstance(block.lin_query, torch.nn.Linear), "block.lin_query is not an instance of torch.nn.Linear"
     assert isinstance(block.lin_value, torch.nn.Linear), "block.lin_value is not an instance of torch.nn.Linear"
@@ -115,7 +109,6 @@ def test_GraphTransformerProcessorBlock_shard_qkve_heads(init_proc, block):
         _layer_kernels,
         _bias,
         num_heads,
-        _num_chunks,
         _qk_norm,
     ) = init_proc
     query = torch.randn(in_channels, num_heads * block.out_channels_conv)
@@ -140,7 +133,6 @@ def test_GraphTransformerProcessorBlock_shard_output_seq(init_proc, block):
         _layer_kernels,
         _bias,
         num_heads,
-        _num_chunks,
         _qk_norm,
     ) = init_proc
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
@@ -160,7 +152,6 @@ def test_GraphTransformerProcessorBlock_forward_backward(init_proc, block):
         _layer_kernels,
         _bias,
         _num_heads,
-        _num_chunks,
         _qk_norm,
     ) = init_proc
 
@@ -206,7 +197,6 @@ def test_GraphTransformerProcessorBlock_chunking(init_proc, block, monkeypatch):
         _bias,
         _activation,
         _num_heads,
-        _num_chunks,
     ) = init_proc
     # Initialize GraphTransformerProcessorBlock
     block = block
