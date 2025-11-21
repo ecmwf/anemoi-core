@@ -442,6 +442,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         bias: bool = True,
         qk_norm: bool = False,
         update_src_nodes: bool = False,
+        edge_pre_mlp: bool = True,
         layer_kernels: DotDict,
         **kwargs,
     ) -> None:
@@ -483,6 +484,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
+        # Optional edge preprocessing MLP
+        if edge_pre_mlp:
+            self.edge_pre_mlp = nn.Sequential(
+                Linear(edge_dim, edge_dim),
+                layer_kernels.Activation(),
+            )
+        else:
+            self.edge_pre_mlp = nn.Identity()
+
         self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
         self.projection = Linear(out_channels, out_channels)
@@ -512,7 +522,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         query = self.lin_query(x_dst)
         key = self.lin_key(x_src)
         value = self.lin_value(x_src)
-        edges = self.lin_edge(edge_attr)
+        edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
 
         return query, key, value, edges
 
