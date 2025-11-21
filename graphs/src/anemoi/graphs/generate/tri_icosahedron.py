@@ -138,10 +138,10 @@ def create_nx_graph_from_tri_coords(coords_rad: np.ndarray, node_ordering: np.nd
 
 
 def add_edges_hop_1(
-        nodes_coords_rad,
-        resolutions: list[int], 
-        node_ordering: list[int],
-        area_mask_builder: KNNAreaMaskBuilder | None = None,
+    nodes_coords_rad,
+    resolutions: list[int],
+    node_ordering: list[int],
+    area_mask_builder: KNNAreaMaskBuilder | None = None,
 ) -> np.ndarray:
     """Adds edges for x_hops = 1 relying on trimesh only."""
 
