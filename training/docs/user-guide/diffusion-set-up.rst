@@ -87,7 +87,7 @@ The diffusion configuration includes:
        _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
        normalized_shape: ${model.num_channels}
        condition_shape: 16
-       w_one_bias_zero_init: True
+       zero_init: True
        autocast: false
 
 The diffusion model uses conditional layer normalization to condition
@@ -226,7 +226,6 @@ A minimal config file for standard diffusion training:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - datamodule: single
    - hardware: example
    - graph: multi_scale
    - model: graphtransformer_diffusion  # Use diffusion model
@@ -247,7 +246,6 @@ For tendency-based diffusion, change the model config and model task:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - datamodule: single
    - hardware: example
    - graph: multi_scale
    - model: graphtransformer_diffusiontend  # Use tendency diffusion model
