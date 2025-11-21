@@ -15,9 +15,10 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.mapper import GraphInterpolationBackwardMapper, SparseProjector
+from anemoi.models.layers.mapper import GraphInterpolationBackwardMapper
 from anemoi.models.layers.mapper import GraphInterpolationBaseMapper
 from anemoi.models.layers.mapper import GraphInterpolationForwardMapper
+from anemoi.models.layers.mapper import SparseProjector
 
 
 @dataclass
@@ -26,7 +27,6 @@ class MapperConfig:
     in_channels_dst: int = 3
     hidden_dim: int = 256
     edge_attribute_name: str = "edge_attr"
-    
 
 
 class TestGraphInterpolation:
@@ -66,6 +66,7 @@ class TestGraphInterpolation:
 
 class TestGraphInterpolationBaseMapper(TestGraphInterpolation):
     """Test the GraphInterpolationBaseMapper class."""
+
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
         return GraphInterpolationBaseMapper(
@@ -97,7 +98,7 @@ class TestGraphInterpolationForwardMapper(TestGraphInterpolation):
     def test_initialization(self, mapper):
         assert isinstance(mapper, GraphInterpolationBaseMapper)
         assert isinstance(mapper.project, SparseProjector)
-        assert len(list(mapper.parameters())) in [0, 2] # no parameters or Linear.{weight,bias}
+        assert len(list(mapper.parameters())) in [0, 2]  # no parameters or Linear.{weight,bias}
 
     def test_forward_backward(self, mapper_init, mapper, pair_tensor):
         x = pair_tensor
@@ -133,7 +134,7 @@ class TestGraphInterpolationBackwardMapper(TestGraphInterpolation):
     def test_initialization(self, mapper):
         assert isinstance(mapper, GraphInterpolationBaseMapper)
         assert isinstance(mapper.project, SparseProjector)
-        assert len(list(mapper.parameters())) in [0, 2] # no parameters or Linear.{weight,bias}
+        assert len(list(mapper.parameters())) in [0, 2]  # no parameters or Linear.{weight,bias}
 
     @pytest.fixture
     def mapper(self, mapper_init, fake_graph):
