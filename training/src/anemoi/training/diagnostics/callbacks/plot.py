@@ -52,7 +52,7 @@ LOGGER = logging.getLogger(__name__)
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
-    def __init__(self, config: BaseSchema) -> None:
+    def __init__(self, config: BaseSchema, dataset_names: list[str] | None = None) -> None:
         """Initialise the BasePlotCallback abstract base class.
 
         Parameters
@@ -64,7 +64,7 @@ class BasePlotCallback(Callback, ABC):
         super().__init__()
         self.config = config
         self.save_basedir = config.hardware.paths.plots
-        self.dataset_names = None
+        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
         self.post_processors = None
         self.latlons = None
@@ -237,9 +237,8 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             If not given, uses default from config at `diagnostics.plot.frequency.batch`
 
         """
-        super().__init__(config)
+        super().__init__(config, dataset_names=dataset_names)
         self.every_n_batches = every_n_batches or self.config.diagnostics.plot.frequency.batch
-        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
         if self.config.diagnostics.plot.asynchronous and self.config.dataloader.read_group_size > 1:
             LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
@@ -315,9 +314,8 @@ class BasePerEpochPlotCallback(BasePlotCallback):
             Epoch frequency to plot at, by default None
             If not given, uses default from config at `diagnostics.plot.frequency.epoch`
         """
-        super().__init__(config)
+        super().__init__(config, dataset_names=dataset_names)
         self.every_n_epochs = every_n_epochs or self.config.diagnostics.plot.frequency.epoch
-        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
     @rank_zero_only
     def on_validation_epoch_end(
@@ -698,9 +696,8 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         every_n_epochs: int | None, optional
             Override for frequency to plot at, by default None
         """
-        super().__init__(config, every_n_epochs=every_n_epochs)
+        super().__init__(config, dataset_names=dataset_names, every_n_epochs=every_n_epochs)
         self.q_extreme_limit = config.get("quantile_edges_to_represent", 0.05)
-        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
     def get_node_trainable_tensors(
         self,
@@ -796,7 +793,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             Override for batch frequency, by default None
 
         """
-        super().__init__(config, every_n_batches=every_n_batches)
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
         self.parameter_groups = parameter_groups
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
@@ -1075,7 +1072,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             Batch frequency to plot at, by default None
         """
         del kwargs
-        super().__init__(config, every_n_batches=every_n_batches)
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
         self.sample_idx = sample_idx
         self.parameters = parameters
 
@@ -1083,8 +1080,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.accumulation_levels_plot = accumulation_levels_plot
         self.per_sample = per_sample
         self.colormaps = colormaps
-
-        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -1176,11 +1171,10 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
         """
-        super().__init__(config, every_n_batches=every_n_batches)
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.min_delta = min_delta
-        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
     @rank_zero_only
     def _plot(
@@ -1264,12 +1258,12 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
         """
-        super().__init__(config, every_n_batches=every_n_batches)
+        super().__init__(config, dataset_names=dataset_names, every_n_batches=every_n_batches)
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.precip_and_related_fields = precip_and_related_fields
         self.log_scale = log_scale
-        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
+
         LOGGER.info(
             "Using precip histogram plotting method for fields: %s.",
             self.precip_and_related_fields,
