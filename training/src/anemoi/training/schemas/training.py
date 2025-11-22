@@ -213,12 +213,8 @@ ScalerSchema = (
 class ImplementedLossesUsingBaseLossSchema(str, Enum):
     kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
     afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
-    rmse = "anemoi.training.losses.RMSELoss"
-    mse = "anemoi.training.losses.MSELoss"
     weighted_mse = "anemoi.training.losses.WeightedMSELoss"
-    mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
-    huber = "anemoi.training.losses.HuberLoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -243,14 +239,26 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     "Deactivate autocast for the kernel CRPS calculation"
 
 
-class HuberLossSchema(BaseLossSchema):
-    delta: float = 1.0
-    "Threshold for Huber loss."
+class TorchLossesUsingBaseSchema(str, Enum):
+    mse = "torch.nn.MSELoss"
+    mae = "torch.nn.L1Loss"
+    huber = "torch.nn.HuberLoss"
+    smoothl1 = "torch.nn.SmoothL1Loss"
+
+
+class TorchLossSchema(BaseModel):
+    target_: TorchLossesUsingBaseSchema = Field(..., alias="_target_")
+
+
+class BaseTorchLossSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.TorchLoss"] = Field(..., alias="_target_")
+    loss: TorchLossSchema
+    "Loss function from torch.nn, e.g. MSELoss, L1Loss, etc."
 
 
 class CombinedLossSchema(BaseLossSchema):
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
-    losses: list[BaseLossSchema] = Field(min_length=1)
+    losses: list[BaseLossSchema | BaseTorchLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -277,7 +285,7 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = BaseLossSchema | HuberLossSchema | CombinedLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema
+LossSchemas = BaseLossSchema | BaseTorchLossSchema | CombinedLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(str, Enum):
