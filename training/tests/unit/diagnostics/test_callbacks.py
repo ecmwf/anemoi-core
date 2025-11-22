@@ -31,6 +31,10 @@ default_config = """
 diagnostics:
   callbacks: []
 
+  training:
+    model_task: null
+
+
   plot:
     enabled: False
     callbacks: []
