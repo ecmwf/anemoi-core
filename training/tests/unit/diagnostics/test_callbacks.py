@@ -32,8 +32,7 @@ diagnostics:
   callbacks: []
 
   training:
-    model_task: null
-
+    model_task: anemoi.training.train.tasks.GraphEnsForecaster
 
   plot:
     enabled: False
@@ -134,7 +133,6 @@ def test_ensemble_plot_mixin_process():
 
     # Mock config
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config["training"]["model_task"] = "anemoi.training.train.tasks.GraphEnsForecaster"
     # Create test tensors
     # batch: bs, input_steps + forecast_steps, latlon, nvar
     batch = torch.randn(2, 6, 100, 5)
