@@ -158,7 +158,7 @@ def test_ensemble_plot_mixin_process():
     mixin.post_processors = mock_post_processors
 
     if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-      time_out = (len(self.config.training.explicit_times.target), "time_interp")
+      time_out = (len(config.training.explicit_times.target), "time_interp")
     else:
       time_out = (getattr(pl_module, "rollout", 0), "forecast")
 
