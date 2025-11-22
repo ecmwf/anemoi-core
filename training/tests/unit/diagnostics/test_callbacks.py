@@ -129,6 +129,7 @@ def test_ensemble_plot_mixin_process():
     pl_module.latlons_data = torch.randn(100, 2)
 
     # Mock config
+    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     config["training"]["model_task"] = "anemoi.training.train.tasks.GraphEnsForecaster"
     # Create test tensors
     # batch: bs, input_steps + forecast_steps, latlon, nvar
