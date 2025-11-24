@@ -164,11 +164,11 @@ def test_ensemble_plot_mixin_process():
     mixin.post_processors = mock_post_processors
 
     if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-        time_out = (len(config.training.explicit_times.target), "time_interp")
+        output_times = (len(config.training.explicit_times.target), "time_interp")
     else:
-        time_out = (getattr(pl_module, "rollout", 0), "forecast")
+        output_times = (getattr(pl_module, "rollout", 0), "forecast")
 
-    data, result_output_tensor = mixin.process(pl_module, outputs, batch, time_out=time_out, members=0)
+    data, result_output_tensor = mixin.process(pl_module, outputs, batch, output_times=output_times, members=0)
 
     # Check instantiation
     assert data is not None
