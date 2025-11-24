@@ -38,7 +38,7 @@ class MapperConfig:
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
     shard_strategy: str = "edges"
-    backend: str = "pyg"
+    graph_attention_backend: str = "pyg"
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)

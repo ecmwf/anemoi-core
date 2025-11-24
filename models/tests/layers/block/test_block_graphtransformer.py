@@ -31,7 +31,7 @@ def init_proc():
     num_heads = 8
     layer_kernels = load_layer_kernels()
     qk_norm = True
-    backend = "pyg"
+    graph_attention_backend = "pyg"
     return (
         in_channels,
         hidden_dim,
@@ -41,7 +41,7 @@ def init_proc():
         bias,
         num_heads,
         qk_norm,
-        backend,
+        graph_attention_backend,
     )
 
 
@@ -56,7 +56,7 @@ def block(init_proc):
         bias,
         num_heads,
         qk_norm,
-        backend,
+        graph_attention_backend,
     ) = init_proc
     return GraphTransformerProcessorBlock(
         in_channels=in_channels,
@@ -68,7 +68,7 @@ def block(init_proc):
         bias=bias,
         update_src_nodes=False,
         qk_norm=qk_norm,
-        backend=backend,
+        graph_attention_backend=graph_attention_backend,
     )
 
 
@@ -246,7 +246,7 @@ def init_mapper():
     num_heads = 8
     layer_kernels = load_layer_kernels()
     qk_norm = True
-    backend = "pyg"
+    graph_attention_backend = "pyg"
     return (
         in_channels,
         hidden_dim,
@@ -256,7 +256,7 @@ def init_mapper():
         bias,
         num_heads,
         qk_norm,
-        backend,
+        graph_attention_backend,
     )
 
 
@@ -271,7 +271,7 @@ def mapper_block(init_mapper):
         bias,
         num_heads,
         qk_norm,
-        backend,
+        graph_attention_backend,
     ) = init_mapper
     return GraphTransformerMapperBlock(
         in_channels=in_channels,
@@ -283,7 +283,7 @@ def mapper_block(init_mapper):
         bias=bias,
         update_src_nodes=False,
         qk_norm=qk_norm,
-        backend=backend,
+        graph_attention_backend=graph_attention_backend,
     )
 
 
