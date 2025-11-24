@@ -365,23 +365,27 @@ def migrator() -> Migrator:
     return Migrator()
 
 
+@pytest.fixture(
+    params=[
+        ["model=gnn"],
+        ["model=graphtransformer"],
+    ],
+)
 @pytest.fixture
 def architecture_config_with_checkpoint(
     migrator: Migrator,
     request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: DictConfig,  # <-- FORCE WITH_TEMP HERE
+    testing_modifications_with_temp_dir: DictConfig,
     get_tmp_paths: GetTmpPaths,
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
     # Reuse the same overrides that architecture_config gets
-    overrides = request.getfixturevalue("architecture_config")._pytestfixturefunction.params[0]
-    # But override the testing_modifications fixture
+    overrides = request.param
     cfg, dataset_url, model_architecture = build_architecture_config(
         overrides,
         testing_modifications_with_temp_dir,
         get_tmp_paths,
     )
-
     # rest of your logic...
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
