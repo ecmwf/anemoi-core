@@ -395,20 +395,21 @@ class ProjectionGraphProvider(BaseGraphProvider):
     def _create_matrix(
         self, edge_index: Tensor, weights: Tensor, src_size: int, dst_size: int, row_normalize: bool
     ) -> None:
-        """Create sparse projection matrix."""
+        """Create sparse projection matrix.
+
+        Creates a matrix where rows are destination nodes and columns are source nodes.
+        output = projection_matrix @ input
+        """
         if row_normalize:
             weights = self._row_normalize_weights(edge_index, weights, dst_size)
 
-        self.projection_matrix = (
-            torch.sparse_coo_tensor(
-                edge_index,
-                weights,
-                (src_size, dst_size),
-                device=edge_index.device,
-            )
-            .coalesce()
-            .T
-        )
+        swapped_indices = torch.stack([edge_index[1], edge_index[0]])
+        self.projection_matrix = torch.sparse_coo_tensor(
+            swapped_indices,
+            weights,
+            (dst_size, src_size),
+            device=edge_index.device,
+        ).coalesce()
         self._edge_dim = self.projection_matrix.shape[1]
 
     @staticmethod
