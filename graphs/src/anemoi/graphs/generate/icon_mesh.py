@@ -262,7 +262,7 @@ class ICONCellDataGrid:
     """Reads cell locations from an ICON grid file; builds grid-to-mesh edges based on ICON topology."""
 
     uuidOfHGrid: str
-    nodeset: NodeSet
+    nodeset: NodeSet  # set of ICON cell circumcenters
     max_level: int
     select_c: np.ndarray
 
