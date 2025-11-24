@@ -77,7 +77,7 @@ encoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
-  backend: "triton"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 
 decoder:
@@ -92,7 +92,7 @@ decoder:
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
-  backend: "triton"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

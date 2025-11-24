@@ -445,7 +445,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         qk_norm: bool = False,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
-        backend: str = "triton",
+        graph_attention_backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -469,6 +469,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
         super().__init__(**kwargs)
 
@@ -500,17 +502,17 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Linear(hidden_dim, out_channels),
         )
 
-        self.backend = backend
-        assert self.backend in [
+        self.graph_attention_backend = graph_attention_backend
+        assert self.graph_attention_backend in [
             "triton",
             "pyg",
-        ], f"Backend {self.backend} not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
+        ], f"Backend {self.graph_attention_backend} not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
 
-        if self.backend == "triton":
-            LOGGER.info(f"{self.__class__.__name__} using triton backend.")
-            self.conv = GraphTransformerFunction
+        if self.graph_attention_backend == "triton":
+            LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
+            self.conv = GraphTransformerFunction.apply
         else:
-            LOGGER.warning(f"{self.__class__.__name__} using pyg backend, consider using triton backend.")
+            LOGGER.warning(f"{self.__class__.__name__} using pyg graph attention backend, consider using 'triton'.")
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
@@ -581,12 +583,14 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
 
-        if self.backend == "triton":
+        if self.graph_attention_backend == "triton":
             csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
             edges_csc = edges.index_select(0, perm)
-            return self.conv.apply(query, key, value, edges_csc, csc, reverse)
+            args_conv = (edges_csc, csc, reverse)
         else:
-            return self.conv(query, key, value, edges, edge_index, size=conv_size)
+            args_conv = (edges, edge_index, conv_size)
+
+        return self.conv(query, key, value, *args_conv)
 
     def attention_block(
         self,
@@ -660,7 +664,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
-        backend: str = "triton",
+        graph_attention_backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -688,7 +692,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Defined in config/models/<model>.yaml
         shard_strategy: str, by default "edges"
             Strategy to shard tensors
-        backend: str, by default "triton"
+        graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
 
@@ -702,7 +706,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             bias=bias,
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
-            backend=backend,
+            graph_attention_backend=graph_attention_backend,
             **kwargs,
         )
 
@@ -820,7 +824,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         qk_norm: bool = False,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
-        backend: str = "triton",
+        graph_attention_backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -844,7 +848,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        backend: str, by default "triton"
+        graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
 
@@ -858,7 +862,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             bias=bias,
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
-            backend=backend,
+            graph_attention_backend=graph_attention_backend,
             **kwargs,
         )
 
