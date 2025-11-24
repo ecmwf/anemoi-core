@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.10.0](https://github.com/ecmwf/anemoi-core/compare/models-0.9.7...models-0.10.0) (2025-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** remove support for EDA ([#651](https://github.com/ecmwf/anemoi-core/issues/651))
+
+### Features
+
+* **training:** Remove support for EDA ([#651](https://github.com/ecmwf/anemoi-core/issues/651)) ([921e108](https://github.com/ecmwf/anemoi-core/commit/921e108b8467f1bcd4e69516927efee2f58f9e33))
+
+
+### Bug Fixes
+
+* Basemodel.predict_step ([#672](https://github.com/ecmwf/anemoi-core/issues/672)) ([0c830e9](https://github.com/ecmwf/anemoi-core/commit/0c830e9f4dda94bdc571f6d3ea3f64e2701d87e7))
+* **models:** Assert no dropout ([#638](https://github.com/ecmwf/anemoi-core/issues/638)) ([c1bbcec](https://github.com/ecmwf/anemoi-core/commit/c1bbcece6996d2808691741c5ef56f70e61fde52))
+* Shard shape type hints ([#625](https://github.com/ecmwf/anemoi-core/issues/625)) ([fb201fd](https://github.com/ecmwf/anemoi-core/commit/fb201fd4c832fb90e7bb06dbc18371af1f214d03))
+* Update readmes ([#655](https://github.com/ecmwf/anemoi-core/issues/655)) ([a58aa64](https://github.com/ecmwf/anemoi-core/commit/a58aa640212cdc6d5de6e38a6d11725d32d662b5))
+
 ## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/models-0.9.6...models-0.9.7) (2025-10-20)
 
 

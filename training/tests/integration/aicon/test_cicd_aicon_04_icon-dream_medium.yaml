@@ -98,9 +98,6 @@ graph:
         _target_: anemoi.graphs.edges.attributes.EdgeDirection
         norm: unit-std
 
-datamodule:
-  _target_: anemoi.training.data.datamodule.AnemoiDatasetsDataModule
-
 
 data:
   resolution: mrl${data.refinement}
@@ -196,6 +193,8 @@ model:
     layer_kernels:
       Activation:
         _target_: torch.nn.GELU
+  residual:
+    _target_: anemoi.models.layers.residual.SkipConnection
   attributes:
     edges:
     - edge_length
@@ -230,9 +229,8 @@ training:
     enabled: false
     lr: 0.0001
   optimizer:
-    zero: False # use ZeroRedundancyOptimizer ; saves memory for larger models
-    kwargs:
-      betas: [0.9, 0.95]
+    _target_: torch.optim.AdamW # or anemoi.training.optimizers.AdEMAMix.AdEMAMix
+    betas: [0.9, 0.95]
   # select strategy
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
@@ -330,6 +328,7 @@ diagnostics:
     tensorboard:
       enabled: false
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
       offline: True
       authentication: False

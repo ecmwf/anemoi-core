@@ -52,6 +52,7 @@ diagnostics:
       enabled: false #some error about metric key in extract_gpu_metrics being invalid
   log:
     mlflow:
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: true
       offline: True
       tracking_uri: ""
