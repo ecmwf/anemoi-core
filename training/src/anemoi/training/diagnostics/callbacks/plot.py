@@ -267,9 +267,9 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             self.post_processors = self.post_processors.cpu()
 
             if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-                time_out = (len(self.config.training.explicit_times.target), "time_interp")
+                output_times = (len(self.config.training.explicit_times.target), "time_interp")
             else:
-                time_out = (getattr(pl_module, "rollout", 0), "forecast")
+                output_times = (getattr(pl_module, "rollout", 0), "forecast")
 
             self.plot(
                 trainer,
@@ -278,7 +278,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                time_out=time_out,
+                output_times=output_times,
                 **kwargs,
             )
 
@@ -309,11 +309,11 @@ class BasePerEpochPlotCallback(BasePlotCallback):
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
             if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-                time_out = (len(self.config.training.explicit_times.target), "time_interp")
+                output_times = (len(self.config.training.explicit_times.target), "time_interp")
             else:
-                time_out = (getattr(pl_module, "rollout", 0), "forecast")
+                output_times = (getattr(pl_module, "rollout", 0), "forecast")
 
-            self.plot(trainer, pl_module, epoch=trainer.current_epoch, time_out=time_out, **kwargs)
+            self.plot(trainer, pl_module, epoch=trainer.current_epoch, output_times=output_times, **kwargs)
 
 
 class LongRolloutPlots(BasePlotCallback):
@@ -879,7 +879,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
-        time_out: tuple,
+        output_times: tuple,
     ) -> None:
         logger = trainer.logger
         _ = batch_idx
@@ -902,7 +902,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 RuntimeWarning,
             )
 
-        for rollout_step in range(time_out[0]):
+        for rollout_step in range(output_times[0]):
             y_hat = outputs[1][rollout_step]
             y_true = batch[
                 :,
@@ -961,7 +961,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         pl_module: pl.LightningModule,
         outputs: list,
         batch: torch.Tensor,
-        time_out: tuple,
+        output_times: tuple,
     ) -> tuple[np.ndarray, np.ndarray]:
 
         if self.latlons is None:
@@ -970,7 +970,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         input_tensor = (
             batch[
                 :,
-                pl_module.multi_step - 1 : pl_module.multi_step + time_out[0] + 1,
+                pl_module.multi_step - 1 : pl_module.multi_step + output_times[0] + 1,
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
@@ -1051,7 +1051,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
-        time_out: tuple,
+        output_times: tuple,
     ) -> None:
         logger = trainer.logger
 
@@ -1065,12 +1065,12 @@ class PlotSample(BasePlotAdditionalMetrics):
             for name in self.parameters
         }
 
-        data, output_tensor = self.process(pl_module, outputs, batch, time_out)
+        data, output_tensor = self.process(pl_module, outputs, batch, output_times)
 
         local_rank = pl_module.local_rank
 
-        for rollout_step in range(time_out[0]):
-            init_step = rollout_step if time_out[1] == "time_interp" else 0
+        for rollout_step in range(output_times[0]):
+            init_step = rollout_step if output_times[1] == "time_interp" else 0
 
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
@@ -1137,14 +1137,14 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
-        time_out: tuple,
+        output_times: tuple,
     ) -> None:
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch, time_out)
+        data, output_tensor = self.process(pl_module, outputs, batch, output_times)
 
-        for rollout_step in range(time_out[0]):
+        for rollout_step in range(output_times[0]):
             # Build dictionary of indices and parameters to be plotted
 
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
@@ -1156,7 +1156,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            init_step = rollout_step if time_out[1] == "time_interp" else 0
+            init_step = rollout_step if output_times[1] == "time_interp" else 0
 
             fig = plot_power_spectrum(
                 plot_parameters_dict_spectrum,
@@ -1225,14 +1225,14 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
-        time_out: tuple,
+        output_times: tuple,
     ) -> None:
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
-        data, output_tensor = self.process(pl_module, outputs, batch, time_out)
+        data, output_tensor = self.process(pl_module, outputs, batch, output_times)
 
-        for rollout_step in range(time_out[0]):
+        for rollout_step in range(output_times[0]):
 
             # Build dictionary of indices and parameters to be plotted
             diagnostics = [] if self.config.data.diagnostic is None else self.config.data.diagnostic
@@ -1245,7 +1245,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            init_step = rollout_step if time_out[1] == "time_interp" else 0
+            init_step = rollout_step if output_times[1] == "time_interp" else 0
 
             fig = plot_histogram(
                 plot_parameters_dict_histogram,
