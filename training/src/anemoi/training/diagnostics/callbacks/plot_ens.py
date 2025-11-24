@@ -253,7 +253,9 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             for name in self.config.diagnostics.plot.parameters
         }
 
-        data, output_tensor = self.process(pl_module, outputs, batch, output_times=output_times, members=self.plot_members)
+        data, output_tensor = self.process(
+            pl_module, outputs, batch, output_times=output_times, members=self.plot_members,
+        )
 
         local_rank = pl_module.local_rank
         for rollout_step in range(output_times[0]):
