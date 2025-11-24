@@ -11,12 +11,14 @@
 import logging
 import os
 from pathlib import Path
+from typing import Union
 
 import pytest
 import torch
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
+from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
@@ -36,8 +38,7 @@ def set_working_directory() -> None:
     os.chdir(repo_root)
 
 
-@pytest.fixture
-def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
+def _load_testing_modifications(tmp_path: Path) -> Union[DictConfig, ListConfig]:
     modifications_file = "training/tests/integration/config/testing_modifications.yaml"
     testing_modifications = OmegaConf.load(Path.cwd() / modifications_file)
     assert isinstance(testing_modifications, DictConfig)
@@ -46,11 +47,14 @@ def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
 
 
 @pytest.fixture
+def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
+    return _load_testing_modifications(tmp_path)
+
+
+@pytest.fixture
 def testing_modifications_callbacks_on_with_temp_dir(tmp_path: Path) -> DictConfig:
-    modifications_file = "training/tests/integration/config/testing_modifications_plotting.yaml"
-    testing_modifications = OmegaConf.load(Path.cwd() / modifications_file)
-    assert isinstance(testing_modifications, DictConfig)
-    testing_modifications.hardware.paths.output = str(tmp_path)
+    testing_modifications = _load_testing_modifications(tmp_path)
+    del testing_modifications.diagnostics.plot.callbacks
     return testing_modifications
 
 
