@@ -34,9 +34,6 @@ training:
 diagnostics:
   callbacks: []
 
-  training:
-    model_task: anemoi.training.train.tasks.GraphEnsForecaster
-
   plot:
     enabled: False
     callbacks: []
