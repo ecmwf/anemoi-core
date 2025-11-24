@@ -254,7 +254,11 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         }
 
         data, output_tensor = self.process(
-            pl_module, outputs, batch, output_times=output_times, members=self.plot_members,
+            pl_module,
+            outputs,
+            batch,
+            output_times=output_times,
+            members=self.plot_members,
         )
 
         local_rank = pl_module.local_rank
