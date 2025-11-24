@@ -192,7 +192,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             torch.save(model, inference_checkpoint_filepath)
-            print("metadata", metadata)
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
 

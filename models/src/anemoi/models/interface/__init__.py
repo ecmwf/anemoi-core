@@ -207,4 +207,3 @@ class AnemoiModelInterface(torch.nn.Module):
 
     def _update_metadata(self) -> None:
         self.model.fill_metadata(self.metadata)
-        print(self.metadata)
