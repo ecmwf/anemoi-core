@@ -184,11 +184,20 @@ class DatasetCache(AnemoiDatasetsDataModule):
     def check_cache(self, date) -> list[int]:
         """ checks either local or global registry. returns list of procs containing file in their SSD"""
         if self.global_cache_registry is not None:
-            cache_subset=self.global_cache_registry[:,date] # (num_proc) array, -1 if not in cache, non-negative if in cache
+            # Slice from torch tensor → convert to 1D numpy array
+            cache_subset = self.global_cache_registry[:, date].detach().cpu().numpy().ravel()
         else:
-            assert self.cache_registry is not None
-            cache_subset = [self.cache_registry[date]]
-        cache_hits = [x for x in cache_subset if x != -1]
+            # Local cache registry is already a Python mapping
+            cache_subset = [self.cache_registry.get(date, -1)]
+
+        # Convert numpy values to Python int and filter out -1
+        cache_hits = [int(x) for x in cache_subset if int(x) != -1]
+        #if self.global_cache_registry is not None:
+        #    cache_subset=self.global_cache_registry[:,date] # (num_proc) array, -1 if not in cache, non-negative if in cache
+        #else:
+        #    assert self.cache_registry is not None
+        #    cache_subset = [self.cache_registry[date]]
+        #cache_hits = [x for x in cache_subset if x != -1]
         return cache_hits
 
     def fetch(self, date, verbose=True) -> np.ndarray:
@@ -197,6 +206,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         cache_hits = self.check_cache(date)
         
         if len(cache_hits) == 0:
+        #if cache_hits.numel() == 0:
             #Cache miss, go to filesystem
             
             data = self.ds[date]

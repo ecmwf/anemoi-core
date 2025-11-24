@@ -25,6 +25,8 @@ from anemoi.training.data.grid_indices import BaseGridIndices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_seconds
+from anemoi.training.data.cache import DatasetCache
+import os
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +58,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
+        
+        self.use_cache=True    
+        if self.use_cache:
+            self.cache_initalised=False #initalise Later when we have the data reader
 
     @cached_property
     def statistics(self) -> dict:
@@ -219,6 +225,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     ) -> NativeGridDataset:
 
         data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
+        
+        #initalise now once we have datareader
+        #TODO tidy
+        if self.use_cache and not self.cache_initalised and label == "train":
+            self.cache=DatasetCache(
+                cache_root=str(os.getenv("TMPDIR")),
+                dataset_path="/home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2022-6h-v6.zarr",
+                ds=data_reader,
+            )
 
         return NativeGridDataset(
             data_reader=data_reader,
@@ -227,6 +242,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             grid_indices=self.grid_indices,
             label=label,
+            cache=self.cache,
         )
 
     def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:
