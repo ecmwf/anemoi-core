@@ -13,6 +13,7 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Any
 
+import numpy as np
 from omegaconf import DictConfig
 from rich.console import Console
 
@@ -146,24 +147,74 @@ class Forward(SampleProvider):
         return self._forward._tree(prefix=prefix)
 
 
-class InsertStatic(Forward):
-    def __init__(self, _context: Context, forward, static: dict):
+class Indices:
+    def __init__(self):
+        self._names_to_index = {}
+        self._categories = {}
+        self._masks = {}
+
+    def add_categories(self, name, name_to_index, categories):
+        self._names_to_index[name] = name_to_index
+        self._categories[name] = categories
+        self._masks = {}
+        print("✅", categories)
+        print("❌", name_to_index)
+        for cat_name, vars in categories.items():
+            self._masks[cat_name] = np.array([name_to_index[v] for v in vars])
+
+    def __call__(self, **kwargs):
+        if len(kwargs) == 0:
+            raise ValueError("At least one variable category must be specified")
+        if len(kwargs) > 1:
+            raise NotImplementedError("Only one variable category can be requested at a time")
+
+        name = list(kwargs.keys())[0]
+        category = kwargs[name]
+
+        if name not in self._names_to_index:
+            raise ValueError(f"Unknown name '{name}', available: {list(self._names_to_index.keys())}")
+        if category not in self._variables_categories[name]:
+            raise ValueError(
+                f"Unknown variable category '{category}' for name '{name}', available: {list(self._variables_categories[name].keys())}"
+            )
+        return self._variables_masks[name][category]
+
+    def __repr__(self):
+        lst = [""]
+        for name, categories in self._categories.items():
+            lst.append(f"  {name}: {list(categories.keys())}")
+        return "\n".join(lst)
+
+
+class AddCategories(Forward):
+    def __init__(self, _context: Context, forward, variables: dict = None, offsets: dict = None):
         super().__init__(_context, forward)
-        self.add_to_static = static
+        self.variables = variables
+        self.offsets = offsets
 
     @property
     def static(self):
         res = self._forward.static.copy()
         assert isinstance(res, StaticDataDict)
-        for k, v in self.add_to_static.items():
-            if k in res:
-                raise ValueError(f"Cannot add '{k}' to static, already present in {list(res.keys())}")
-            res[k] = v
+
+        if "indices" not in res:
+            res.indices = Indices()
+
+        if self.variables is not None:
+            res.indices.add_categories("variables", name_to_index=res["name_to_index"], categories=self.variables)
+
+        if self.offsets is not None:
+            name_to_index = {name: i for i, name in enumerate(res["offsets"])}
+            res.indices.add_categories("offsets", name_to_index=name_to_index, categories=self.offsets)
+
         return res
 
     def _tree(self, prefix=None):
         tree = self._forward._tree(prefix=prefix)
-        tree.add(f"+{','.join(self.add_to_static.keys())} to static")
+        if self.variables is not None:
+            tree.add(f"[bold magenta]Variables categories:[/bold magenta] {self.variables}")
+        if self.offsets is not None:
+            tree.add(f"[bold magenta]Offsets categories:[/bold magenta] {self.offsets}")
         return tree
 
 

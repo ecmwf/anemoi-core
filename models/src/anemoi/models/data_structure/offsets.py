@@ -24,10 +24,20 @@ LOGGER = logging.getLogger(__name__)
 # Utility functions to handle offsets
 
 
+def normalise_offset(v) -> str:
+    if isinstance(v, str):
+        if v.startswith("m"):
+            v = "-" + v[1:]
+        v = offset_to_timedelta(v)
+    elif isinstance(v, np.timedelta64):
+        v = v.astype("timedelta64[s]").item()
+    assert isinstance(v, datetime.timedelta), type(v)
+    return offset_to_string(v)
+
+
 def offset_to_string(x) -> str:
     # copied here to make sure that the automatically generated keys are stable
     # so we don't use frequency_to_string from anemoi.utils
-
     assert isinstance(x, datetime.timedelta), type(x)
 
     total_seconds = int(x.total_seconds())

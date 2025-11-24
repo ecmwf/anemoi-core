@@ -15,10 +15,11 @@ from rich.tree import Tree as _RichTree
 from anemoi.models.data_structure.dicts import DynamicDataDict
 from anemoi.models.data_structure.dicts import StaticDataDict
 from anemoi.models.data_structure.offsets import find_required_steps_for_rollout
+from anemoi.models.data_structure.offsets import normalise_offset
 from anemoi.models.data_structure.offsets import offset_to_np_timedelta
+from anemoi.models.data_structure.sample_provider.base import AddCategories
 from anemoi.models.data_structure.sample_provider.base import Context
 from anemoi.models.data_structure.sample_provider.base import Forward
-from anemoi.models.data_structure.sample_provider.base import InsertStatic
 from anemoi.models.data_structure.sample_provider.base import SampleProvider
 from anemoi.models.data_structure.sample_provider.base import _sample_provider_factory
 
@@ -195,7 +196,7 @@ class Container(SampleProvider):
                 if not all(k in ALLOWED for k in categories.keys()):
                     raise ValueError(f"Expected keys in {ALLOWED} for variables, got {list(categories.keys())}")
                 forward = _sample_provider_factory(_context, container)
-                return InsertStatic.new(_context, forward=forward, static=dict(variables_categories=categories))
+                return AddCategories.new(_context, forward=forward, variables=categories)
 
             case {"offsets": dict()}:
                 # if key "offsets " is present and with a special format (categories of rollout)
@@ -208,8 +209,10 @@ class Container(SampleProvider):
                     container["offsets"] = find_required_steps_for_rollout(**categories["rollout"])
                 else:
                     container["offsets"] = _merge_sublists(categories)
+                container["offsets"] = [normalise_offset(o) for o in container["offsets"]]
+                categories = {k: [normalise_offset(o) for o in v] for k, v in categories.items()}
                 forward = _sample_provider_factory(_context, container)
-                return InsertStatic.new(_context, forward=forward, static=dict(offsets_categories=categories))
+                return AddCategories.new(_context, forward=forward, offsets=categories)
 
             case {"dimensions": list() as dims} if all(isinstance(d, str) for d in dims):
                 # found "dimensions" key with simple format (a list of string)
@@ -226,10 +229,11 @@ class Container(SampleProvider):
                 assert "offsets" in container, f"Expected 'offsets' in container when using dimensions {container}"
                 _, *dimensions = container.pop("dimensions")
                 offsets = container.pop("offsets")
+                offsets = [normalise_offset(o) for o in offsets]
                 multi_offset = {}
                 for offset in offsets:
                     cfg = container.copy()
-                    cfg["offset"] = offset
+                    cfg["offset"] = normalise_offset(offset)
                     cfg["dimensions"] = dimensions
                     multi_offset[offset] = _sample_provider_factory(_context, cfg)
                 return StackAsLists.new(_context, "offsets", multi_offset)
