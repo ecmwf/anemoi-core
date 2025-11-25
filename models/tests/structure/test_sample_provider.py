@@ -35,39 +35,40 @@ def wrapped_getitem(sample_provider, index):
 def test_gridded():
     config_sample_provider = yaml.safe_load(
         """sample_provider:
-              groups:
-                # era5_o48:
-                #     variables:
-                #       forcings: ["2t"]
-                #       prognostics: ["10u", "10v"]
-                #       diagnostics: ["tp"]
-                #     dimensions: ["offsets", "ensembles", "values", "variables"]
-                #     offsets: ["-6h", "+0h", "+6h"]
-                # era5_o96:
-                #     variables:
-                #       forcings: ["z_500", "z_850"]
-                #       prognostics: ["q_500", "q_850", "q_925"]
-                #       diagnostics: ["u_100", "v_100"]
-                #     dimensions: [["offsets"], "ensembles", "values", "variables"]
-                #     offsets: ["-6h", "+0h", "+6h"]
-                #     extra_configs:
-                #       normalisation: # override the one in data_handler
-                #         {default: 'mean-std', 'mean-std': [u_100, v_100]}
-                #       more_config: {}
-                era5_20:
-                    variables:
-                      forcings: ["2t"]
-                      prognostics: ["t_500", "t_850"]
-                      diagnostics: ["z_500"]
-                    dimensions: ["offsets", "ensembles", "values", "variables"]
-                    offsets: ["-6h", "+0h"]
+              sample:
+                dimensions: ["offsets", "ensembles", "values", "variables"]
+                offsets: ["+0h", "+6h"]
+                groups:
+                  # era5_o48:
+                  #     variables:
+                  #       forcings: ["2t"]
+                  #       prognostics: ["10u", "10v"]
+                  #       diagnostics: ["tp"]
+                  #     dimensions: ["offsets", "ensembles", "values", "variables"]
+                  #     offsets: ["-6h", "+0h", "+6h"]
+                  # era5_o96:
+                  #     variables:
+                  #       forcings: ["z_500", "z_850"]
+                  #       prognostics: ["q_500", "q_850", "q_925"]
+                  #       diagnostics: ["u_100", "v_100"]
+                  #     dimensions: [["offsets"], "ensembles", "values", "variables"]
+                  #     offsets: ["-6h", "+0h", "+6h"]
+                  #     extra_configs:
+                  #       normalisation: # override the one in data_handler
+                  #         {default: 'mean-std', 'mean-std': [u_100, v_100]}
+                  #       more_config: {}
+                  era5_20:
+                      variables:
+                        forcings: ["2t"]
+                        prognostics: ["t_500", "t_850"]
+                        diagnostics: ["z_500"]
+                      # offsets: ["+0h", "+6h"]
+                      # dimensions: ["offsets", "ensembles", "values", "variables"]
 
-                era5_20_bis:
-                    variables:
-                      forcings: ["2t"]
-                      diagnostics: ["z_500"]
-                    dimensions: ["offsets", "ensembles", "values", "variables"]
-                    offsets: ["+0h", "+6h"]
+                  era5_20_bis:
+                      variables:
+                        forcings: ["2t"]
+                        diagnostics: ["z_500"]
               data_handler:
                 training:
                     start: 2016-12-19
@@ -120,14 +121,15 @@ def test_gridded():
 def test_observations():
     cfg = yaml.safe_load(
         """sample_provider:
-             frequency: 3h
-             groups:
+            frequency: 3h
+            dimensions: [["offsets"], "values", "variables"]
+            sample:
+              groups:
                 msg_combined_seviri_o256:
                   variables:
                     forcings: ["cos_latitude", "sin_latitude"]
                     prognostics: []
                     diagnostics: []
-                  dimensions: [["offsets"], "values", "variables"]
                   offsets: ["-6h", "+0h"]
                     # input: ["-3h", "+0h"]
                     # target: ["+3h"]
@@ -135,7 +137,7 @@ def test_observations():
                     normalisation: # override the one in data_handler
                       {default: 'mean-std', 'mean-std': [u_100, v_100]}
                     more_config: {}
-             data_handler:
+            data_handler:
                training:
                    start: 2018-11-01T12:00:00
                    end: 2021
@@ -148,7 +150,7 @@ def test_observations():
                       # contains:  ...
                       dataset: observations-2021-10days-6h-v1-eta
                       frequency: 3h
-             aliases: "is ignored"
+            aliases: "is ignored"
            """
     )["sample_provider"]
 

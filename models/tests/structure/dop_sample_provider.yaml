@@ -3,54 +3,45 @@
 # ----------------------------------------
 frequency: 3h
 
-groups:
-  # MSG SEVIRI O256
-  #msg_combined_seviri_o256:
-  #  variables: ['cos_latitude', 'rawbt_4', 'rawbt_5']
-  #    # diagnostics: null
-  #  dimensions: [["offsets"], "values", "variables"]
-  #  #offsets: ["0h"]
-  #  offsets:
-  #    input: ["-3h", "+0h"]
-  #    target: ["+3h"]
-  #  # extra_configs:
-  #  #   more_config: {}
+sample:
+  dimensions: [["offsets"], "values", "variables"]
+  offsets:
+    input: ["-3h", "+0h"]
+    target: ["+3h"]
+  groups:
+    # MSG SEVIRI O256
+    #msg_combined_seviri_o256:
+    #  variables: ['cos_latitude', 'rawbt_4', 'rawbt_5']
+    #    # diagnostics: null
+    #  offsets:
+    #    input: ["-3h", "+0h"]
+    #    target: ["+3h"]
+    #  # extra_configs:
+    #  #   more_config: {}
 
-  ## NPP ATMS
-  #npp_atms_unthinned_native:
-  #  variables:
-  #    - cos_latitude
-  #    - sin_latitude
-  #  dimensions: [["offsets"], "values", "variables"]
-  #  offsets:
-  #    input: ["-3h", "+0h"]
-  #    target: ["+3h"]
-  #  extra_configs:
-  #    more_config: {}
+    ## NPP ATMS
+    #npp_atms_unthinned_native:
+    #  variables:
+    #    - cos_latitude
+    #    - sin_latitude
+    #  extra_configs:
+    #    more_config: {}
 
-  ## Aeolus ALADIN MIE
-  #aeolus_aladin_mie:
-  #  variables:
-  #    - cos_latitude
-  #    - sin_latitude
-  #  dimensions: [["offsets"], "values", "variables"]
-  #  offsets:
-  #    input: ["-3h", "+0h"]
-  #    target: ["+3h"]
-  #  extra_configs:
-  #    more_config: {}
+    ## Aeolus ALADIN MIE
+    #aeolus_aladin_mie:
+    #  variables:
+    #    - cos_latitude
+    #    - sin_latitude
+    #  extra_configs:
+    #    more_config: {}
 
-  # MSLP + IBTrACS combined
-  noaa_20_atms_radiances_native:
-    variables:
-      forcings: ["cos_latitude"]
-   #   prognostics: ["pmsl_0"]
-    dimensions: [["offsets"], "values", "variables"]
-    offsets:
-      input: ["-3h", "+0h"]
-      target: ["+3h"]
-    # extra_configs:
-    #   more_config: {}
+    # MSLP + IBTrACS combined
+    noaa_20_atms_radiances_native:
+      variables:
+        forcings: ["cos_latitude"]
+     #   prognostics: ["pmsl_0"]
+      # extra_configs:
+      #   more_config: {}
 
 data_handler:
   training:

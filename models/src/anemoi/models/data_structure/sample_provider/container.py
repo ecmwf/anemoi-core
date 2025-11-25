@@ -185,6 +185,13 @@ class Container(SampleProvider):
         container = container.copy()
         assert "variables" in container, f"Must specify variables, got {container}"
 
+        if "dimensions" not in container and _context.get("dimensions") is not None:
+            container["dimensions"] = _context["dimensions"]
+            _context = Context(_context, dimensions=None)
+        if "offsets" not in container and _context.get("offsets") is not None:
+            container["offsets"] = _context["offsets"]
+            _context = Context(_context, offsets=None)
+
         match container:
             # order matters here
 

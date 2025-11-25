@@ -231,25 +231,27 @@ def _sample_provider_factory(_context: Context, cfg: Any) -> SampleProvider:
             cfg = _resolve_omega_conf_reference(cfg)
             return _sample_provider_factory(_context, cfg)
 
-        case {"dictionary": dict() as dictionary} if len(cfg) == 1:
-            raise ValueError("Don't use 'dictionary'. Use 'groups' instead.")
+        case {"sample": dict() as sample} if len(cfg) == 1:
+            return _sample_provider_factory(_context, sample)
+
+        case {"dimensions": dimensions, **config}:
+            _context = Context(_context, dimensions=dimensions)
+            return _sample_provider_factory(_context, config)
+
+        case {"offset": offset, **config}:
+            # should not be used directly by user.
+            _context = Context(_context, offset=offset)
+            return _sample_provider_factory(_context, config)
+
+        case {"offsets": offsets, **config}:
+            _context = Context(_context, offsets=offsets)
+            return _sample_provider_factory(_context, config)
 
         case {"groups": dict() as dictionary} if len(cfg) == 1:
             # create a dictionary of sample providers
             from anemoi.models.data_structure.sample_provider.dictionary import SampleProviderDictionary
 
             return SampleProviderDictionary.new(_context, dictionary)
-
-        case {"offset": offset, **config}:
-            # create a sample provider with an offset, updating the context
-            # note the singular "offset", not "offsets"
-            # this is used internally when expanding offsets in a list or dict
-            # and is not expected to be used by the user directly
-            # (although it would work, and set the offset for all downstream sample providers
-            # we may want to support this in the future and extend it to "dimensions" or other keys
-            # as well)
-            _context = Context(_context, offset=offset)
-            return _sample_provider_factory(_context, config)
 
         case _:
             # finally, create a container
