@@ -224,6 +224,7 @@ Anemoi supports compilation via the 'models.compile' keyword, which takes a list
 For information on how to compile see the `compilation documentation`_ for anemoi.
 
 The following modules have been found to give a speedup from compilation:
+
 - anemoi.models.layers.conv.GraphTransformerConv (when not using the triton backend)
 - anemoi.models.layers.normalization.ConditionalLayerNorm (when using the ensemble model)
 - torch.nn.LayerNorm
