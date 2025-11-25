@@ -25,7 +25,7 @@ This guide will introduce you to what you can change your models performance. It
  Memory
 ########
 
-Memory issues typically appear as a "CUDA Out Of Memory" error. These typically occur in the first few iterations of your model. 
+Memory issues typically appear as a "CUDA Out Of Memory" error. These typically occur in the first few iterations of your model.
 .. code-block::
    torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 8.60 GiB. GPU 0 has a total capacity of 39.56 GiB of which 4.79 GiB is free.
 
@@ -39,7 +39,7 @@ Instead a CUDA out-of-memory error is raised.
 
 The easiest way to tell if your memory is fragmented is to read the CUDA out-of-memory error.
 
-.. code-block:: 
+.. code-block::
    torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 3.15 GiB. GPU 0 has a total capacity of 39.56 GiB of which 6.80 GiB is free. Including non-PyTorch memory, this process has 36.61 GiB memory in use. Of the allocated memory 31.66 GiB is allocated by PyTorch, and 4.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.
 
 The error message states there was an error allocating a 3GiB tensor, but that 4GiB of memory is reserved but not allocated. This is memory which is unusable due to memory fragmentation.
@@ -140,7 +140,7 @@ Below are some other settings which impact dataloader performance, and their rec
 
    # prefetch_factor > 1 only seems to increase memory required by dataloader processes without giving a speedup.
    prefetch_factor: 1
-   # Reduce the time needed to transfer data from CPU to GPU by copying the input batch into a pinned memory buffer on the CPU. 
+   # Reduce the time needed to transfer data from CPU to GPU by copying the input batch into a pinned memory buffer on the CPU.
    pin_memory: True
 
    #dataloaders read in parallel.
@@ -229,4 +229,3 @@ For further insights in your runtime performance, you can take the traces produc
 
 .. _pytorch profiler: https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/benchmarking.html#memory-profiler
 .. _perfetto: https://ui.perfetto.dev/
-
