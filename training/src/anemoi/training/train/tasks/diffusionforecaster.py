@@ -105,7 +105,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
     def _get_noise_level(
         self,
-        shape: torch.shape,
+        shape: tuple[int],
         sigma_max: float,
         sigma_min: float,
         sigma_data: float,
