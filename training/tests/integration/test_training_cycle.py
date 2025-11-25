@@ -157,7 +157,7 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     get_test_archive(url)
 
     AnemoiTrainer(cfg).train()
-    output_dir = Path(cfg.system.output.root+'/' +cfg.system.output.checkpoints.root)
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
 
     assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
 

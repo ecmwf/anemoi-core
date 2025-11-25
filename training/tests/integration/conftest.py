@@ -352,7 +352,7 @@ def architecture_config_with_checkpoint(
 
     _, new_ckpt, _ = migrator.sync(existing_ckpt)
 
-    checkpoint_dir = Path(cfg.system.output.root + "/"+cfg.system.output.checkpoints.root +"/dummy_id")
+    checkpoint_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root + "/dummy_id")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
