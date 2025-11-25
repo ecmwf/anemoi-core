@@ -187,7 +187,7 @@ class EcTransOctahedralSHT:
                 m_off_symm += (n_total_values - 1) * self.n_lat_nh
                 m_off_anti += (n_total_values + 1) * self.n_lat_nh
 
-        self.symmetric = torch.stack(self.symmetric).to(complex_dtype_map[self.dtype])
+        self.symmetric = torch.stack(self.symmetric)[:, 1:, :].to(complex_dtype_map[self.dtype])
         self.antisymmetric = torch.stack(self.antisymmetric).to(complex_dtype_map[self.dtype])
 
     def longitudinal_rfft(self, x: torch.Tensor):
@@ -206,22 +206,24 @@ class EcTransOctahedralSHT:
         return torch.stack(four_out, dim=2)
 
     def legendre_quadrature(self, x: torch.Tensor):
-
         fourier_sh_flipped = torch.flip(x[:, :, self.n_lat_nh :, :, :], dims=[2])
         fourier_norm_sym = x[:, :, : self.n_lat_nh, :, :] + fourier_sh_flipped
         fourier_norm_anti = x[:, :, : self.n_lat_nh, :, :] - fourier_sh_flipped
 
-        spectrum_sym = torch.einsum(
+        [bs, ens, _, mmax, nvars] = fourier_norm_sym.shape
+
+        spectrum = torch.empty(bs, ens, self.truncation + 1, mmax, nvars, dtype=x.dtype, device=x.device)
+        spectrum[:, :, 0::2, :, :] = torch.einsum(
             "mnijk,jli->mnljk", fourier_norm_sym, self.symmetric.to(device=x.device)
         )  # noqa: F841
-        spectrum_anti = torch.einsum(
+        spectrum[:, :, 1::2, :, :] = torch.einsum(
             "mnijk,jli->mnljk", fourier_norm_anti, self.antisymmetric.to(device=x.device)
         )  # noqa: F841
 
-        return (spectrum_sym, spectrum_anti)
+        return spectrum
 
     def __call__(self, x: torch.Tensor):
 
-        x = self.longitudinal_rfft(x)
-        x_sym, x_anti = self.legendre_quadrature(x)
-        return x_sym, x_anti
+        x_fourier = self.longitudinal_rfft(x)
+        spectrum = self.legendre_quadrature(x_fourier)
+        return spectrum
