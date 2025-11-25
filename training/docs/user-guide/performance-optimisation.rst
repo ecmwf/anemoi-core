@@ -291,19 +291,11 @@ takes a list of modules to be compiled.
 For information on how to compile see the `compilation documentation`_
 for anemoi.
 
-<<<<<<< HEAD
 The following modules have been found to give a speedup from compilation:
 
 - anemoi.models.layers.conv.GraphTransformerConv (when not using the triton backend)
 - anemoi.models.layers.normalization.ConditionalLayerNorm (when using the ensemble model)
 - torch.nn.LayerNorm
-=======
-The following modules have been found to give a speedup from
-compilation: - anemoi.models.layers.conv.GraphTransformerConv (when not
-using the triton backend) -
-anemoi.models.layers.normalization.ConditionalLayerNorm (when using the
-ensemble model) - torch.nn.LayerNorm
->>>>>>> edbddd51864ec16b6092c44deb20e434f53e6b4a
 
 Compiling can also decrease the peak memory required, by fusing multiple
 functions into a single one which reduces the intermediate activations
