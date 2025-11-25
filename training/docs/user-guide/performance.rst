@@ -25,18 +25,23 @@ This guide will introduce you to what you can change your models performance. It
  Memory
 ########
 
-Memory issues typically appear as a "CUDA Out Of Memory" error. These typically occur in the first few iterations of your model. 
+<<<<<<< HEAD
+Memory issues typically appear as a "CUDA Out Of Memory" error. These typically occur in the first few iterations of your model.
    :code:`torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 8.60 GiB. GPU 0 has a total capacity of 39.56 GiB of which 4.79 GiB is free`.
+=======
+Memory issues typically appear as a "CUDA Out Of Memory" error. These typically occur in the first few iterations of your model.
+.. image:: ../images/performance-guide/cuda-oom.png
+>>>>>>> 33d80a1a8d9c0b1c04bbcb3bb59e1aad0216039c
 
 If Out Of Memory errors occur much later on in your run, this could indicate a memory leak, see section ... for instructions on how to debug a memory leak.
 
 *****************************
  Reduce Memory Fragmentation
 *****************************
-The first step to getting past an out-of-memory error is to reduce memory fragmentation. Over the course of a run, blocks of GPU memory are allocated and freed many times. This can lead to relatively small gaps occuring between allocated blocks of memory. These gaps taken alltogether, might be sufficent to store a large tensor, but since they are fragmented they cannot be used. 
+The first step to getting past an out-of-memory error is to reduce memory fragmentation. Over the course of a run, blocks of GPU memory are allocated and freed many times. This can lead to relatively small gaps occuring between allocated blocks of memory. These gaps taken alltogether, might be sufficent to store a large tensor, but since they are fragmented they cannot be used.
 Instead a CUDA out-of-memory error is raised.
 
-The easiest way to tell if your memory is fragmented is to read the CUDA out-of-memory error. 
+The easiest way to tell if your memory is fragmented is to read the CUDA out-of-memory error.
 
  :code:`torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 3.15 GiB. GPU 0 has a total capacity of 39.56 GiB of which 6.80 GiB is free. Including non-PyTorch memory, this process has 36.61 GiB memory in use. Of the allocated memory 31.66 GiB is allocated by PyTorch, and 4.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.`
 
@@ -49,7 +54,7 @@ To resolve memory fragmentation the following environment variable can be set
 If you are launching jobs via SLURM, this line can be put at the top of your SLURM batch script.
 This environment variable works for most GPUs tested (Nvidia A100, H100, GH200 and AMD MI250x). It is currently not supported on AMD MI300A (due to the unified physical memory) and CPUs (which do not use the CUDA caching memory allocator).
 
-For a techinical explanation of the CUDA Caching memory allocator, and how memory fragmentation occurs, you can read `this blog post`_. 
+For a techinical explanation of the CUDA Caching memory allocator, and how memory fragmentation occurs, you can read `this blog post`_.
 
 .. _this blog post: https://zdevito.github.io/2022/08/04/cuda-caching-allocator.html
 
@@ -70,9 +75,15 @@ In the example above the number of mapper chunks have been increased from 1 to 4
 
 Chunking defaults to 4 for the encoder and decoder and 2 for the processor (lower resolution). Chunking can be controlled using the following config parameter
 
+<<<<<<< HEAD
 :code:`model.encoder.num_chunks=... model.processor.num_chunks=... model.decoder.num_chunks=...`
+=======
+``
+model.encoder.num_chunks=... model.processor.num_chunks=... model.decoder.num_chunks=...
+``
+>>>>>>> 33d80a1a8d9c0b1c04bbcb3bb59e1aad0216039c
 
-The number of chunks should always be a power of two. 
+The number of chunks should always be a power of two.
 
 Processor chunks can be increased to a maximum of the number of layers in a model, by default 16. The number of processor chunks has no impact on performance.
 
@@ -131,14 +142,21 @@ Below are some other settings which impact dataloader performance, and their rec
 .. code-block:: yaml
    #training/config/dataloader/native_grid.yaml
 
+<<<<<<< HEAD
    # prefetch_factor > 1 only seems to increase memory required by dataloader processes without giving a speedup.
    prefetch_factor: 1
-   # Reduce the time needed to transfer data from CPU to GPU by copying the input batch into a pinned memory buffer on the CPU. 
+   # Reduce the time needed to transfer data from CPU to GPU by copying the input batch into a pinned memory buffer on the CPU.
    pin_memory: True
 
    #dataloaders read in parallel.
    #Only impactful if hardware.num_gpus_per_model > 1
    read_group_size: ${hardware.num_gpus_per_model}
+=======
+# prefetch_factor > 1 only seems to increase memory required by dataloader processes without giving a speedup.
+prefetch_factor: 1
+# Reduce the time needed to transfer data from CPU to GPU by copying the input batch into a pinned memory buffer on the CPU.
+pin_memory: True
+>>>>>>> 33d80a1a8d9c0b1c04bbcb3bb59e1aad0216039c
 
 
 .. note::
@@ -153,7 +171,7 @@ Below are some other settings which impact dataloader performance, and their rec
 
 .. note::
 
-   Longer rollout increases the CPU memory required by the dataloaders. It can be beneficial to break rollout runs into multiple runs (e.g. rollout 1->6 and rollout 7->12) and tune the number of workers for both runs accordingly.    
+   Longer rollout increases the CPU memory required by the dataloaders. It can be beneficial to break rollout runs into multiple runs (e.g. rollout 1->6 and rollout 7->12) and tune the number of workers for both runs accordingly.
 
 
 **************************
@@ -183,7 +201,7 @@ Triton is the default backend when using the GraphTransformer processor. However
  Compiling
 ************
 
-PyTorch can improve performance by compiling PyTorch code into Triton code at runtime. 
+PyTorch can improve performance by compiling PyTorch code into Triton code at runtime.
 
 Anemoi supports compilation via the 'models.compile' keyword, which takes a list of modules to be compiled.
 .. code-block:: yaml
@@ -201,7 +219,7 @@ The following modules have been found to give a speedup from compilation:
 * anemoi.models.layers.normalization.ConditionalLayerNorm (when using the ensemble model)
 * torch.nn.LayerNorm
 
-Compiling can also decrease the peak memory required, by fusing multiple functions into a single one which reduces the intermediate activations which must be stored. 
+Compiling can also decrease the peak memory required, by fusing multiple functions into a single one which reduces the intermediate activations which must be stored.
 
 Not all modules are able to be compiled, and some compilation errors can be difficult to debug.
 
@@ -209,7 +227,7 @@ Not all modules are able to be compiled, and some compilation errors can be diff
    Compiling the triton backend of the GraphTransformer will not have an effect, since it is already in triton.
 
 .. note::
-   The triton backend currently uses more memory then the compiled pyg 
+   The triton backend currently uses more memory then the compiled pyg
 
 
 .. _compilation documentation: https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/models.html#compilation
@@ -222,4 +240,3 @@ For further insights in your runtime performance, you can take the traces produc
 
 .. _pytorch profiler: https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/benchmarking.html#memory-profiler
 .. _perfetto: https://ui.perfetto.dev/
- 
