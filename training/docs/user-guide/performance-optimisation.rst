@@ -236,7 +236,7 @@ their recomended settings
    rollout 1->6 and rollout 7->12) and tune the number of workers for
    both runs accordingly.
 
-Change processor backend
+Change attention backend
 ========================
 
 The processor is a large component of the overall runtime. Both the
