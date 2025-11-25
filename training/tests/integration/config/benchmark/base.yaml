@@ -3,7 +3,7 @@
 system:
   hardware:
     accelerator: cuda
-    num_gpus_per_node: 2
+    num_gpus_per_node: 1
     num_nodes: 1
 
 

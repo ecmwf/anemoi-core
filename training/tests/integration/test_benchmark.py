@@ -36,6 +36,8 @@ def test_benchmark_training_cycle(
     cfg, test_case = benchmark_config
     LOGGER.info("Benchmarking the configuration: %s", test_case)
 
+    print(cfg.system.output.profiler)
+
     # Reset memory logging and free all possible memory between runs
     # this ensures we report the peak memory used during each run,
     # and not the peak memory used by the run with the highest memory usage
