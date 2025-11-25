@@ -1,11 +1,18 @@
 .. _usage-performance:
 
+.. role:: bash(code)
+   :language: bash
+
+##############
+ Benchmarking
+##############
+
+
 Is your model running too slowly? Or does your model not fit in your devices memory? Anemoi contains numerous settings to tweak the throughput and memory behaviour of your model.
 
 This guide will introduce you to what you can change your models performance. It is structured as a flowchart you can follow when debugging performance issues with your models.
 
 .. image:: ../images/performance-guide/performance-flowchart.png
-
 
 .. note::
 
@@ -19,7 +26,7 @@ This guide will introduce you to what you can change your models performance. It
 ########
 
 Memory issues typically appear as a "CUDA Out Of Memory" error. These typically occur in the first few iterations of your model. 
-.. image:: ../images/performance-guide/cuda-oom.png
+   :code:`torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 8.60 GiB. GPU 0 has a total capacity of 39.56 GiB of which 4.79 GiB is free`.
 
 If Out Of Memory errors occur much later on in your run, this could indicate a memory leak, see section ... for instructions on how to debug a memory leak.
 
@@ -31,17 +38,14 @@ Instead a CUDA out-of-memory error is raised.
 
 The easiest way to tell if your memory is fragmented is to read the CUDA out-of-memory error. 
 
-``
- torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 3.15 GiB. GPU 0 has a total capacity of 39.56 GiB of which 6.80 GiB is free. Including non-PyTorch memory, this process has 36.61 GiB memory in use. Of the allocated memory 31.66 GiB is allocated by PyTorch, and 4.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.
-``
+ :code:`torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 3.15 GiB. GPU 0 has a total capacity of 39.56 GiB of which 6.80 GiB is free. Including non-PyTorch memory, this process has 36.61 GiB memory in use. Of the allocated memory 31.66 GiB is allocated by PyTorch, and 4.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.`
 
 The error message states there was an error allocating a 3GiB tensor, but that 4GiB of memory is reserved but not allocated. This is memory which is unusable due to memory fragmentation.
 
 To resolve memory fragmentation the following environment variable can be set
 
-``
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-``
+:bash:`export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+
 If you are launching jobs via SLURM, this line can be put at the top of your SLURM batch script.
 This environment variable works for most GPUs tested (Nvidia A100, H100, GH200 and AMD MI250x). It is currently not supported on AMD MI300A (due to the unified physical memory) and CPUs (which do not use the CUDA caching memory allocator).
 
@@ -60,15 +64,13 @@ The image below shows memory usage in a single iteration (forward and backward p
 
 Peak memory usage in the mappers can be greatly reduced by computing the mappers sequantially in smaller chunks.
 
-.. image:: ../images/performance-guide/memory-4chunks.png
+.. image:: ../images/performance-guide/mem-snapshot-4-mapper-chunks.png
 
 In the example above the number of mapper chunks have been increased from 1 to 4. Subsequentially the peak memory usage has decreased from ~22GB to ~9GB.
 
 Chunking defaults to 4 for the encoder and decoder and 2 for the processor (lower resolution). Chunking can be controlled using the following config parameter
 
-``
-model.encoder.num_chunks=... model.processor.num_chunks=... model.decoder.num_chunks=... 
-``
+:code:`model.encoder.num_chunks=... model.processor.num_chunks=... model.decoder.num_chunks=...`
 
 The number of chunks should always be a power of two. 
 
@@ -78,19 +80,14 @@ There is no hard limit on how much the mappers can be chunked. However there is 
 
 It is often possible to determine from reading the CUDA out-of-memory stacktrace in which component of the model the OOM occured. This can inform you about which num_chunks parameter to change.
 
-.. image:: ../images/performance/oom-chunking.png
-
-
 .. note::
 
-   Chunking the mappers requires ``model.encoder/decoder.shard_strategy: 'edges'``. This is the default since anemoi-models v0.6.0.
+   Chunking the mappers requires :code:`model.encoder/decoder.shard_strategy: 'edges'`. This is the default since anemoi-models v0.6.0.
 
 .. note::
 
    At inference time the chunking can be changed using the following environment variables:
-   ``
-   export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=... ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR=...
-   ``
+   :bash:`export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=... ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR=...`
 
 ****************************
  Shard model over more GPUs
@@ -98,9 +95,7 @@ It is often possible to determine from reading the CUDA out-of-memory stacktrace
 
 If your model instance still does not fit in memory, you can shard the model over multiple GPUs.
 
-``
-hardware.num_gpus_per_model=2
-``
+:code:`hardware.num_gpus_per_model=2`
 
 This will reduce memory usage by sharding the input batch and model channels across GPUs.
 
@@ -130,34 +125,31 @@ One reason for slow performance could be that your CPU and filesystem cannot loa
 
 By default, each GPU will spawn 8 workers. Each worker will load data in parallel. You should try increase this number until you run out of CPU memory.
 A CPU out of memory error looks like:
-``
-slurmstepd: error: Detected 4 oom_kill events in StepId=39701120.0. Some of the step tasks have been OOM Killed.
-``
+:code:`slurmstepd: error: Detected 4 oom_kill events in StepId=39701120.0. Some of the step tasks have been OOM Killed.`
 
 Below are some other settings which impact dataloader performance, and their recomended settings
-``
-#training/config/dataloader/native_grid.yaml
+.. code-block:: yaml
+   #training/config/dataloader/native_grid.yaml
 
-# prefetch_factor > 1 only seems to increase memory required by dataloader processes without giving a speedup.
-prefetch_factor: 1
-# Reduce the time needed to transfer data from CPU to GPU by copying the input batch into a pinned memory buffer on the CPU. 
-pin_memory: True
+   # prefetch_factor > 1 only seems to increase memory required by dataloader processes without giving a speedup.
+   prefetch_factor: 1
+   # Reduce the time needed to transfer data from CPU to GPU by copying the input batch into a pinned memory buffer on the CPU. 
+   pin_memory: True
 
-#dataloaders read in parallel.
-#Only impactful if hardware.num_gpus_per_model > 1
-read_group_size: ${hardware.num_gpus_per_model}
-``
+   #dataloaders read in parallel.
+   #Only impactful if hardware.num_gpus_per_model > 1
+   read_group_size: ${hardware.num_gpus_per_model}
+
 
 .. note::
 
    Dataloader workers run on the CPU and require CPU cores and memory. If you are running on slurm you should ensure you have allocated the maximum number of CPU cores and memory required.
    For example on a node with 4 GPUs and 128 CPU cores
-   ``
-   #SBATCH --ntasks-per-node=4
-   #SBATCH --gpus-per-node=4
-   #SBATCH --cpus-per-task=32 # 128 cores / 4 tasks = 32 cores per task
-   #SBATCH --mem=0 # '0' is shorthand to request a CPU nodes entire memory
-   ``
+   .. code-block:: bash
+      #SBATCH --ntasks-per-node=4
+      #SBATCH --gpus-per-node=4
+      #SBATCH --cpus-per-task=32 # 128 cores / 4 tasks = 32 cores per task
+      #SBATCH --mem=0 # '0' is shorthand to request a CPU nodes entire memory
 
 .. note::
 
@@ -171,18 +163,20 @@ read_group_size: ${hardware.num_gpus_per_model}
 The processor is a large component of the overall runtime. Both the GraphTransformer and Transformer processor support multiple backends which can improve performance.
 
 For the Transformer processor, the 'flash attention' backend is the fastest. Flash attention can be selected in the config like so:
-``
-model.processor.attention_implementation = 'flash_attention'
-``
+
+.. code-block:: yaml
+   model.processor.attention_implementation: 'flash_attention'
+
 Flash attention is currently available on Nvidia and AMD GPUs only. On Nvidia GPUs, there are multiple versions of the flash attention library (2, 3 and 4) corresponding to different hardware generations (Ampere, Hopper and Blackwell) which take advantage of hardware-specific features for further speedups.
 
 Flash attention is not the default as it must be compiled from source.
 
 
 For the GraphTransformer processor, the 'triton' backend is the fastest. To use the 'triton' backend set the following config option:
-``
-model.processor.graph_attention_backend: "triton"
-``
+
+.. code-block:: yaml
+   model.processor.graph_attention_backend: "triton"
+
 Triton is the default backend when using the GraphTransformer processor. However it requires the 'triton' library to be installed. On AMD systems the library is called 'pytorch-triton-rocm'. Triton is not officially supported on CPUs.
 
 ************
@@ -192,14 +186,13 @@ Triton is the default backend when using the GraphTransformer processor. However
 PyTorch can improve performance by compiling PyTorch code into Triton code at runtime. 
 
 Anemoi supports compilation via the 'models.compile' keyword, which takes a list of modules to be compiled.
-``
-#training/config/models/graphtransformer.yaml
-compile:
-  - module: anemoi.models.layers.conv.GraphTransformerConv
-  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
-    options:
-      dynamic: False
-``
+.. code-block:: yaml
+   #training/config/models/graphtransformer.yaml
+   compile:
+      - module: anemoi.models.layers.conv.GraphTransformerConv
+      - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+        options:
+          dynamic: False
 
 For information on how to compile see the `complation documentation`_ for anemoi.
 
@@ -214,6 +207,9 @@ Not all modules are able to be compiled, and some compilation errors can be diff
 
 .. note::
    Compiling the triton backend of the GraphTransformer will not have an effect, since it is already in triton.
+
+.. note::
+   The triton backend currently uses more memory then the compiled pyg 
 
 
 .. _compilation documentation: https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/models.html#compilation

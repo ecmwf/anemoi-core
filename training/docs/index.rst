@@ -44,6 +44,7 @@ This package provides the *Anemoi* training functionality.
    user-guide/benchmarking
    user-guide/distributed
    user-guide/download-era5-o96
+   user-guide/performance
 
 .. toctree::
    :maxdepth: 1
