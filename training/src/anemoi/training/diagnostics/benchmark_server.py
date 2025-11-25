@@ -702,7 +702,7 @@ def benchmark(
     store: str,
     update_data: bool = False,  # when this is true, data is always updated
 ) -> None:
-    profiler_path=cfg.system.output.profiler
+    profiler_path = cfg.system.output.profiler
     local_benchmark_results = get_local_benchmark_results(profiler_path)
 
     # Get reference benchmark results
