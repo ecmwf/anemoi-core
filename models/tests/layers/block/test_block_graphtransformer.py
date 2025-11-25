@@ -31,6 +31,7 @@ def init_proc():
     num_heads = 8
     layer_kernels = load_layer_kernels()
     qk_norm = True
+    graph_attention_backend = "pyg"
     return (
         in_channels,
         hidden_dim,
@@ -40,6 +41,7 @@ def init_proc():
         bias,
         num_heads,
         qk_norm,
+        graph_attention_backend,
     )
 
 
@@ -54,6 +56,7 @@ def block(init_proc):
         bias,
         num_heads,
         qk_norm,
+        graph_attention_backend,
     ) = init_proc
     return GraphTransformerProcessorBlock(
         in_channels=in_channels,
@@ -65,6 +68,7 @@ def block(init_proc):
         bias=bias,
         update_src_nodes=False,
         qk_norm=qk_norm,
+        graph_attention_backend=graph_attention_backend,
     )
 
 
@@ -78,6 +82,7 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
         _bias,
         num_heads,
         _qk_norm,
+        _backend,
     ) = init_proc
     assert isinstance(
         block, GraphTransformerProcessorBlock
@@ -110,6 +115,7 @@ def test_GraphTransformerProcessorBlock_shard_qkve_heads(init_proc, block):
         _bias,
         num_heads,
         _qk_norm,
+        _backend,
     ) = init_proc
     query = torch.randn(in_channels, num_heads * block.out_channels_conv)
     key = torch.randn(in_channels, num_heads * block.out_channels_conv)
@@ -134,6 +140,7 @@ def test_GraphTransformerProcessorBlock_shard_output_seq(init_proc, block):
         _bias,
         num_heads,
         _qk_norm,
+        _backend,
     ) = init_proc
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
     shapes = (10, 10, 10)
@@ -153,6 +160,7 @@ def test_GraphTransformerProcessorBlock_forward_backward(init_proc, block):
         _bias,
         _num_heads,
         _qk_norm,
+        _backend,
     ) = init_proc
 
     # Generate random input tensor
@@ -197,6 +205,8 @@ def test_GraphTransformerProcessorBlock_chunking(init_proc, block, monkeypatch):
         _bias,
         _activation,
         _num_heads,
+        _num_chunks,
+        _backend,
     ) = init_proc
     # Initialize GraphTransformerProcessorBlock
     block = block
@@ -236,6 +246,7 @@ def init_mapper():
     num_heads = 8
     layer_kernels = load_layer_kernels()
     qk_norm = True
+    graph_attention_backend = "pyg"
     return (
         in_channels,
         hidden_dim,
@@ -245,6 +256,7 @@ def init_mapper():
         bias,
         num_heads,
         qk_norm,
+        graph_attention_backend,
     )
 
 
@@ -259,6 +271,7 @@ def mapper_block(init_mapper):
         bias,
         num_heads,
         qk_norm,
+        graph_attention_backend,
     ) = init_mapper
     return GraphTransformerMapperBlock(
         in_channels=in_channels,
@@ -270,6 +283,7 @@ def mapper_block(init_mapper):
         bias=bias,
         update_src_nodes=False,
         qk_norm=qk_norm,
+        graph_attention_backend=graph_attention_backend,
     )
 
 
@@ -283,6 +297,7 @@ def test_GraphTransformerMapperBlock_init(init_mapper, mapper_block):
         _bias,
         num_heads,
         _qk_norm,
+        _backend,
     ) = init_mapper
     block = mapper_block
     assert isinstance(block, GraphTransformerMapperBlock), "block is not an instance of GraphTransformerMapperBlock"
@@ -312,6 +327,7 @@ def test_GraphTransformerMapperBlock_shard_qkve_heads(init_mapper, mapper_block)
         _bias,
         num_heads,
         _qk_norm,
+        _backend,
     ) = init_mapper
     block = mapper_block
     query = torch.randn(in_channels, num_heads * block.out_channels_conv)
@@ -328,16 +344,9 @@ def test_GraphTransformerMapperBlock_shard_qkve_heads(init_mapper, mapper_block)
 
 
 def test_GraphTransformerMapperBlock_shard_output_seq(init_mapper, mapper_block):
-    (
-        in_channels,
-        _hidden_dim,
-        _out_channels,
-        _edge_dim,
-        _layer_kernels,
-        _bias,
-        num_heads,
-        _qk_norm,
-    ) = init_mapper
+    (in_channels, _hidden_dim, _out_channels, _edge_dim, _layer_kernels, _bias, num_heads, _qk_norm, _backend) = (
+        init_mapper
+    )
     block = mapper_block
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
     shapes = (10, 10, 10)
@@ -356,6 +365,7 @@ def test_GraphTransformerMapperBlock_forward_backward(init_mapper, mapper_block)
         _bias,
         _num_heads,
         _qk_norm,
+        _backend,
     ) = init_mapper
     # Initialize GraphTransformerMapperBlock
     block = mapper_block
