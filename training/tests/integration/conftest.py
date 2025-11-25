@@ -371,7 +371,6 @@ def migrator() -> Migrator:
         ["model=graphtransformer"],
     ],
 )
-@pytest.fixture
 def architecture_config_with_checkpoint(
     migrator: Migrator,
     request: pytest.FixtureRequest,
