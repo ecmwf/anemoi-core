@@ -60,20 +60,21 @@ datasets:
     - "mw_t_sin_local_time"
     - "mw_t_cos_vza"
     - "mw_t_sin_vza"
+    - "mw_t_cos_sza"
     - "mw_t_reportype"
     diagnostic: null
     processors:
-      const_imputer:
-        _target_: anemoi.models.preprocessing.imputer.InputImputer
+      input_only_imputer:
+        _target_: anemoi.models.preprocessing.imputer.InputOnlyImputer
         config:
-          default: "mean"  # TODO: try a constant imputer, e.g. 0 or -1
+          default: "mean"
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
         config:
           default: "mean-std"
           std:
           min-max:
-          max:
+          max: "mw_t_reportype"
           none:
           - "mw_t_cos_latitude"
           - "mw_t_cos_longitude"
@@ -85,6 +86,7 @@ datasets:
           - "mw_t_sin_local_time"
           - "mw_t_cos_vza"
           - "mw_t_sin_vza"
+          - "mw_t_cos_sza"
   surface:
     forcing:
     - "conv_cos_julian_day"
@@ -93,20 +95,19 @@ datasets:
     - "conv_sin_local_time"
     - "conv_cos_sza"
     - "conv_reportype"
-    - "lsm"
-    - "z"
+    - "conv_lsm"
+    - "conv_z"
     prognostic: null
     diagnostic:
-    - "10u"
-    - "10v"
-    - "2t"
-    - "msl"
-    - "sp"
+    - "conv_10u"
+    - "conv_10v"
+    - "conv_2t"
+    - "conv_msl"
     processors:
-      const_imputer:
-        _target_: anemoi.models.preprocessing.imputer.InputImputer
+      input_only_imputer:
+        _target_: anemoi.models.preprocessing.imputer.InputOnlyImputer
         config:
-          default: "mean"  # TODO: try a constant imputer, e.g. 0 or -1
+          default: "mean"
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
         config:
@@ -120,6 +121,7 @@ datasets:
           - "conv_sin_julian_day"
           - "conv_sin_local_time"
           - "conv_cos_sza"
+          - "conv_lsm"
 
 # Values set in the code
 num_features: null # number of features in the forecast state

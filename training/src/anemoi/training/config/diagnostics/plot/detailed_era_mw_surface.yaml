@@ -24,11 +24,10 @@ parameters:
     - mw_t_ch14
     - mw_t_ch16
   surface:
-    - 10u
-    - 10v
-    - 2t
-    - msl
-    - sp
+    - conv_10u
+    - conv_10v
+    - conv_2t
+    - conv_msl
 
 # Sample index
 sample_idx: 0
@@ -65,7 +64,6 @@ callbacks:
     parameter_groups:
       moisture: [tp, cp, tcw]
       sfc_wind: [10u, 10v]
-      microwave_bt: [mw_t_ch03, mw_t_ch06, mw_t_ch09, mw_t_ch14, mw_t_ch16]
     every_n_batches: ${diagnostics.plot.frequency.batch}
     dataset_names: ["era5", "mw_t", "surface"]
 

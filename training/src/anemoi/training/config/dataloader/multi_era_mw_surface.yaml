@@ -73,12 +73,20 @@ training:
         start: 1980
         end: 2020
         frequency: ${data.frequency}
-        drop: ["z", "lsm"]
+        drop: ["z", "lsm", "2d", "sp"]
+        rename:
+          10u: conv_10u
+          10v: conv_10v
+          2t: conv_2t
+          msl: conv_msl
       - dataset: ${hardware.paths.data}/${hardware.files.dataset_d}
         start: 1980
         end: 2020
         frequency: ${data.frequency}
         select: ["z", "lsm"]
+        rename:
+          z: conv_z
+          lsm: conv_lsm
       start: 1980
       end: 2020
       drop: []
@@ -104,12 +112,20 @@ validation:
         start: 2021
         end: 2022
         frequency: ${data.frequency}
-        drop: ["z", "lsm"]
+        drop: ["z", "lsm", "2d", "sp"]
+        rename:
+          10u: conv_10u
+          10v: conv_10v
+          2t: conv_2t
+          msl: conv_msl
       - dataset: ${hardware.paths.data}/${hardware.files.dataset_d}
         start: 2021
         end: 2022
         frequency: ${data.frequency}
         select: ["z", "lsm"]
+        rename:
+          z: conv_z
+          lsm: conv_lsm
       start: 2021
       end: 2022
       drop: []

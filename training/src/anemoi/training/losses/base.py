@@ -61,6 +61,7 @@ class BaseLoss(nn.Module, ABC):
         self.sum_function = torch.nansum if ignore_nans else torch.sum
 
         self.supports_sharding = True
+        self.ignore_nans = ignore_nans
 
     @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:

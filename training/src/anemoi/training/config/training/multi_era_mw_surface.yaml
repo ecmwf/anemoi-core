@@ -24,7 +24,7 @@ multistep_input: 2
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
 
-num_sanity_val_steps: 6
+num_sanity_val_steps: 10
 
 # clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
 gradient_clip:
@@ -58,6 +58,7 @@ strategy:
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
+
 # length of the "rollout" window (see Keisler's paper)
 rollout:
   start: 1
@@ -74,7 +75,7 @@ lr:
   warmup: 1000 # number of warmup iterations
   rate: 0.625e-4 #local_lr
   iterations: ${training.max_steps} # NOTE: When max_epochs < max_steps, scheduler will run for max_steps
-  min: 3e-7 #Not scaled by #GPU
+  min: 3e-7 # Not scaled by #GPU
 
 # Changes in per-gpu batch_size should come with a rescaling of the local_lr
 # in order to keep a constant global_lr
@@ -93,11 +94,11 @@ training_loss:
     mw_t:
       _target_: anemoi.training.losses.MSELoss
       scalers: ['general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: true
+      ignore_nans: false
     surface:
       _target_: anemoi.training.losses.MSELoss
       scalers: ['general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: true
+      ignore_nans: false
 
 validation_metrics:
   datasets:
@@ -110,12 +111,12 @@ validation_metrics:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['node_weights']
-        ignore_nans: true
+        ignore_nans: false
     surface:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['node_weights']
-        ignore_nans: true
+        ignore_nans: false
 
 # ERA5-specific variable groups (extends default with more variables)
 variable_groups:
@@ -131,7 +132,7 @@ variable_groups:
     surface:
       default: sfc
       sfc:
-        param: [10u, 10v, 2t, 2d, msl, sp]  # Surface observation variables
+        param: [conv_10u, conv_10v, conv_2t, conv_msl]  # Surface observation variables
 
 metrics:
   datasets:
@@ -145,7 +146,7 @@ metrics:
     - mw_t_ch06
     - mw_t_ch07
     surface:
-    - 10u
-    - 10v
-    - 2t
-    - msl
+    - conv_10u
+    - conv_10v
+    - conv_2t
+    - conv_msl

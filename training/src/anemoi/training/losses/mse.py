@@ -37,4 +37,9 @@ class MSELoss(FunctionalLoss):
         torch.Tensor
             MSE loss
         """
+        # return torch.square(pred - target)
+        if self.ignore_nans:
+            nan_mask = torch.isnan(target)
+            target = target.masked_fill(nan_mask, 0.0)
+            pred = pred.masked_fill(nan_mask, 0.0)
         return torch.square(pred - target)

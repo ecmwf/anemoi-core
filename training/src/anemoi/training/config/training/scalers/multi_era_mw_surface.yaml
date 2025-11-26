@@ -67,12 +67,10 @@ datasets:
       weights:
         default: 1
         # TODO: revisit the weights for the surface obs
-        sp: 10.
-        msl: 10.
-        10u: 0.5
-        10v: 0.5
-        2d: 0.5
-        2t: 2.0
+        conv_msl: 10.0
+        conv_10u: 0.5
+        conv_10v: 0.5
+        conv_2t: 2.0
 
     nan_mask_weights:
       _target_: anemoi.training.losses.scalers.NaNMaskScaler
