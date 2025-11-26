@@ -66,28 +66,30 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         )
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
-        self.model_comm_group_size = config.hardware.num_gpus_per_model
-        assert config.hardware.num_gpus_per_ensemble % config.hardware.num_gpus_per_model == 0, (
+        self.model_comm_group_size = config.system.hardware.num_gpus_per_model
+        assert config.system.hardware.num_gpus_per_ensemble % config.system.hardware.num_gpus_per_model == 0, (
             "Invalid ensemble vs. model size GPU group configuration: "
-            f"{config.hardware.num_gpus_per_ensemble} mod {config.hardware.num_gpus_per_model} != 0.\
+            f"{config.system.hardware.num_gpus_per_ensemble} mod {config.system.hardware.num_gpus_per_model} != 0.\
             If you would like to run in deterministic mode, please use aifs-train"
         )
 
-        self.num_gpus_per_model = config.hardware.num_gpus_per_model
-        self.num_gpus_per_ensemble = config.hardware.num_gpus_per_ensemble
+        self.num_gpus_per_model = config.system.hardware.num_gpus_per_model
+        self.num_gpus_per_ensemble = config.system.hardware.num_gpus_per_ensemble
 
         self.lr = (
-            config.hardware.num_nodes
-            * config.hardware.num_gpus_per_node
+            config.system.hardware.num_nodes
+            * config.system.hardware.num_gpus_per_node
             * config.training.lr.rate
-            / config.hardware.num_gpus_per_ensemble
+            / config.system.hardware.num_gpus_per_ensemble
         )
 
         LOGGER.info("Base (config) learning rate: %e -- Effective learning rate: %e", config.training.lr.rate, self.lr)
 
         self.nens_per_device = config.training.ensemble_size_per_device
         self.nens_per_group = (
-            config.training.ensemble_size_per_device * self.num_gpus_per_ensemble // config.hardware.num_gpus_per_model
+            config.training.ensemble_size_per_device
+            * self.num_gpus_per_ensemble
+            // config.system.hardware.num_gpus_per_model
         )
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
 
