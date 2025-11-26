@@ -192,28 +192,6 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
 
-    def __init__(
-        self,
-        *,
-        config: BaseSchema,
-        graph_data: HeteroData,
-        statistics: dict,
-        statistics_tendencies: dict,
-        data_indices: IndexCollection,
-        metadata: dict,
-        supporting_arrays: dict,
-    ) -> None:
-
-        super().__init__(
-            config=config,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
-        )
-
     def compute_loss_metrics(
         self,
         y_pred: torch.Tensor,
