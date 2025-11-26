@@ -217,3 +217,53 @@ class CheckpointConfigError(CheckpointError):
 
         super().__init__(message, error_details)
         self.config_path = config_path
+
+
+class CheckpointSourceError(CheckpointError):
+    """Raised when checkpoint source operations fail.
+
+    This exception is raised when fetching a checkpoint from a
+    source (S3, HTTP, etc.) fails due to network issues, authentication
+    problems, or source unavailability.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        source_path: str,
+        original_error: Exception | None = None,
+        details: dict[str, Any] | None = None,
+    ):
+        """Initialize checkpoint source error."""
+        error_details = {"source_path": source_path}
+
+        if original_error:
+            error_details["original_error"] = str(original_error)
+
+        if details:
+            error_details.update(details)
+
+        super().__init__(message, error_details)
+        self.source_path = source_path
+        self.original_error = original_error
+
+
+class CheckpointTimeoutError(CheckpointError):
+    """Raised when checkpoint operation times out.
+
+    This exception is raised when a checkpoint operation exceeds
+    the configured timeout duration.
+    """
+
+    def __init__(self, operation: str, timeout: float, details: dict[str, Any] | None = None):
+        """Initialize checkpoint timeout error."""
+        message = f"Checkpoint operation timed out after {timeout}s: {operation}"
+
+        error_details = {"operation": operation, "timeout_seconds": timeout}
+
+        if details:
+            error_details.update(details)
+
+        super().__init__(message, error_details)
+        self.operation = operation
+        self.timeout = timeout

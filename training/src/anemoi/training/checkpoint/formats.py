@@ -84,8 +84,9 @@ def detect_checkpoint_format(
             # If it's just a dict of tensors, it's a state dict
             if checkpoint and all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
                 return "state_dict"
-            # Default to pytorch for structured checkpoints
-            return "pytorch"
+            else:
+                # Default to pytorch for structured checkpoints
+                return "pytorch"
 
         except (OSError, RuntimeError, pickle.UnpicklingError, EOFError) as e:
             # If we can't load it (file corruption, empty file, etc.), default to lightning
@@ -170,11 +171,12 @@ def extract_state_dict(checkpoint_data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(checkpoint_data, dict):
         from .exceptions import CheckpointValidationError
 
-        raise CheckpointValidationError(
+        msg = (
             "Cannot extract state dict: checkpoint data is not a dictionary. "
             f"Got {type(checkpoint_data).__name__} instead. "
-            "This might indicate a corrupted or incompatible checkpoint file.",
+            "This might indicate a corrupted or incompatible checkpoint file."
         )
+        raise CheckpointValidationError(msg)
 
     # Try common state dict keys in order of preference
     for key in ["state_dict", "model_state_dict", "model"]:
@@ -183,11 +185,12 @@ def extract_state_dict(checkpoint_data: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(state_dict, dict):
                 from .exceptions import CheckpointValidationError
 
-                raise CheckpointValidationError(
+                msg = (
                     f"State dict under key '{key}' is not a dictionary. "
                     f"Got {type(state_dict).__name__} instead. "
-                    "This indicates an incompatible checkpoint format.",
+                    "This indicates an incompatible checkpoint format."
                 )
+                raise CheckpointValidationError(msg)
             return state_dict
 
     # Check if the checkpoint itself looks like a state dict
@@ -406,7 +409,7 @@ def _handle_anemoi_metadata(
         try:
             from anemoi.utils.checkpoints import save_metadata
 
-            LOGGER.debug(f"Saving Anemoi metadata for checkpoint {path}")
+            LOGGER.debug("Saving Anemoi metadata for checkpoint %s", path)
             save_metadata(path, anemoi_metadata, supporting_arrays=supporting_arrays)
             LOGGER.debug("Anemoi metadata saved successfully")
 
@@ -415,8 +418,8 @@ def _handle_anemoi_metadata(
                 "anemoi.utils.checkpoints.save_metadata not available. "
                 "Anemoi metadata will not be saved. Install anemoi-utils to enable metadata support.",
             )
-        except Exception as e:
-            LOGGER.error(f"Failed to save Anemoi metadata for {path}: {e}")
+        except (OSError, RuntimeError):
+            LOGGER.exception("Failed to save Anemoi metadata for %s", path)
             # Don't fail the entire checkpoint save if metadata saving fails
             LOGGER.warning("Checkpoint saved successfully but metadata saving failed")
 
@@ -474,10 +477,11 @@ def convert_lightning_to_pytorch(
     if not isinstance(lightning_checkpoint, dict):
         from .exceptions import CheckpointValidationError
 
-        raise CheckpointValidationError(
+        msg = (
             f"Cannot convert checkpoint: expected dictionary, got {type(lightning_checkpoint).__name__}. "
-            "Input must be a loaded Lightning checkpoint.",
+            "Input must be a loaded Lightning checkpoint."
         )
+        raise CheckpointValidationError(msg)
 
     pytorch_checkpoint = {}
     warnings = []
@@ -504,11 +508,12 @@ def convert_lightning_to_pytorch(
         from .exceptions import CheckpointValidationError
 
         available_keys = list(lightning_checkpoint.keys())[:10]
-        raise CheckpointValidationError(
+        msg = (
             "Lightning checkpoint conversion failed: no recognizable Lightning components found.\n"
             f"Available keys: {available_keys}\n"
-            "Expected keys: 'state_dict' (required), 'optimizer_states', 'lr_schedulers' (optional)",
+            "Expected keys: 'state_dict' (required), 'optimizer_states', 'lr_schedulers' (optional)"
         )
+        raise CheckpointValidationError(msg)
 
     return pytorch_checkpoint
 

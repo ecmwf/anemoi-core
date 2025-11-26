@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from pathlib import Path  # noqa: TC003 - Used for actual Path operations, not just type hints
+from pathlib import Path
 from typing import Any
 
 import aiohttp
