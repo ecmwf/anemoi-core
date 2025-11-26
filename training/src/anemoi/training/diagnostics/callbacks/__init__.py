@@ -62,7 +62,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         return []
 
     checkpoint_settings = {
-        "dirpath": config.hardware.paths.checkpoints,
+        "dirpath": config.system.output.checkpoints.root,
         "verbose": False,
         # save weights, optimizer states, LR-schedule states, hyperparameters etc.
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint
@@ -84,7 +84,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
-            config.hardware.files.checkpoint[key],
+            config.system.output.checkpoints[key],
             frequency,
             n_saved,
         )
@@ -182,7 +182,10 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
 
     # Plotting callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    if config["training"]["model_task"] != "anemoi.training.train.tasks.GraphInterpolator":
+        trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    else:
+        LOGGER.info("Plotting callbacks have been temporarily deactivated for the TimeInterpolator")
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(config))
