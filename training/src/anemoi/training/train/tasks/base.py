@@ -426,7 +426,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         step: int | None = None,
         grid_shard_slice: slice | None = None,
-        **kwargs
+        **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
 
