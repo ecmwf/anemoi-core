@@ -169,8 +169,8 @@ class GraphDiffusionForecaster(GraphForecaster):
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                rollout_step,
-                validation_mode,
+                step=rollout_step,
+                validation_mode=validation_mode,
                 weights=noise_weights,
                 use_reentrant=False,
             )
@@ -227,7 +227,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
         validation_mode: bool = False,
         y_pred_state: torch.Tensor = None,
         y_state: torch.Tensor = None,
@@ -284,8 +283,7 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
             metrics_next = self.calculate_val_metrics(
                 y_pred_state_full,
                 y_state_full,
-                rollout_step,
-                grid_shard_slice_metrics,
+                grid_shard_slice=grid_shard_slice_metrics,
             )
 
         return loss, metrics_next
@@ -396,10 +394,10 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 self.compute_loss_metrics,
                 tendency_pred,
                 tendency_target,
-                rollout_step,
-                validation_mode,
-                y_pred,
-                y,
+                y_pred_state=y_pred,
+                y_state=y,
+                step=rollout_step,
+                validation_mode=validation_mode,
                 weights=noise_weights,
                 use_reentrant=False,
             )
