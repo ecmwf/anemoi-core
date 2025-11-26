@@ -710,7 +710,13 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         else:
             LOGGER.warning("There are no trainable node attributes to plot.")
 
-        if len(edge_trainable_modules := self.get_edge_trainable_modules(model)):
+        from anemoi.models.models import AnemoiModelEncProcDecHierarchical
+
+        if isinstance(model, AnemoiModelEncProcDecHierarchical):
+            LOGGER.warning(
+                "Edge trainable features are not supported for Hierarchical models, skipping plot generation.",
+            )
+        elif len(edge_trainable_modules := self.get_edge_trainable_modules(model)):
             fig = plot_graph_edge_features(model, edge_trainable_modules, q_extreme_limit=self.q_extreme_limit)
 
             self._output_figure(
