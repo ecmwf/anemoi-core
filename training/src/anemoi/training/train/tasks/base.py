@@ -405,8 +405,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
-        **kwargs
-            Additional arguments
 
         Returns
         -------
@@ -424,9 +422,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        step: int | None = None,
         grid_shard_slice: slice | None = None,
-        **kwargs,
+        **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
 
@@ -444,7 +441,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Computed metrics
         """
-        return self.calculate_val_metrics(y_pred, y, step=step, grid_shard_slice=grid_shard_slice, **kwargs)
+        return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice)
 
     def compute_loss_metrics(
         self,
@@ -605,8 +602,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        step: int | None = None,
         grid_shard_slice: slice | None = None,
+        step: int | None = None,
+        **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
 

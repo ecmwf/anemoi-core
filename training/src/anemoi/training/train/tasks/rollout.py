@@ -114,6 +114,32 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         ]
         return x
 
+    def _compute_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        step: int | None = None,
+        grid_shard_slice: slice | None = None,
+        **_kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Compute validation metrics.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Computed metrics
+        """
+        return self.calculate_val_metrics(y_pred, y, step=step, grid_shard_slice=grid_shard_slice)
+
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss = super().training_step(batch, batch_idx)
         self.log(
