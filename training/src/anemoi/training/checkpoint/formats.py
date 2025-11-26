@@ -84,9 +84,8 @@ def detect_checkpoint_format(
             # If it's just a dict of tensors, it's a state dict
             if checkpoint and all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
                 return "state_dict"
-            else:
-                # Default to pytorch for structured checkpoints
-                return "pytorch"
+            # Default to pytorch for structured checkpoints
+            return "pytorch"
 
         except (OSError, RuntimeError, pickle.UnpicklingError, EOFError) as e:
             # If we can't load it (file corruption, empty file, etc.), default to lightning
