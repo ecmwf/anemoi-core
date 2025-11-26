@@ -100,9 +100,9 @@ mappers sequentially in smaller chunks.
 
 .. image:: ../images/performance-guide/mem-snapshot-4-mapper-chunks.png
 
-In the example above the number of mapper chunks has been increased
-from 1 to 4. Subsequentially the peak memory usage has decreased from
-~22GB to ~9GB.
+In the example above the number of mapper chunks has been increased from
+1 to 4. Subsequentially the peak memory usage has decreased from ~22GB
+to ~9GB.
 
 Chunking defaults to 4 for the encoder and decoder and 2 for the
 processor (lower resolution). Chunking can be controlled using the
@@ -192,8 +192,8 @@ results in your GPU stalling at the start of an iteration while it waits
 for the CPU to provide the next input batch.
 
 By default, each GPU will spawn 8 workers. Each worker will load data in
-parallel. You should try to increase this number until you run out of CPU
-memory. A CPU out of memory error looks like:
+parallel. You should try to increase this number until you run out of
+CPU memory. A CPU out of memory error looks like:
 
 .. code::
 
