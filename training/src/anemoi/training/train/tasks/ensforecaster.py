@@ -126,9 +126,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
-    def forward(self, x: torch.Tensor, fcstep: int) -> torch.Tensor:
-        return super().forward(x, fcstep=fcstep)
-
     def compute_loss_metrics(
         self,
         y_pred: torch.Tensor,
@@ -199,7 +196,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         for rollout_step in range(rollout or self.rollout):
             # prediction at rollout step rollout_step, shape = (bs, latlon, nvar)
-            y_pred = self(x, rollout_step)
+            y_pred = self(x, fcstep=rollout_step)
 
             y = batch[:, self.multi_step + rollout_step, 0, :, self.data_indices.data.output.full]
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
