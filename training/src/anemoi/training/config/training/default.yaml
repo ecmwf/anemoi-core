@@ -78,7 +78,7 @@ model_task: anemoi.training.train.tasks.GraphForecaster
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -117,7 +117,7 @@ validation_metrics:
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         # Use the `scale_validation_metrics` section to variable scale.
-        scalers: ['node_weights']
+        scalers: ["node_weights"]
         # other kwargs
         ignore_nans: True
 
@@ -154,10 +154,10 @@ variable_groups:
 metrics:
   datasets:
     data: # user-defined key in data
-    - z_500
-    - t_850
-    - u_850
-    - v_850
+      - z_500
+      - t_850
+      - u_850
+      - v_850
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:

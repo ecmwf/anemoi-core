@@ -17,7 +17,6 @@ from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
@@ -31,35 +30,6 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-        truncation_data: dict,
-    ) -> None:
-        """Initializes the graph neural network.
-
-        Parameters
-        ----------
-        model_config : DotDict
-            Model configuration
-        data_indices : dict
-            Data indices
-        graph_data : HeteroData
-            Graph definition
-        """
-
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            truncation_data=truncation_data,
-        )
-
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
@@ -70,7 +40,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.input_dim_latent[dataset_name],
+                in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden][dataset_name],
                 hidden_dim=self.num_channels,
                 sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
                 src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
@@ -106,63 +76,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
             )
 
-    def _make_truncation_matrix(self, A, data_type=torch.float32):
-        A_ = torch.sparse_coo_tensor(
-            torch.tensor(np.vstack(A.nonzero()), dtype=torch.long),
-            torch.tensor(A.data, dtype=data_type),
-            size=A.shape,
-        ).coalesce()
-        return A_
-
-    def _multiply_sparse(self, x, A):
-        return torch.sparse.mm(A, x)
-
-    def _truncate_fields(self, x, A, batch_size=None, auto_cast=False):
-        if not batch_size:
-            batch_size = x.shape[0]
-        out = []
-        with torch.amp.autocast(device_type="cuda", enabled=auto_cast):
-            for i in range(batch_size):
-                out.append(self._multiply_sparse(x[i, ...], A))
-        return torch.stack(out)
-
-    def _get_shard_shapes(self, x, dim=0, shard_shapes_dim=None, model_comm_group=None):
-        if shard_shapes_dim is None:
-            return get_shard_shapes(x, dim, model_comm_group)
-        else:
-            return apply_shard_shapes(x, dim, shard_shapes_dim)
-
-    def _apply_truncation(self, x, grid_shard_shapes=None, model_comm_group=None):
-        if self.A_down is not None or self.A_up is not None:
-            if grid_shard_shapes is not None:
-                shard_shapes = self._get_shard_shapes(x, -2, grid_shard_shapes, model_comm_group)
-                # grid-sharded input: reshard to channel-shards to apply truncation
-                x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
-
-            # these can't be registered as buffers because ddp does not like to broadcast sparse tensors
-            # hence we check that they are on the correct device ; copy should only happen in the first forward run
-            if self.A_down is not None:
-                self.A_down = self.A_down.to(x.device)
-                x = self._truncate_fields(x, self.A_down)  # to coarse resolution
-            if self.A_up is not None:
-                self.A_up = self.A_up.to(x.device)
-                x = self._truncate_fields(x, self.A_up)  # back to high resolution
-
-            if grid_shard_shapes is not None:
-                # back to grid-sharding as before
-                x = gather_channels(x, shard_shapes, model_comm_group)
-
-        return x
-
     def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
-        x_skip = x[:, -1, ...]
-        x_skip = einops.rearrange(x_skip, "batch ensemble grid vars -> (batch ensemble) grid vars")
-        x_skip = self.truncation(x_skip, grid_shard_shapes, model_comm_group)
-        x_skip = einops.rearrange(x_skip, "(batch ensemble) grid vars -> batch ensemble grid vars", batch=batch_size)
-
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name]
+
+        x_skip = self.residual(x, grid_shard_shapes=grid_shard_shapes, model_comm_group=model_comm_group)
 
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -313,7 +232,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_shapes_for_processor = shard_shapes_hidden_dict[first_dataset_name]
 
         x_latent_proc = self.processor(
-            x_latent,
+            x=x_latent,
             batch_size=batch_size,
             shard_shapes=shard_shapes_for_processor,
             model_comm_group=model_comm_group,

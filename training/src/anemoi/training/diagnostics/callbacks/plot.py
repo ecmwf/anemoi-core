@@ -63,7 +63,7 @@ class BasePlotCallback(Callback, ABC):
         """
         super().__init__()
         self.config = config
-        self.save_basedir = config.hardware.paths.plots
+        self.save_basedir = config.system.output.plots
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
         self.post_processors = None
@@ -762,7 +762,13 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             else:
                 LOGGER.warning("There are no trainable node attributes to plot.")
 
-            if len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
+            from anemoi.models.models import AnemoiModelEncProcDecHierarchical
+
+            if isinstance(model, AnemoiModelEncProcDecHierarchical):
+                LOGGER.warning(
+                    "Edge trainable features are not supported for Hierarchical models, skipping plot generation.",
+                )
+            elif len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
                 fig = plot_graph_edge_features(
                     model.node_attributes[dataset_name],
                     edge_trainable_modules,

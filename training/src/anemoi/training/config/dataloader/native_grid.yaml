@@ -10,7 +10,7 @@ pin_memory: True
 #   The number of GPUs per model must be divisible by read_group_size.
 #   To disable, set to 1.
 # ============
-read_group_size: ${hardware.num_gpus_per_model}
+read_group_size: ${system.hardware.num_gpus_per_model}
 
 num_workers:
   training: 8
@@ -52,7 +52,7 @@ grid_indices:
 # See https://anemoi-datasets.readthedocs.io
 # ============
 
-dataset: ${hardware.paths.data}/${hardware.files.dataset}
+dataset: ${system.input.dataset}
 
 training:
   datasets:
@@ -61,7 +61,7 @@ training:
       start: 2000
       end: 2019
       frequency: ${data.frequency}
-      drop:  []
+      drop: []
 
 validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
 
@@ -72,4 +72,4 @@ validation:
       start: 2021
       end: 2021
       frequency: ${data.frequency}
-      drop:  []
+      drop: []

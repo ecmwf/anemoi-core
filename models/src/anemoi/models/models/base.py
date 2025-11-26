@@ -13,6 +13,7 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
+from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -20,10 +21,10 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.truncation import BaseTruncation
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ class BaseGraphModel(nn.Module):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        truncation_data: dict,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -56,7 +56,6 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self._truncation_data = truncation_data  # todo needs to be a dict as well ; we leave it for now
 
         model_config = DotDict(model_config)
         self._graph_name_data = (
@@ -81,8 +80,8 @@ class BaseGraphModel(nn.Module):
         # build networks
         self._build_networks(model_config)
 
-        # build truncation
-        self.truncation = BaseTruncation(self._truncation_data)
+        # build residual connection
+        self.residual = instantiate(model_config.model.residual, graph=graph_data)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -300,6 +299,7 @@ class BaseGraphModel(nn.Module):
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
-                y_hat = gather_tensor(y_hat, -2, grid_shard_shapes, model_comm_group)
+                y_hat_shard_shapes = apply_shard_shapes(y_hat, -2, grid_shard_shapes)
+                y_hat = gather_tensor(y_hat, -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
