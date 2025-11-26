@@ -40,6 +40,7 @@ def _get_config_path() -> str:
     # Fallback: use relative path from tests/ directory
     return "../src/anemoi/training/config"
 
+
 pytest_plugins = "anemoi.utils.testing"
 
 PYTEST_MARKED_TESTS = [

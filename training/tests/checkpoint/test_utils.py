@@ -109,7 +109,7 @@ class TestDownloadWithRetry:
         mock_response.headers = {"content-length": "1024"}
 
         # Create an async iterator for the chunk data
-        async def mock_chunk_iter(chunk_size: int) -> AsyncGenerator[bytes, None]:  # noqa: ARG001, RUF029
+        async def mock_chunk_iter(chunk_size: int) -> AsyncGenerator[bytes, None]:  # noqa: ARG001
             yield b"test_data"
 
         mock_response.content.iter_chunked = mock_chunk_iter
@@ -176,7 +176,7 @@ class TestDownloadWithRetry:
         mock_response.headers = {"content-length": str(len(large_data) * chunk_size)}
 
         # Create an async iterator for the large chunk data
-        async def mock_large_chunk_iter(chunk_size: int) -> AsyncGenerator[bytes, None]:  # noqa: ARG001, RUF029
+        async def mock_large_chunk_iter(chunk_size: int) -> AsyncGenerator[bytes, None]:  # noqa: ARG001
             for chunk in large_data:
                 yield chunk
 
@@ -223,7 +223,7 @@ class TestDownloadWithRetry:
         chunks = [test_data[i : i + custom_chunk_size] for i in range(0, len(test_data), custom_chunk_size)]
 
         # Create an async iterator for the chunk data
-        async def mock_chunk_iter(chunk_size: int) -> AsyncGenerator[bytes, None]:  # noqa: ARG001, RUF029
+        async def mock_chunk_iter(chunk_size: int) -> AsyncGenerator[bytes, None]:  # noqa: ARG001
             for chunk in chunks:
                 yield chunk
 
@@ -268,7 +268,7 @@ class TestDownloadWithRetry:
         num_chunks = 1280  # 10MB / 8KB
 
         # Create an async generator function for large file chunks
-        async def mock_chunk_generator(chunk_size: int) -> AsyncGenerator[bytes, None]:  # noqa: RUF029
+        async def mock_chunk_generator(chunk_size: int) -> AsyncGenerator[bytes, None]:
             for _ in range(num_chunks):
                 yield b"x" * chunk_size
 
