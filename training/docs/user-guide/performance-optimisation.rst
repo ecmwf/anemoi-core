@@ -76,7 +76,7 @@ tested (Nvidia A100, H100, GH200 and AMD MI250x). It is currently not
 supported on AMD MI300A (due to the unified physical memory) and CPUs
 (which do not use the CUDA caching memory allocator).
 
-For a techinical explanation of the CUDA Caching memory allocator, and
+For a technical explanation of the CUDA Caching memory allocator, and
 how memory fragmentation occurs, you can read `this blog post`_.
 
 .. _this blog post: https://zdevito.github.io/2022/08/04/cuda-caching-allocator.html
