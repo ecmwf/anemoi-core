@@ -167,7 +167,7 @@ Additionally, model sharding increases the total number of GPUs
 required, which can lead to longer queue times on shared HPC systems.
 
 The GPUs within a node typically are connected via a faster interconnect
-then GPUs across nodes. For this reason model sharding typically
+than GPUs across nodes. For this reason model sharding typically
 performs less efficiently once a model instance is sharded across
 multiple nodes.
 
