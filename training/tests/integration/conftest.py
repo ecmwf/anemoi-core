@@ -153,7 +153,6 @@ def build_architecture_config(
     tmp_dir, rel_paths, dataset_urls = get_tmp_paths(use_case_modifications, ["dataset"])
     use_case_modifications.system.input.dataset = str(Path(tmp_dir, rel_paths[0]))
 
-
     imputer_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/imputer_modifications.yaml")
 
     OmegaConf.set_struct(template.data, False)
@@ -348,6 +347,8 @@ def benchmark_config(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
     )
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
+
+    cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
     OmegaConf.resolve(cfg)
     return cfg, test_case
 
