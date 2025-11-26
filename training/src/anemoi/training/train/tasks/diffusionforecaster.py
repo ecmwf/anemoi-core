@@ -165,8 +165,8 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         """
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
 
-        x = self.get_input(batch) # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch) # (bs, ens, latlon, nvar)
+        x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         sigma, noise_weights = self._get_noise_level(
@@ -289,8 +289,8 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         """
         loss = torch.zeros(1, dtype=batch.dtype, device=self.device, requires_grad=False)
 
-        x = self.get_input(batch) # (bs, multi_step, ens, latlon, nvar)
-        y = self.get_target(batch) # (bs, ens, latlon, nvar)
+        x = self.get_input(batch)  # (bs, multi_step, ens, latlon, nvar)
+        y = self.get_target(batch)  # (bs, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None:
