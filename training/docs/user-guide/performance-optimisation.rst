@@ -20,7 +20,7 @@ debugging performance issues with your models.
 .. note::
 
    This guide assumes a batch size of 1 e.g. 1 single PyTorch
-   DistributedDataParallel (DDP) model instance It is recomended to
+   DistributedDataParallel (DDP) model instance. It is recommended to
    follow this guide to work out the optimal performance settings for a
    single model instance. Then the total number of model instances can
    be scaled up via DDP. The optimal settings and runtime should not
@@ -47,8 +47,8 @@ Reduce Memory Fragmentation
 The first step to getting past an out-of-memory error is to reduce
 memory fragmentation. Over the course of a run, blocks of GPU memory are
 allocated and freed many times. This can lead to relatively small gaps
-occuring between allocated blocks of memory. These gaps taken
-alltogether, might be sufficent to store a large tensor, but since they
+occurring between allocated blocks of memory. These gaps taken
+altogether, might be sufficient to store a large tensor, but since they
 are fragmented they cannot be used. Instead a CUDA out-of-memory error
 is raised.
 
@@ -85,22 +85,22 @@ Chunking
 ========
 
 Memory usage in anemoi varies greatly across a run. Memory usage
-typically peaks during the encoder and decoder phases, as model must
+typically peaks during the encoder and decoder phases, as the model must
 iterate over many edge connections to compute the mapping between source
 and latent grids.
 
 The image below shows memory usage in a single iteration (forward and
-backward pass). The 4 large peaks represent in order: fwd-encoder,
+backward pass). The 4 large peaks represent, in order: fwd-encoder,
 fwd-decoder, bwd-decoder, bwd-encoder.
 
 .. image:: ../images/performance-guide/mem-snapshot-1-mapper-chunk.png
 
 Peak memory usage in the mappers can be greatly reduced by computing the
-mappers sequantially in smaller chunks.
+mappers sequentially in smaller chunks.
 
 .. image:: ../images/performance-guide/mem-snapshot-4-mapper-chunks.png
 
-In the example above the number of mapper chunks have been increased
+In the example above the number of mapper chunks has been increased
 from 1 to 4. Subsequentially the peak memory usage has decreased from
 ~22GB to ~9GB.
 
@@ -121,11 +121,11 @@ on performance.
 There is no hard limit on how much the mappers can be chunked. However
 there is typically a small (~10%) performance penalty from 16 chunks and
 beyond. Additionally the memory savings of higher chunk counts begin to
-drop off. Therefore it is recomended to chunk between 4 and 16 in the
+drop off. Therefore it is recommended to chunk between 4 and 16 in the
 mappers.
 
 It is often possible to determine from reading the CUDA out-of-memory
-stacktrace in which component of the model the OOM occured. This can
+stacktrace in which component of the model the OOM occurred. This can
 inform you about which num_chunks parameter to change.
 
 .. note::
@@ -160,7 +160,7 @@ The number of GPUs per model should be a power of two and is limited by
 the number of heads in your model, by default 16.
 
 Sharding a model over multiple GPUs can also increase performance, as
-the compute workload is divded over more GPUs. However sharding a model
+the compute workload is divided over more GPUs. However sharding a model
 over too many GPUs can lead to decreased performance from increased
 collective communication operations required to keep the GPUs in sync.
 Additionally, model sharding increases the total number of GPUs
@@ -192,7 +192,7 @@ results in your GPU stalling at the start of an iteration while it waits
 for the CPU to provide the next input batch.
 
 By default, each GPU will spawn 8 workers. Each worker will load data in
-parallel. You should try increase this number until you run out of CPU
+parallel. You should try to increase this number until you run out of CPU
 memory. A CPU out of memory error looks like:
 
 .. code::
@@ -200,7 +200,7 @@ memory. A CPU out of memory error looks like:
    slurmstepd: error: Detected 4 oom_kill events in StepId=39701120.0. Some of the step tasks have been OOM Killed.
 
 Below are some other settings which impact dataloader performance, and
-their recomended settings
+their recommended settings
 
 .. code::
 
@@ -240,8 +240,8 @@ Change attention backend
 ========================
 
 The processor is a large component of the overall runtime. Both the
-GraphTransformer and Transformer processor support multiple backends
-which can improve performance.
+GraphTransformer and Transformer processors support multiple backends
+which have different performance characteristics.
 
 For the Transformer processor, the 'flash attention' backend is the
 fastest. Flash attention can be selected in the config like so:
@@ -300,9 +300,9 @@ compilation:
    the ensemble model)
 -  torch.nn.LayerNorm
 
-Compiling can also decrease the peak memory required, by fusing multiple
+Compiling can also decrease the peak memory required by fusing multiple
 functions into a single one which reduces the intermediate activations
-which must be stored.
+that must be stored.
 
 Not all modules are able to be compiled, and some compilation errors can
 be difficult to debug.
@@ -314,7 +314,7 @@ be difficult to debug.
 
 .. note::
 
-   The triton backend currently uses more memory then the compiled pyg
+   The triton backend currently uses more memory than the compiled pyg
    due to the need to store edges in an intermediate CSC form during the
    forward pass. If memory is a limiting factor it might be worthwhile
    to switch to the compiled pyg attention backend, once other fixes
@@ -325,7 +325,7 @@ be difficult to debug.
 Performance Profiling
 =====================
 
-For further insights in your runtime performance, you can take the
+For further insights into your runtime performance, you can take the
 traces produced by the `pytorch profiler`_ and upload them to perfetto_.
 
 .. _perfetto: https://ui.perfetto.dev/
