@@ -1,5 +1,5 @@
 ---
 defaults:
-  - storage: example
-  - files: example
+  - output: example
+  - input: example
   - hardware: slurm
