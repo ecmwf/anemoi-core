@@ -1,0 +1,5 @@
+---
+defaults:
+  - storage: example
+  - files: example
+  - hardware: slurm
