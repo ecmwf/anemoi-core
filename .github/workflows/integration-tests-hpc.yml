@@ -51,7 +51,7 @@ jobs:
             #SBATCH --qos=ng
             #SBATCH --gpus=1
             #SBATCH --gres=gpu:1
-            #SBATCH --mem=16G
+            #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
   benchmark-tests:
     runs-on: hpc

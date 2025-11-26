@@ -185,7 +185,10 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
 
     # Plotting callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    if config["training"]["model_task"] != "anemoi.training.train.tasks.GraphInterpolator":
+        trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    else:
+        LOGGER.info("Plotting callbacks have been temporarily deactivated for the TimeInterpolator")
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(config))
