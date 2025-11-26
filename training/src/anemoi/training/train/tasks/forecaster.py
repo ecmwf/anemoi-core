@@ -77,8 +77,8 @@ class GraphForecaster(BaseRolloutGraphModule):
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                rollout_step,
-                validation_mode,
+                step=rollout_step,
+                validation_mode=validation_mode,
                 use_reentrant=False,
             )
 

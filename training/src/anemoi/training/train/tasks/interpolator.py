@@ -122,7 +122,7 @@ class GraphInterpolator(BaseGraphModule):
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                interp_step - 1,
+                step=interp_step - 1,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )

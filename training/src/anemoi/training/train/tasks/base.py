@@ -388,11 +388,68 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return y_pred_full, y_full, grid_shard_slice
 
-    def compute_loss_metrics(
+    def _compute_loss(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        grid_shard_slice: slice | None = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Compute the loss function.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+        **kwargs
+            Additional arguments
+
+        Returns
+        -------
+        torch.Tensor
+            Computed loss
+        """
+        return self.loss(
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            group=self.model_comm_group,
+        )
+
+    def _compute_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         step: int | None = None,
+        grid_shard_slice: slice | None = None,
+        **kwargs
+    ) -> dict[str, torch.Tensor]:
+        """Compute validation metrics.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted values
+        y : torch.Tensor
+            Target values
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Computed metrics
+        """
+        return self.calculate_val_metrics(y_pred, y, step=step, grid_shard_slice=grid_shard_slice, **kwargs)
+
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
         validation_mode: bool = False,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
@@ -423,23 +480,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
             validation_mode,
         )
 
-        loss = self.loss(
-            y_pred_full,
-            y_full,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-            **kwargs,
-        )
+        loss = self._compute_loss(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self.calculate_val_metrics(
-                y_pred_full,
-                y_full,
-                step,
-                grid_shard_slice=grid_shard_slice,
-            )
+            metrics_next = self._compute_metrics(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
         return loss, metrics_next, y_pred_full
 
