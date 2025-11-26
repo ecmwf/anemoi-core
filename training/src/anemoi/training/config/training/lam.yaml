@@ -48,7 +48,7 @@ model_task: anemoi.training.train.tasks.GraphForecaster
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
-  num_gpus_per_model: ${hardware.num_gpus_per_model}
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
 # loss functions
@@ -112,13 +112,13 @@ validation_metrics:
 variable_groups:
   default: sfc
   pl:
-     param: [q, t, u, v, w, z]
+    param: [q, t, u, v, w, z]
 
 metrics:
-- z_500
-- t_850
-- u_850
-- v_850
+  - z_500
+  - t_850
+  - u_850
+  - v_850
 
 # length of the "rollout" window (see Keisler's paper)
 rollout:
