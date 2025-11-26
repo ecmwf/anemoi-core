@@ -50,9 +50,9 @@ def build_mock_config(
     config.training.fork_run_id = fork_run_id
     config.training.load_weights_only = False
     config.training.transfer_learning = False
-    config.hardware.files.warm_start = warm_start
-    config.hardware.paths.checkpoints = checkpoints_path
-    config.hardware.paths.warm_start = warm_start_path
+    config.system.output.root = ""
+    config.system.output.checkpoints.root = checkpoints_path
+    config.system.input.warm_start = warm_start_path / warm_start if warm_start_path and warm_start else None
     config.diagnostics.log.mlflow.enabled = False
     return config
 
@@ -81,7 +81,6 @@ def trainer_factory() -> AnemoiTrainer:
 def test_restart_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
     run_id = "run-id-123"
     expected_path, checkpoints_path = tmp_checkpoint_factory(rid=run_id, ckpt_path_name="mock_checkpoints")
-
     config = build_mock_config(
         run_id=run_id,
         checkpoints_path=checkpoints_path,
@@ -108,7 +107,6 @@ def test_restart_fork_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_fact
     )
 
     trainer = trainer_factory(config)
-
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id != fork_run_id
     assert trainer.last_checkpoint == expected_path
@@ -203,67 +201,6 @@ def test_restart_warm_start_run_id(
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id == run_id
     assert trainer.last_checkpoint == expected_path
-
-
-def test_restart_warm_start_misconfiguration_path(
-    trainer_factory: AnemoiTrainer,
-    tmp_checkpoint_factory: pytest.TempPathFactory,
-) -> None:
-    """Test to assert misconfiguration is missing path for warm_start."""
-    warm_start = "checkpoint_10.ckpt"
-    run_id = "id-222"
-    _, checkpoints_path = tmp_checkpoint_factory()
-
-    config = build_mock_config(
-        checkpoints_path=checkpoints_path,
-        warm_start=warm_start,
-        run_id=run_id,
-    )
-
-    trainer = trainer_factory(config)
-
-    assert trainer.start_from_checkpoint is True
-    assert trainer.run_id == run_id
-
-    # This should raise because the warm start file is not in the expected location
-    with pytest.raises(
-        AssertionError,
-        match=r"Please configure config.hardware.paths.warm_start correctly, found: None",
-    ):
-        _ = trainer.last_checkpoint
-
-
-def test_restart_warm_start_misconfiguration_filename(
-    trainer_factory: AnemoiTrainer,
-    tmp_checkpoint_factory: pytest.TempPathFactory,
-) -> None:
-    """Test to assert misconfiguration is missing file for warm_start."""
-    run_id = "id-222"
-    warm_start_path = "mock-checkpoints"
-    _, warm_start_path = tmp_checkpoint_factory(
-        rid=run_id,
-        ckpt_path_name=warm_start_path,
-    )
-    _, checkpoints_path = tmp_checkpoint_factory(
-        ckpt_path_name=warm_start_path,
-    )  # path where writing the checkpoints it's different
-
-    config = build_mock_config(
-        checkpoints_path=checkpoints_path,
-        warm_start_path=warm_start_path / Path(run_id),  #
-        run_id=run_id,
-    )
-
-    trainer = trainer_factory(config)
-
-    assert trainer.start_from_checkpoint is True
-    assert trainer.run_id == run_id
-    # This should raise because the warm start file is not in the expected location
-    with pytest.raises(
-        AssertionError,
-        match=r"Please configure config.hardware.files.warm_start correctly, found: None",
-    ):
-        _ = trainer.last_checkpoint
 
 
 def test_warm_start_file_not_found(
