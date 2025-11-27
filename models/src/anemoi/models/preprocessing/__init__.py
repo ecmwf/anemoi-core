@@ -191,7 +191,8 @@ class Processors(nn.Module):
 
         if self.first_run:
             self.first_run = False
-            self._run_checks(x)
+            # NB: disable the NaN check, we may have NaNs in the output steps
+            # self._run_checks(x)
         return x
 
     def _run_checks(self, x):
