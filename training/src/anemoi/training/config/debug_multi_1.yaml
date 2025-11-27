@@ -27,16 +27,16 @@ system:
   input:
     graph: graph_anemoi_new_${data.resolution}.pt
     truncation: null
-    
+
     # Primary dataset for ERA5
     dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
 
     # Secondary dataset for ERA5_copy (using same file for debugging)
     dataset_b: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8.zarr
 
-  output: 
+  output:
     root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
-  
+
   hardware:
     accelerator: auto
     num_gpus_per_node: 1
