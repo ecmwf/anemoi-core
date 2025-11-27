@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from functools import reduce
 from importlib.util import find_spec
 
 import torch
@@ -16,8 +15,7 @@ import torch_geometric
 from hydra.utils import get_class
 from numpy import unique
 from omegaconf import DictConfig
-
-from anemoi.training.train.tasks.base import BaseGraphModule
+from torch.nn import Module
 
 LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +56,7 @@ def _meets_library_versions_for_compile() -> bool:
     return version_req and has_triton
 
 
-def mark_for_compilation(model: BaseGraphModule, compile_config: DictConfig | None) -> BaseGraphModule:
+def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Module:
     """Marks modules within 'model' for compilation, according to 'compile_config'.
 
     Modules are not compiled here. The compilation will occur
@@ -83,19 +81,10 @@ def mark_for_compilation(model: BaseGraphModule, compile_config: DictConfig | No
             options = entry.get("options", default_compile_options)
 
             LOGGER.debug("%s will be compiled with the following options: %s", str(module), str(options))
-            compiled_module = torch.compile(module, **options)  # Note: the module is not compiled yet
+            module.forward = torch.compile(module.forward, **options)  # Note: the function is not compiled yet
             # It is just marked for JIT-compilation later
             # It will be compiled before its first forward pass
             compiled_modules.append(entry.module)
-
-            # Update the model with the new 'compiled' module
-            # go from "anemoi.models.layers.conv.GraphTransformerConv"
-            # to obj(anemoi.models.layers.conv)
-            parts = name.split(".")
-            parent = reduce(getattr, parts[:-1], model)
-            # then set obj(anemoi.models.layers.conv).GrapTransformerConv = compiled_module
-            LOGGER.debug("Replacing %s with a compiled version", str(parts[-1]))
-            setattr(parent, parts[-1], compiled_module)
 
     LOGGER.info("The following modules will be compiled: %s", str(unique(compiled_modules)))
 
