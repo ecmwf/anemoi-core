@@ -305,7 +305,7 @@ class PlotLoss(_PlotLoss):
             trainer,
             pl_module,
             outputs,
-            batch[0][:, :, 0, :, :],
+            batch[:, :, 0, :, :],
             batch_idx,
         )
 

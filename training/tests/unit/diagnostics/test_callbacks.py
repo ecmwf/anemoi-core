@@ -221,7 +221,9 @@ def test_ensemble_plot_callbacks_instantiation():
                 },
             },
             "data": {"diagnostic": None},
-            "hardware": {"paths": {"plots": "path_to_plots"}},
+            "system": {
+                "output": {"root": "path_to_output", "plots": "plot"},
+            },
             "dataloader": {"read_group_size": 1},
         },
     )
