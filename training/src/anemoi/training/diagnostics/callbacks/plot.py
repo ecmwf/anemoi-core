@@ -93,7 +93,7 @@ class BasePlotCallback(Callback, ABC):
         """Return index of initial step for plotting."""
         return rollout_step if mode == "time_interp" else 0
 
-    def _get_output_times(self, config, pl_module):
+    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule):
         """Return times outputted by the model"""
         if isinstance(pl_module, GraphInterpolator):
           output_times = (len(config.training.explicit_times.target), "time_interp")

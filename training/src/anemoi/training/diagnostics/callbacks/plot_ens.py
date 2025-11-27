@@ -58,12 +58,13 @@ class EnsemblePlotMixin:
         # Return batch[0] (normalized data) and structured output like regular forecaster
         return batch[0] if isinstance(batch, list | tuple) else batch, [loss, y_preds]
 
-        def _get_output_times(config,pl_module):
-            if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
-              output_times = (len(config.training.explicit_times.target), "time_interp")
-            else:
-              output_times = (getattr(pl_module, "rollout", 0), "forecast")
-            return output_times
+    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule):
+        """Return times outputted by the model"""
+        if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
+          output_times = (len(config.training.explicit_times.target), "time_interp")
+        else:
+          output_times = (getattr(pl_module, "rollout", 0), "forecast")
+        return output_times
 
     def process(
         self,
