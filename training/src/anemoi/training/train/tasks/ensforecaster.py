@@ -75,6 +75,7 @@ class GraphEnsForecaster(BaseGraphModule):
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
         self.model_comm_group_size = config.system.hardware.num_gpus_per_model
+        self.num_gpus_per_node = config.system.hardware.num_gpus_per_node
         self.num_gpus_per_model = config.system.hardware.num_gpus_per_model
         self.num_gpus_per_ensemble = config.system.hardware.num_gpus_per_ensemble
         self.nens_per_device = config.training.ensemble_size_per_device
