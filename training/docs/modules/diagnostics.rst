@@ -30,7 +30,7 @@ Callbacks are configured in the config file under the
 
 For regular callbacks, they can be provided as a list of dictionaries
 underneath the ``config.diagnostics.callbacks`` key. Each dictionary
-must have a ``_target`` key which is used by hydra to instantiate the
+must have a ``_target_`` key which is used by hydra to instantiate the
 callback, any other kwarg is passed to the callback's constructor.
 
 .. code:: yaml
