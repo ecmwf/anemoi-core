@@ -62,9 +62,9 @@ class EnsemblePlotMixin:
     def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
         """Return times outputted by the model."""
         if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
-          output_times = (len(config.training.explicit_times.target), "time_interp")
+            output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
-          output_times = (getattr(pl_module, "rollout", 0), "forecast")
+            output_times = (getattr(pl_module, "rollout", 0), "forecast")
         return output_times
 
     def process(
