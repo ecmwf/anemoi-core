@@ -22,6 +22,7 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram as _PlotHis
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss as _PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample as _PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum as _PlotSpectrum
+from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     from typing import Any
@@ -58,8 +59,8 @@ class EnsemblePlotMixin:
         # Return batch[0] (normalized data) and structured output like regular forecaster
         return batch[0] if isinstance(batch, list | tuple) else batch, [loss, y_preds]
 
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule):
-        """Return times outputted by the model"""
+    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
+        """Return times outputted by the model."""
         if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
           output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
@@ -161,7 +162,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
 
-            output_times = self._get_output_times(config, pl_module)
+            output_times = self._get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,

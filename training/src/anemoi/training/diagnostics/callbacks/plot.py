@@ -89,12 +89,12 @@ class BasePlotCallback(Callback, ABC):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
-    def _get_init_step(self, rollout_step: int, model: tuple) -> int:
+    def _get_init_step(self, rollout_step: int, mode: tuple) -> int:
         """Return index of initial step for plotting."""
         return rollout_step if mode == "time_interp" else 0
 
-    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule):
-        """Return times outputted by the model"""
+    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
+        """Return times outputted by the model."""
         if isinstance(pl_module, GraphInterpolator):
             output_times = (len(config.training.explicit_times.target), "time_interp")
         else:
@@ -981,9 +981,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
 
-        import ipdb
-
-        ipdb.set_trace()
         input_tensor = (
             batch[
                 :,
