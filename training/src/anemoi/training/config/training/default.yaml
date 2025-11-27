@@ -141,6 +141,7 @@ rollout:
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
 max_steps: 150000
+val_check_interval: 1500
 
 lr:
   warmup: 1000 # number of warmup iterations

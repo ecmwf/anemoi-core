@@ -525,6 +525,7 @@ class AnemoiTrainer(ABC):
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
+            val_check_interval=self.config.training.val_check_interval or 1.0,
             logger=self.loggers,
             profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,

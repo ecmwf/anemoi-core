@@ -25,6 +25,9 @@ multistep_input: 2
 accum_grad_batches: 1
 
 num_sanity_val_steps: 10
+# set to "null" (validation runs at the end of every epoch)
+# or int (number of training steps) to enable validation during training
+val_check_interval: 1500
 
 # clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
 gradient_clip:
@@ -94,11 +97,11 @@ training_loss:
     mw_t:
       _target_: anemoi.training.losses.MSELoss
       scalers: ['general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: false
+      ignore_nans: true
     surface:
       _target_: anemoi.training.losses.MSELoss
       scalers: ['general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: false
+      ignore_nans: true
 
 validation_metrics:
   datasets:
@@ -106,17 +109,17 @@ validation_metrics:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['node_weights']
-        ignore_nans: true
+        ignore_nans: false
     mw_t:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['node_weights']
-        ignore_nans: false
+        ignore_nans: true
     surface:
       mse:
         _target_: anemoi.training.losses.MSELoss
         scalers: ['node_weights']
-        ignore_nans: false
+        ignore_nans: true
 
 # ERA5-specific variable groups (extends default with more variables)
 variable_groups:

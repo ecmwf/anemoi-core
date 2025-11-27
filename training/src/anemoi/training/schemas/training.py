@@ -350,6 +350,8 @@ class BaseTrainingSchema(BaseModel):
     max_epochs: PositiveInt | None = None
     "Maximum number of epochs, stops earlier if max_steps is reached first."
     max_steps: PositiveInt = 150000
+    "Run validation every X training steps (int) or at the end of each training epoch (1.0)."
+    val_check_interval: PositiveInt | float = 1.0
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     lr: LR = Field(default_factory=LR)
     "Learning rate configuration."

@@ -1158,6 +1158,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 )
                 for name in self.parameters[dataset_name]
             }
+            LOGGER.info("Plotting parameters for dataset %s: %s", dataset_name, plot_parameters_dict)
 
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
