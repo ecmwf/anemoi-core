@@ -45,6 +45,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.train.tasks import GraphInterpolator
 from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -87,6 +88,18 @@ class BasePlotCallback(Callback, ABC):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
+
+    def _get_init_step(self, rollout_step: int, model: tuple) -> int:
+        """Return index of initial step for plotting."""
+        return rollout_step if mode == "time_interp" else 0
+
+    def _get_output_times(self, config, pl_module):
+        """Return times outputted by the model"""
+        if isinstance(pl_module, GraphInterpolator):
+          output_times = (len(config.training.explicit_times.target), "time_interp")
+        else:
+          output_times = (getattr(pl_module, "rollout", 0), "forecast")
+        return output_times
 
     @rank_zero_only
     def _output_figure(
@@ -266,10 +279,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
 
-            if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-                output_times = (len(self.config.training.explicit_times.target), "time_interp")
-            else:
-                output_times = (getattr(pl_module, "rollout", 0), "forecast")
+            output_times=self._get_output_times(self.config, pl_module)
 
             self.plot(
                 trainer,
@@ -308,10 +318,8 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
-            if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-                output_times = (len(self.config.training.explicit_times.target), "time_interp")
-            else:
-                output_times = (getattr(pl_module, "rollout", 0), "forecast")
+
+            output_times=self._get_output_times(self.config, pl_module)
 
             self.plot(trainer, pl_module, epoch=trainer.current_epoch, output_times=output_times, **kwargs)
 
@@ -967,6 +975,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         if self.latlons is None:
             self.latlons = np.rad2deg(pl_module.latlons_data.clone().detach().cpu().numpy())
 
+        import ipdb; ipdb.set_trace()
         input_tensor = (
             batch[
                 :,
@@ -1070,7 +1079,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
 
         for rollout_step in range(output_times[0]):
-            init_step = rollout_step if output_times[1] == "time_interp" else 0
+            init_step = self._get_init_step(rollout_step,output_times[1])
 
             fig = plot_predicted_multilevel_flat_sample(
                 plot_parameters_dict,
@@ -1156,7 +1165,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            init_step = rollout_step if output_times[1] == "time_interp" else 0
+            init_step = self._get_init_step(rollout_step,output_times[1])
 
             fig = plot_power_spectrum(
                 plot_parameters_dict_spectrum,
@@ -1245,7 +1254,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            init_step = rollout_step if output_times[1] == "time_interp" else 0
+            init_step = self._get_init_step(rollout_step,output_times[1])
 
             fig = plot_histogram(
                 plot_parameters_dict_histogram,

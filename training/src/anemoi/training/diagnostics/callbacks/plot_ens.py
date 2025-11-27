@@ -58,6 +58,13 @@ class EnsemblePlotMixin:
         # Return batch[0] (normalized data) and structured output like regular forecaster
         return batch[0] if isinstance(batch, list | tuple) else batch, [loss, y_preds]
 
+        def _get_output_times(config,pl_module):
+            if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
+              output_times = (len(config.training.explicit_times.target), "time_interp")
+            else:
+              output_times = (getattr(pl_module, "rollout", 0), "forecast")
+            return output_times
+
     def process(
         self,
         pl_module: pl.LightningModule,
@@ -153,10 +160,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
 
-            if self.config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
-                output_times = (len(self.config.training.explicit_times.target), "time_interp")
-            else:
-                output_times = (getattr(pl_module, "rollout", 0), "forecast")
+            output_times=self._get_output_times(config,pl_module)
 
             self.plot(
                 trainer,
