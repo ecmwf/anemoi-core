@@ -30,7 +30,6 @@ model:
   latent_skip: False # True/False for skip connection on latent mesh
 
 training:
-  multistep_input: 1
   # Instead of inferred using multistep and timeincrement, specify time indices explicitly
   explicit_times:
     input: [0, 6]
