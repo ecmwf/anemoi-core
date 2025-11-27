@@ -7,8 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
+import os
+import random
 from functools import cached_property
 
 import numpy as np
@@ -18,6 +19,7 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.training.utils.seeding import get_base_seed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -153,12 +155,27 @@ class MultiDataset(IterableDataset):
         """Set ensemble communication group information for all datasets."""
         self._apply_to_all_datasets("set_ens_comm_group_info", *args, **kwargs)
 
-    def per_worker_init(self, *args, **kwargs) -> None:
+    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all datasets for this worker."""
-        self._apply_to_all_datasets("per_worker_init", *args, **kwargs)
+        self.worker_id = worker_id
+        self._apply_to_all_datasets("per_worker_init", n_workers, worker_id)
+        base_seed = get_base_seed()
 
-    def _get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        return {name: dataset._get_sample(index) for name, dataset in self.datasets.items()}
+        torch.manual_seed(base_seed)
+        random.seed(base_seed)
+        self.rng = np.random.default_rng(seed=base_seed)
+        sanity_rnd = self.rng.random(1)
+        LOGGER.info(
+            ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
+            worker_id,
+            self.label,
+            os.getpid(),
+            base_seed,
+            sanity_rnd,
+        )
+
+    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
+        return {name: dataset.get_sample(index) for name, dataset in self.datasets.items()}
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
@@ -171,27 +188,27 @@ class MultiDataset(IterableDataset):
         """
         # Get the shuffled indices from the primary dataset
         # All datasets will use the same shuffled indices for synchronization
-        primary_dataset = self.primary_dataset
+        chunk_index_range = self.primary_dataset.chunk_index_range
 
         if self.shuffle:
-            shuffled_chunk_indices = primary_dataset.rng.choice(
+            shuffled_chunk_indices = self.rng.choice(
                 self.valid_date_indices,
                 size=len(self.valid_date_indices),
                 replace=False,
-            )[primary_dataset.chunk_index_range]
+            )[chunk_index_range]
         else:
-            shuffled_chunk_indices = self.valid_date_indices[primary_dataset.chunk_index_range]
+            shuffled_chunk_indices = self.valid_date_indices[chunk_index_range]
 
         LOGGER.debug(
             "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
             self.__class__.__name__,
-            primary_dataset.worker_id,
-            primary_dataset.worker_id,
+            os.getpid(),
+            self.worker_id,
             shuffled_chunk_indices[:10],
         )
         # TODO: improve this...
         for i in shuffled_chunk_indices:
-            yield self._get_sample(i)
+            yield self.get_sample(i)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
