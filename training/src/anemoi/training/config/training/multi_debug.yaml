@@ -144,13 +144,13 @@ variable_groups:
     era5:
       default: sfc
       pl:
-        param: [q, t, u, v, w, z]  # ERA5 has vorticity and divergence
+        param: [q, t, u, v, w] #, z] TODO: # ERA5 has vorticity and divergence
       sfc:
         param: [tp, cp, 10u, 10v, 2d, sp]  # ERA5 surface variables
     cerra:
       default: sfc
       pl:
-        param: [q, t, u, v, w, z]  # CERRA has vorticity and divergence
+        param: [q, t, u, v, w] #, z] TODO: # CERRA has vorticity and divergence
       sfc:
         param: [tp, cp, 10u, 10v, 2d]  # CERRA surface variables
 
