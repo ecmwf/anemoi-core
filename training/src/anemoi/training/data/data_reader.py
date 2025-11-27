@@ -10,7 +10,6 @@
 
 import logging
 import os
-import random
 from collections.abc import Callable
 from functools import cached_property
 
@@ -19,16 +18,14 @@ import torch
 from einops import rearrange
 from rich.console import Console
 from rich.tree import Tree
-from torch.utils.data import IterableDataset
 
 from anemoi.training.data.grid_indices import BaseGridIndices
-from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
 
-class NativeGridDataset(IterableDataset):
+class NativeGridDataset:
     """Iterable dataset for AnemoI data on the arbitrary grids."""
 
     def __init__(
@@ -242,10 +239,7 @@ class NativeGridDataset(IterableDataset):
             Number of workers
         worker_id : int
             Worker ID
-
         """
-        self.worker_id = worker_id
-
         # Divide this equally across shards (one shard per group!)
         shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
@@ -268,30 +262,7 @@ class NativeGridDataset(IterableDataset):
             high,
         )
 
-        base_seed = get_base_seed()
-
-        torch.manual_seed(base_seed)
-        random.seed(base_seed)
-        self.rng = np.random.default_rng(seed=base_seed)
-        sanity_rnd = self.rng.random(1)
-
-        LOGGER.info(
-            (
-                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                "group_rank %d, seed group id %d, base_seed %d, sanity rnd %f)"
-            ),
-            worker_id,
-            self.label,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            base_seed,
-            sanity_rnd,
-        )
-
-    def _get_sample(self, index: int) -> torch.Tensor:
+    def get_sample(self, index: int) -> torch.Tensor:
         start = index + self.relative_date_indices[0]
         end = index + self.relative_date_indices[-1] + 1
         timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
@@ -312,42 +283,6 @@ class NativeGridDataset(IterableDataset):
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
 
         return torch.from_numpy(x)
-
-    def __iter__(self) -> torch.Tensor:
-        """Return an iterator over the dataset.
-
-        The datasets are retrieved by anemoi.datasets from anemoi datasets. This iterator yields
-        chunked batches for DDP and sharded training.
-
-        Currently it receives data with an ensemble dimension, which is discarded for
-        now. (Until the code is "ensemble native".)
-        """
-        if self.shuffle:
-            shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
-                replace=False,
-            )[self.chunk_index_range]
-        else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
-
-        LOGGER.debug(
-            (
-                "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
-            ),
-            os.getpid(),
-            self.label,
-            self.worker_id,
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            shuffled_chunk_indices[:10],
-        )
-
-        for i in shuffled_chunk_indices:
-            yield self._get_sample(i)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
