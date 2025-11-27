@@ -22,7 +22,6 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram as _PlotHis
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss as _PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample as _PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum as _PlotSpectrum
-from anemoi.training.schemas.base_schema import BaseSchema
 
 if TYPE_CHECKING:
     from typing import Any
@@ -30,6 +29,7 @@ if TYPE_CHECKING:
 
     import pytorch_lightning as pl
     from omegaconf import DictConfig
+    from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
 
