@@ -109,7 +109,7 @@ def test_compile() -> None:
     result_compiled = ln_compiled.forward(x_in, cond)
 
     # check the function was compiled
-    assert hasattr(ln_compiled, "_compile_kwargs")
+    assert hasattr(ln_compiled.forward, "_torchdynamo_orig_callable")
 
     # check the result of the compiled function matches the uncompiled result
     assert torch.allclose(result, result_compiled)
@@ -145,7 +145,7 @@ def test_compile_layer_kernel() -> None:
     result_compiled = mhsa_compiled.forward(x, shapes, batch_size)
 
     # check the function was compiled
-    assert hasattr(mhsa_compiled.projection, "_compile_kwargs")
+    assert hasattr(mhsa_compiled.projection.forward, "_torchdynamo_orig_callable")
 
     # check the result of the compiled function matches the uncompiled result
     assert torch.allclose(result, result_compiled)

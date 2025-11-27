@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     import pytorch_lightning as pl
     from omegaconf import DictConfig
+
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
