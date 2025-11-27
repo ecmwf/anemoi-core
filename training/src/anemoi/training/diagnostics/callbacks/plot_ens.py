@@ -161,7 +161,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
 
-            output_times=self._get_output_times(config,pl_module)
+            output_times = self._get_output_times(config, pl_module)
 
             self.plot(
                 trainer,
