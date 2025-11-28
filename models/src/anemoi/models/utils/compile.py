@@ -9,6 +9,7 @@
 
 import logging
 from importlib.util import find_spec
+from functools import reduce
 
 import torch
 import torch_geometric
