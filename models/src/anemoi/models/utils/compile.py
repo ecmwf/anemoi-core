@@ -81,7 +81,6 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
             options = entry.get("options", default_compile_options)
 
             LOGGER.debug("%s will be compiled with the following options: %s", str(module), str(options))
-            # compiled_module = CompileWrapper(module, options)
             # It is just marked for JIT-compilation later
             # It will be compiled before its first forward pass
 
