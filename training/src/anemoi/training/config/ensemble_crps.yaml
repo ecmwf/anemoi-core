@@ -26,6 +26,7 @@ system:
     dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6.zarr
     truncation: ${data.resolution}-o32-linear.mat.npz
     truncation_inv: o32-${data.resolution}-linear.mat.npz
+    #warm_start: /home/ecm2559/dev_perm/anemoi-core/test2/test_training_cycle_ensemble0/checkpoint/bf2f635c-d448-4abb-a2e7-9b9377054af2/last.ckp
   hardware:
     accelerator: auto
     num_gpus_per_ensemble: 1
@@ -33,12 +34,19 @@ system:
     num_nodes: 1
     num_gpus_per_model: 1
 
+
+  # input:
+  #   #/home/ecm2559/dev_perm/anemoi-core/test_training_cycle_ensemble0/checkpoint/2e3310bb-8d37-4698-8d56-2c5fdd7ed106/last.ckpt
+  #   warm_start: /home/ecm2559/dev_perm/anemoi-core/test2/test_training_cycle_ensemble0/checkpoint/bf2f635c-d448-4abb-a2e7-9b9377054af2/last.ckpt
+
 model:
   num_channels: 128
+  #compile: null
 dataloader:
   limit_batches:
     training: 100
     validation: 100
+
 
 data:
   resolution: o96
