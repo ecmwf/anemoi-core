@@ -73,3 +73,12 @@ validation:
       end: 2021
       frequency: ${data.frequency}
       drop: []
+
+test:
+  datasets:
+    data: # user-defined key
+      dataset: ${dataloader.dataset}
+      start: 2022
+      end: 2022
+      frequency: ${data.frequency}
+      drop: []
