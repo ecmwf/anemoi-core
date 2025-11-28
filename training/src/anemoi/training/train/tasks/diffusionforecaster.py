@@ -129,17 +129,19 @@ class GraphDiffusionForecaster(GraphForecaster):
 
         """
         # start rollout of preprocessed batch
-        x = batch[
-            :,
-            0 : self.multi_step,
-            ...,
-            self.data_indices.data.input.full,
-        ]  # (bs, multi_step, ens, latlon, nvar)
-        msg = (
-            "Batch length not sufficient for requested multi_step length!"
-            f", {batch.shape[1]} !>= {rollout + self.multi_step}"
-        )
-        assert batch.shape[1] >= rollout + self.multi_step, msg
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.multi_step,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, multi_step, latlon, nvar)
+            msg = (
+                f"Batch length not sufficient for requested multi_step length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {rollout + self.multi_step}"
+            )
+            assert dataset_batch.shape[1] >= rollout + self.multi_step, msg
 
         for rollout_step in range(rollout or self.rollout):
 
@@ -154,8 +156,15 @@ class GraphDiffusionForecaster(GraphForecaster):
             )
 
             # get targets and noised targets
-            y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.data.output.full]
-            y_noised = self._noise_target(y, sigma)
+            y = {}
+            for dataset_name, dataset_batch in batch.items():
+                y[dataset_name] = dataset_batch[
+                    :,
+                    self.multi_step + rollout_step,
+                    ...,
+                    self.data_indices[dataset_name].data.output.full,
+                ]
+            y_noised = {name: self._noise_target(y, sigma) for name, y in y.items()}
 
             # prediction, fwd_with_preconditioning
             y_pred = self(
@@ -185,7 +194,7 @@ class GraphDiffusionForecaster(GraphForecaster):
 
     def _get_noise_level(
         self,
-        shape: torch.shape,
+        shape: tuple[int],
         sigma_max: float,
         sigma_min: float,
         sigma_data: float,
