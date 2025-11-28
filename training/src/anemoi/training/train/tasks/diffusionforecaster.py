@@ -68,8 +68,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
     def get_target(self, batch: torch.Tensor) -> torch.Tensor:
         """Get target tensor shape for diffusion model."""
-        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
-        return y
+        return batch[:, self.multi_step, ..., self.data_indices.data.output.full]
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         return self.model.model.fwd_with_preconditioning(
