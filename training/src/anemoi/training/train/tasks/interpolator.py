@@ -75,6 +75,7 @@ class GraphInterpolator(BaseGraphModule):
 
         self.use_time_fraction = config.training.target_forcing.time_fraction
 
+        self.multi_step = 1
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))

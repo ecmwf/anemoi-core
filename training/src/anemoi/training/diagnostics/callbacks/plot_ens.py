@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     import pytorch_lightning as pl
     from omegaconf import DictConfig
 
+    from anemoi.training.schemas.base_schema import BaseSchema
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -58,11 +60,20 @@ class EnsemblePlotMixin:
         # Return batch[0] (normalized data) and structured output like regular forecaster
         return batch[0] if isinstance(batch, list | tuple) else batch, [loss, y_preds]
 
+    def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
+        """Return times outputted by the model."""
+        if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphEnsInterpolator":
+            output_times = (len(config.training.explicit_times.target), "time_interp")
+        else:
+            output_times = (getattr(pl_module, "rollout", 0), "forecast")
+        return output_times
+
     def process(
         self,
         pl_module: pl.LightningModule,
         outputs: list,
         batch: torch.Tensor,
+        output_times: tuple,
         members: Union[int, list[int]] = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process ensemble outputs for metrics plotting.
@@ -77,6 +88,7 @@ class EnsemblePlotMixin:
             List of outputs from the model
         batch : torch.Tensor
             Batch tensor (bs, input_steps + forecast_steps, latlon, nvar)
+        output_times : tuple
         members : int, list[int], optional
             Ensemble members to plot. If None, all members are returned. Default to 0.
 
@@ -94,7 +106,7 @@ class EnsemblePlotMixin:
         input_tensor = (
             batch[
                 :,
-                pl_module.multi_step - 1 : pl_module.multi_step + pl_module.rollout + 1,
+                pl_module.multi_step - 1 : pl_module.multi_step + output_times[0] + 1,
                 ...,
                 pl_module.data_indices.data.output.full,
             ]
@@ -151,6 +163,8 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                     post_processor.nan_locations = pl_module.allgather_batch(post_processor.nan_locations)
             self.post_processors = self.post_processors.cpu()
 
+            output_times = self._get_output_times(self.config, pl_module)
+
             self.plot(
                 trainer,
                 pl_module,
@@ -158,6 +172,7 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
                 processed_batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
+                output_times=output_times,
                 **kwargs,
             )
 
@@ -232,6 +247,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         batch: torch.Tensor,
         batch_idx: int,
         epoch: int,
+        output_times: tuple,
     ) -> None:
         from anemoi.training.diagnostics.plots import plot_predicted_ensemble
 
@@ -244,10 +260,16 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             for name in self.config.diagnostics.plot.parameters
         }
 
-        data, output_tensor = self.process(pl_module, outputs, batch, members=self.plot_members)
+        data, output_tensor = self.process(
+            pl_module,
+            outputs,
+            batch,
+            output_times=output_times,
+            members=self.plot_members,
+        )
 
         local_rank = pl_module.local_rank
-        for rollout_step in range(pl_module.rollout):
+        for rollout_step in range(output_times[0]):
             fig = plot_predicted_ensemble(
                 parameters=plot_parameters_dict,
                 n_plots_per_sample=4,
