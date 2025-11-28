@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from functools import reduce
 from importlib.util import find_spec
 
 import torch
@@ -15,6 +16,7 @@ import torch_geometric
 from hydra.utils import get_class
 from numpy import unique
 from omegaconf import DictConfig
+from torch import nn
 from torch.nn import Module
 
 LOGGER = logging.getLogger(__name__)
@@ -56,6 +58,22 @@ def _meets_library_versions_for_compile() -> bool:
     return version_req and has_triton
 
 
+class CompileWrapper(nn.Module):
+    """Wrapper which compiles the underlying module while supporting pickling"""
+
+    def __init__(self, module, compile_options):
+        super().__init__()
+        self.compiled_module = torch.compile(module, **compile_options)
+
+    def forward(self, *args, **kwargs):
+        return self.compiled_module(*args, **kwargs)
+
+
+def is_compiled(module: Module) -> bool:
+    """Checks if a module has been compiled"""
+    return isinstance(module, CompileWrapper)
+
+
 def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Module:
     """Marks modules within 'model' for compilation, according to 'compile_config'.
 
@@ -72,7 +90,6 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
 
     default_compile_options = {}
     compiled_modules = []
-
     # Loop through all modules
     for name, module in model.named_modules():
         entry = _get_compile_entry(module, compile_config)
@@ -81,9 +98,19 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
             options = entry.get("options", default_compile_options)
 
             LOGGER.debug("%s will be compiled with the following options: %s", str(module), str(options))
-            module.forward = torch.compile(module.forward, **options)  # Note: the function is not compiled yet
+            compiled_module = CompileWrapper(module, options)  # Note: the function is not compiled yet
             # It is just marked for JIT-compilation later
             # It will be compiled before its first forward pass
+
+            # Update the model with the new module
+            if model == module:
+                model = compiled_module
+            else:
+                parts = name.split(".")
+                parent = reduce(getattr, parts[:-1], model)
+                LOGGER.debug("Replacing %s with a compiled version", str(parts[-1]))
+                setattr(parent, parts[-1], compiled_module)
+
             compiled_modules.append(entry.module)
 
     LOGGER.info("The following modules will be compiled: %s", str(unique(compiled_modules)))

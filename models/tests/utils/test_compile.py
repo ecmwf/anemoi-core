@@ -18,6 +18,7 @@ from anemoi.models.layers.normalization import ConditionalLayerNorm
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.utils.compile import _get_compile_entry
 from anemoi.models.utils.compile import _meets_library_versions_for_compile
+from anemoi.models.utils.compile import is_compiled
 from anemoi.models.utils.compile import mark_for_compilation
 
 LOGGER = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ def test_compile() -> None:
     result_compiled = ln_compiled.forward(x_in, cond)
 
     # check the function was compiled
-    assert hasattr(ln_compiled.forward, "_torchdynamo_orig_callable")
+    assert is_compiled(ln_compiled)
 
     # check the result of the compiled function matches the uncompiled result
     assert torch.allclose(result, result_compiled)
@@ -145,7 +146,7 @@ def test_compile_layer_kernel() -> None:
     result_compiled = mhsa_compiled.forward(x, shapes, batch_size)
 
     # check the function was compiled
-    assert hasattr(mhsa_compiled.projection.forward, "_torchdynamo_orig_callable")
+    assert is_compiled(mhsa_compiled.projection)
 
     # check the result of the compiled function matches the uncompiled result
     assert torch.allclose(result, result_compiled)
