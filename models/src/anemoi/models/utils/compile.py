@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from functools import reduce
 from importlib.util import find_spec
 
 import torch
