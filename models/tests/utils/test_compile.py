@@ -203,7 +203,15 @@ def test_compile_load_checkpoint() -> None:
 
     checkpoint = torch.load("compiled.pt", weights_only=False)
     os.remove("compiled.pt")
-    mhsa.load_state_dict(checkpoint.state_dict(), assign=False)
 
-    result = mhsa.forward(x, shapes, batch_size)
+    new_mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        dropout_p=dropout_p,
+        attention_implementation="scaled_dot_product_attention",
+    )
+    new_mhsa.load_state_dict(checkpoint.state_dict(), assign=False)
+
+    result = new_mhsa.forward(x, shapes, batch_size)
     assert torch.allclose(result, result_compiled)

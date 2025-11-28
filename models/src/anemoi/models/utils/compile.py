@@ -85,8 +85,6 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
             # It is just marked for JIT-compilation later
             # It will be compiled before its first forward pass
 
-            LOGGER.info("Compiling %s", name)
-
             module.compile(**options)
 
             parts = name.split(".")
