@@ -21,6 +21,10 @@ from .masks import GridsMask
 from .masks import LimitedAreaMask
 from .masks import NonmissingAnemoiDatasetVariable
 from .masks import NonzeroAnemoiDatasetVariable
+from .scalar_attributes import CosLatitude
+from .scalar_attributes import CosLongitude
+from .scalar_attributes import SinLatitude
+from .scalar_attributes import SinLongitude
 
 __all__ = [
     "GridsMask",
@@ -37,4 +41,8 @@ __all__ = [
     "BooleanOrMask",
     "CosineLatWeightedAttribute",
     "IsolatitudeAreaWeights",
+    "SinLatitude",
+    "SinLongitude",
+    "CosLatitude",
+    "CosLongitude",
 ]
