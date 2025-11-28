@@ -441,7 +441,6 @@ class AnemoiTrainer(ABC):
             LOGGER.info("Dry run: %s", self.dry_run)
 
     def prepare_compilation(self) -> None:
-        import os
 
         if hasattr(self.config.model, "compile"):
             self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
@@ -449,10 +448,6 @@ class AnemoiTrainer(ABC):
             torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
             torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
             LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
-
-        if os.getenv("REDUCE_OVERHEAD", "0") == "1":
-            LOGGER.info("Wrapping the entire model in torch.compile(mode='reduce-overhead')")
-            self.model = torch.compile(self.model, mode="reduce-overhead")
 
     @cached_property
     def strategy(self) -> Any:
