@@ -8,8 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from importlib.util import find_spec
 from functools import reduce
+from importlib.util import find_spec
 
 import torch
 import torch_geometric
