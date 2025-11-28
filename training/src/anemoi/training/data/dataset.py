@@ -10,23 +10,22 @@
 
 import logging
 import os
-import random
 from collections.abc import Callable
 from functools import cached_property
 
 import numpy as np
 import torch
 from einops import rearrange
-from torch.utils.data import IterableDataset
+from rich.console import Console
+from rich.tree import Tree
 
 from anemoi.training.data.grid_indices import BaseGridIndices
-from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
 
-class NativeGridDataset(IterableDataset):
+class NativeGridDataset:
     """Iterable dataset for AnemoI data on the arbitrary grids."""
 
     def __init__(
@@ -37,8 +36,6 @@ class NativeGridDataset(IterableDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
-        num_gpus_per_ens: int = 1,
-        num_gpus_per_model: int = 1,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -56,10 +53,6 @@ class NativeGridDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
-        num_gpus_per_ens : int, optional
-            Number of GPUs per ensemble, by default 1
-        num_gpus_per_model : int, optional
-            Number of GPUs per model, by default 1
         """
         self.label = label
 
@@ -67,13 +60,6 @@ class NativeGridDataset(IterableDataset):
 
         self.timestep = timestep
         self.grid_indices = grid_indices
-
-        # lazy init
-        self.n_samples_per_epoch_total: int = 0
-        self.n_samples_per_epoch_per_worker: int = 0
-
-        self.num_gpus_per_ens = num_gpus_per_ens
-        self.num_gpus_per_model = num_gpus_per_model
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
@@ -96,10 +82,6 @@ class NativeGridDataset(IterableDataset):
         self.chunk_index_range: np.ndarray | None = None
         self.shuffle = shuffle
 
-        # Data dimensions
-        self.ensemble_dim: int = 2
-        self.ensemble_size = self.data.shape[self.ensemble_dim]
-
         # relative index of dates to extract
         self.relative_date_indices = relative_date_indices
 
@@ -109,7 +91,7 @@ class NativeGridDataset(IterableDataset):
         return self.data.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
+    def statistics_tendencies(self) -> dict | None:
         """Return dataset tendency statistics."""
         try:
             return self.data.statistics_tendencies(self.timestep)
@@ -127,12 +109,12 @@ class NativeGridDataset(IterableDataset):
         return self.data.supporting_arrays()
 
     @cached_property
-    def name_to_index(self) -> dict:
+    def name_to_index(self) -> dict[str, int]:
         """Return dataset statistics."""
         return self.data.name_to_index
 
     @cached_property
-    def resolution(self) -> dict:
+    def resolution(self) -> str:
         """Return dataset resolution."""
         return self.data.resolution
 
@@ -240,10 +222,7 @@ class NativeGridDataset(IterableDataset):
             Number of workers
         worker_id : int
             Worker ID
-
         """
-        self.worker_id = worker_id
-
         # Divide this equally across shards (one shard per group!)
         shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
@@ -266,88 +245,40 @@ class NativeGridDataset(IterableDataset):
             high,
         )
 
-        base_seed = get_base_seed()
+    def get_sample(self, index: int) -> torch.Tensor:
+        start = index + self.relative_date_indices[0]
+        end = index + self.relative_date_indices[-1] + 1
+        timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+        # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
+        # data[start...] will be replaced with data[self.relative_date_indices + i]
 
-        torch.manual_seed(base_seed)
-        random.seed(base_seed)
-        self.rng = np.random.default_rng(seed=base_seed)
-        sanity_rnd = self.rng.random(1)
+        grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+        if isinstance(grid_shard_indices, slice):
+            # Load only shards into CPU memory
+            x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
 
-        LOGGER.info(
-            (
-                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                "group_rank %d, seed group id %d, base_seed %d, sanity rnd %f)"
-            ),
-            worker_id,
-            self.label,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            base_seed,
-            sanity_rnd,
-        )
-
-    def __iter__(self) -> torch.Tensor:
-        """Return an iterator over the dataset.
-
-        The datasets are retrieved by anemoi.datasets from anemoi datasets. This iterator yields
-        chunked batches for DDP and sharded training.
-
-        Currently it receives data with an ensemble dimension, which is discarded for
-        now. (Until the code is "ensemble native".)
-        """
-        if self.shuffle:
-            shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
-                replace=False,
-            )[self.chunk_index_range]
         else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
+            # Load full grid in CPU memory, select grid_shard after
+            # Note that anemoi-datasets currently doesn't support slicing + indexing
+            # in the same operation.
+            x = self.data[start:end:timeincrement, :, :, :]
+            x = x[..., grid_shard_indices]  # select the grid shard
+        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
 
-        LOGGER.debug(
-            (
-                "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
-            ),
-            os.getpid(),
-            self.label,
-            self.worker_id,
-            self.global_rank,
-            self.model_comm_group_id,
-            self.model_comm_group_rank,
-            self.sample_comm_group_id,
-            shuffled_chunk_indices[:10],
-        )
-
-        for i in shuffled_chunk_indices:
-            start = i + self.relative_date_indices[0]
-            end = i + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
-
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
-
-            else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-            self.ensemble_dim = 1
-
-            yield torch.from_numpy(x)
+        return torch.from_numpy(x)
 
     def __repr__(self) -> str:
-        return f"""
-            {super().__repr__()}
-            Dataset: {self.data}
-            Relative dates: {self.relative_date_indices}
-        """
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Timestep: {self.timestep}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Relative dates: {self.relative_date_indices}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree.add(f"Num samples: {len(self.valid_date_indices)}")
+        return tree

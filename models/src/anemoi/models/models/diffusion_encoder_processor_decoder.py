@@ -69,39 +69,47 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         """Builds the model components."""
 
         # Encoder data -> hidden
-        self.encoder = instantiate(
-            model_config.model.encoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.input_dim,
-            in_channels_dst=self.input_dim_latent,
-            hidden_dim=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_data, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-        )
+        self.encoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.encoder[dataset_name] = instantiate(
+                model_config.model.encoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.input_dim[dataset_name],
+                in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
+                hidden_dim=self.num_channels,
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+            )
 
-        # Processor hidden -> hidden
+        # Processor hidden -> hidden (shared across all datasets)
+        first_dataset_name = next(iter(self._graph_data.keys()))
+        processor_graph = self._graph_data[first_dataset_name][(self._graph_name_hidden, "to", self._graph_name_hidden)]
+        processor_grid_size = self.node_attributes[first_dataset_name].num_nodes[self._graph_name_hidden]
+
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            sub_graph=processor_graph,
+            src_grid_size=processor_grid_size,
+            dst_grid_size=processor_grid_size,
         )
 
         # Decoder hidden -> data
-        self.decoder = instantiate(
-            model_config.model.decoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.num_channels,
-            in_channels_dst=self.input_dim,
-            hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-        )
+        self.decoder = torch.nn.ModuleDict()
+        for dataset_name in self._graph_data.keys():
+            self.decoder[dataset_name] = instantiate(
+                model_config.model.decoder,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=self.num_channels,
+                in_channels_dst=self.input_dim[dataset_name],
+                hidden_dim=self.num_channels,
+                out_channels_dst=self.num_output_channels[dataset_name],
+                sub_graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
+                src_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
+                dst_grid_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
+            )
 
     def _calculate_input_dim(self):
         base_input_dim = super()._calculate_input_dim()

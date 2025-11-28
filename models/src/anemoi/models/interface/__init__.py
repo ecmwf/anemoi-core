@@ -76,27 +76,75 @@ class AnemoiModelInterface(torch.nn.Module):
         self.data_indices = data_indices
         self._build_model()
 
-    def _build_model(self) -> None:
-        """Builds the model and pre- and post-processors."""
-        # Instantiate processors
+    def _build_processors_for_dataset(
+        self, dataset_name: str, statistics: dict, data_indices: dict, statistics_tendencies: dict = None
+    ):
+        """Build processors for a single dataset.
+
+        Parameters
+        ----------
+        dataset_name : str
+            Name of the dataset
+        statistics : dict
+            Statistics for the dataset
+        data_indices : dict
+            Data indices for the dataset
+        statistics_tendencies : dict, optional
+            Tendencies statistics for the dataset
+
+        Returns
+        -------
+        tuple
+            (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
+        """
+        from anemoi.training.utils.config_utils import get_dataset_data_config
+
+        # Get dataset-specific data config
+        dataset_data_config = get_dataset_data_config(self.config, dataset_name)
+
+        # Build processors for the dataset
         processors = [
-            [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics)]
-            for name, processor in self.config.data.processors.items()
+            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
+            for name, processor in dataset_data_config.processors.items()
         ]
 
-        # Assign the processor list pre- and post-processors
-        self.pre_processors = Processors(processors)
-        self.post_processors = Processors(processors, inverse=True)
+        pre_processors = Processors(processors)
+        post_processors = Processors(processors, inverse=True)
 
-        # If tendencies statistics are provided, instantiate the tendencies processors
-        if self.statistics_tendencies is not None:
-            processors = [
-                [name, instantiate(processor, data_indices=self.data_indices, statistics=self.statistics_tendencies)]
-                for name, processor in self.config.data.processors.items()
+        # Build tendencies processors if provided
+        pre_processors_tendencies = None
+        post_processors_tendencies = None
+        if statistics_tendencies is not None:
+            processors_tendencies = [
+                [name, instantiate(processor, data_indices=data_indices, statistics=statistics_tendencies)]
+                for name, processor in dataset_data_config.processors.items()
             ]
-            # Assign the processor list pre- and post-processors
-            self.pre_processors_tendencies = Processors(processors)
-            self.post_processors_tendencies = Processors(processors, inverse=True)
+            pre_processors_tendencies = Processors(processors_tendencies)
+            post_processors_tendencies = Processors(processors_tendencies, inverse=True)
+
+        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
+
+    def _build_model(self) -> None:
+        """Builds the model and pre- and post-processors."""
+        # Multi-dataset mode: create processors for each dataset
+        self.pre_processors = torch.nn.ModuleDict()
+        self.post_processors = torch.nn.ModuleDict()
+        self.pre_processors_tendencies = torch.nn.ModuleDict()
+        self.post_processors_tendencies = torch.nn.ModuleDict()
+
+        for dataset_name in self.statistics.keys():
+            # Build processors for each dataset
+            pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
+                dataset_name,
+                self.statistics[dataset_name],
+                self.data_indices[dataset_name],
+                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
+            )
+            self.pre_processors[dataset_name] = pre
+            self.post_processors[dataset_name] = post
+            if pre_tend is not None:
+                self.pre_processors_tendencies[dataset_name] = pre_tend
+                self.post_processors_tendencies[dataset_name] = post_tend
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg

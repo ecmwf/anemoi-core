@@ -29,8 +29,8 @@ from pyshtools.expand import SHGLQ
 from pyshtools.expand import SHExpandGLQ
 from scipy.interpolate import griddata
 from torch import Tensor
-from torch import nn
 
+from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.maps import Coastlines
 from anemoi.training.diagnostics.maps import EquirectangularProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -772,7 +772,7 @@ def edge_plot(
 
 
 def plot_graph_node_features(
-    model: nn.Module,
+    node_attributes: NamedNodesAttributes,
     trainable_tensors: dict[str, Tensor],
     datashader: bool = False,
 ) -> Figure:
@@ -780,8 +780,8 @@ def plot_graph_node_features(
 
     Parameters
     ----------
-    model: AneomiModelEncProcDec
-        Model object
+    node_attributes: NamedNodesAttributes
+        Node attributes object
     trainable_tensors: dict[str, torch.Tensor]
         Node trainable tensors
     datashader: bool, optional
@@ -799,7 +799,7 @@ def plot_graph_node_features(
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, (mesh, trainable_tensor) in enumerate(trainable_tensors.items()):
-        latlons = model.node_attributes.get_coordinates(mesh).cpu().numpy()
+        latlons = node_attributes.get_coordinates(mesh).cpu().numpy()
         node_features = trainable_tensor.cpu().detach().numpy()
 
         lat, lon = latlons[:, 0], latlons[:, 1]
@@ -820,7 +820,7 @@ def plot_graph_node_features(
 
 
 def plot_graph_edge_features(
-    model: nn.Module,
+    node_attributes: NamedNodesAttributes,
     trainable_modules: dict[tuple[str, str], Tensor],
     q_extreme_limit: float = 0.05,
 ) -> Figure:
@@ -828,8 +828,8 @@ def plot_graph_edge_features(
 
     Parameters
     ----------
-    model: AneomiModelEncProcDec
-        Model object
+    node_attributes: NamedNodesAttributes
+        Node attributes object
     trainable_modules: dict[tuple[str, str], torch.Tensor]
         Edge trainable tensors.
     q_extreme_limit : float, optional
@@ -846,8 +846,8 @@ def plot_graph_edge_features(
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, ((src, dst), graph_mapper) in enumerate(trainable_modules.items()):
-        src_coords = model.node_attributes.get_coordinates(src).cpu().numpy()
-        dst_coords = model.node_attributes.get_coordinates(dst).cpu().numpy()
+        src_coords = node_attributes.get_coordinates(src).cpu().numpy()
+        dst_coords = node_attributes.get_coordinates(dst).cpu().numpy()
         edge_index = graph_mapper.edge_index_base.cpu().numpy()
         edge_features = graph_mapper.trainable.trainable.cpu().detach().numpy()
 
