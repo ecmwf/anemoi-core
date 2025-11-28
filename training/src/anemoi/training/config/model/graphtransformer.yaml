@@ -32,6 +32,7 @@ processor:
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
   layer_kernels: ${model.layer_kernels}
+  adj_norm: null
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 encoder:

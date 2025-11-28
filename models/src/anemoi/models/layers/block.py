@@ -12,7 +12,7 @@ import logging
 import os
 from abc import ABC
 from abc import abstractmethod
-from typing import Optional
+from typing import Literal, Optional
 from typing import Union
 
 import einops
@@ -443,6 +443,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        adj_norm: Literal['sym','rw'] | None = None,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -464,6 +465,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Add bias or not
         qk_norm : bool, by default False
             Normalize query and key
+        adj_norm : Literal['sym','rw'] | None
+            Normalize adjacency aggregation: D^-1A ('rw') or D^{-1/2}AD^{-1/2} ('sym')
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
         layer_kernels : DotDict
@@ -479,6 +482,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.out_channels_conv = out_channels // num_heads
         self.num_heads = num_heads
         self.qk_norm = qk_norm
+        self.adj_norm = adj_norm
 
         Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
@@ -513,7 +517,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self.conv = GraphTransformerFunction.apply
         else:
             LOGGER.warning(f"{self.__class__.__name__} using pyg graph attention backend, consider using 'triton'.")
-            self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+            self.conv = GraphTransformerConv(out_channels=self.out_channels_conv,adj_norm=self.adj_norm)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))

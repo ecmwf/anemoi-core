@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 from torch import Tensor
@@ -18,6 +18,7 @@ from torch_geometric.typing import Adj
 from torch_geometric.typing import OptPairTensor
 from torch_geometric.typing import OptTensor
 from torch_geometric.typing import Size
+from torch_geometric.utils import degree
 from torch_geometric.utils import scatter
 from torch_geometric.utils import softmax
 
@@ -83,16 +84,22 @@ class GraphTransformerConv(MessagePassing):
 
     Adapted from 'Masked Label Prediction: Unified Message Passing Model for Semi-Supervised Classification'
     (https://arxiv.org/abs/2009.03509)
+    
+    Edge normalization taken from  'Semi-Supervised Classification with Graph Convolutional Networks'(https://arxiv.org/abs/1609.02907)
+    Code inspired from https://pytorch-geometric.readthedocs.io/en/2.6.0/_modules/torch_geometric/utils/laplacian.html#get_laplacian
     """
 
     def __init__(
         self,
         out_channels: int,
         dropout: float = 0.0,
+        adj_norm: Literal["sym", "rw"] | None = None,
         **kwargs,
     ):
         kwargs.setdefault("aggr", "add")
         super().__init__(node_dim=0, **kwargs)
+
+        self.adj_norm = adj_norm
 
         self.out_channels = out_channels
         self.dropout = dropout
@@ -108,6 +115,19 @@ class GraphTransformerConv(MessagePassing):
     ):
         dim_size = query.shape[0]
         heads = query.shape[1]
+        
+        edge_weights = torch.ones(edge_index.size(1), dtype = query.dtype, device = query.device)
+
+        if self.adj_norm is not None:
+            row, col = edge_index
+            deg = degree(col,dtype=query.dtype)
+            
+            if self.adj_norm=="sym":
+                deg_inv_sqrt = deg.pow_(-0.5)
+                deg_inv_sqrt.masked_fill_(deg_inv_sqrt==float('inf'),0)
+                edge_weights = (deg_inv_sqrt[row] * deg_inv_sqrt[col])
+            elif self.adj_norm=='rw':
+                edge_weights = (deg.pow_(-1.0)[row] * edge_weights)
 
         out = self.propagate(
             edge_index=edge_index,
@@ -118,8 +138,9 @@ class GraphTransformerConv(MessagePassing):
             query=query,
             key=key,
             value=value,
+            edge_weights = edge_weights.repeat(1,heads)
         )
-
+        
         return out
 
     def message(
@@ -128,6 +149,7 @@ class GraphTransformerConv(MessagePassing):
         query_i: Tensor,
         key_j: Tensor,
         value_j: Tensor,
+        edge_weights: Tensor,
         edge_attr: OptTensor,
         index: Tensor,
         ptr: OptTensor,
@@ -141,4 +163,4 @@ class GraphTransformerConv(MessagePassing):
         alpha = softmax(alpha, index, ptr, size_i)
         alpha = dropout(alpha, p=self.dropout, training=self.training)
 
-        return (value_j + edge_attr) * alpha.view(-1, heads, 1)
+        return edge_weights.view(-1,heads,1) * (value_j + edge_attr) * alpha.view(-1, heads, 1)

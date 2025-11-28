@@ -68,6 +68,7 @@ def block(init_proc):
         bias=bias,
         update_src_nodes=False,
         qk_norm=qk_norm,
+        adj_norm=None,
         graph_attention_backend=graph_attention_backend,
     )
 

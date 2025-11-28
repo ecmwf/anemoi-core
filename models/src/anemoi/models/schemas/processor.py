@@ -42,6 +42,8 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     "Number of chunks to divide the layer into. Default to 2."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
+    adj_norm: Literal['sym','rw'] | None =Field(example=None)
+    "Normalize adjacency aggregation: D^-1A ('rw') or D^{-1/2}AD^{-1/2} ('sym')"
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
