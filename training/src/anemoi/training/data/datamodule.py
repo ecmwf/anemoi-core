@@ -227,8 +227,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             timestep=self.config.data.timestep,
             shuffle=shuffle,
             label=label,
-            num_gpus_per_ens=getattr(self.config.hardware, "num_gpus_per_ensemble", 1),
-            num_gpus_per_model=self.config.hardware.num_gpus_per_model,
         )
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:

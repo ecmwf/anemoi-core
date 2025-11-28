@@ -35,7 +35,6 @@ class MultiDataset(IterableDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
-        **kwargs,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -70,7 +69,6 @@ class MultiDataset(IterableDataset):
                 timestep=timestep,
                 shuffle=self.shuffle,  # Will be overridden in __iter__
                 label=f"{label}_{name}",
-                **kwargs,
             )
 
         # Use the first dataset as the primary for shared properties
