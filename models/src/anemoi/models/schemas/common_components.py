@@ -66,3 +66,8 @@ class PointWiseModelComponent(BaseModel):
     "Offload to CPU. Default to False."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+
+
+class InterpolationModelComponent(BaseModel):
+    edge_weight_attribute: str = Field(example="edge_length")
+    "Edge attribute to use as weight for interpolation. Default to 'edge_length'."
