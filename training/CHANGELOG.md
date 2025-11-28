@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.8.0](https://github.com/ecmwf/anemoi-core/compare/training-0.7.0...training-0.8.0) (2025-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** Refactor configuration by introducing system schema with hardware, paths, and files subschemas ([#598](https://github.com/ecmwf/anemoi-core/issues/598))
+* cond layer norm ([#658](https://github.com/ecmwf/anemoi-core/issues/658))
+
+### Features
+
+* Activate minmium plotting for integration tests ([#669](https://github.com/ecmwf/anemoi-core/issues/669)) ([84e5882](https://github.com/ecmwf/anemoi-core/commit/84e5882352a82482f77c5d14225b9f5fda28f134))
+* Compile transformer gnn ([#181](https://github.com/ecmwf/anemoi-core/issues/181)) ([24d162c](https://github.com/ecmwf/anemoi-core/commit/24d162c8dc5e47f14439ee2d2623abd916b6f129))
+* **models:** Add configurable residual connections in enc-proc-dec ([#670](https://github.com/ecmwf/anemoi-core/issues/670)) ([aeaf00b](https://github.com/ecmwf/anemoi-core/commit/aeaf00b1b42c7a6f98547fc6289e99660a9b5630))
+* **models:** Triton GraphTransformer ([#631](https://github.com/ecmwf/anemoi-core/issues/631)) ([b40b6c6](https://github.com/ecmwf/anemoi-core/commit/b40b6c610af47d15e8bb087c7bee79e692f7f2d7))
+* **training:** Performance docs ([#696](https://github.com/ecmwf/anemoi-core/issues/696)) ([9574ff1](https://github.com/ecmwf/anemoi-core/commit/9574ff1cf0e2979a1e86886306a82033af9f4d4f))
+* **training:** Refactor optimizer creation to support custom and torch optimizers ([#588](https://github.com/ecmwf/anemoi-core/issues/588)) ([cd777fb](https://github.com/ecmwf/anemoi-core/commit/cd777fb44b23ec047623f3dbcf86b21f50a75ea2))
+
+
+### Bug Fixes
+
+* Add package config path to Hydra search path in plugin ([#656](https://github.com/ecmwf/anemoi-core/issues/656)) ([ca6f732](https://github.com/ecmwf/anemoi-core/commit/ca6f732f0b21ef7202187aff19c029724ece464c))
+* Cond layer norm ([#658](https://github.com/ecmwf/anemoi-core/issues/658)) ([7315e3a](https://github.com/ecmwf/anemoi-core/commit/7315e3a4144a0b40322ff5bfef26accb91676232))
+* **logger:** Bugs in AzureMLFlowLogger from [#646](https://github.com/ecmwf/anemoi-core/issues/646) ([#685](https://github.com/ecmwf/anemoi-core/issues/685)) ([14c0235](https://github.com/ecmwf/anemoi-core/commit/14c023541fe865e4da15a06c9567780193c19a02))
+* **models:** Processor chunking ([#629](https://github.com/ecmwf/anemoi-core/issues/629)) ([06e5533](https://github.com/ecmwf/anemoi-core/commit/06e5533f3e8da37c44d887c42b67440b40286cb3))
+* Ptl 2.6.0 explicitly pass weights_only=False ([#710](https://github.com/ecmwf/anemoi-core/issues/710)) ([e18824c](https://github.com/ecmwf/anemoi-core/commit/e18824cf89323593a1d45c67eefbe3acf233216d))
+* Slurm system config ([#702](https://github.com/ecmwf/anemoi-core/issues/702)) ([cce8763](https://github.com/ecmwf/anemoi-core/commit/cce8763b72c058bce388f34ab248f66608d5fa05))
+* Target docs ([#704](https://github.com/ecmwf/anemoi-core/issues/704)) ([200101e](https://github.com/ecmwf/anemoi-core/commit/200101e539f24c208c9167bad3a86052152b634e))
+* **training:** Refactor configuration by introducing system schema with hardware, paths, and files subschemas ([#598](https://github.com/ecmwf/anemoi-core/issues/598)) ([da02fe7](https://github.com/ecmwf/anemoi-core/commit/da02fe7bac8c6a69f1ac967f3b243d716abf5910))
+
 ## [0.7.0](https://github.com/ecmwf/anemoi-core/compare/training-0.6.7...training-0.7.0) (2025-11-17)
 
 

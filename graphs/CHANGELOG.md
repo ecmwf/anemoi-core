@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.7.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.2...graphs-0.7.3) (2025-11-28)
+
+
+### Bug Fixes
+
+* Sparse export ([#686](https://github.com/ecmwf/anemoi-core/issues/686)) ([969b787](https://github.com/ecmwf/anemoi-core/commit/969b787409dcdd3e347fd96b7ffc2fa6ce153ae3))
+* Target docs ([#704](https://github.com/ecmwf/anemoi-core/issues/704)) ([200101e](https://github.com/ecmwf/anemoi-core/commit/200101e539f24c208c9167bad3a86052152b634e))
+
 ## [0.7.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.7.1...graphs-0.7.2) (2025-11-17)
 
 

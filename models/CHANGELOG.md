@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.11.0](https://github.com/ecmwf/anemoi-core/compare/models-0.10.0...models-0.11.0) (2025-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** Refactor configuration by introducing system schema with hardware, paths, and files subschemas ([#598](https://github.com/ecmwf/anemoi-core/issues/598))
+* cond layer norm ([#658](https://github.com/ecmwf/anemoi-core/issues/658))
+
+### Features
+
+* Compile transformer gnn ([#181](https://github.com/ecmwf/anemoi-core/issues/181)) ([24d162c](https://github.com/ecmwf/anemoi-core/commit/24d162c8dc5e47f14439ee2d2623abd916b6f129))
+* **models:** Add configurable residual connections in enc-proc-dec ([#670](https://github.com/ecmwf/anemoi-core/issues/670)) ([aeaf00b](https://github.com/ecmwf/anemoi-core/commit/aeaf00b1b42c7a6f98547fc6289e99660a9b5630))
+* **models:** Multibackend all_to_all wrapper ([#95](https://github.com/ecmwf/anemoi-core/issues/95)) ([6819be1](https://github.com/ecmwf/anemoi-core/commit/6819be1506411a6760eb0a3749ef46a0dd465a8c))
+* **models:** Triton GraphTransformer ([#631](https://github.com/ecmwf/anemoi-core/issues/631)) ([b40b6c6](https://github.com/ecmwf/anemoi-core/commit/b40b6c610af47d15e8bb087c7bee79e692f7f2d7))
+
+
+### Bug Fixes
+
+* Cond layer norm ([#658](https://github.com/ecmwf/anemoi-core/issues/658)) ([7315e3a](https://github.com/ecmwf/anemoi-core/commit/7315e3a4144a0b40322ff5bfef26accb91676232))
+* **models:** Processor chunking ([#629](https://github.com/ecmwf/anemoi-core/issues/629)) ([06e5533](https://github.com/ecmwf/anemoi-core/commit/06e5533f3e8da37c44d887c42b67440b40286cb3))
+* Predict_step shard shapes ([#692](https://github.com/ecmwf/anemoi-core/issues/692)) ([be9ff8b](https://github.com/ecmwf/anemoi-core/commit/be9ff8b4e085d69babdef156aee7755e326b5434))
+* Remove import of anemoi training in compile ([#705](https://github.com/ecmwf/anemoi-core/issues/705)) ([f7d5ae4](https://github.com/ecmwf/anemoi-core/commit/f7d5ae4f0547bae0f5010d7d7a72c42e244f7761))
+* Small pytorch boxcox inefficiency ([#683](https://github.com/ecmwf/anemoi-core/issues/683)) ([66b40e0](https://github.com/ecmwf/anemoi-core/commit/66b40e0822460616735e10f197aa46e1c3d733d9))
+* **training:** Refactor configuration by introducing system schema with hardware, paths, and files subschemas ([#598](https://github.com/ecmwf/anemoi-core/issues/598)) ([da02fe7](https://github.com/ecmwf/anemoi-core/commit/da02fe7bac8c6a69f1ac967f3b243d716abf5910))
+
 ## [0.10.0](https://github.com/ecmwf/anemoi-core/compare/models-0.9.7...models-0.10.0) (2025-11-17)
 
 
