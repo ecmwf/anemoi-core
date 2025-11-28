@@ -36,8 +36,6 @@ class NativeGridDataset:
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
-        num_gpus_per_ens: int = 1,
-        num_gpus_per_model: int = 1,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -55,10 +53,6 @@ class NativeGridDataset:
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "generic"
-        num_gpus_per_ens : int, optional
-            Number of GPUs per ensemble, by default 1
-        num_gpus_per_model : int, optional
-            Number of GPUs per model, by default 1
         """
         self.label = label
 
@@ -66,13 +60,6 @@ class NativeGridDataset:
 
         self.timestep = timestep
         self.grid_indices = grid_indices
-
-        # lazy init
-        self.n_samples_per_epoch_total: int = 0
-        self.n_samples_per_epoch_per_worker: int = 0
-
-        self.num_gpus_per_ens = num_gpus_per_ens
-        self.num_gpus_per_model = num_gpus_per_model
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
@@ -94,10 +81,6 @@ class NativeGridDataset:
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
         self.shuffle = shuffle
-
-        # Data dimensions
-        self.ensemble_dim: int = 2
-        self.ensemble_size = self.data.shape[self.ensemble_dim]
 
         # relative index of dates to extract
         self.relative_date_indices = relative_date_indices
