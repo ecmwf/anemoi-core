@@ -212,7 +212,6 @@ class AnemoiTrainer(ABC):
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
 
-                kwargs = {}
                 if version.parse("2.6.0") <= PL_VERSION:
                     kwargs["weights_only"] = False
 
