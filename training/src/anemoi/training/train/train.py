@@ -197,10 +197,6 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        kwargs = {}
-        if version.parse("2.6.0") <= PL_VERSION:
-            kwargs["weights_only"] = False
-
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
@@ -215,6 +211,11 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
+
+                kwargs = {}
+                if version.parse("2.6.0") <= PL_VERSION:
+                    kwargs["weights_only"] = False
+
                 model = model_task.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
