@@ -15,8 +15,10 @@ import pickle
 from pathlib import Path
 from typing import Any
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+from packaging import version
 from pytorch_lightning import Callback
 from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
@@ -24,6 +26,8 @@ from pytorch_lightning import Trainer
 from anemoi.models.migrations import Migrator
 from anemoi.training.train.tasks.base import BaseGraphModule
 from anemoi.utils.checkpoints import save_metadata
+
+PL_VERSION = version.parse(pl.__version__)
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 
@@ -44,7 +48,11 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
-    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
+    kwargs = {}
+    if version.parse("2.6.0") <= PL_VERSION:
+        kwargs["weights_only"] = False
+
+    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, **kwargs)
     model = module.model
 
     metadata = dict(**model.metadata)

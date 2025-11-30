@@ -13,9 +13,11 @@ import shutil
 from pathlib import Path
 
 import pytest
+import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging import version
 from pytorch_lightning import Trainer
 from pytorch_lightning.demos.boring_classes import BoringModel
 from torch import nn
@@ -24,6 +26,8 @@ from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.checkpoints import load_metadata
 from anemoi.utils.config import DotDict
+
+PL_VERSION = version.parse(pl.__version__)
 
 
 class DummyModel(torch.nn.Module):
@@ -134,7 +138,10 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
             if Path(tmp_path + "/" + pl_ckpt_name).exists():
                 uuid = load_metadata(ckpt_path)["uuid"]
 
-                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name, weights_only=False)
+            kwargs = {}
+            if version.parse("2.6.0") <= PL_VERSION:
+                kwargs["weights_only"] = False
+                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name, **kwargs)
 
                 assert uuid == pl_model.hparams["metadata"]["uuid"]
 
