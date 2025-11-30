@@ -24,6 +24,7 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging import version
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
@@ -43,6 +44,8 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
+
+PL_VERSION = version.parse(pl.__version__)
 
 
 class AnemoiTrainer(ABC):
@@ -491,11 +494,24 @@ class AnemoiTrainer(ABC):
 
         LOGGER.debug("Starting training..")
 
-        trainer.fit(
-            self.model,
-            datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-        )
+        if version.parse("2.6.0") <= PL_VERSION:
+            # From 2.6 onwards pytorch-lightning has now exposed the weights_only flag to be
+            # consistent with Pytorch's behaviour. Refer to https://docs.pytorch.org/docs/stable/generated/torch.load.html
+            # for more details. `weights_only` does not refer to loading the optimizer. Pytorch_lightning controls this
+            # via the checkpoint connector. If a ckpt_path is passed then all states are loaded. While if no ckpt_path
+            # is loaded and just the `load_from_checkpoint` interface is used - then optimizer states are skipepd.
+            trainer.fit(
+                self.model,
+                datamodule=self.datamodule,
+                ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+                weights_only=False,
+            )
+        else:
+            trainer.fit(
+                self.model,
+                datamodule=self.datamodule,
+                ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
+            )
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
