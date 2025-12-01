@@ -24,6 +24,7 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging import version
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
@@ -456,6 +457,28 @@ class AnemoiTrainer(ABC):
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
+    @cached_property
+    def fit_options(self) -> Any:
+        """Returns options to pl.Trainer.fit."""
+        options = {}
+
+        options["model"] = self.model
+        options["datamodule"] = self.datamodule
+        options["ckpt_path"] = None if (self.load_weights_only) else self.last_checkpoint
+
+        # PyTorch Lightning 2.6 and above expose 'weights_only' from torch.load in trainer.fit
+        # Based on the version of Lightning, we might need to pass it
+        pl_version = version.parse(pl.__version__)
+        if pl_version >= version.parse("2.6"):
+            LOGGER.debug(
+                "PyTorch Lightning version of %s is greater than or equal to '2.6',\
+                        'weights_only' will be passed based on 'self.config.training.load_weights_only'",
+                pl_version,
+            )
+            options["weights_only"] = self.load_weights_only
+
+        return options
+
     def train(self) -> None:
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
@@ -491,11 +514,7 @@ class AnemoiTrainer(ABC):
 
         LOGGER.debug("Starting training..")
 
-        trainer.fit(
-            self.model,
-            datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-        )
+        trainer.fit(**self.fit_options)
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
