@@ -158,3 +158,215 @@ class RegisterMigrations(Callback):
         checkpoint: dict[str, Any],
     ) -> None:
         self.migrator.register_migrations(checkpoint)
+
+
+def safe_modules_for_weights_only_load() -> Any:
+    """Since torch 2.6, when loading weights only a list of 'safe' modules must be given.
+
+    This list was obtained using torch.serialization.get_unsafe_globals_in_checkpoint() on an anemoi checkpoint.
+    see https://docs.pytorch.org/docs/stable/notes/serialization.html#torch-load-with-weights-only-true for more.
+    """
+    from pathlib import PosixPath
+
+    # typing, builtins, pathlib
+    from typing import Any
+
+    # numpy
+    from numpy import dtype
+    from numpy import ndarray
+    from numpy.core.multiarray import _reconstruct
+    from numpy.dtypes import Float32DType
+    from numpy.dtypes import Float64DType
+
+    # omegaconf
+    from omegaconf.base import ContainerMetadata
+    from omegaconf.base import Metadata
+    from omegaconf.dictconfig import DictConfig
+    from omegaconf.listconfig import ListConfig
+    from omegaconf.nodes import AnyNode
+
+    # torch_geometric
+    from torch_geometric.data.storage import BaseStorage
+    from torch_geometric.data.storage import EdgeStorage
+    from torch_geometric.data.storage import NodeStorage
+
+    from anemoi.graphs.schemas.base_graph import BaseGraphSchema
+    from anemoi.graphs.schemas.base_graph import EdgeSchema
+    from anemoi.graphs.schemas.base_graph import NodeSchema
+    from anemoi.graphs.schemas.edge_attributes_schemas import BaseEdgeAttributeSchema
+
+    # anemoi.graphs.schemas
+    from anemoi.graphs.schemas.edge_schemas import CutoffEdgeSchema
+    from anemoi.graphs.schemas.edge_schemas import KNNEdgeSchema
+    from anemoi.graphs.schemas.edge_schemas import MultiScaleEdgeSchema
+    from anemoi.graphs.schemas.node_attributes_schemas import SphericalAreaWeightSchema
+    from anemoi.graphs.schemas.node_schemas import AnemoiDatasetNodeSchema
+    from anemoi.graphs.schemas.node_schemas import IcosahedralandHealPixNodeSchema
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.data_indices.index import DataIndex
+    from anemoi.models.data_indices.index import ModelIndex
+
+    # anemoi.models.data_indices
+    from anemoi.models.data_indices.tensor import InputTensorIndex
+    from anemoi.models.data_indices.tensor import OutputTensorIndex
+
+    # anemoi.models.migrations.migrator
+    from anemoi.models.migrations.migrator import MigrationMetadata
+    from anemoi.models.migrations.migrator import _SerializedRollback
+
+    # anemoi.models.schemas.data_processor
+    from anemoi.models.schemas.data_processor import PreprocessorSchema
+    from anemoi.models.schemas.decoder import GNNDecoderSchema
+
+    # anemoi.models.schemas.encoder/decoder
+    from anemoi.models.schemas.encoder import GNNEncoderSchema
+    from anemoi.models.schemas.models import BaseModelSchema
+    from anemoi.models.schemas.models import Model
+    from anemoi.models.schemas.models import NoOutputMaskSchema
+    from anemoi.models.schemas.models import ReluBoundingSchema
+    from anemoi.models.schemas.models import TrainableParameters
+
+    # anemoi.models.schemas.processor
+    from anemoi.models.schemas.processor import GNNProcessorSchema
+
+    # anemoi.models.schemas.residual
+    from anemoi.models.schemas.residual import SkipConnectionSchema
+
+    # anemoi.training.schemas.base_schema
+    from anemoi.training.schemas.base_schema import BaseSchema
+
+    # anemoi.training.schemas.data
+    from anemoi.training.schemas.data import DataSchema
+
+    # anemoi.training.schemas.dataloader
+    from anemoi.training.schemas.dataloader import DataLoaderSchema
+    from anemoi.training.schemas.dataloader import FullGridIndicesSchema
+    from anemoi.training.schemas.dataloader import LoaderSet
+
+    # anemoi.training.schemas.diagnostics
+    from anemoi.training.schemas.diagnostics import BenchmarkProfilerSchema
+    from anemoi.training.schemas.diagnostics import CheckpointSchema
+    from anemoi.training.schemas.diagnostics import Debug
+    from anemoi.training.schemas.diagnostics import DiagnosticsSchema
+    from anemoi.training.schemas.diagnostics import LoggingSchema
+    from anemoi.training.schemas.diagnostics import MatplotlibColormapClevelsSchema
+    from anemoi.training.schemas.diagnostics import MatplotlibColormapSchema
+    from anemoi.training.schemas.diagnostics import MemorySchema
+    from anemoi.training.schemas.diagnostics import MlflowSchema
+    from anemoi.training.schemas.diagnostics import PlotSchema
+    from anemoi.training.schemas.diagnostics import PlottingFrequency
+    from anemoi.training.schemas.diagnostics import Profiling
+    from anemoi.training.schemas.diagnostics import Snapshot
+    from anemoi.training.schemas.diagnostics import TensorboardSchema
+    from anemoi.training.schemas.diagnostics import WandbSchema
+
+    # anemoi.training.schemas.system
+    from anemoi.training.schemas.system import CheckpointsSchema
+    from anemoi.training.schemas.system import HardwareSchema
+    from anemoi.training.schemas.system import InputSchema
+    from anemoi.training.schemas.system import Logs
+    from anemoi.training.schemas.system import OutputSchema
+    from anemoi.training.schemas.system import SystemSchema
+
+    # anemoi.training.schemas.training
+    from anemoi.training.schemas.training import LR
+    from anemoi.training.schemas.training import SWA
+    from anemoi.training.schemas.training import BaseDDPStrategySchema
+    from anemoi.training.schemas.training import BaseLossSchema
+    from anemoi.training.schemas.training import ForecasterSchema
+    from anemoi.training.schemas.training import GeneralVariableLossScalerSchema
+    from anemoi.training.schemas.training import GradientClip
+    from anemoi.training.schemas.training import GraphNodeAttributeScalerSchema
+    from anemoi.training.schemas.training import NaNMaskScalerSchema
+    from anemoi.training.schemas.training import OptimizerSchema
+    from anemoi.training.schemas.training import Rollout
+    from anemoi.training.schemas.training import TendencyScalerSchema
+    from anemoi.training.schemas.training import VariableLevelScalerSchema
+
+    safe_imports = [
+        TrainableParameters,
+        ReluBoundingSchema,
+        NoOutputMaskSchema,
+        Model,
+        BaseModelSchema,
+        MigrationMetadata,
+        _SerializedRollback,
+        LoaderSet,
+        DataLoaderSchema,
+        FullGridIndicesSchema,
+        ForecasterSchema,
+        BaseLossSchema,
+        VariableLevelScalerSchema,
+        SWA,
+        NaNMaskScalerSchema,
+        Rollout,
+        GeneralVariableLossScalerSchema,
+        LR,
+        OptimizerSchema,
+        GradientClip,
+        TendencyScalerSchema,
+        GraphNodeAttributeScalerSchema,
+        BaseDDPStrategySchema,
+        SkipConnectionSchema,
+        TensorboardSchema,
+        Profiling,
+        Snapshot,
+        MatplotlibColormapClevelsSchema,
+        WandbSchema,
+        MatplotlibColormapSchema,
+        MlflowSchema,
+        PlotSchema,
+        BenchmarkProfilerSchema,
+        LoggingSchema,
+        MemorySchema,
+        DiagnosticsSchema,
+        Debug,
+        CheckpointSchema,
+        PlottingFrequency,
+        ContainerMetadata,
+        Metadata,
+        AnyNode,
+        ListConfig,
+        DictConfig,
+        MultiScaleEdgeSchema,
+        KNNEdgeSchema,
+        CutoffEdgeSchema,
+        NodeSchema,
+        BaseGraphSchema,
+        EdgeSchema,
+        BaseEdgeAttributeSchema,
+        SphericalAreaWeightSchema,
+        IcosahedralandHealPixNodeSchema,
+        AnemoiDatasetNodeSchema,
+        InputTensorIndex,
+        OutputTensorIndex,
+        ModelIndex,
+        DataIndex,
+        IndexCollection,
+        BaseStorage,
+        NodeStorage,
+        EdgeStorage,
+        ndarray,
+        dtype,
+        _reconstruct,
+        GNNProcessorSchema,
+        PreprocessorSchema,
+        DataSchema,
+        CheckpointsSchema,
+        SystemSchema,
+        HardwareSchema,
+        InputSchema,
+        OutputSchema,
+        Logs,
+        BaseSchema,
+        GNNEncoderSchema,
+        GNNDecoderSchema,
+        Any,
+        PosixPath,
+        Float32DType,
+        Float64DType,
+        int,
+    ]
+
+    LOGGER.debug("Marking the following imports as safe for torch weights-only checkpoint load: %s", safe_imports)
+    return safe_imports

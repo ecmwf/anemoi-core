@@ -38,6 +38,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
+from anemoi.training.utils.checkpoint import safe_modules_for_weights_only_load
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
@@ -209,12 +210,17 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(
-                    self.last_checkpoint,
-                    **kwargs,
-                    strict=False,
-                    weights_only=False,
+                LOGGER.debug(
+                    "Unsafe globals in checkpoint: %s",
+                    torch.serialization.get_unsafe_globals_in_checkpoint(self.last_checkpoint),
                 )
+                with torch.serialization.safe_globals(safe_modules_for_weights_only_load()):
+                    model = model_task.load_from_checkpoint(
+                        self.last_checkpoint,
+                        **kwargs,
+                        strict=False,
+                        weights_only=True,
+                    )
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same

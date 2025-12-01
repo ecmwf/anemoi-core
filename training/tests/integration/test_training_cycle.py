@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from torch import load
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -171,7 +172,49 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
 
     cfg.training.run_id = checkpoint_dir.name
     cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+
+    # pytorch lightning resets the global step to zero when loading the checkpoint, so we load directly with torch
+    global_step = load(next(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt")), weights_only=False)["global_step"] - 1
+    assert global_step == 3
+
+    trainer.train()
+
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_restart_training_load_weights_only(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config
+    get_test_archive(url)
+
     AnemoiTrainer(cfg).train()
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+
+    checkpoint_dir = run_dirs[0]
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.max_epochs = 3
+    # OVERWRITE DEFAULT CONFIG
+    cfg.training.load_weights_only = True
+
+    trainer = AnemoiTrainer(cfg)
+
+    assert trainer.model.global_step == 0
+
+    trainer.train()
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
