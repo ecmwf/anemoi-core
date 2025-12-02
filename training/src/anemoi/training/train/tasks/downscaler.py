@@ -147,7 +147,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
-
+    
+    #@torch.compile() #self.model.pre_processors breaks
     def _step(
         self,
         batch: list[torch.Tensor],
@@ -159,6 +160,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         [batch_size, dates, ensemble, gridpoints, variables].
         """
         import time
+        torch.compiler.cudagraph_mark_step_begin()
 
         time_init = time.time()
         del batch_idx
@@ -241,7 +243,8 @@ class GraphDiffusionDownscaler(BaseGraphModule):
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Add noise to the state."""
         return x + torch.randn_like(x) * sigma
-
+    
+    @torch.compile()
     def _get_noise_level(
         self,
         shape: torch.shape,

@@ -586,10 +586,13 @@ class AnemoiTrainer:
         )
 
         LOGGER.debug("Starting training..")
-        recompile_limit=32
+        recompile_limit=128
         torch._dynamo.config.cache_size_limit = int(recompile_limit)
         torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(recompile_limit), 256)
         LOGGER.info("Recompile limit set to %d", recompile_limit)
+        #if os.getenv("REDUCE_OVERHEAD", "0") == "1":
+        LOGGER.info("Wrapping the entire model in torch.compile(mode='reduce-overhead') (had to comment out self.scalers line in DS task)")
+        self.model=torch.compile(self.model, mode="reduce-overhead")
 
         trainer.fit(
             self.model,

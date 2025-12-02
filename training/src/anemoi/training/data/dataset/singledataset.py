@@ -90,6 +90,9 @@ class NativeGridDataset(IterableDataset):
         # relative index of dates to extract
         self.relative_date_indices = relative_date_indices
 
+        #if true, only the first batch will be loaded and this will be served continuously to fake the dataloading
+        self.fake_dataloading = os.getenv("AIFS_FAKE_DATALOADING", "0") == "1"
+
     @cached_property
     def statistics(self) -> dict:
         """Return dataset statistics."""
@@ -279,27 +282,38 @@ class NativeGridDataset(IterableDataset):
         )
 
         for i in shuffled_chunk_indices:
-            start = i + self.relative_date_indices[0]
-            end = i + self.relative_date_indices[-1] + 1
-            timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
-            # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
-            # data[start...] will be replaced with data[self.relative_date_indices + i]
+            if not fake_dataloading or (fake_dataloading and initial_batch is None):
+                start = i + self.relative_date_indices[0]
+                end = i + self.relative_date_indices[-1] + 1
+                timeincrement = self.relative_date_indices[1] - self.relative_date_indices[0]
+                # NOTE: this is temporary until anemoi datasets allows indexing with arrays or lists
+                # data[start...] will be replaced with data[self.relative_date_indices + i]
 
-            grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
-            if isinstance(grid_shard_indices, slice):
-                # Load only shards into CPU memory
-                x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
+                grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
+                if isinstance(grid_shard_indices, slice):
+                    # Load only shards into CPU memory
+                    x = self.data[start:end:timeincrement, :, :, grid_shard_indices]
 
+                else:
+                    # Load full grid in CPU memory, select grid_shard after
+                    # Note that anemoi-datasets currently doesn't support slicing + indexing
+                    # in the same operation.
+                    x = self.data[start:end:timeincrement, :, :, :]
+                    x = x[..., grid_shard_indices]  # select the grid shard
+                x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+                self.ensemble_dim = 1
+
+                sample = torch.from_numpy(x)
+                if fake_dataloading:
+                    initial_batch = sample
+
+                yield sample
+            elif fake_dataloading and initial_batch is not None:
+                LOGGER.debug("Faking the dataloading")
+                yield initial_batch
             else:
-                # Load full grid in CPU memory, select grid_shard after
-                # Note that anemoi-datasets currently doesn't support slicing + indexing
-                # in the same operation.
-                x = self.data[start:end:timeincrement, :, :, :]
-                x = x[..., grid_shard_indices]  # select the grid shard
-            x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-            self.ensemble_dim = 1
+                raise ValueError("Unknown dataloading path")
 
-            yield torch.from_numpy(x)
 
     def __repr__(self) -> str:
         return f"""

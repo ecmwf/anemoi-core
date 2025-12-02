@@ -16,6 +16,7 @@ from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
 
 
+@torch.compile(mode="reduce-overhead")
 def edge_index_to_csc(edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = None, reverse: bool = True):
     """Convert edge indices to CSC format, optionally also building reverse (CSR-like) metadata.
 

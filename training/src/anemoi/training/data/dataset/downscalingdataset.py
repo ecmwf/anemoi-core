@@ -53,6 +53,10 @@ class DownscalingDataset(NativeGridDataset):
         )
         self.lres_grid_indices = lres_grid_indices
         self.hres_grid_indices = hres_grid_indices
+        #if true, only the first batch will be loaded and this will be served continuously to fake the dataloading
+        self.fake_dataloading = os.getenv("AIFS_FAKE_DATALOADING", "0") == "1"
+        if self.fake_dataloading:
+            LOGGER.info("Faking the dataloading")
 
     def __iter__(self):
         """Return an iterator over the dataset.
@@ -86,49 +90,61 @@ class DownscalingDataset(NativeGridDataset):
             shuffled_chunk_indices[:10],
         )
 
+        initial_batch_y=None
+
         for i in shuffled_chunk_indices:
 
-            import time
+            if not self.fake_dataloading or (self.fake_dataloading and initial_batch_y is None):
+                import time
 
-            time_start = time.time()
+                time_start = time.time()
 
-            lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
-            hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(
-                self.reader_group_rank
-            )
+                lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(
+                    self.reader_group_rank
+                )
+                hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(
+                    self.reader_group_rank
+                )
 
-            # Load full grid in CPU memory, select grid_shard after
-            # Note that anemoi-datasets currently doesn't support slicing + indexing
-            # in the same operation.
-            x_in_lres, x_in_hres, y = self.data[i : i + 1]
-            x_in_lres = x_in_lres[..., lres_grid_shard_indices]
-            x_in_hres = x_in_hres[..., hres_grid_shard_indices]
-            y = y[..., hres_grid_shard_indices]
+                # Load full grid in CPU memory, select grid_shard after
+                # Note that anemoi-datasets currently doesn't support slicing + indexing
+                # in the same operation.
+                x_in_lres, x_in_hres, y = self.data[i : i + 1]
+                x_in_lres = x_in_lres[..., lres_grid_shard_indices]
+                x_in_hres = x_in_hres[..., hres_grid_shard_indices]
+                y = y[..., hres_grid_shard_indices]
 
-            # iterate input
-            x_in_hres = rearrange(
-                x_in_hres,
-                "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
-            )
-            x_in_hres = torch.from_numpy(x_in_hres)
+                # iterate input
+                x_in_hres = rearrange(
+                    x_in_hres,
+                    "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
+                )
+                x_in_hres = torch.from_numpy(x_in_hres)
 
-            x_in_lres = rearrange(
-                x_in_lres,
-                "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
-            )
-            x_in_lres = torch.from_numpy(x_in_lres)
+                x_in_lres = rearrange(
+                    x_in_lres,
+                    "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
+                )
+                x_in_lres = torch.from_numpy(x_in_lres)
 
-            y = rearrange(
-                y,
-                "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
-            )
-            y = torch.from_numpy(y)
+                y = rearrange(
+                    y,
+                    "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
+                )
+                y = torch.from_numpy(y)
+                if self.fake_dataloading:
+                    initial_batch_y = y
+                    initial_batch_x_in_lres = x_in_lres
+                    initial_batch_x_in_hres = x_in_hres
 
-            time_end = time.time()
-            from icecream import ic
+                yield x_in_lres, x_in_hres, y
+                time_end = time.time()
+                from icecream import ic
+            elif self.fake_dataloading and initial_batch_y is not None:
+                yield  initial_batch_x_in_lres,  initial_batch_x_in_hres,  initial_batch_y
+            else:
+                raise ValueError("Unknown dataloading path")
 
-            # ic("data load time", time_end - time_start)
 
-            yield x_in_lres, x_in_hres, y
+                # ic("data load time", time_end - time_start)
+
