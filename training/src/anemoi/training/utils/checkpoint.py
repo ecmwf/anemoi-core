@@ -76,6 +76,33 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     return inference_filepath
 
 
+def compare_state_dicts(state_dict, model_state_dict):
+    common_keys = state_dict.keys() & model_state_dict.keys()
+    missing_in_model = state_dict.keys() - model_state_dict.keys()
+    missing_in_checkpoint = model_state_dict.keys() - state_dict.keys()
+
+    LOGGER.info("=== Common Keys ===")
+    for k in sorted(common_keys):
+        s_shape = getattr(state_dict[k], "shape", None)
+        m_shape = getattr(model_state_dict[k], "shape", None)
+        s_shape_str = str(tuple(s_shape)) if s_shape is not None else "N/A"
+        m_shape_str = str(tuple(m_shape)) if m_shape is not None else "N/A"
+        match = "✓" if s_shape == m_shape else "✗"
+        LOGGER.info(f"{k:60} | checkpoint: {s_shape_str:>20} | model: {m_shape_str:>20} | match: {match}")
+
+    LOGGER.info("=== Missing in model (present in checkpoint only) ===")
+    for k in sorted(missing_in_model):
+        s_shape = getattr(state_dict[k], "shape", None)
+        s_shape_str = str(tuple(s_shape)) if s_shape is not None else "N/A"
+        LOGGER.info(f"{k:60} | checkpoint: {s_shape_str}")
+
+    LOGGER.info("=== Missing in checkpoint (present in model only) ===")
+    for k in sorted(missing_in_checkpoint):
+        m_shape = getattr(model_state_dict[k], "shape", None)
+        m_shape_str = str(tuple(m_shape)) if m_shape is not None else "N/A"
+        LOGGER.info(f"{k:60} | model: {m_shape_str}")
+
+
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
@@ -84,6 +111,8 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     state_dict = checkpoint["state_dict"]
 
     model_state_dict = model.state_dict()
+
+    compare_state_dicts(state_dict, model_state_dict)
 
     for key in state_dict.copy():
         if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
@@ -98,7 +127,6 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     # Needed for data indices check
     model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
     return model
-
 
 def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
     """Recursively freezes the parameters of a submodule with the specified name.
@@ -118,7 +146,6 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
         else:
             # Recursively search within children
             freeze_submodule_by_name(child, target_name)
-
 
 class LoggingUnpickler(pickle.Unpickler):
     def find_class(self, module: str, name: str) -> str:

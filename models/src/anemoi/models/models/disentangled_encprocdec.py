@@ -21,8 +21,7 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.utils.config import DotDict
 
 from .autoencoder import AnemoiModelAutoEncoder
-from .autoencoder import AnemoiModelHierarchicalAutoEncoder
-from .hierarchical import AnemoiModelEncProcDecHierarchical
+from .hierarchical_autoencoder import AnemoiModelHierarchicalAutoEncoder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,10 +50,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             Graph definition
         """
 
-        # Monkey-patch _calculate_shapes_and_indices on self before init
-        self._calculate_shapes_and_indices = self._calculate_shapes_and_indices.__get__(self)
-
-        super(AnemoiModelAutoEncoder, self).__init__(
+        super().__init__(
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
@@ -62,22 +58,11 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             truncation_data=truncation_data,
         )
 
-        model_config = DotDict(model_config)
+        # Latent rollout
+        self.latent_rollout = model_config.get("latent_rollout", False)
 
-        # Overwrite decoder to only use prognostic data in the decoder
-        self.decoder = instantiate(
-            model_config.model.decoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.num_channels,
-            in_channels_dst=self.target_dim,
-            hidden_dim=self.num_channels,
-            out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-        )
-
-        model_config = DotDict(model_config)
+    def _build_networks(self, model_config: DotDict) -> None:
+        super()._build_networks(model_config)
 
         # Latent Blending
         self.latent_blender = instantiate(
@@ -91,17 +76,15 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
         )
 
-        # Latent rollout
-        self.latent_rollout = model_config.model.get("latent_rollout", False)
-
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return super()._assemble_input(x, batch_size, grid_shard_shapes, model_comm_group)
-
-    def _assemble_output(self, x_out, batch_size, ensemble_size, dtype):
-        return super()._assemble_output(x_out, batch_size, ensemble_size, dtype)
-
-    def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return super()._assemble_forcings(x, batch_size, grid_shard_shapes, model_comm_group)
+        # Processor hidden -> hidden
+        self.processor = instantiate(
+            model_config.model.processor,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            num_channels=self.num_channels,
+            sub_graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+        )
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         super()._calculate_shapes_and_indices(data_indices)
@@ -158,8 +141,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
                 )
 
                 # Encode timestep
-                x_data_latent, x_latent = self._run_mapper(
-                    self.encoder,
+                x_data_latent, x_latent = self.encoder(
                     (x_data_latent, x_hidden_latent),
                     batch_size=batch_size,
                     shard_shapes=(shard_shapes_data, shard_shapes_hidden),
@@ -188,8 +170,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             x_skip = self.x_latent_proc
 
         # Latent blending network
-        _, blended_x = self._run_mapper(
-            self.latent_blender,
+        _, blended_x = self.latent_blender(
             (self.x_accum, x_hidden_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_hidden),
@@ -217,8 +198,7 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         )
 
         # Decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (x_latent_proc, x_target_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hidden, shard_shapes_target),
@@ -257,11 +237,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
             Graph definition
         """
 
-        # Monkey-patch _calculate_shapes_and_indices on self before init
-        self._calculate_shapes_and_indices = self._calculate_shapes_and_indices.__get__(self)
-
-        AnemoiModelEncProcDecHierarchical.__init__(
-            self,
+        super().__init__(
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
@@ -269,49 +245,38 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
             truncation_data=truncation_data,
         )
 
-        model_config = DotDict(model_config)
+        # Latent rollout
+        self.latent_rollout = model_config.get("latent_rollout", False)
 
-        # Overwrite decoder to only use prognostic data in the decoder
-        self.decoder = instantiate(
-            model_config.model.decoder,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.hidden_dims[self._graph_hidden_names[0]],
-            in_channels_dst=self.target_dim,
-            hidden_dim=self.hidden_dims[self._graph_hidden_names[0]],
-            out_channels_dst=self.num_output_channels,
-            sub_graph=self._graph_data[(self._graph_hidden_names[0], "to", self._graph_name_data)],
-            src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[0]],
-            dst_grid_size=self.node_attributes.num_nodes[self._graph_name_data],
-        )
+    def _build_networks(self, model_config: DotDict) -> None:
+        super()._build_networks(model_config)
 
-        model_config = DotDict(model_config)
+        num_channels = self.hidden_dims[self._graph_hidden_names[-1]]
 
-        ## Latent Blending
+        # Latent Blending
         self.latent_blender = instantiate(
             model_config.model.encoder,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
-            in_channels_src=self.hidden_dims[self._graph_hidden_names[-1]] * self.multi_step,
+            in_channels_src=num_channels * self.multi_step,
             in_channels_dst=self.node_attributes.attr_ndims[self._graph_hidden_names[-1]],
-            hidden_dim=self.hidden_dims[self._graph_hidden_names[-1]],
+            hidden_dim=num_channels,
             sub_graph=self._graph_data[(self._graph_hidden_names[-1], "to", self._graph_hidden_names[-1])],
             src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
             dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
         )
 
-        # Latent rollout
-        self.latent_rollout = model_config.model.get("latent_rollout", False)
-
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
-        return AnemoiModelHierarchicalAutoEncoder._assemble_input(
-            self, x, batch_size, grid_shard_shapes, model_comm_group
+        # Processor hidden -> hidden
+        self.processor = instantiate(
+            model_config.model.processor,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            num_channels=num_channels,
+            sub_graph=self._graph_data[(self._graph_hidden_names[-1], "to", self._graph_hidden_names[-1])],
+            src_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
+            dst_grid_size=self.node_attributes.num_nodes[self._graph_hidden_names[-1]],
         )
-
-    def _assemble_output(self, x_out, batch_size, ensemble_size, dtype):
-        return AnemoiModelHierarchicalAutoEncoder._assemble_output(self, x_out, batch_size, ensemble_size, dtype)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         AnemoiModelHierarchicalAutoEncoder._calculate_shapes_and_indices(self, data_indices)
-
         # only 1 timestep per time to the encoder
         self.input_dim = self.num_input_channels + self.node_attributes.attr_ndims[self._graph_name_data]
 
@@ -368,8 +333,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
                 )
 
                 # Encode timestep
-                x_data_latent, curr_latent = self._run_mapper(
-                    self.encoder,
+                x_data_latent, curr_latent = self.encoder(
                     (x_data_latent, x_hidden_latents[self._graph_hidden_names[0]]),
                     batch_size=batch_size,
                     shard_shapes=(shard_shapes_data, shard_shapes_hiddens[self._graph_hidden_names[0]]),
@@ -396,8 +360,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
                         )
 
                     # Encode to next hidden level
-                    x_encoded_latents[src_hidden_name], curr_latent = self._run_mapper(
-                        self.downscale[src_hidden_name],
+                    x_encoded_latents[src_hidden_name], curr_latent = self.downscale[src_hidden_name](
                         (curr_latent, x_hidden_latents[dst_hidden_name]),
                         batch_size=batch_size,
                         shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -426,8 +389,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
             x_skip = self.x_latent_proc
 
         # Latent blending network
-        _, blended_x = self._run_mapper(
-            self.latent_blender,
+        _, blended_x = self.latent_blender(
             (self.x_accum, x_hidden_latents[self._graph_hidden_names[self.num_hidden - 1]]),
             batch_size=batch_size,
             shard_shapes=(
@@ -460,8 +422,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
             dst_hidden_name = self._graph_hidden_names[i - 1]
 
             # Decode to next level
-            curr_latent = self._run_mapper(
-                self.upscale[src_hidden_name],
+            curr_latent = self.upscale[src_hidden_name](
                 (curr_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_shapes=(shard_shapes_hiddens[src_hidden_name], shard_shapes_hiddens[dst_hidden_name]),
@@ -487,8 +448,7 @@ class AnemoiModelDisentangledEncProcDecHierarchical(AnemoiModelHierarchicalAutoE
         )
 
         # Run decoder
-        x_out = self._run_mapper(
-            self.decoder,
+        x_out = self.decoder(
             (curr_latent, x_target_latent),
             batch_size=batch_size,
             shard_shapes=(shard_shapes_hiddens[self._graph_hidden_names[0]], shard_shapes_target),

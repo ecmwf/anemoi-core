@@ -170,6 +170,8 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             keep_x_dst_sharded=True,
         )
 
+        assert torch.isnan(x_latent).sum() == 0, "NaNs detected in latent representation after encoder."
+
         # Do not pass x_data_latent to the decoder
         # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
         # Only pass data and forcing coordinates to the decoder
@@ -179,14 +181,18 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
         # Decoder
         x_out = self.decoder(
-            (x_latent, x_target_latent),
+            (x_latent, x_target_latent), #TODO: put back in place
+            # (x_latent, x_data_latent),
             batch_size=batch_size,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_target),
+            shard_shapes=(shard_shapes_hidden, shard_shapes_target), #TODO: put back in place
+            # shard_shapes=(shard_shapes_hidden, shard_shapes_data),
             model_comm_group=model_comm_group,
             x_src_is_sharded=True,  # x_latent always comes sharded
             x_dst_is_sharded=in_out_sharded,  # x_target_latent comes sharded iff in_out_sharded
             keep_x_dst_sharded=in_out_sharded,  # keep x_out sharded iff in_out_sharded
         )
+
+        assert torch.isnan(x_out).sum() == 0, "NaNs detected in output after decoder."
 
         x_out = self._assemble_output(x_out, batch_size, ensemble_size, x.dtype)
 
