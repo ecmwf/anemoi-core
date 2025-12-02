@@ -28,6 +28,55 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+class GraphUncondDiffusionForecaster(GraphForecaster):
+    """Graph neural network forecaster for diffusion (inconditionnel version)."""
+
+    def __init__(self, *, config, graph_data, truncation_data, statistics,
+                 statistics_tendencies, data_indices, metadata, supporting_arrays):
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            truncation_data=truncation_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+        self.rho = config.model.model.diffusion.rho
+
+    def forward(self, x: torch.Tensor | None, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+        """Forward inconditionnel : x est ignoré."""
+        if x is None:
+            # tensor nul pour x (dimensions compatibles)
+            x = torch.zeros(
+                y_noised.shape[0],        # batch
+                self.multi_step,          # steps historiques (dummy)
+                *y_noised.shape[2:],      # ens, latlon, nvar_input
+                device=y_noised.device,
+                dtype=y_noised.dtype
+            )
+        return self.model.model.fwd_with_preconditioning(
+            x,
+            y_noised,
+            sigma,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+        )
+
+    def sample_unconditional(self, batch_size: int, shape: tuple[int, ...], device: torch.device):
+        """Échantillonner directement y à partir du bruit, sans condition ni rollout."""
+        sigma, noise_weights = self._get_noise_level(
+            shape=(batch_size,) + shape,
+            sigma_max=self.model.model.sigma_max,
+            sigma_min=self.model.model.sigma_min,
+            sigma_data=self.model.model.sigma_data,
+            rho=self.rho,
+            device=device,
+        )
+        y_noised = torch.randn((batch_size,) + shape, device=device) * sigma
+        y_pred = self(x=None, y_noised=y_noised, sigma=sigma)
+        return y_pred
 
 class GraphDiffusionForecaster(GraphForecaster):
     """Graph neural network forecaster for diffusion."""
@@ -59,6 +108,7 @@ class GraphDiffusionForecaster(GraphForecaster):
         self.rho = config.model.model.diffusion.rho
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+        print('JE SUIS X DANS GRAPHDIFFUSIONFORECASTER', x.shape,x)
         return self.model.model.fwd_with_preconditioning(
             x,
             y_noised,
@@ -130,7 +180,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             Loss value, metrics, and predictions (per step)
 
         """
-        # start rollout of preprocessed batch
+        # start rollout of preprocessed batch:  x contient les données historiques ou d’entrée (multi-step, variables passées, etc.).
         x = batch[
             :,
             0 : self.multi_step,

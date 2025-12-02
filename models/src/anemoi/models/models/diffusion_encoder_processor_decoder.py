@@ -47,7 +47,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     ) -> None:
 
         model_config_local = DotDict(model_config)
-
+        print('je suis config', model_config_local,'NUM_CHANNELS',self.num_channels)
         diffusion_config = model_config_local.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
         self.noise_cond_dim = diffusion_config.noise_cond_dim
@@ -119,12 +119,16 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None):
         node_attributes_data = self.node_attributes(self._graph_name_data, batch_size=bse)
         if grid_shard_shapes is not None:
+            print('JE SUIS DANS ASSEMBLE INPUT 1')
+
             shard_shapes_nodes = get_or_apply_shard_shapes(
                 node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
             )
             node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
+        print('JE SUIS DANS ASSEMBLE INPUT')
+
         x_data_latent = torch.cat(
             (
                 einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
