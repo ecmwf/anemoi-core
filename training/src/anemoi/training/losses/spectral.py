@@ -8,110 +8,25 @@
 # nor does it submit to any jurisdiction.
 
 
-import abc
 import logging
 from typing import Literal
 
-import einops
 import torch
-import torch.fft
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.layers.spectral_transforms import FFT2D
+from anemoi.models.layers.spectral_transforms import SHT
+from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
-class SpectralTransform:
-
-    @abc.abstractmethod
-    def __call__(
-        self,
-        data: torch.Tensor,
-    ) -> torch.Tensor:
-        """Transform data to spectral domain.
-
-        Parameters
-        ----------
-        data : torch.Tensor
-            Input data in the spatial domain.
-
-        Returns
-        -------
-        torch.Tensor
-            Data transformed to the spectral domain.
-        """
-
-
-class FFT2D(SpectralTransform):
-
-    def __init__(
-        self,
-        x_dim: int,
-        y_dim: int,
-    ) -> None:
-        """2D FFT Transform.
-
-        Parameters
-        ----------
-        x_dim : int
-            size of the spatial dimension x of the original data in 2D
-        y_dim : int
-            size of the spatial dimension y of the original data in 2D
-        """
-        self.x_dim = x_dim
-        self.y_dim = y_dim
-
-    def __call__(
-        self,
-        data: torch.Tensor,
-    ) -> torch.Tensor:
-        """Transform data to spectral domain using 2D FFT.
-
-        Parameters
-        ----------
-        data : torch.Tensor
-            Input data in the spatial domain.
-
-        Returns
-        -------
-        torch.Tensor
-            Data transformed to the spectral domain.
-        """
-        batch_size, time, _, var = data.shape
-        # [batch, time, y*x, variables] -> [batch*time*variables, y, x]
-        data = einops.rearrange(data, "b t (y x) v -> (b t v) y x", x=self.x_dim, y=self.y_dim)
-        fft_data = torch.fft.fft2(data)
-        # [batch*time*variables, y, x] -> [batch, time, y*x, variables]
-        return einops.rearrange(fft_data, "(b t v) y x -> b t (y x) v", b=batch_size, t=time, v=var)
-
-
-class SHT(SpectralTransform):
-    """Placeholder for Spherical Harmonics Transform."""
-
-    def __call__(
-        self,
-        data: torch.Tensor,
-    ) -> torch.Tensor:
-        """Transform data to spectral domain using spherical harmonics.
-
-        Parameters
-        ----------
-        data : torch.Tensor
-            Input data in the spatial domain.
-
-        Returns
-        -------
-        torch.Tensor
-            Data transformed to the spectral domain.
-        """
-        msg = "Spherical harmonics transform is not implemented yet."
-        raise NotImplementedError(msg)
-
-
 class SpectralLoss(BaseLoss):
     """Base class for spectral losses."""
+
+    transform: SpectralTransform
 
     def __init__(
         self,
