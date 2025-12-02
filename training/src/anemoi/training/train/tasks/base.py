@@ -35,6 +35,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.utils.config_utils import get_multiple_datasets_config
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -159,72 +160,104 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         super().__init__()
 
-        graph_data = graph_data.to(self.device)
+        # Handle dictionary of graph_data
+        graph_data = {name: data.to(self.device) for name, data in graph_data.items()}
+        # Create output_mask dictionary for each dataset
+        self.output_mask = {}
+        for name, data in graph_data.items():
+            self.output_mask[name] = instantiate(
+                config.model_dump(by_alias=True).model.output_mask,
+                graph_data=data,
+            )
 
-        self.output_mask = instantiate(config.model_dump(by_alias=True).model.output_mask, graph_data=graph_data)
+        # Handle supporting_arrays merge for multi-dataset
+        # Multi-dataset: merge supporting arrays from all output masks
+        combined_supporting_arrays = supporting_arrays.copy()
+        for mask in self.output_mask.values():
+            combined_supporting_arrays.update(mask.supporting_arrays)
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
-            supporting_arrays=supporting_arrays | self.output_mask.supporting_arrays,
+            supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=convert_to_omegaconf(config),
         )
         self.config = config
+
         self.data_indices = data_indices
 
         self.save_hyperparameters()
 
-        self.latlons_data = graph_data[config.graph.data].x
         self.statistics_tendencies = statistics_tendencies
 
         self.logger_enabled = config.diagnostics.log.wandb.enabled or config.diagnostics.log.mlflow.enabled
 
-        metadata_extractor = ExtractVariableGroupAndLevel(
-            variable_groups=config.model_dump(by_alias=True).training.variable_groups,
-            metadata_variables=metadata["dataset"].get("variables_metadata"),
-        )
+        # Initialize components for multi-dataset
+        self.latlons_data = {}  # plotting only, dict of tensors
+        self.scalers = {}  # dict of dict of tensors
+        self.updating_scalars = {}  # dict of dict of objects
+        self.val_metric_ranges = {}  # dict of dict of lists
+        self._scaling_values_log = {}  # dict of dict[str, float]
+        self.loss = torch.nn.ModuleDict()
+        self.metrics = torch.nn.ModuleDict()
 
-        # Instantiate all scalers with the training configuration
-        self.scalers, self.updating_scalars = create_scalers(
-            config.model_dump(by_alias=True).training.scalers,
-            data_indices=data_indices,
-            graph_data=graph_data,
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            metadata_extractor=metadata_extractor,
-            output_mask=self.output_mask,
-        )
+        dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
+        loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        scalers_configs = get_multiple_datasets_config(config.training.scalers)
+        val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
+        metrics_to_log = get_multiple_datasets_config(config.training.metrics)
+        for dataset_name in graph_data:
+            self.latlons_data[dataset_name] = graph_data[dataset_name][config.graph.data].x
 
-        self.val_metric_ranges = get_metric_ranges(
-            config,
-            data_indices,
-            metadata_extractor=metadata_extractor,
-        )
+            # Create dataset-specific metadata extractor
+            metadata_extractor = ExtractVariableGroupAndLevel(
+                variable_groups=dataset_variable_groups[dataset_name],
+                metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
+            )
 
-        self.loss = get_loss_function(
-            config.model_dump(by_alias=True).training.training_loss,
-            scalers=self.scalers,
-            data_indices=self.data_indices,
-        )
-        self._scaling_values_log = print_variable_scaling(
-            self.loss,
-            data_indices,
-        )
+            dataset_scalers, dataset_updating_scalars = create_scalers(
+                scalers_configs[dataset_name],
+                data_indices=data_indices[dataset_name],
+                graph_data=graph_data[dataset_name],
+                statistics=statistics[dataset_name],
+                statistics_tendencies=(
+                    statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
+                ),
+                metadata_extractor=metadata_extractor,
+                output_mask=self.output_mask[dataset_name],
+            )
+            self.scalers[dataset_name] = dataset_scalers
+            self.updating_scalars[dataset_name] = dataset_updating_scalars
 
-        self.metrics = torch.nn.ModuleDict(
-            {
-                metric_name: get_loss_function(val_metric_config, scalers=self.scalers, data_indices=self.data_indices)
-                for metric_name, val_metric_config in config.model_dump(
-                    by_alias=True,
-                ).training.validation_metrics.items()
-            },
-        )
+            self.val_metric_ranges[dataset_name] = get_metric_ranges(
+                metadata_extractor,
+                output_data_indices=data_indices[dataset_name].model.output,
+                metrics_to_log=metrics_to_log[dataset_name],
+            )
+
+            self.loss[dataset_name] = get_loss_function(
+                loss_configs[dataset_name],
+                dataset_scalers,
+                data_indices[dataset_name],
+            )
+
+            self.metrics[dataset_name] = self._build_metrics_for_dataset(
+                val_metrics_configs[dataset_name],
+                scalers=dataset_scalers,
+                data_indices=data_indices[dataset_name],
+            )
+            self._scaling_values_log[dataset_name] = print_variable_scaling(
+                self.loss[dataset_name],
+                data_indices[dataset_name],
+            )
 
         if config.training.loss_gradient_scaling:
-            self.loss.register_full_backward_hook(grad_scaler, prepend=False)
+            # Multi-dataset: register hook for each loss
+            for loss_fn in self.loss.values():
+                loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
         self.multi_step = config.training.multistep_input
@@ -243,11 +276,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.reader_groups = None
 
         reader_group_size = self.config.dataloader.read_group_size
-        self.grid_indices = instantiate(
-            self.config.model_dump(by_alias=True).dataloader.grid_indices,
-            reader_group_size=reader_group_size,
-        )
-        self.grid_indices.setup(graph_data)
+
+        self.grid_indices = {}
+        grid_indices_configs = get_multiple_datasets_config(self.config.dataloader.grid_indices)
+        for dataset_name in graph_data:
+            self.grid_indices[dataset_name] = instantiate(
+                grid_indices_configs[dataset_name],
+                reader_group_size=reader_group_size,
+            )
+            self.grid_indices[dataset_name].setup(graph_data[dataset_name])
         self.grid_dim = -2
 
         # check sharding support
@@ -261,23 +298,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
         # set flag if loss and metrics support sharding
-        self.loss_supports_sharding = getattr(self.loss, "supports_sharding", False)
-        self.metrics_support_sharding = all(
-            getattr(metric, "supports_sharding", False) for metric in self.metrics.values()
-        )
-
-        if not self.loss_supports_sharding and self.keep_batch_sharded:
-            LOGGER.warning(
-                "Loss function %s does not support sharding. "
-                "This may lead to increased memory usage and slower training.",
-                self.loss.name,
-            )
-        if not self.metrics_support_sharding and self.keep_batch_sharded:
-            LOGGER.warning(
-                "Validation metrics %s do not support sharding. "
-                "This may lead to increased memory usage and slower training.",
-                ", ".join(self.metrics.keys()),
-            )
+        self._check_sharding_support()
 
         LOGGER.debug("Multistep: %d", self.multi_step)
 
@@ -294,6 +315,49 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = None
         self.grid_shard_slice = None
 
+    def _get_loss_name(self) -> str:
+        """Get the loss name for multi-dataset cases."""
+        # For multi-dataset, use a generic name or combine dataset names
+        return "multi_dataset"
+
+    def _check_sharding_support(self) -> None:
+        self.loss_supports_sharding = all(getattr(loss, "supports_sharding", False) for loss in self.loss.values())
+        self.metrics_support_sharding = all(
+            getattr(metric, "supports_sharding", False)
+            for dataset_metrics in self.metrics.values()
+            for metric in dataset_metrics.values()
+        )
+
+        if not self.loss_supports_sharding and self.keep_batch_sharded:
+            unsupported_losses = [
+                loss.name for loss in self.loss.values() if not getattr(loss, "supports_sharding", False)
+            ]
+            LOGGER.warning(
+                "Some loss functions do not support sharding: %s. "
+                "This may lead to increased memory usage and slower training.",
+                ", ".join(unsupported_losses),
+            )
+        if not self.metrics_support_sharding and self.keep_batch_sharded:
+            unsupported_metrics = [
+                f"{dataset_name}.{metric_name}"
+                for dataset_name, dataset_metrics in self.metrics.items()
+                for metric_name, metric in dataset_metrics.items()
+                if not getattr(metric, "supports_sharding", False)
+            ]
+            LOGGER.warning(
+                "Some validation metrics do not support sharding: %s. "
+                "This may lead to increased memory usage and slower training.",
+                ", ".join(unsupported_metrics),
+            )
+
+    def _build_metrics_for_dataset(self, validation_metrics_configs, scalers, data_indices) -> torch.nn.ModuleDict:
+        return torch.nn.ModuleDict(
+            {
+                metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
+                for metric_name, val_metric_config in validation_metrics_configs.items()
+            },
+        )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(
             x,
@@ -304,19 +368,44 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
 
+    def _update_scaler_for_dataset(
+        self,
+        name: str,
+        scaler_builder,
+        callback: AvailableCallbacks,
+        loss_obj,
+        metrics_dict,
+        dataset_name: str | None = None,
+    ) -> None:
+        """Update a single scaler for loss and metrics objects."""
+        kwargs = {"model": self.model}
+        if dataset_name is not None:
+            kwargs["dataset_name"] = dataset_name
+
+        scaler = scaler_builder.update_scaling_values(callback, **kwargs)
+        if scaler is None:  # If scalar is None, no update to be applied
+            return
+
+        if name in loss_obj.scaler:  # If scalar in loss, update it
+            loss_obj.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+
+        for metric in metrics_dict.values():  # If scalar in metrics, update it
+            if name in metric.scaler:
+                metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
-        for name, scaler_builder in self.updating_scalars.items():
-            scaler = scaler_builder.update_scaling_values(callback, model=self.model)
-            if scaler is None:  # If scalar is None, no update to be applied
-                continue
-
-            if name in self.loss.scaler:  # If scalar in loss, update it
-                self.loss.update_scaler(scaler=scaler[1], name=name)  # Only update the values
-
-            for metric in self.metrics.values():  # If scalar in metrics, update it
-                if name in metric.scaler:
-                    metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+        # Multi-dataset case: {'dataset_a': {'nan_mask_weights': scaler, ...}, 'dataset_b': {...}}
+        for dataset_name, dataset_scalers in self.updating_scalars.items():
+            for name, scaler_builder in dataset_scalers.items():
+                self._update_scaler_for_dataset(
+                    name,
+                    scaler_builder,
+                    callback,
+                    self.loss[dataset_name],
+                    self.metrics[dataset_name],
+                    dataset_name=dataset_name,
+                )
 
     def set_model_comm_group(
         self,
@@ -349,6 +438,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         validation_mode: bool = False,
+        dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
         """Prepare tensors for loss computation, handling sharding if necessary.
 
@@ -366,28 +456,34 @@ class BaseGraphModule(pl.LightningModule, ABC):
         tuple[torch.Tensor, torch.Tensor, slice | None]
             Prepared y_pred, y, and grid_shard_slice
         """
-        is_sharded = self.grid_shard_slice is not None
+        # Handle multi-dataset case for grid shard slice and shapes
+        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+        grid_shard_slice = self.grid_shard_slice[dataset_name]
+        grid_shard_shapes = self.grid_shard_shapes[dataset_name]
+
+        is_sharded = grid_shard_slice is not None
 
         sharding_supported = (self.loss_supports_sharding or validation_mode) and (
             self.metrics_support_sharding or not validation_mode
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, self.grid_shard_shapes)
+            shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, grid_shard_shapes)
             y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
             y_full = gather_tensor(torch.clone(y), self.grid_dim, shard_shapes, self.model_comm_group)
-            grid_shard_slice = None
+            final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
-            grid_shard_slice = self.grid_shard_slice
+            final_grid_shard_slice = grid_shard_slice
 
-        return y_pred_full, y_full, grid_shard_slice
+        return y_pred_full, y_full, final_grid_shard_slice
 
     def _compute_loss(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -400,6 +496,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        dataset_name : str | None
+            Dataset name for multi-dataset scenarios
         **_kwargs
             Additional arguments
 
@@ -408,7 +506,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        return self.loss(
+        # Handle multi-dataset case
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets"
+        loss_fn = self.loss[dataset_name]
+
+        return loss_fn(
             y_pred,
             y,
             grid_shard_slice=grid_shard_slice,
@@ -421,6 +523,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
 
@@ -445,6 +548,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y,
             rollout_step,
             grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
         )
 
     def compute_loss_metrics(
@@ -453,6 +557,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         rollout_step: int,
         validation_mode: bool = False,
+        dataset_name: str | None = None,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         """Compute loss and metrics for the given predictions and targets.
@@ -480,14 +585,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
             y_pred,
             y,
             validation_mode,
+            dataset_name,
         )
 
-        loss = self._compute_loss(y_pred=y_pred_full, y=y_full, grid_shard_slice=grid_shard_slice, **kwargs)
+        loss = self._compute_loss(
+            y_pred=y_pred_full,
+            y=y_full,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            **kwargs,
+        )
 
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice)
+            metrics_next = self._compute_metrics(y_pred_full, y_full, rollout_step, grid_shard_slice, dataset_name)
 
         return loss, metrics_next
 
@@ -517,7 +629,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return batch
 
-    def _setup_batch_sharding(self, batch: torch.Tensor) -> torch.Tensor:
+    def _setup_batch_sharding(self, batch: dict) -> torch.Tensor:
         """Setup batch sharding before every step.
 
         If the batch is sharded, it will be setup with the grid shard shapes and slice.
@@ -533,13 +645,41 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Batch after setup
         """
-        if self.keep_batch_sharded and self.model_comm_group_size > 1:
-            self.grid_shard_shapes = self.grid_indices.shard_shapes
-            self.grid_shard_slice = self.grid_indices.get_shard_slice(self.reader_group_rank)
-        else:
-            batch = self.allgather_batch(batch)
-            self.grid_shard_shapes, self.grid_shard_slice = None, None
+        self.grid_shard_shapes = {}
+        self.grid_shard_slice = {}
+
+        for dataset_name in self.grid_indices:
+            if self.keep_batch_sharded and self.model_comm_group_size > 1:
+                self.grid_shard_shapes[dataset_name] = self.grid_indices[dataset_name].shard_shapes
+                self.grid_shard_slice[dataset_name] = self.grid_indices[dataset_name].get_shard_slice(
+                    self.reader_group_rank,
+                )
+            else:
+                self.grid_shard_shapes[dataset_name] = None
+                self.grid_shard_slice[dataset_name] = None
+                batch[dataset_name] = self.allgather_batch(
+                    batch[dataset_name],
+                    self.grid_indices[dataset_name],
+                    self.grid_dim,
+                )
         return batch
+
+    def transfer_batch_to_device(
+        self,
+        batch: dict,
+        device: torch.device,
+        dataloader_idx: int = 0,
+    ) -> dict:
+        """Transfer batch to device, handling dictionary batches."""
+        # Multi-dataset dictionary batch
+        transferred_batch = {}
+        for dataset_name, dataset_batch in batch.items():
+            transferred_batch[dataset_name] = (
+                dataset_batch.to(device, non_blocking=True)
+                if isinstance(dataset_batch, torch.Tensor)
+                else dataset_batch
+            )
+        return transferred_batch
 
     def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Normalize batch for training and validation before every step.
@@ -554,7 +694,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Normalized batch
         """
-        return self.model.pre_processors(batch)
+        for dataset_name in batch:
+            batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
+        return batch
 
     def _prepare_loss_scalers(self) -> None:
         """Prepare scalers for training and validation before every step."""
@@ -573,26 +715,30 @@ class BaseGraphModule(pl.LightningModule, ABC):
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
         pass
 
-    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
+    def allgather_batch(self, batch: torch.Tensor, grid_indices, grid_dim: int) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
 
         Parameters
         ----------
         batch : torch.Tensor
             Batch-shard of current reader rank
+        grid_indices :
+            Grid indices object with shard_shapes and grid_size
+        grid_dim : int
+            Grid dimension
 
         Returns
         -------
         torch.Tensor
             Allgathered (full) batch
         """
-        grid_shard_shapes = self.grid_indices.shard_shapes
-        grid_size = self.grid_indices.grid_size
+        grid_shard_shapes = grid_indices.shard_shapes
+        grid_size = grid_indices.grid_size
 
-        if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
+        if grid_size == batch.shape[grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
-        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
+        shard_shapes = apply_shard_shapes(batch, grid_dim, grid_shard_shapes)
         tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
 
         torch.distributed.all_gather(
@@ -601,7 +747,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             group=self.reader_groups[self.reader_group_id],
         )
 
-        return torch.cat(tensor_list, dim=self.grid_dim)
+        return torch.cat(tensor_list, dim=grid_dim)
 
     def calculate_val_metrics(
         self,
@@ -609,6 +755,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         rollout_step: int = 0,
         grid_shard_slice: slice | None = None,
+        dataset_name: str | None = None,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
 
@@ -627,16 +774,23 @@ class BaseGraphModule(pl.LightningModule, ABC):
             validation metrics and predictions
         """
         metrics = {}
-        y_postprocessed = self.model.post_processors(y, in_place=False)
-        y_pred_postprocessed = self.model.post_processors(y_pred, in_place=False)
 
-        for metric_name, metric in self.metrics.items():
+        # Handle multi-dataset case for post-processors
+        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+        post_processor = self.model.post_processors[dataset_name]
+        metrics_dict = self.metrics[dataset_name]
+        val_metric_ranges = self.val_metric_ranges[dataset_name]
+
+        y_postprocessed = post_processor(y, in_place=False)
+        y_pred_postprocessed = post_processor(y_pred, in_place=False)
+
+        for metric_name, metric in metrics_dict.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
                 metrics[f"{metric_name}_metric/{rollout_step + 1}"] = metric(y_pred_postprocessed, y_postprocessed)
                 continue
 
-            for mkey, indices in self.val_metric_ranges.items():
+            for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{mkey}/{rollout_step + 1}"
                 if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
                     exception_msg = (
@@ -659,14 +813,18 @@ class BaseGraphModule(pl.LightningModule, ABC):
         del batch_idx
 
         train_loss, _, _ = self._step(batch)
+
+        # Get batch size (handle dict of tensors)
+        batch_size = next(iter(batch.values())).shape[0]
+
         self.log(
-            "train_" + self.loss.name + "_loss",
+            "train_" + self._get_loss_name() + "_loss",
             train_loss,
             on_epoch=True,
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch.shape[0],
+            batch_size=batch_size,
             sync_dist=True,
         )
 
@@ -705,14 +863,20 @@ class BaseGraphModule(pl.LightningModule, ABC):
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, validation_mode=True)
 
+        # Get batch size (handle dict of tensors)
+        batch_size = next(iter(batch.values())).shape[0]
+
+        # Get batch size (handle dict of tensors)
+        batch_size = next(iter(batch.values())).shape[0]
+
         self.log(
-            "val_" + self.loss.name + "_loss",
+            "val_" + self._get_loss_name() + "_loss",
             val_loss,
             on_epoch=True,
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch.shape[0],
+            batch_size=batch_size,
             sync_dist=True,
         )
 
@@ -724,7 +888,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 on_step=False,
                 prog_bar=False,
                 logger=self.logger_enabled,
-                batch_size=batch.shape[0],
+                batch_size=batch_size,
                 sync_dist=True,
             )
 
