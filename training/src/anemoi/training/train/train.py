@@ -215,7 +215,7 @@ class AnemoiTrainer(ABC):
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
-                    weights_only=False,  #required for Pytorch Lightning 2.6 
+                    weights_only=False,  # required for Pytorch Lightning 2.6
                 )
 
             model.data_indices = self.data_indices
