@@ -55,7 +55,7 @@ al. (2023).
 
 The physical data is encoded on to a multi-mesh latent space of
 decreasing resolution. This multi-mesh is defined by the graph given in
-``config.hardware.files.graph``.
+``config.system.input.graph``.
 
 .. figure:: ../images/gnn-encoder-decoder-multimesh.jpg
    :width: 500
@@ -213,3 +213,47 @@ configuration:
 This determines how many ensemble members are generated per device
 during training. Effective ensemble size is then the number of ensemble
 members per device times the number of GPUs per ensemble.
+
+*************
+ Compilation
+*************
+
+PyTorch supports JIT-compiliation of code. This can speed up execution
+and reduce peak memory usage. For more information, consult `the
+introduction to torch.compile
+<https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>`__
+and `the official documentation
+<https://docs.pytorch.org/docs/stable/generated/torch.compile.html>`__.
+
+Compilation requires Triton. Normally Triton is pulled in as a
+dependancy when PyTorch is installed. Otherwise, Triton can be `built
+from source
+<https://github.com/triton-lang/triton?tab=readme-ov-file#install-from-source>`__
+. Compilation requires torch >= 2.6 and torch_geometric >= 2.6. If these
+versions are not met, or if Triton is not installed, then anemoi will
+run without compilation.
+
+Anemoi exposes 'torch.compile' at the module level through the model
+config. Below is an example:
+
+.. code:: yaml
+
+   #training/config/models/transformer_ens.yaml
+   compile:
+   - module: anemoi.models.layers.conv.GraphTransformerConv
+     options:
+       dynamic: false
+       mode: max-autotune
+   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+     options:
+       dynamic: false
+
+Under the 'compile' keyword, you provide a list of modules. These
+modules will be marked for compilation when the model is built. During
+their first forward pass, these modules will be compiled. No code
+modifications are required.
+
+You can optionally pass options to torch compile via the 'options'
+keyword. A full list of the possible options and their meanings can be
+found in the `torch.compile documentation
+<https://docs.pytorch.org/docs/stable/generated/torch.compile.html>`__.
