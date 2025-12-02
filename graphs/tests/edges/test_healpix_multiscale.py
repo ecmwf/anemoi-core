@@ -32,7 +32,7 @@ class TestMultiScaleEdgesInit:
             HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=scale_resolutions)
 
     def test_fail_init_diff_nodes(self):
-        """Test MultiScaleEdges initialization with invalid nodes."""
+        """Test MultiScaleEdges initialisation with invalid nodes."""
         with pytest.raises(AssertionError):
             HEALPixMultiScaleEdges("test_nodes", "test_nodes2", None)
 
