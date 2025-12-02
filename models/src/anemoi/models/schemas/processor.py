@@ -43,6 +43,21 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
 
+    @model_validator(mode="after")
+    def check_valid_extras(self) -> Any:
+        # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
+        allowed_extras = {"graph_attention_backend": str}
+        extras = getattr(self, "__pydantic_extra__", {}) or {}
+        for extra_field, value in extras.items():
+            if extra_field not in allowed_extras:
+                msg = f"Extra field '{extra_field}' is not allowed. Allowed fields are: {list(allowed_extras.keys())}."
+                raise ValueError(msg)
+            if not isinstance(value, allowed_extras[extra_field]):
+                msg = f"Extra field '{extra_field}' must be of type {allowed_extras[extra_field].__name__}."
+                raise TypeError(msg)
+
+        return self
+
 
 class TransformerProcessorSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(..., alias="_target_")
