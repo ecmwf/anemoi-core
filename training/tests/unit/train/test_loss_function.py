@@ -26,6 +26,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 
 
@@ -116,6 +117,20 @@ def test_simple_functionalloss(
     pred, target, loss_result = loss_inputs
 
     loss = simple_functionalloss(pred, target)
+
+    assert isinstance(loss, torch.Tensor)
+    assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
+
+
+def test_multiscale_loss_eqivalent_to_per_scale_loss(
+    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
+    per_scale_loss = AlmostFairKernelCRPS()
+    multiscale_loss = MultiscaleLossWrapper(truncation_path="", internal_loss=per_scale_loss)
+
+    pred, target, loss_result = loss_inputs
+
+    loss = multiscale_loss(pred, target)
 
     assert isinstance(loss, torch.Tensor)
     assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
