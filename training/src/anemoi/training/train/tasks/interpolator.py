@@ -75,6 +75,7 @@ class GraphInterpolator(BaseGraphModule):
 
         self.use_time_fraction = config.training.target_forcing.time_fraction
 
+        self.multi_step = 1
         self.boundary_times = config.training.explicit_times.input
         self.interp_times = config.training.explicit_times.target
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
@@ -118,11 +119,11 @@ class GraphInterpolator(BaseGraphModule):
             y_pred = self(x_bound, target_forcing)
             y = batch[:, self.imap[interp_step], :, :, self.data_indices.data.output.full]
 
-            loss_step, metrics_next = checkpoint(
+            loss_step, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                interp_step - 1,
+                step=interp_step - 1,
                 validation_mode=validation_mode,
                 use_reentrant=False,
             )
@@ -135,9 +136,4 @@ class GraphInterpolator(BaseGraphModule):
         return loss, metrics, y_preds
 
     def forward(self, x: torch.Tensor, target_forcing: torch.Tensor) -> torch.Tensor:
-        return self.model(
-            x,
-            target_forcing=target_forcing,
-            model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
-        )
+        return super().forward(x, target_forcing=target_forcing)
