@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from functools import reduce
 from importlib.util import find_spec
 
 import torch
@@ -72,7 +73,6 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
 
     default_compile_options = {}
     compiled_modules = []
-
     # Loop through all modules
     for name, module in model.named_modules():
         entry = _get_compile_entry(module, compile_config)
@@ -81,9 +81,16 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
             options = entry.get("options", default_compile_options)
 
             LOGGER.debug("%s will be compiled with the following options: %s", str(module), str(options))
-            module.forward = torch.compile(module.forward, **options)  # Note: the function is not compiled yet
             # It is just marked for JIT-compilation later
             # It will be compiled before its first forward pass
+
+            module.compile(**options)
+
+            parts = name.split(".")
+            parent = reduce(getattr, parts[:-1], model)
+            LOGGER.debug("Replacing %s with a compiled version", str(parts[-1]))
+            setattr(parent, parts[-1], module)
+
             compiled_modules.append(entry.module)
 
     LOGGER.info("The following modules will be compiled: %s", str(unique(compiled_modules)))
