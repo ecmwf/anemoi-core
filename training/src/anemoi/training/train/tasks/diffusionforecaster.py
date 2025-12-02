@@ -146,13 +146,15 @@ class GraphDiffusionForecaster(GraphForecaster):
         for rollout_step in range(rollout or self.rollout):
 
             # get noise level and associated loss weights
-            sigma, noise_weights = self._get_noise_level(
-                shape=(x.shape[0],) + (1,) * (x.ndim - 2),
-                sigma_max=self.model.model.sigma_max,
-                sigma_min=self.model.model.sigma_min,
-                sigma_data=self.model.model.sigma_data,
+            sigma, noise_weights ={}, {}
+            for dataset_name, dataset_batch in batch.items():
+                sigma[dataset_name], noise_weights[dataset_name] = self._get_noise_level(
+                    shape=(dataset_batch.shape[0],) + (1,) * (dataset_batch.ndim - 2),
+                    sigma_max=self.model.model.sigma_max,
+                    sigma_min=self.model.model.sigma_min,
+                    sigma_data=self.model.model.sigma_data,
                 rho=self.rho,
-                device=x.device,
+                device=dataset_batch.device,
             )
 
             # get targets and noised targets
@@ -164,7 +166,7 @@ class GraphDiffusionForecaster(GraphForecaster):
                     ...,
                     self.data_indices[dataset_name].data.output.full,
                 ]
-            y_noised = {name: self._noise_target(y, sigma) for name, y in y.items()}
+            y_noised = {name: self._noise_target(y, sigma[name]) for name, y in y.items()}
 
             # prediction, fwd_with_preconditioning
             y_pred = self(
