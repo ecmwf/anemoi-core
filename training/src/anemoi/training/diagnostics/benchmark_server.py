@@ -702,7 +702,8 @@ def benchmark(
     store: str,
     update_data: bool = False,  # when this is true, data is always updated
 ) -> None:
-    local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
+    profiler_path = cfg.system.output.profiler
+    local_benchmark_results = get_local_benchmark_results(profiler_path)
 
     # Get reference benchmark results
     benchmark_server = parse_benchmark_location(store, test_case=test_case)
@@ -725,7 +726,7 @@ def benchmark(
 
     if len(failed_tests) > 0:
         msg = f"The following tests failed: {failed_tests}"
-        artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+        artifacts = get_local_benchmark_artifacts(profiler_path)
         artifacts_tar = Path(f"./{test_case}_artifacts.tar.gz")
         _tar_files(artifacts, artifacts_tar)
         LOGGER.info("Profiling artifacts from failed run stored under: %s", artifacts_tar)
@@ -736,5 +737,5 @@ def benchmark(
         LOGGER.info("Updating metrics on server")
         for local_benchmark_value in local_benchmark_results:
             benchmark_server.set_value(local_benchmark_value)
-            artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+            artifacts = get_local_benchmark_artifacts(profiler_path)
             benchmark_server.store_artifacts(artifacts, local_benchmark_results[0].commit)
