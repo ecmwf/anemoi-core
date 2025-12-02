@@ -16,7 +16,7 @@ from anemoi.graphs.nodes import HEALPixNodes
 
 class TestMultiScaleEdgesInit:
     def test_init(self):
-        """Test MultiScaleEdges initialization."""
+        """Test MultiScaleEdges initialisation."""
         assert isinstance(HEALPixMultiScaleEdges("test_nodes", "test_nodes", None), HEALPixMultiScaleEdges)
         assert isinstance(
             HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=4), HEALPixMultiScaleEdges
