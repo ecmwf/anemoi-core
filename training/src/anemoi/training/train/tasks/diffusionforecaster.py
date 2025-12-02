@@ -256,7 +256,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 y_state,
                 validation_mode,
             )
-            metrics_next = self._compute_metrics(
+            metrics_next = self.calculate_val_metrics(
                 y_pred_state_full,
                 y_state_full,
                 grid_shard_slice=grid_shard_slice_metrics,
