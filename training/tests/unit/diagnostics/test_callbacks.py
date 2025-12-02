@@ -29,7 +29,7 @@ NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigra
 
 default_config = """
 training:
-    model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  model_task: anemoi.training.train.tasks.GraphEnsForecaster
 
 diagnostics:
   callbacks: []
@@ -131,6 +131,8 @@ def test_ensemble_plot_mixin_process():
     pl_module.data_indices.data.output.full = slice(None)
     pl_module.latlons_data = torch.randn(100, 2)
 
+    # Mock config
+    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     # Create test tensors
     # batch: bs, input_steps + forecast_steps, latlon, nvar
     batch = torch.randn(2, 6, 100, 5)
@@ -158,7 +160,12 @@ def test_ensemble_plot_mixin_process():
     # Set post_processors on the mixin instance
     mixin.post_processors = mock_post_processors
 
-    data, result_output_tensor = mixin.process(pl_module, outputs, batch, members=0)
+    if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
+        output_times = (len(config.training.explicit_times.target), "time_interp")
+    else:
+        output_times = (getattr(pl_module, "rollout", 0), "forecast")
+
+    data, result_output_tensor = mixin.process(pl_module, outputs, batch, output_times=output_times, members=0)
 
     # Check instantiation
     assert data is not None
