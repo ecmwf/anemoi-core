@@ -38,8 +38,12 @@ class SpectralLoss(BaseLoss):
 
         Parameters
         ----------
+        transform : Literal["fft2d", "sht"]
+            type of spectral transform to use
         ignore_nans : bool
             whether to ignore NaNs in the loss computation
+        kwargs : dict
+            additional arguments for the spectral transform
         """
         super().__init__(ignore_nans, **kwargs)
         if transform == "fft2d":
@@ -83,6 +87,48 @@ class SpectralL2Loss(FunctionalSpectralLoss):
         return (pred - target) ** 2
 
 
+class LogSpectralDistance(SpectralLoss):
+    r"""Log Spectral Distance (LSD).
+
+    The log spectral distance is used to compute the difference between spectra of two fields.
+    It is also called log spectral distortion. When it is expressed in discrete space with L2 norm, it is defined as:
+    .. math::
+        D_{LS}={\left\{ \frac{1}{N} \sum_{n=1}^N \left[ \log P(n) - \log\hat{P}(n)\right]^2\right\\}}^{1/2} ,
+    where P(n) and ^P(n) are the power spectral densities of the true and predicted fields respectively.
+    """
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = -2,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+    ) -> torch.Tensor:
+
+        eps = torch.finfo(pred.dtype).eps
+
+        pred_spectral = self.transform(pred)
+        target_spectral = self.transform(target)
+
+        power_spectra_real = torch.abs(pred_spectral) ** 2
+        power_spectra_pred = torch.abs(target_spectral) ** 2
+
+        log_diff = torch.log(power_spectra_real + eps) - torch.log(power_spectra_pred + eps)
+
+        result = self.scale(
+            log_diff**2,
+            scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
+
+        return torch.sqrt(self.reduce(result, squash=squash, group=group) + eps)
+
+
 class FourierCorrelationLoss(SpectralLoss):
     r"""Fourier Correlation Loss (FCL).
 
@@ -111,6 +157,9 @@ class FourierCorrelationLoss(SpectralLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
+
+        eps = torch.finfo(pred.dtype).eps
+
         # transform to spectral domain
         pred_spectral = self.transform(pred)
         target_spectral = self.transform(target)
@@ -129,7 +178,7 @@ class FourierCorrelationLoss(SpectralLoss):
         denominator = torch.sqrt(
             self.reduce(torch.abs(pred_spectral) ** 2, squash=squash, group=group)
             * self.reduce(torch.abs(target_spectral) ** 2, squash=squash, group=group)
-            + 1e-12,
+            + eps,
         )
 
         return 1 - numerator / denominator
