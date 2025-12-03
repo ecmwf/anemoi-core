@@ -49,6 +49,7 @@ class FFT2D(SpectralTransform):
         self,
         x_dim: int,
         y_dim: int,
+        nodes_slice: slice = slice(None),  # TODO: generic indexing class
     ) -> None:
         """2D FFT Transform.
 
@@ -61,11 +62,13 @@ class FFT2D(SpectralTransform):
         """
         self.x_dim = x_dim
         self.y_dim = y_dim
+        self.nodes_slice = nodes_slice
 
     def __call__(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
+        data = data[:, :, :, self.nodes_slice, :]
         batch_size, time, ens, _, var = data.shape
         # [batch, time, ens, y*x, variables] -> [batch*time*ens*variables, y, x]
         data = einops.rearrange(data, "b t e (y x) v -> (b t e v) y x", x=self.x_dim, y=self.y_dim)
