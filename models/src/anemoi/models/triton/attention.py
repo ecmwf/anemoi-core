@@ -620,7 +620,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     tl.store(dq_ptrs, dq)
 
 
-class _attention(torch.autograd.Function):
+class TritonAttention(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, q, k, v, causal, window, sm_scale, warp_specialize=True):
@@ -701,8 +701,13 @@ class _attention(torch.autograd.Function):
     @staticmethod
     def backward(ctx, do):
         q, k, v, o, M = ctx.saved_tensors
-        assert do.is_contiguous()
-        assert q.stride() == k.stride() == v.stride() == o.stride() == do.stride()
+
+        if not do.is_contiguous():
+            do = do.contiguous()
+
+        if do.shape == o.shape and do.stride() != o.stride():
+            do = do.reshape(o.shape).contiguous()
+
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
@@ -743,7 +748,6 @@ class _attention(torch.autograd.Function):
         return dq, dk, dv, None, None, None, None
 
 
-attention = _attention.apply
 
 TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2')
 
@@ -758,6 +762,7 @@ TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2')
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("provider", ["triton-fp16"] + (["triton-fp8"] if TORCH_HAS_FP8 else []))
 def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provider, dtype=torch.float16):
+    attention = TritonAttention.apply
     if mode == "fwd" and "fp16" in provider:
         pytest.skip("Avoid running the forward computation twice.")
     if mode == "bwd" and "fp8" in provider:
