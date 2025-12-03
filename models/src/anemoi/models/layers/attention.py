@@ -66,7 +66,6 @@ class MultiHeadSelfAttention(nn.Module):
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
-        _compile: bool = True,
     ):
         """Initialize MultiHeadSelfAttention.
 
@@ -100,8 +99,6 @@ class MultiHeadSelfAttention(nn.Module):
             Anything > 0 activates softcapping attention, by default None
         use_alibi_slopes : bool, optional
             Adds bias
-        _compile: bool
-            Whether to compile flex attention
         """
         super().__init__()
 
@@ -121,7 +118,6 @@ class MultiHeadSelfAttention(nn.Module):
         self.qk_norm = qk_norm
         self.softcap = softcap
         self.use_rotary_embeddings = use_rotary_embeddings
-        self._compile=_compile
 
         self.set_attention_function()
 
@@ -146,8 +142,7 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
-            "flex_attention": FlexAttentionWrapper,
-            "triton_attention": TritonAttentionWrapper,
+            "triton": TritonAttentionWrapper,
         }
         assert (
             self.attention_implementation in attn_funcs
@@ -159,8 +154,6 @@ class MultiHeadSelfAttention(nn.Module):
             self.attention = attn_funcs[self.attention_implementation](
                 use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
             )
-        elif  self.attention_implementation == "flex_attention":
-            self.attention = attn_funcs[self.attention_implementation](_compile=self._compile)
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 
@@ -413,87 +406,7 @@ class FlashAttentionWrapper(nn.Module):
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
-class FlexAttentionWrapper(nn.Module):
-    """Wrapper for Pytorch Flex attention."""
 
-    def __init__(self, _compile=True):
-        """ If _compile is false, attention will be run in eager mode. this is not performant but is faster for very small test cases, and useful for correctness checks when there are issues with the compiler"""
-        super().__init__()
-
-        if version.parse(torch.__version__) < version.parse("2.5.0"):
-            raise RuntimeError("Error: torch version is too low. Update to 2.5.0 or higher to use Flex Attention.")
-
-        self.is_attn_compiled = False
-        self._compile = _compile
-
-        self.prev_seq_len = 0
-
-    def _not_implemented(self, causal: bool, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
-        msg = ""
-        if causal is not False:
-            msg += "causal"
-        if dropout_p != 0.0:
-            msg += "dropout_p, "
-        if softcap is not None:
-            msg += "softcap, "
-        if alibi_slopes is not None:
-            msg += "alibi slobes, "
-        if len(msg) > 0:
-            msg = "The following features you requested are not yet implemented in the Flex-Attention backend: " + msg
-            raise NotImplementedError(msg)
-
-    def forward(
-        self,
-        query,
-        key,
-        value,
-        batch_size: int,
-        causal: bool = False,
-        window_size: int = None,
-        dropout_p: float = 0.0,
-        softcap = None,
-        alibi_slopes: torch.Tensor = None,
-    ):
-
-        softcap=None
-        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
-
-        # recompile if seq len changes
-        if query.shape[2] != self.prev_seq_len:
-            self.is_attn_compiled = False
-            LOGGER.debug("Sequence length has changed - recompiling flex attention")
-
-        if (not self.is_attn_compiled):
-            import functools
-
-            from torch.nn.attention.flex_attention import create_block_mask
-            from torch.nn.attention.flex_attention import flex_attention
-
-            if window_size is not None:
-
-                def sliding_window_mask(b, h, q_idx, kv_idx):
-                    return abs(q_idx - kv_idx) <= window_size
-
-                seq_len = query.shape[2]
-                #self.block_mask = torch.compile(create_block_mask(
-                self.block_mask = create_block_mask(
-                    sliding_window_mask, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len, _compile=self._compile
-                )
-                self.attention = functools.partial(flex_attention, block_mask=self.block_mask)  # Cache the block mask
-                self.prev_seq_len = seq_len
-            else:
-                self.attention = flex_attention
-
-            if self._compile:
-                self.attention = torch.compile(self.attention)
-
-            self.is_attn_compiled = True
-
-        torch._dynamo.config.optimize_ddp = False
-        out = self.attention(query, key, value)
-        torch._dynamo.config.optimize_ddp = True
-
-        return out
 
 class TritonAttentionWrapper(nn.Module):
     """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
@@ -502,9 +415,10 @@ class TritonAttentionWrapper(nn.Module):
         super().__init__()
 
         from anemoi.models.triton.attention import TritonAttention
-        self.attention=TritonAttention
 
-        #TODO check if triton is installed
+        self.attention = TritonAttention
+
+        # TODO check if triton is installed
 
     def forward(
         self,
@@ -515,15 +429,14 @@ class TritonAttentionWrapper(nn.Module):
         causal: bool = False,
         window_size: int = None,
         dropout_p: float = 0.0,
-        softcap = None,
+        softcap=None,
         alibi_slopes: torch.Tensor = None,
     ):
 
-        #expects  (BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM)
-        softcap=None
+        softcap = None
         self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
 
-        softmax_scale=1 / math.sqrt(query.size(-1))
+        softmax_scale = 1 / math.sqrt(query.size(-1))
 
         out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).half()
 

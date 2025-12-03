@@ -1,22 +1,28 @@
-"""
-Fused Attention
+# (C) Copyright 2024 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+"""Fused Attention
 ===============
 
 This is a Triton implementation of the Flash Attention v2 algorithm from Tri Dao (https://tridao.me/publications/flash2/flash2.pdf)
 
-Credits: OpenAI kernel team
+It is based on the fused attention example from the Triton-lang github repo (MIT license) (Credits: OpenAI kernel team)
+https://triton-lang.org/main/getting-started/tutorials/06-fused-attention.html
 
-Extra Credits:
-
-* Original flash attention paper (https://arxiv.org/abs/2205.14135)
-* Rabe and Staats (https://arxiv.org/pdf/2112.05682v2.pdf)
+It has been extended to support sliding window attention.
 
 """
 
-import pytest
-import torch
 import os
 
+import pytest
+import torch
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
@@ -45,12 +51,28 @@ def is_hopper():
 
 
 @triton.jit
-def _attn_fwd_inner(acc, l_i, m_i, q,  #
-                    desc_k, desc_v,  #
-                    offset_y, dtype: tl.constexpr, start_m, qk_scale,  #
-                    BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr, BLOCK_N: tl.constexpr,  #
-                    STAGE: tl.constexpr, offs_m: tl.constexpr, offs_n: tl.constexpr,  #
-                    N_CTX: tl.constexpr, WINDOW: tl.constexpr, warp_specialize: tl.constexpr, IS_HOPPER: tl.constexpr):
+def _attn_fwd_inner(
+    acc,
+    l_i,
+    m_i,
+    q,  #
+    desc_k,
+    desc_v,  #
+    offset_y,
+    dtype: tl.constexpr,
+    start_m,
+    qk_scale,  #
+    BLOCK_M: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+    BLOCK_N: tl.constexpr,  #
+    STAGE: tl.constexpr,
+    offs_m: tl.constexpr,
+    offs_n: tl.constexpr,  #
+    N_CTX: tl.constexpr,
+    WINDOW: tl.constexpr,
+    warp_specialize: tl.constexpr,
+    IS_HOPPER: tl.constexpr,
+):
     # range of values handled by this stage
     if STAGE == 1:
         lo, hi = 0, start_m * BLOCK_M
@@ -63,7 +85,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
 
     if WINDOW > 0:
         lo = tl.maximum(0, (start_m * BLOCK_M) - WINDOW)
-        hi =  tl.minimum(N_CTX, (start_m+1) * BLOCK_M + WINDOW)
+        hi = tl.minimum(N_CTX, (start_m + 1) * BLOCK_M + WINDOW)
 
     offsetk_y = offset_y + lo
     if dtype == tl.float8e5:
@@ -77,8 +99,8 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
         k = desc_k.load([offsetk_y, 0]).T
         qk = tl.dot(q, k)
 
-        #Apply masking 
-        if WINDOW > 0: #TODO calculate only for partial block, not for every block
+        # Apply masking
+        if WINDOW > 0:  # TODO calculate only for partial block, not for every block
             n_pos = start_n + offs_n[None, :]
             m_pos = offs_m[:, None]
             # Mask condition: keep if (q - window_size <= k <= q + window size)
@@ -87,7 +109,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
             m_ij = tl.maximum(m_i, tl.max(qk, 1))
             qk -= m_ij[:, None]
 
-        elif STAGE == 2: #causal mask in partially masked block
+        elif STAGE == 2:  # causal mask in partially masked block
             mask = offs_m[:, None] >= (start_n + offs_n[None, :])
             qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
             m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -124,9 +146,6 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
         m_i = m_ij
         offsetk_y += BLOCK_N
         offsetv_y += BLOCK_N
-        #rest block settings
-        skip_block=False
-        partial_block=False
     return acc, l_i, m_i
 
 
@@ -153,11 +172,11 @@ else:
     NUM_STAGES_OPTIONS = [2, 3, 4]
 
 configs = [
-    triton.Config({'BLOCK_M': BM, 'BLOCK_N': BN}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook) \
-    for BM in [64, 128]\
-    for BN in [32, 64, 128]\
-    for s in NUM_STAGES_OPTIONS \
-    for w in [4, 8]\
+    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook)
+    for BM in [64, 128]
+    for BN in [32, 64, 128]
+    for s in NUM_STAGES_OPTIONS
+    for w in [4, 8]
 ]
 if "PYTEST_VERSION" in os.environ:
     # Use a single config in testing for reproducibility
@@ -169,8 +188,12 @@ if "PYTEST_VERSION" in os.environ:
 def keep(conf):
     BLOCK_M = conf.kwargs["BLOCK_M"]
     BLOCK_N = conf.kwargs["BLOCK_N"]
-    return not (is_cuda() and torch.cuda.get_device_capability()[0] == 9 and BLOCK_M * BLOCK_N < 128 * 128
-                and conf.num_warps == 8)
+    return not (
+        is_cuda()
+        and torch.cuda.get_device_capability()[0] == 9
+        and BLOCK_M * BLOCK_N < 128 * 128
+        and conf.num_warps == 8
+    )
 
 
 def prune_invalid_configs(configs, named_args, **kwargs):
@@ -188,20 +211,31 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
         return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
 
 
-@triton.autotune(configs=list(filter(keep, configs)), key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
-                 prune_configs_by={'early_config_prune': prune_invalid_configs})
+@triton.autotune(
+    configs=list(filter(keep, configs)),
+    key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
+)
 @triton.jit
-def _attn_fwd(sm_scale, M,  #
-              Z, H, desc_q, desc_k, desc_v, desc_o, N_CTX,  #
-              HEAD_DIM: tl.constexpr,  #
-              WINDOW: tl.constexpr,   #
-              BLOCK_M: tl.constexpr,  #
-              BLOCK_N: tl.constexpr,  #
-              FP8_OUTPUT: tl.constexpr,  #
-              STAGE: tl.constexpr,  #
-              warp_specialize: tl.constexpr,  #
-              IS_HOPPER: tl.constexpr,  #
-              ):
+def _attn_fwd(
+    sm_scale,
+    M,  #
+    Z,
+    H,
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
+    N_CTX,  #
+    HEAD_DIM: tl.constexpr,  #
+    WINDOW: tl.constexpr,  #
+    BLOCK_M: tl.constexpr,  #
+    BLOCK_N: tl.constexpr,  #
+    FP8_OUTPUT: tl.constexpr,  #
+    STAGE: tl.constexpr,  #
+    warp_specialize: tl.constexpr,  #
+    IS_HOPPER: tl.constexpr,  #
+):
     dtype = tl.float8e5 if FP8_OUTPUT else tl.float16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
     start_m = tl.program_id(0)
@@ -210,18 +244,23 @@ def _attn_fwd(sm_scale, M,  #
     off_h = off_hz % H
 
     y_dim = Z * H * N_CTX
-    desc_q = _maybe_make_tensor_desc(desc_q, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                     block_shape=[BLOCK_M, HEAD_DIM])
+    desc_q = _maybe_make_tensor_desc(
+        desc_q, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_M, HEAD_DIM]
+    )
     if FP8_OUTPUT:
-        desc_v = _maybe_make_tensor_desc(desc_v, shape=[HEAD_DIM, y_dim], strides=[N_CTX, 1],
-                                         block_shape=[HEAD_DIM, BLOCK_N])
+        desc_v = _maybe_make_tensor_desc(
+            desc_v, shape=[HEAD_DIM, y_dim], strides=[N_CTX, 1], block_shape=[HEAD_DIM, BLOCK_N]
+        )
     else:
-        desc_v = _maybe_make_tensor_desc(desc_v, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                         block_shape=[BLOCK_N, HEAD_DIM])
-    desc_k = _maybe_make_tensor_desc(desc_k, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                     block_shape=[BLOCK_N, HEAD_DIM])
-    desc_o = _maybe_make_tensor_desc(desc_o, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                     block_shape=[BLOCK_M, HEAD_DIM])
+        desc_v = _maybe_make_tensor_desc(
+            desc_v, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_N, HEAD_DIM]
+        )
+    desc_k = _maybe_make_tensor_desc(
+        desc_k, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_N, HEAD_DIM]
+    )
+    desc_o = _maybe_make_tensor_desc(
+        desc_o, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1], block_shape=[BLOCK_M, HEAD_DIM]
+    )
 
     offset_y = off_z * (N_CTX * H) + off_h * N_CTX
     qo_offset_y = offset_y + start_m * BLOCK_M
@@ -241,20 +280,52 @@ def _attn_fwd(sm_scale, M,  #
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
     if STAGE & 1:
-        acc, l_i, m_i = _attn_fwd_inner(acc, l_i, m_i, q,  #
-                                        desc_k, desc_v,  #
-                                        offset_y, dtype, start_m, qk_scale,  #
-                                        BLOCK_M, HEAD_DIM, BLOCK_N,  #
-                                        4 - STAGE, offs_m, offs_n, N_CTX,  #
-                                        WINDOW, warp_specialize, IS_HOPPER)
+        acc, l_i, m_i = _attn_fwd_inner(
+            acc,
+            l_i,
+            m_i,
+            q,  #
+            desc_k,
+            desc_v,  #
+            offset_y,
+            dtype,
+            start_m,
+            qk_scale,  #
+            BLOCK_M,
+            HEAD_DIM,
+            BLOCK_N,  #
+            4 - STAGE,
+            offs_m,
+            offs_n,
+            N_CTX,  #
+            WINDOW,
+            warp_specialize,
+            IS_HOPPER,
+        )
     # stage 2: on-band
     if STAGE & 2:
-        acc, l_i, m_i = _attn_fwd_inner(acc, l_i, m_i, q,  #
-                                        desc_k, desc_v,  #
-                                        offset_y, dtype, start_m, qk_scale,  #
-                                        BLOCK_M, HEAD_DIM, BLOCK_N,  #
-                                        2, offs_m, offs_n, N_CTX,  #
-                                        WINDOW, warp_specialize, IS_HOPPER)
+        acc, l_i, m_i = _attn_fwd_inner(
+            acc,
+            l_i,
+            m_i,
+            q,  #
+            desc_k,
+            desc_v,  #
+            offset_y,
+            dtype,
+            start_m,
+            qk_scale,  #
+            BLOCK_M,
+            HEAD_DIM,
+            BLOCK_N,  #
+            2,
+            offs_m,
+            offs_n,
+            N_CTX,  #
+            WINDOW,
+            warp_specialize,
+            IS_HOPPER,
+        )
     # epilogue
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
@@ -264,16 +335,12 @@ def _attn_fwd(sm_scale, M,  #
 
 
 @triton.jit
-def _attn_bwd_preprocess(O, DO,  #
-                         Delta,  #
-                         Z, H, N_CTX,  #
-                         BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr  #
-                         ):
+def _attn_bwd_preprocess(Out, DO, Delta, Z, H, N_CTX, BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr):  #  #  #  #
     off_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
     # load
-    o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :])
+    o = tl.load(Out + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :])
     do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
@@ -282,19 +349,31 @@ def _attn_bwd_preprocess(O, DO,  #
 
 # The main inner-loop logic for computing dK and dV.
 @triton.jit
-def _attn_bwd_dkdv(dk, dv,  #
-                   Q, k, v, sm_scale,  #
-                   DO,  #
-                   M, D,  #
-                   # shared by Q/K/V/DO.
-                   stride_tok, stride_d,  #
-                   H, N_CTX, BLOCK_M1: tl.constexpr,  #
-                   BLOCK_N1: tl.constexpr,  #
-                   HEAD_DIM: tl.constexpr,  #
-                   # Filled in by the wrapper.
-                   start_n, start_m, num_steps,  #
-                   CAUSAL: tl.constexpr,
-                   WINDOW: tl.constexpr):
+def _attn_bwd_dkdv(
+    dk,
+    dv,  #
+    Q,
+    k,
+    v,
+    sm_scale,  #
+    DO,  #
+    M,
+    D,  #
+    # shared by Q/K/V/DO.
+    stride_tok,
+    stride_d,  #
+    H,
+    N_CTX,
+    BLOCK_M1: tl.constexpr,  #
+    BLOCK_N1: tl.constexpr,  #
+    HEAD_DIM: tl.constexpr,  #
+    # Filled in by the wrapper.
+    start_n,
+    start_m,
+    num_steps,  #
+    CAUSAL: tl.constexpr,
+    WINDOW: tl.constexpr,
+):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -305,51 +384,51 @@ def _attn_bwd_dkdv(dk, dv,  #
     curr_m = start_m
     step_m = BLOCK_M1
 
-    #TODO change num_steps and start_m based on window, currently we have kernels which launch and do nothing in for loop
+    # TODO change num_steps and start_m based on window, currently we have kernels which launch and do nothing in for loop
 
-    #if CAUSAL:
-        # This kernel is doing a causal attention calculation
-        # We must determine where this block is in the global matrix
-        # To determine if its treated
-        # There are 3 options:
-        #   fully masked out (curr_m < start_n) => skip block
-        #   partially masked (start_n <= curr_m  <= start_n + BLOCK_N1) => apply MASK to block
-        #   fully including (curr_m > start_n + BLOCK_N1) => include fully
-        # TODO precompute list of size num_steps with [skip,skip,partial,full,full]
+    # if CAUSAL:
+    # This kernel is doing a causal attention calculation
+    # We must determine where this block is in the global matrix
+    # To determine if its treated
+    # There are 3 options:
+    #   fully masked out (curr_m < start_n) => skip block
+    #   partially masked (start_n <= curr_m  <= start_n + BLOCK_N1) => apply MASK to block
+    #   fully including (curr_m > start_n + BLOCK_N1) => include fully
+    # TODO precompute list of size num_steps with [skip,skip,partial,full,full]
 
-    #if WINDOW > 0:
-        #CAUSAL=False #TODO move this much further up or replace with assert
+    # if WINDOW > 0:
+    # CAUSAL=False #TODO move this much further up or replace with assert
 
-        # fully masked out: curr_m < lo, curr_m > hi 
-        # partially masked: lo <= curr_m < lo + BLOCK_N1,  hi - BLOCK_N1 <= curr_m < hi
-        # fully included: lo + BLOCK_N1 <= curr_m <= hi - BLOCK_N1
+    # fully masked out: curr_m < lo, curr_m > hi
+    # partially masked: lo <= curr_m < lo + BLOCK_N1,  hi - BLOCK_N1 <= curr_m < hi
+    # fully included: lo + BLOCK_N1 <= curr_m <= hi - BLOCK_N1
 
     # Calculate the upper and lower bounds when using sliding window
     if WINDOW > 0:
-        #end_m = start_m + (step_m * num_steps)
+        # end_m = start_m + (step_m * num_steps)
         # we have a fixed block of n and we would normally iterate over an entire row on m
         # with sliding window, we iterate less, based on the postion of the fixed n block
         lo = tl.maximum(0, start_n - WINDOW)
         hi = tl.minimum(N_CTX, (start_n + BLOCK_N1) + WINDOW)
 
-    skip_block=False
-    partial_block=False
+    skip_block = False
+    partial_block = False
 
     for blk_idx in range(num_steps):
-        
+
         if CAUSAL:
             if curr_m < start_n:
-                skip_block=True
+                skip_block = True
             elif curr_m >= start_n and curr_m <= start_n + BLOCK_N1:
-                partial_block=True
+                partial_block = True
 
         if WINDOW > 0:
             if curr_m < lo or curr_m > hi:
-                skip_block=True
+                skip_block = True
             # partially masked: lo <= curr_m < lo + BLOCK_N1,  hi - BLOCK_N1 <= curr_m < hi
-            #if (curr_m >= lo and curr_m < lo + BLOCK_N1) or (curr_m >= hi - BLOCK_N1 and curr_m < hi):
+            # if (curr_m >= lo and curr_m < lo + BLOCK_N1) or (curr_m >= hi - BLOCK_N1 and curr_m < hi):
             else:
-                partial_block=True
+                partial_block = True
 
         if not skip_block:
             qT = tl.load(qT_ptrs)
@@ -361,15 +440,15 @@ def _attn_bwd_dkdv(dk, dv,  #
             # Autoregressive masking.
             if partial_block:
                 if CAUSAL:
-                    #fwd causal partial block (moving n, fixed m): offs_m[:, None] >= (start_n + offs_n[None, :])
-                    mask = (offs_m[None, :] >= offs_n[:, None])
+                    # fwd causal partial block (moving n, fixed m): offs_m[:, None] >= (start_n + offs_n[None, :])
+                    mask = offs_m[None, :] >= offs_n[:, None]
                     pT = tl.where(mask, pT, 0.0)
 
                 if WINDOW > 0:
                     n_pos = offs_n[:, None]
                     m_pos = offs_m[None, :]
                     # Mask condition: keep if (q - window_size <= k <= q + window size)
-                    #fwd (moving n, fixed m opposit to here): (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
+                    # fwd (moving n, fixed m opposit to here): (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
                     mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
                     pT = tl.where(mask, pT, 0.0)
 
@@ -390,25 +469,36 @@ def _attn_bwd_dkdv(dk, dv,  #
         qT_ptrs += step_m * stride_tok
         do_ptrs += step_m * stride_tok
         # reset block mode
-        skip_block=False
-        partial_block=False
+        skip_block = False
+        partial_block = False
     return dk, dv
 
 
 # the main inner-loop logic for computing dQ
 @triton.jit
-def _attn_bwd_dq(dq, q, K, V,  #
-                 do, m, D,
-                 # shared by Q/K/V/DO.
-                 stride_tok, stride_d,  #
-                 H, N_CTX,  #
-                 BLOCK_M2: tl.constexpr,  #
-                 BLOCK_N2: tl.constexpr,  #
-                 HEAD_DIM: tl.constexpr,
-                 # Filled in by the wrapper.
-                 start_m, start_n, num_steps,  #
-                 CAUSAL: tl.constexpr,    #
-                 WINDOW: tl.constexpr):
+def _attn_bwd_dq(
+    dq,
+    q,
+    K,
+    V,  #
+    do,
+    m,
+    D,
+    # shared by Q/K/V/DO.
+    stride_tok,
+    stride_d,  #
+    H,
+    N_CTX,  #
+    BLOCK_M2: tl.constexpr,  #
+    BLOCK_N2: tl.constexpr,  #
+    HEAD_DIM: tl.constexpr,
+    # Filled in by the wrapper.
+    start_m,
+    start_n,
+    num_steps,  #
+    CAUSAL: tl.constexpr,  #
+    WINDOW: tl.constexpr,
+):
     offs_m = start_m + tl.arange(0, BLOCK_M2)
     offs_n = start_n + tl.arange(0, BLOCK_N2)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -421,22 +511,22 @@ def _attn_bwd_dq(dq, q, K, V,  #
     curr_n = start_n
     step_n = BLOCK_N2
 
-    #if CAUSAL:
-        # This kernel is doing a causal attention calculation
-        # We must determine where this block is in the global matrix
-        # To determine if its treated
-        # There are 3 options:
-        #   fully masked out (curr_n < start_m) => skip block
-        #   partially masked (start_m <= curr_n  <= start_m + BLOCK_M2) => apply MASK to block (start_m )
-        #   fully including (curr_n > start_m + BLOCK_M2) => include fully
-        # TODO precompute list of size num_steps with [skip,skip,partial,full,full]
+    # if CAUSAL:
+    # This kernel is doing a causal attention calculation
+    # We must determine where this block is in the global matrix
+    # To determine if its treated
+    # There are 3 options:
+    #   fully masked out (curr_n < start_m) => skip block
+    #   partially masked (start_m <= curr_n  <= start_m + BLOCK_M2) => apply MASK to block (start_m )
+    #   fully including (curr_n > start_m + BLOCK_M2) => include fully
+    # TODO precompute list of size num_steps with [skip,skip,partial,full,full]
 
-    #if WINDOW > 0:
-        #CAUSAL=False #TODO move this much further up or replace with assert
+    # if WINDOW > 0:
+    # CAUSAL=False #TODO move this much further up or replace with assert
 
-        # fully masked out: curr_n < lo, curr_n > hi
-        # partially masked: lo <= curr_n < lo + BLOCK_M2,  hi - BLOCK_M2 <= curr_n < hi
-        # fully included: lo + BLOCK_M2 <= curr_n <= hi - BLOCK_M2
+    # fully masked out: curr_n < lo, curr_n > hi
+    # partially masked: lo <= curr_n < lo + BLOCK_M2,  hi - BLOCK_M2 <= curr_n < hi
+    # fully included: lo + BLOCK_M2 <= curr_n <= hi - BLOCK_M2
 
     # Calculate the upper and lower bounds when using sliding window
     if WINDOW > 0:
@@ -446,25 +536,25 @@ def _attn_bwd_dq(dq, q, K, V,  #
         lo = tl.maximum(0, start_m - WINDOW)
         hi = tl.minimum(N_CTX, (start_m + BLOCK_M2) + WINDOW)
 
-    skip_block=False
-    partial_block=False
+    skip_block = False
+    partial_block = False
 
     for blk_idx in range(num_steps):
 
         if CAUSAL:
             if curr_n > start_m + BLOCK_M2:
-                skip_block=True
+                skip_block = True
             elif curr_n >= start_m and curr_n <= start_m + BLOCK_M2:
-                partial_block=True
+                partial_block = True
 
-        #copied directly from dkdv, but might have to change signs like was done for causal
+        # copied directly from dkdv, but might have to change signs like was done for causal
         if WINDOW > 0:
             if curr_n < lo or curr_n > hi:
-                skip_block=True
-            #partially masked: lo <= curr_m < lo + BLOCK_M2,  hi - BLOCK_M2 <= curr_m < hi
-            #if (curr_n >= lo and curr_n < lo + BLOCK_M2) or (curr_n >= hi - BLOCK_M2 and curr_n < hi):
+                skip_block = True
+            # partially masked: lo <= curr_m < lo + BLOCK_M2,  hi - BLOCK_M2 <= curr_m < hi
+            # if (curr_n >= lo and curr_n < lo + BLOCK_M2) or (curr_n >= hi - BLOCK_M2 and curr_n < hi):
             else:
-                partial_block=True
+                partial_block = True
 
         if not skip_block:
             kT = tl.load(kT_ptrs)
@@ -474,30 +564,30 @@ def _attn_bwd_dq(dq, q, K, V,  #
             # Autoregressive masking.
             if partial_block:
 
-                #dkdv 
-                #if CAUSAL:
+                # dkdv
+                # if CAUSAL:
                 #    mask = (offs_m[None, :] >= offs_n[:, None])
 
-                #if WINDOW > 0:
+                # if WINDOW > 0:
                 #    n_pos = offs_n[:, None]
                 #    m_pos = offs_m[None, :]
-                    # Mask condition: keep if (q - window_size <= k <= q + window size)
+                # Mask condition: keep if (q - window_size <= k <= q + window size)
                 #    mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
 
                 offs_n = curr_n + tl.arange(0, BLOCK_N2)
-                n_pos = offs_n[None,:]
+                n_pos = offs_n[None, :]
                 m_pos = offs_m[:, None]
 
                 if CAUSAL:
-                    mask = (m_pos >= n_pos)
+                    mask = m_pos >= n_pos
                     p = tl.where(mask, p, 0.0)
 
                 if WINDOW > 0:
-                    #fwd (fixed m, moving n) (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
-                    #mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW) #original
-                    mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW) #original
-                    #mask = (n_pos > m_pos + WINDOW) & (n_pos < m_pos - WINDOW)
-                    #mask = (m_pos >= n_pos + WINDOW) & (n)
+                    # fwd (fixed m, moving n) (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)
+                    # mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW) #original
+                    mask = (n_pos <= m_pos + WINDOW) & (n_pos >= m_pos - WINDOW)  # original
+                    # mask = (n_pos > m_pos + WINDOW) & (n_pos < m_pos - WINDOW)
+                    # mask = (m_pos >= n_pos + WINDOW) & (n)
                     p = tl.where(mask, p, 0.0)
 
             # Compute dP and dS.
@@ -511,28 +601,40 @@ def _attn_bwd_dq(dq, q, K, V,  #
         curr_n += step_n
         kT_ptrs += step_n * stride_tok
         vT_ptrs += step_n * stride_tok
-         # reset block mode
-        skip_block=False
-        partial_block=False
+        # reset block mode
+        skip_block = False
+        partial_block = False
     return dq
 
 
 @triton.jit
-def _attn_bwd(Q, K, V, sm_scale,  #
-              DO,  #
-              DQ, DK, DV,  #
-              M, D,
-              # shared by Q/K/V/DO.
-              stride_z, stride_h, stride_tok, stride_d,  #
-              H, N_CTX,  #
-              BLOCK_M1: tl.constexpr,  #
-              BLOCK_N1: tl.constexpr,  #
-              BLOCK_M2: tl.constexpr,  #
-              BLOCK_N2: tl.constexpr,  #
-              BLK_SLICE_FACTOR: tl.constexpr,  #
-              HEAD_DIM: tl.constexpr,  #
-              CAUSAL: tl.constexpr,
-              WINDOW: tl.constexpr):
+def _attn_bwd(
+    Q,
+    K,
+    V,
+    sm_scale,  #
+    DO,  #
+    DQ,
+    DK,
+    DV,  #
+    M,
+    D,
+    # shared by Q/K/V/DO.
+    stride_z,
+    stride_h,
+    stride_tok,
+    stride_d,  #
+    H,
+    N_CTX,  #
+    BLOCK_M1: tl.constexpr,  #
+    BLOCK_N1: tl.constexpr,  #
+    BLOCK_M2: tl.constexpr,  #
+    BLOCK_N2: tl.constexpr,  #
+    BLK_SLICE_FACTOR: tl.constexpr,  #
+    HEAD_DIM: tl.constexpr,  #
+    CAUSAL: tl.constexpr,
+    WINDOW: tl.constexpr,
+):
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
     bhid = tl.program_id(2)
@@ -557,7 +659,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     start_n = pid * BLOCK_N1
     start_m = 0
 
-    MASK_BLOCK_M1: tl.constexpr = BLOCK_M1 // BLK_SLICE_FACTOR
+    # MASK_BLOCK_M1: tl.constexpr = BLOCK_M1 // BLK_SLICE_FACTOR #was used in original bwd pass when in partial causal block
     offs_n = start_n + tl.arange(0, BLOCK_N1)
 
     dv = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
@@ -570,14 +672,25 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     # Compute dK and dV for non-masked blocks.
     num_steps = (N_CTX - start_m) // BLOCK_M1
     dk, dv = _attn_bwd_dkdv(  #
-        dk, dv,  #
-        Q, k, v, sm_scale,  #
+        dk,
+        dv,  #
+        Q,
+        k,
+        v,
+        sm_scale,  #
         DO,  #
-        M, D,  #
-        stride_tok, stride_d,  #
-        H, N_CTX,  #
-        BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
-        start_n, start_m, num_steps,  #
+        M,
+        D,  #
+        stride_tok,
+        stride_d,  #
+        H,
+        N_CTX,  #
+        BLOCK_M1,
+        BLOCK_N1,
+        HEAD_DIM,  #
+        start_n,
+        start_m,
+        num_steps,  #
         CAUSAL=CAUSAL,  #
         WINDOW=WINDOW,  #
     )
@@ -595,7 +708,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     start_n = 0
     num_steps = N_CTX // BLOCK_N2
 
-    MASK_BLOCK_N2: tl.constexpr = BLOCK_N2 // BLK_SLICE_FACTOR
+    # MASK_BLOCK_N2: tl.constexpr = BLOCK_N2 // BLK_SLICE_FACTOR # was used in original bwd pass when in partial causal block
     offs_m = start_m + tl.arange(0, BLOCK_M2)
 
     q = tl.load(Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
@@ -605,15 +718,27 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     m = tl.load(M + offs_m)
     m = m[:, None]
 
-    dq = _attn_bwd_dq(dq, q, K, V,  #
-                      do, m, D,  #
-                      stride_tok, stride_d,  #
-                      H, N_CTX,  #
-                      BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
-                      start_m, start_n, num_steps,  #
-                      CAUSAL=CAUSAL,  #
-                      WINDOW=WINDOW,  #
-                      )
+    dq = _attn_bwd_dq(
+        dq,
+        q,
+        K,
+        V,  #
+        do,
+        m,
+        D,  #
+        stride_tok,
+        stride_d,  #
+        H,
+        N_CTX,  #
+        BLOCK_M2,
+        BLOCK_N2,
+        HEAD_DIM,  #
+        start_m,
+        start_n,
+        num_steps,  #
+        CAUSAL=CAUSAL,  #
+        WINDOW=WINDOW,  #
+    )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
     dq *= LN2
@@ -631,11 +756,11 @@ class TritonAttention(torch.autograd.Function):
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
         o = torch.empty_like(q)
-        stage =  3 if causal else 1 #TODO replace stage with causal bool arg, its hard to read
+        stage = 3 if causal else 1  # TODO replace stage with causal bool arg, its hard to read
         if window is None:
             window = 0
         if window > 0:
-            stage=1 #disable causal if running window
+            stage = 1  # disable causal if running window
         extra_kern_args = {}
         # Tuning for AMD target
         if is_hip():
@@ -651,11 +776,13 @@ class TritonAttention(torch.autograd.Function):
             dummy_block = [1, 1]
             desc_q = TensorDescriptor(q, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
             if q.dtype == torch.float8_e5m2:
-                desc_v = TensorDescriptor(v, shape=[HEAD_DIM_K, y_dim], strides=[q.shape[2], 1],
-                                          block_shape=dummy_block)
+                desc_v = TensorDescriptor(
+                    v, shape=[HEAD_DIM_K, y_dim], strides=[q.shape[2], 1], block_shape=dummy_block
+                )
             else:
-                desc_v = TensorDescriptor(v, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1],
-                                          block_shape=dummy_block)
+                desc_v = TensorDescriptor(
+                    v, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block
+                )
             desc_k = TensorDescriptor(k, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
             desc_o = TensorDescriptor(o, shape=[y_dim, HEAD_DIM_K], strides=[HEAD_DIM_K, 1], block_shape=dummy_block)
         else:
@@ -679,9 +806,14 @@ class TritonAttention(torch.autograd.Function):
             else:
                 extra_kern_args["maxnreg"] = 80
         _attn_fwd[grid](
-            sm_scale, M,  #
-            q.shape[0], q.shape[1],  #
-            desc_q, desc_k, desc_v, desc_o,  #
+            sm_scale,
+            M,  #
+            q.shape[0],
+            q.shape[1],  #
+            desc_q,
+            desc_k,
+            desc_v,
+            desc_o,  #
             N_CTX=q.shape[2],  #
             HEAD_DIM=HEAD_DIM_K,  #
             WINDOW=window,
@@ -689,7 +821,8 @@ class TritonAttention(torch.autograd.Function):
             STAGE=stage,  #
             warp_specialize=warp_specialize,  #
             IS_HOPPER=is_hopper(),  #
-            **extra_kern_args)
+            **extra_kern_args,
+        )
 
         ctx.save_for_backward(q, k, v, o, M)
         ctx.sm_scale = sm_scale
@@ -724,19 +857,30 @@ class TritonAttention(torch.autograd.Function):
         pre_grid = (N_CTX // PRE_BLOCK, BATCH * N_HEAD)
         delta = torch.empty_like(M)
         _attn_bwd_preprocess[pre_grid](
-            o, do,  #
-            delta,  #
-            BATCH, N_HEAD, N_CTX,  #
-            BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM  #
+            o, do, delta, BATCH, N_HEAD, N_CTX, BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM  #  #  #  #
         )
         grid = (N_CTX // BLOCK_N1, 1, BATCH * N_HEAD)
         _attn_bwd[grid](
-            q, arg_k, v, ctx.sm_scale, do, dq, dk, dv,  #
-            M, delta,  #
-            q.stride(0), q.stride(1), q.stride(2), q.stride(3),  #
-            N_HEAD, N_CTX,  #
-            BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,  #
-            BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,  #
+            q,
+            arg_k,
+            v,
+            ctx.sm_scale,
+            do,
+            dq,
+            dk,
+            dv,  #
+            M,
+            delta,  #
+            q.stride(0),
+            q.stride(1),
+            q.stride(2),
+            q.stride(3),  #
+            N_HEAD,
+            N_CTX,  #
+            BLOCK_M1=BLOCK_M1,
+            BLOCK_N1=BLOCK_N1,  #
+            BLOCK_M2=BLOCK_M2,
+            BLOCK_N2=BLOCK_N2,  #
             BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,  #
             HEAD_DIM=ctx.HEAD_DIM,  #
             num_warps=NUM_WARPS,  #
@@ -748,8 +892,7 @@ class TritonAttention(torch.autograd.Function):
         return dq, dk, dv, None, None, None, None
 
 
-
-TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2')
+TORCH_HAS_FP8 = hasattr(torch, "float8_e5m2")
 
 
 @pytest.mark.parametrize("Z", [1, 4])
@@ -758,7 +901,7 @@ TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2')
 @pytest.mark.parametrize("HEAD_DIM", [64, 128])
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("warp_specialize", [False, True] if is_blackwell() else [False])
-@pytest.mark.parametrize("window", [0,512])
+@pytest.mark.parametrize("window", [0, 512])
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("provider", ["triton-fp16"] + (["triton-fp8"] if TORCH_HAS_FP8 else []))
 def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provider, dtype=torch.float16):
@@ -769,12 +912,12 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provid
         pytest.skip("Backward pass with FP8 is not supported.")
     if window > 0 and causal:
         pytest.skip("Causal and sliding window together not supported")
-    #if window > 0 and mode == "bwd":
+    # if window > 0 and mode == "bwd":
     #    pytest.skip("Sliding window only supported in fwd pass")
     torch.manual_seed(20)
-    q = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_())
-    k = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_())
-    v = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_())
+    q = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
+    k = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
+    v = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
     sm_scale = 0.5
     # reference implementation
     ref_dtype = dtype
@@ -791,7 +934,7 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provid
         # Create sliding window mask
         positions = torch.arange(N_CTX, device="cuda")
         mask = abs(positions[:, None] - positions[None, :]) <= window
-        #print(~mask)
+        # print(~mask)
         p[:, :, ~mask] = float("-inf")
     p = torch.softmax(p.float(), dim=-1)
     p = p.to(ref_dtype)
@@ -829,98 +972,3 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provid
     torch.testing.assert_close(tri_dv, ref_dv, atol=1e-2, rtol=rtol)
     torch.testing.assert_close(tri_dk, ref_dk, atol=1e-2, rtol=rtol)
     torch.testing.assert_close(tri_dq, ref_dq, atol=1e-2, rtol=rtol)
-
-
-try:
-    from flash_attn.flash_attn_interface import \
-        flash_attn_qkvpacked_func as flash_attn_func
-    HAS_FLASH = True
-except BaseException:
-    HAS_FLASH = False
-
-TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2')
-BATCH, N_HEADS = 4, 32
-# vary seq length for fixed head and batch=4
-configs = []
-for HEAD_DIM in [64, 128]:
-    for mode in ["fwd", "bwd"]:
-        for causal in [True, False]:
-            for window in [0, 512]:
-                # Enable warpspec for causal fwd on Hopper
-                enable_ws = mode == "fwd" and (is_blackwell() or (is_hopper() and not causal))
-                for warp_specialize in [False, True] if enable_ws else [False]:
-                    if not (causal and window > 0):
-                        configs.append(
-                            triton.testing.Benchmark(
-                                x_names=["N_CTX"],
-                                x_vals=[2**i for i in range(10, 15)],
-                                line_arg="provider",
-                                line_vals=["triton-fp16"] + (["triton-fp8"] if TORCH_HAS_FP8 else []) +
-                                (["flash"] if HAS_FLASH else []),
-                                line_names=["Triton [FP16]"] + (["Triton [FP8]"] if TORCH_HAS_FP8 else []) +
-                                (["Flash-2"] if HAS_FLASH else []),
-                                styles=[("red", "-"), ("blue", "-"), ("green", "-")],
-                                ylabel="TFLOPS",
-                                plot_name=
-                                f"fused-attention-batch{BATCH}-head{N_HEADS}-d{HEAD_DIM}-{mode}-causal={causal}-window={window}-warp_specialize={warp_specialize}",
-                                args={
-                                    "H": N_HEADS,
-                                    "BATCH": BATCH,
-                                    "HEAD_DIM": HEAD_DIM,
-                                    "mode": mode,
-                                    "causal": causal,
-                                    "window": window,
-                                    "warp_specialize": warp_specialize,
-                                },
-                            ))
-
-
-@triton.testing.perf_report(configs)
-def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, causal, window, warp_specialize, mode, provider, device=DEVICE):
-    assert mode in ["fwd", "bwd"]
-    dtype = torch.float16
-    if "triton" in provider:
-        q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
-        k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
-        v = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
-        if mode == "fwd" and "fp8" in provider:
-            q = q.to(torch.float8_e5m2)
-            k = k.to(torch.float8_e5m2)
-            v = v.permute(0, 1, 3, 2).contiguous()
-            v = v.permute(0, 1, 3, 2)
-            v = v.to(torch.float8_e5m2)
-        sm_scale = 1.3
-        fn = lambda: attention(q, k, v, causal, window, sm_scale, warp_specialize)
-        if mode == "bwd":
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn)
-
-    if provider == "flash":
-        flash_window = (-1,-1) if window == 0 else  (window,window)
-        qkv = torch.randn((BATCH, N_CTX, 3, H, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
-        fn = lambda: flash_attn_func(qkv, causal=causal, window_size=flash_window)
-        if mode == "bwd":
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn)
-
-    return_flops=False
-    if return_flops:
-        flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX * HEAD_DIM
-        total_flops = 2 * flops_per_matmul
-        if causal:
-            total_flops *= 0.5
-        if mode == "bwd":
-            total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
-        return total_flops * 1e-12 / (ms * 1e-3)
-    else:
-        return ms 
-
-
-if __name__ == "__main__":
-    # only works on post-Ampere GPUs right now
-    bench_flash_attention.run(save_path=".", print_data=True)
-
