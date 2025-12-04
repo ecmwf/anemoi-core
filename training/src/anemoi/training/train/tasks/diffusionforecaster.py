@@ -83,7 +83,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        weights: torch.Tensor,
+        weights: torch.Tensor | None = None,
         grid_shard_slice: slice | None = None,
         **_kwargs,
     ) -> torch.Tensor:
@@ -107,6 +107,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         torch.Tensor
             Computed loss with noise weighting applied
         """
+        assert weights is not None, f"{self.__class__.__name__} must be provided for diffusion loss computation."
         return self.loss(
             y_pred,
             y,
@@ -114,75 +115,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
             grid_shard_slice=grid_shard_slice,
             group=self.model_comm_group,
         )
-
-    def compute_loss_metrics(
-        self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        validation_mode: bool = False,
-        y_pred_state: torch.Tensor | None = None,
-        y_state: torch.Tensor | None = None,
-        **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
-        """Compute loss on tendencies and metrics on states.
-
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Predicted tendencies
-        y : torch.Tensor
-            Target tendencies
-        rollout_step : int
-            Current rollout step
-        validation_mode : bool
-            Whether to compute validation metrics
-        y_pred_state : torch.Tensor, optional
-            Predicted states (for validation metrics)
-        y_state : torch.Tensor, optional
-            Target states (for validation metrics)
-        **kwargs
-            Additional arguments (including weights for diffusion)
-
-        Returns
-        -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
-            Loss and metrics dictionary (if validation_mode)
-        """
-        # Prepare tendencies for loss computation
-        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
-            y_pred,
-            y,
-            validation_mode,
-        )
-
-        # Compute loss on tendencies
-        loss = self._compute_loss(
-            y_pred=y_pred_full,
-            y=y_full,
-            grid_shard_slice=grid_shard_slice,
-            **kwargs,
-        )
-
-        # Compute metrics on states if in validation mode
-        metrics_next = {}
-        if validation_mode:
-            if y_pred_state is not None and y_state is not None:
-                # Prepare states for metrics computation. In case of tendency-based model, these have to be provided.
-                y_pred_state_full, y_state_full, grid_shard_slice_metrics = self._prepare_tensors_for_loss(
-                    y_pred_state,
-                    y_state,
-                    validation_mode,
-                )
-            else:
-                y_pred_state_full, y_state_full, grid_shard_slice_metrics = y_pred_full, y_full, grid_shard_slice
-
-            metrics_next = self.calculate_val_metrics(
-                y_pred_state_full,
-                y_state_full,
-                grid_shard_slice=grid_shard_slice_metrics,
-            )
-
-        return loss, metrics_next, y_pred_full
 
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Add noise to the state."""

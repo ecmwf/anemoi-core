@@ -448,6 +448,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y_pred: torch.Tensor,
         y: torch.Tensor,
         validation_mode: bool = False,
+        y_pred_state: torch.Tensor | None = None,
+        y_state: torch.Tensor | None = None,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss and metrics for the given predictions and targets.
@@ -462,6 +464,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
+        y_pred_state : torch.Tensor, optional
+            Predicted states (for validation metrics) if they differ from y_pred (e.g., tendency-based models)
+        y_state : torch.Tensor, optional
+            Target states (for validation metrics) if they differ from y (e.g., tendency-based models)
         **kwargs
             Additional arguments to pass to loss computation
 
@@ -482,9 +488,25 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
-            metrics_next = self._compute_metrics(y_pred_full, y_full, grid_shard_slice=grid_shard_slice, **kwargs)
 
-        return loss, metrics_next, y_pred_full
+            if y_pred_state is not None and y_state is not None:
+                # Prepare states for metrics computation
+                y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
+                    y_pred_state,
+                    y_state,
+                    validation_mode,
+                )
+            else:
+                y_pred_state_full, y_state_full = y_pred_full, y_full
+
+            metrics_next = self._compute_metrics(
+                y_pred_state_full,
+                y_state_full,
+                grid_shard_slice=grid_shard_slice,
+                **kwargs,
+            )
+
+        return loss, metrics_next, y_pred_state_full
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
