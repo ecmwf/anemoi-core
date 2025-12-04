@@ -372,7 +372,10 @@ class ForecasterEnsSchema(ForecasterSchema):
     ensemble_size_per_device: PositiveInt = Field(example=1)
     "Number of ensemble member per device"
 
-
+class UncondDiffusionForecasterSchema(ForecasterSchema):
+    model_task: Literal["anemoi.training.train.tasks.GraphUncondDiffusionForecaster"] = Field(..., alias="model_task")
+    "Training objective."
+    
 class DiffusionForecasterSchema(ForecasterSchema):
     model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
     "Training objective."
@@ -400,6 +403,7 @@ TrainingSchema = Annotated[
     | ForecasterEnsSchema
     | InterpolationSchema
     | DiffusionForecasterSchema
+    | UncondDiffusionForecasterSchema
     | DiffusionTendForecasterSchema,
     Discriminator("model_task"),
 ]
