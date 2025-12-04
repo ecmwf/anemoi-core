@@ -10,6 +10,8 @@
 
 import datetime
 import logging
+from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -22,11 +24,12 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from pytorch_lightning.profilers import PyTorchProfiler
+from packaging import version
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
-from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
 
+from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_tensorboard_logger
@@ -42,8 +45,10 @@ from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
 
+PL_VERSION = version.parse(pl.__version__)
 
-class AnemoiTrainer:
+
+class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
     def __init__(self, config: DictConfig) -> None:
@@ -74,7 +79,7 @@ class AnemoiTrainer:
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
-            or bool(self.config.hardware.files.warm_start)
+            or bool(self.config.system.input.warm_start)
         )
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
@@ -99,11 +104,7 @@ class AnemoiTrainer:
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = instantiate(
-            convert_to_omegaconf(self.config).datamodule,
-            convert_to_omegaconf(self.config),
-            self.graph_data,
-        )
+        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
         self.config.data.num_features = len(datamodule.ds_train.data.variables)
         LOGGER.info("Number of data variables: %s", str(len(datamodule.ds_train.data.variables)))
         LOGGER.info("Variables: %s", str(datamodule.ds_train.data.variables))
@@ -142,12 +143,8 @@ class AnemoiTrainer:
 
         Creates the graph in all workers.
         """
-        if self.config.hardware.files.graph is not None:
-            graph_filename = Path(
-                self.config.hardware.paths.graph,
-                self.config.hardware.files.graph,
-            )
-
+        if (graph_filename := self.config.system.input.graph) is not None:
+            graph_filename = Path(graph_filename)
             if graph_filename.exists() and not self.config.graph.overwrite:
                 from anemoi.graphs.utils import get_distributed_device
 
@@ -166,22 +163,10 @@ class AnemoiTrainer:
         )
 
     @cached_property
-    def truncation_data(self) -> dict:
-        """Truncation data.
-
-        Loads truncation data.
-        """
-        truncation_data = {}
-        if self.config.hardware.files.truncation is not None:
-            truncation_data["down"] = load_npz(
-                Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation),
-            )
-        if self.config.hardware.files.truncation_inv is not None:
-            truncation_data["up"] = load_npz(
-                Path(self.config.hardware.paths.truncation, self.config.hardware.files.truncation_inv),
-            )
-
-        return truncation_data
+    @abstractmethod
+    def profiler(self) -> None:
+        """Abstract method to be used for AnemoiProfiler."""
+        return None
 
     @cached_property
     def model(self) -> pl.LightningModule:
@@ -206,7 +191,6 @@ class AnemoiTrainer:
             "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
-            "truncation_data": self.truncation_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
@@ -227,7 +211,12 @@ class AnemoiTrainer:
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_task.load_from_checkpoint(
+                    self.last_checkpoint,
+                    **kwargs,
+                    strict=False,
+                    weights_only=False,  # required for Pytorch Lightning 2.6
+                )
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
@@ -288,25 +277,16 @@ class AnemoiTrainer:
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
-        warm_start_dir = getattr(self.config.hardware.paths, "warm_start", None)  # avoid breaking change
-        warm_start_file = self.config.hardware.files.warm_start
-        warm_start_path = None
+        warm_start_path = self.config.system.input.warm_start
 
-        if warm_start_dir or warm_start_file:
-            assert (
-                warm_start_dir is not None
-            ), f"Please configure config.hardware.paths.warm_start correctly, found: {warm_start_dir}"
-            assert (
-                warm_start_file is not None
-            ), f"Please configure config.hardware.files.warm_start correctly, found: {warm_start_file}"
-            warm_start_path = Path(warm_start_dir) / Path(warm_start_file)
-            msg = "Warm start checkpoint not found: %s", warm_start_path
+        if warm_start_path:
+            msg = f"Warm start checkpoint not found: {warm_start_path}"
             assert Path.is_file(warm_start_path), msg
         return warm_start_path
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
         """Returns the directory where checkpoints are stored."""
-        return Path(self.config.hardware.paths.checkpoints.parent, fork_id or self.lineage_run) / "last.ckpt"
+        return Path(self.config.system.output.checkpoints.root.parent, fork_id or self.lineage_run) / "last.ckpt"
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
@@ -316,7 +296,6 @@ class AnemoiTrainer:
 
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
         checkpoint = self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
-
         # Check if the last checkpoint exists
         if checkpoint.exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
@@ -353,32 +332,6 @@ class AnemoiTrainer:
         return self.datamodule.supporting_arrays
 
     @cached_property
-    def profiler(self) -> PyTorchProfiler | None:
-        """Returns a pytorch profiler object, if profiling is enabled."""
-        if self.config.diagnostics.profiler:
-            assert (
-                self.config.diagnostics.log.tensorboard.enabled
-            ), "Tensorboard logging must be enabled when profiling! Check your job config."
-            return PyTorchProfiler(
-                dirpath=self.config.hardware.paths.logs.tensorboard,
-                filename="anemoi-profiler",
-                export_to_chrome=False,
-                # profiler-specific keywords
-                activities=[
-                    # torch.profiler.ProfilerActivity.CPU,  # this is memory-hungry
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
-                schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    dir_name=self.config.hardware.paths.logs.tensorboard,
-                ),
-                profile_memory=True,
-                record_shapes=True,
-                with_stack=True,
-            )
-        return None
-
-    @cached_property
     def loggers(self) -> list:
         loggers = []
         if self.config.diagnostics.log.wandb.enabled:
@@ -394,17 +347,17 @@ class AnemoiTrainer:
 
     @cached_property
     def accelerator(self) -> str:
-        assert self.config.hardware.accelerator in {
+        assert self.config.system.hardware.accelerator in {
             "auto",
             "cpu",
             "gpu",
             "cuda",
             "tpu",
-        }, f"Invalid accelerator ({self.config.hardware.accelerator}) in hardware config."
+        }, f"Invalid accelerator ({self.config.system.hardware.accelerator}) in system.hardware config."
 
-        if self.config.hardware.accelerator == "cpu":
+        if self.config.system.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
-        return self.config.hardware.accelerator
+        return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
         # Log number of variables (features)
@@ -414,9 +367,9 @@ class AnemoiTrainer:
 
         # Log learning rate multiplier when running single-node, multi-GPU and/or multi-node
         total_number_of_model_instances = (
-            self.config.hardware.num_nodes
-            * self.config.hardware.num_gpus_per_node
-            / self.config.hardware.num_gpus_per_model
+            self.config.system.hardware.num_nodes
+            * self.config.system.hardware.num_gpus_per_node
+            / self.config.system.hardware.num_gpus_per_model
         )
 
         LOGGER.info(
@@ -455,16 +408,22 @@ class AnemoiTrainer:
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.lineage_run = self.parent_run_server2server or self.run_id
-            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
-            self.config.hardware.paths.plots = Path(self.config.hardware.paths.plots, self.lineage_run)
+            self.config.system.output.checkpoints.root = Path(
+                self.config.system.output.checkpoints.root,
+                self.lineage_run,
+            )
+            self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
         elif self.config.training.fork_run_id:
             # WHEN USING MANY NODES/GPUS
             self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
             # Only rank non zero in the forked run will go here
-            self.config.hardware.paths.checkpoints = Path(self.config.hardware.paths.checkpoints, self.lineage_run)
+            self.config.system.output.checkpoints.root = Path(
+                self.config.system.output.checkpoints.root,
+                self.lineage_run,
+            )
 
-        LOGGER.info("Checkpoints path: %s", self.config.hardware.paths.checkpoints)
-        LOGGER.info("Plots path: %s", self.config.hardware.paths.plots)
+        LOGGER.info("Checkpoints path: %s", self.config.system.output.checkpoints)
+        LOGGER.info("Plots path: %s", self.config.system.output.plots)
 
     @rank_zero_only
     def _check_dry_run(self) -> None:
@@ -477,12 +436,21 @@ class AnemoiTrainer:
         if self.config.diagnostics.log.mlflow.enabled:
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
-                self.mlflow_logger._parent_dry_run and not Path(self.config.hardware.paths.checkpoints).is_dir()
+                self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints).is_dir()
             )
             self.start_from_checkpoint = (
                 False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint
             )
             LOGGER.info("Dry run: %s", self.dry_run)
+
+    def prepare_compilation(self) -> None:
+
+        if hasattr(self.config.model, "compile"):
+            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
+        if hasattr(self.config.training, "recompile_limit"):
+            torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
+            LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
 
     @cached_property
     def strategy(self) -> Any:
@@ -490,6 +458,28 @@ class AnemoiTrainer:
             convert_to_omegaconf(self.config).training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
+
+    @cached_property
+    def fit_parameters(self) -> Any:
+        """Options to be passed to trainer.fit().
+
+        This builds up different arguments based on the version of pytorch lightning.
+        From 2.6 onwards pytorch-lightning has now exposed the weights_only flag to be
+        consistent with Pytorch's behaviour.
+        Refer to https://docs.pytorch.org/docs/stable/generated/torch.load.html for more details.
+        `weights_only` does not refer to loading the optimizer. Pytorch_lightning controls this
+        via the checkpoint connector. If a ckpt_path is passed then all states are loaded. If no ckpt_path
+        is passed and just the `load_from_checkpoint` interface is used - then optimizer states are skipped.
+        """
+        params = {}
+
+        params["model"] = self.model
+        params["datamodule"] = self.datamodule
+        params["ckpt_path"] = None if (self.load_weights_only) else self.last_checkpoint
+
+        if version.parse("2.6.0") <= PL_VERSION:
+            params["weights_only"] = False
+        return params
 
     def train(self) -> None:
         """Training entry point."""
@@ -501,12 +491,13 @@ class AnemoiTrainer:
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
-            devices=self.config.hardware.num_gpus_per_node,
-            num_nodes=self.config.hardware.num_nodes,
+            devices=self.config.system.hardware.num_gpus_per_node,
+            num_nodes=self.config.system.hardware.num_nodes,
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
             logger=self.loggers,
+            profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,
             # run a fixed no of batches per epoch (helpful when debugging)
             limit_train_batches=self.config.dataloader.limit_batches.training,
@@ -517,21 +508,18 @@ class AnemoiTrainer:
             gradient_clip_algorithm=self.config.training.gradient_clip.algorithm,
             # we have our own DDP-compliant sampler logic baked into the dataset
             use_distributed_sampler=False,
-            profiler=self.profiler,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
+        self.prepare_compilation()
+
         LOGGER.debug("Starting training..")
 
-        trainer.fit(
-            self.model,
-            datamodule=self.datamodule,
-            ckpt_path=None if (self.load_weights_only) else self.last_checkpoint,
-        )
+        trainer.fit(**self.fit_parameters)
 
         if self.config.diagnostics.print_memory_summary:
-            LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
+            LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
 
         LOGGER.debug("---- DONE. ----")
 

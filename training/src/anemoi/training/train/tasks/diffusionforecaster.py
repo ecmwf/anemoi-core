@@ -37,7 +37,6 @@ class GraphDiffusionForecaster(GraphForecaster):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -48,7 +47,6 @@ class GraphDiffusionForecaster(GraphForecaster):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
@@ -103,7 +101,7 @@ class GraphDiffusionForecaster(GraphForecaster):
             group=self.model_comm_group,
         )
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
@@ -167,17 +165,17 @@ class GraphDiffusionForecaster(GraphForecaster):
             )  # shape is (bs, ens, latlon, nvar)
 
             # Use checkpoint for compute_loss_metrics
-            loss, metrics_next = checkpoint(
+            loss, metrics_next, y_pred = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                rollout_step,
-                validation_mode,
+                step=rollout_step,
+                validation_mode=validation_mode,
                 weights=noise_weights,
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred
 
@@ -208,7 +206,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        truncation_data: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
@@ -219,7 +216,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            truncation_data=truncation_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
@@ -231,7 +227,6 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        rollout_step: int,
         validation_mode: bool = False,
         y_pred_state: torch.Tensor = None,
         y_state: torch.Tensor = None,
@@ -285,16 +280,15 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 y_state,
                 validation_mode,
             )
-            metrics_next = self._compute_metrics(
+            metrics_next = self.calculate_val_metrics(
                 y_pred_state_full,
                 y_state_full,
-                rollout_step,
-                grid_shard_slice_metrics,
+                grid_shard_slice=grid_shard_slice_metrics,
             )
 
         return loss, metrics_next
 
-    def rollout_step(
+    def _rollout_step(
         self,
         batch: torch.Tensor,
         rollout: int | None = None,
@@ -400,14 +394,14 @@ class GraphDiffusionTendForecaster(GraphDiffusionForecaster):
                 self.compute_loss_metrics,
                 tendency_pred,
                 tendency_target,
-                rollout_step,
-                validation_mode,
-                y_pred,
-                y,
+                y_pred_state=y_pred,
+                y_state=y,
+                step=rollout_step,
+                validation_mode=validation_mode,
                 weights=noise_weights,
                 use_reentrant=False,
             )
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+            x = self._advance_input(x, y_pred, batch, rollout_step)
 
             yield loss, metrics_next, y_pred

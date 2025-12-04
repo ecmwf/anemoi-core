@@ -49,8 +49,10 @@ class SphericalAreaWeightSchema(BaseModel):
 
 
 class CutOutMaskSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.attributes.CutOutMask"] = Field(..., alias="_target_")
-    "Implementation of the cutout mask from anemoi.graphs.nodes.attributes."
+    target_: Literal["anemoi.graphs.nodes.attributes.CutOutMask", "anemoi.graphs.nodes.attributes.LimitedAreaMask"] = (
+        Field(..., alias="_target_")
+    )
+    "Implementation of the area masks from anemoi.graphs.nodes.attributes."
 
 
 class GridsMaskSchema(BaseModel):
