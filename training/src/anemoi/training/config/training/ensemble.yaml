@@ -68,8 +68,8 @@ loss_gradient_scaling: False
 training_loss:
   # loss class to initialise, can be anything subclassing torch.nn.Module
   _target_: anemoi.training.losses.MultiscaleLossWrapper
-  truncation_path: ${hardware.paths.truncation}
-  filenames: ${hardware.files.truncation_loss}
+  truncation_path: ${system.input.truncation_loss_path}
+  filenames: ${system.input.truncation_loss}
   weights:
     - 1.0
     - 1.0
@@ -106,31 +106,8 @@ validation_metrics:
   multiscale:
     _target_: anemoi.training.losses.MultiscaleLossWrapper
 
-    truncation_path: ${hardware.paths.truncation}
-    filenames: ${hardware.files.truncation_loss}
-    keep_batch_sharded: ${model.keep_batch_sharded}
-    weights:
-     - 1.0
-     - 1.0
-
-    internal_loss:
-      _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-      scalers: ['node_weights']
-
-      # Scalers to include in loss calculation
-      # A selection of available scalers are listed in training/scalers.
-      # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-      # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-      # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-      ignore_nans: False
-      no_autocast: True
-      alpha: 1.0
-
-  multiscale:
-    _target_: anemoi.training.losses.MultiscaleLossWrapper
-
-    truncation_path: ${hardware.paths.truncation}
-    filenames: ${hardware.files.truncation_loss}
+    truncation_path: ${system.input.truncation_loss_path}
+    filenames: ${system.input.truncation_loss}
     keep_batch_sharded: ${model.keep_batch_sharded}
     weights:
      - 1.0
@@ -146,7 +123,10 @@ validation_metrics:
       # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
       # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
       ignore_nans: False
+      no_autocast: True
       alpha: 1.0
+
+
 
 
 # Variable groups definition for scaling

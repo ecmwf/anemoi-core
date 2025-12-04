@@ -689,7 +689,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         del batch_idx
 
         with torch.no_grad():
-            val_loss, metrics, *args = self._step(batch, validation_mode=True)
+            val_loss, _, metrics, *args = self._step(batch, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",
