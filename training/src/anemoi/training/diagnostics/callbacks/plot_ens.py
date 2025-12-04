@@ -54,11 +54,11 @@ class EnsemblePlotMixin:
         # For ensemble models, batch is a tuple - allgather the full batch first
         batch = pl_module.allgather_batch(batch)
         # Extract ensemble predictions
-        loss, y_preds, _ = output
+        loss, y_preds = output
         y_preds = [pl_module.allgather_batch(pred) for pred in y_preds]
 
-        # Return batch[0] (normalized data) and structured output like regular forecaster
-        return batch[0] if isinstance(batch, list | tuple) else batch, [loss, y_preds]
+        # Return batch (normalized data) and structured output like regular forecaster
+        return batch, [loss, y_preds]
 
     def _get_output_times(self, config: BaseSchema, pl_module: pl.LightningModule) -> tuple:
         """Return times outputted by the model."""
@@ -101,7 +101,8 @@ class EnsemblePlotMixin:
         # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
         # but internal ones would be on the cpu), The lines below allow to address this problem
         if self.latlons is None:
-            self.latlons = np.rad2deg(pl_module.latlons_data.clone().cpu().numpy())
+            self.latlons = pl_module.model.model._graph_data[pl_module.model.model._graph_name_data].x.detach()
+            self.latlons = self.latlons.cpu().numpy()
 
         input_tensor = (
             batch[
