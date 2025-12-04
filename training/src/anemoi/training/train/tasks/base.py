@@ -506,7 +506,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 **kwargs,
             )
 
-        return loss, metrics_next, y_pred_state_full
+        return loss, metrics_next, y_pred_state_full if validation_mode else None
 
     def on_after_batch_transfer(self, batch: torch.Tensor, _: int) -> torch.Tensor:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
