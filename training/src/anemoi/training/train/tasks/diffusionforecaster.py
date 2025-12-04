@@ -299,14 +299,15 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             )
             raise AttributeError(msg)
 
+        x_ref = batch[:, self.multi_step - 1, ...]
         x_ref = self.model.model.apply_reference_state_truncation(
-            x,
+            x_ref,
             self.grid_shard_shapes,
             self.model_comm_group,
         )
 
         tendency_target = self.model.model.compute_tendency(
-            y,
+            batch[:, self.multi_step - 1, ...],
             x_ref,
             self.model.pre_processors,
             self.model.pre_processors_tendencies,
