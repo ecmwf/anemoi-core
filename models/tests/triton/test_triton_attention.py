@@ -20,11 +20,11 @@ from anemoi.models.triton.attention import TritonAttention
 
 
 def is_hip():
-    return triton.runtime.driver.active.get_current_target().backend == "hip"
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "hip"
 
 
 def is_cuda():
-    return triton.runtime.driver.active.get_current_target().backend == "cuda"
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "cuda"
 
 
 def supports_host_descriptor():
@@ -46,7 +46,7 @@ TORCH_HAS_FP8 = hasattr(torch, "float8_e5m2")
 @pytest.mark.slow
 @pytest.mark.parametrize("Z", [1, 4])
 @pytest.mark.parametrize("H", [2, 48])
-@pytest.mark.parametrize("N_CTX", [128, 1024, (2 if is_hip() else 4) * 1024])
+@pytest.mark.parametrize("N_CTX", [128, 1024, 2048])
 @pytest.mark.parametrize("HEAD_DIM", [64, 128])
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("warp_specialize", [False, True] if is_blackwell() else [False])

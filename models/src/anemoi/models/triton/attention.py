@@ -23,12 +23,13 @@ import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
+
 def is_hip():
-    return triton.runtime.driver.active.get_current_target().backend == "hip"
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "hip"
 
 
 def is_cuda():
-    return triton.runtime.driver.active.get_current_target().backend == "cuda"
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "cuda"
 
 
 def supports_host_descriptor():
@@ -157,29 +158,31 @@ def _host_descriptor_pre_hook(nargs):
     nargs["desc_o"].block_shape = [BLOCK_M, HEAD_DIM]
 
 
-if is_hip():
-    NUM_STAGES_OPTIONS = [1]
-elif supports_host_descriptor():
-    NUM_STAGES_OPTIONS = [2, 3, 4]
-else:
-    NUM_STAGES_OPTIONS = [2, 3, 4]
+def _generate_configs():
+    if is_hip():
+        NUM_STAGES_OPTIONS = [1]
+    elif supports_host_descriptor():
+        NUM_STAGES_OPTIONS = [2, 3, 4]
+    else:
+        NUM_STAGES_OPTIONS = [2, 3, 4]
 
-configs = [
-    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook)
-    for BM in [64, 128]
-    for BN in [32, 64, 128]
-    for s in NUM_STAGES_OPTIONS
-    for w in [4, 8]
-]
-
-if "PYTEST_VERSION" in os.environ:
-    # Use a single config in testing for reproducibility
     configs = [
-        triton.Config(dict(BLOCK_M=128, BLOCK_N=64), num_stages=2, num_warps=4, pre_hook=_host_descriptor_pre_hook),
+        triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook)
+        for BM in [64, 128]
+        for BN in [32, 64, 128]
+        for s in NUM_STAGES_OPTIONS
+        for w in [4, 8]
     ]
 
+    if "PYTEST_VERSION" in os.environ:
+        # Use a single config in testing for reproducibility
+        configs = [
+            triton.Config(dict(BLOCK_M=128, BLOCK_N=64), num_stages=2, num_warps=4, pre_hook=_host_descriptor_pre_hook),
+        ]
+    return configs
 
-def keep(conf):
+
+def _keep(conf):
     BLOCK_M = conf.kwargs["BLOCK_M"]
     BLOCK_N = conf.kwargs["BLOCK_N"]
     return not (
@@ -190,7 +193,7 @@ def keep(conf):
     )
 
 
-def prune_invalid_configs(configs, named_args, **kwargs):
+def _prune_invalid_configs(configs, named_args, **kwargs):
     N_CTX = kwargs["N_CTX"]
 
     # Filter out configs where BLOCK_M > N_CTX
@@ -206,9 +209,9 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
 
 
 @triton.autotune(
-    configs=list(filter(keep, configs)),
+    configs=list(filter(_keep, _generate_configs())),
     key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
-    prune_configs_by={"early_config_prune": prune_invalid_configs},
+    prune_configs_by={"early_config_prune": _prune_invalid_configs},
 )
 @triton.jit
 def _attn_fwd(
