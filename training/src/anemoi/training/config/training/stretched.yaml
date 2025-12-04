@@ -31,11 +31,14 @@ gradient_clip:
   val: 32.
   algorithm: value
 
-# stochastic weight averaging
-# https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
-swa:
-  enabled: False
-  lr: 1.e-4
+# weight averaging (SWA or EMA)
+weight_averaging: null
+# For EMA:
+#  _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+#  decay: 0.999
+# For SWA:
+#  _target_: pytorch_lightning.callbacks.StochasticWeightAveraging
+#  swa_lrs: 1.e-4
 
 # Optimizer settings
 optimizer:
