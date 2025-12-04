@@ -307,7 +307,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         )
 
         tendency_target = self.model.model.compute_tendency(
-            batch[:, self.multi_step - 1, ...],
+            batch[:, self.multi_step, ...],
             x_ref,
             self.model.pre_processors,
             self.model.pre_processors_tendencies,
