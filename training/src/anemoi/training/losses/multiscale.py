@@ -36,7 +36,7 @@ class MultiscaleLossWrapper(BaseLoss):
         filenames: list[Path | str] | None,
         weights: list[float],
         keep_batch_sharded: bool,
-        internal_loss: BaseLoss,
+        per_scale_loss: BaseLoss,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
@@ -61,7 +61,7 @@ class MultiscaleLossWrapper(BaseLoss):
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
         self.weights = weights
-        self.loss = internal_loss
+        self.loss = per_scale_loss
         self.scaler = self.loss.scaler
         self.keep_batch_sharded = keep_batch_sharded
         self.supports_sharding = True
@@ -80,9 +80,6 @@ class MultiscaleLossWrapper(BaseLoss):
             Whether to override existing scaler values, by default False
         """
         self.loss.update_scaler(name=name, scaler=scaler, override=override)
-
-    def init_loss_scales(self, dtype: torch.dtype, device: torch.device) -> None:
-        self.mloss = [torch.zeros(1, dtype=dtype, device=device, requires_grad=False) for _ in range(self.num_scales)]
 
     def load_loss_truncation_matrices(
         self,

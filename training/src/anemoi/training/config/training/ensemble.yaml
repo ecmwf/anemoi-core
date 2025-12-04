@@ -75,7 +75,7 @@ training_loss:
     - 1.0
   keep_batch_sharded: ${model.keep_batch_sharded}
 
-  internal_loss:
+  per_scale_loss:
     _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
     scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
 
@@ -136,7 +136,7 @@ validation_metrics:
      - 1.0
      - 1.0
 
-    internal_loss:
+    per_scale_loss:
       _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
       scalers: ['node_weights']
 
