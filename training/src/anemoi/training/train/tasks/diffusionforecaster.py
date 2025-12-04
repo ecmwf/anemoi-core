@@ -115,6 +115,75 @@ class BaseDiffusionForecaster(BaseGraphModule):
             group=self.model_comm_group,
         )
 
+    def compute_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        y_pred_state: torch.Tensor | None = None,
+        y_state: torch.Tensor | None = None,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        """Compute loss on tendencies and metrics on states.
+
+        Parameters
+        ----------
+        y_pred : torch.Tensor
+            Predicted tendencies
+        y : torch.Tensor
+            Target tendencies
+        rollout_step : int
+            Current rollout step
+        validation_mode : bool
+            Whether to compute validation metrics
+        y_pred_state : torch.Tensor, optional
+            Predicted states (for validation metrics)
+        y_state : torch.Tensor, optional
+            Target states (for validation metrics)
+        **kwargs
+            Additional arguments (including weights for diffusion)
+
+        Returns
+        -------
+        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
+            Loss and metrics dictionary (if validation_mode)
+        """
+        # Prepare tendencies for loss computation
+        y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
+            y_pred,
+            y,
+            validation_mode,
+        )
+
+        # Compute loss on tendencies
+        loss = self._compute_loss(
+            y_pred=y_pred_full,
+            y=y_full,
+            grid_shard_slice=grid_shard_slice,
+            **kwargs,
+        )
+
+        # Compute metrics on states if in validation mode
+        metrics_next = {}
+        if validation_mode:
+            if y_pred_state is not None and y_state is not None:
+                # Prepare states for metrics computation. In case of tendency-based model, these have to be provided.
+                y_pred_state_full, y_state_full, grid_shard_slice_metrics = self._prepare_tensors_for_loss(
+                    y_pred_state,
+                    y_state,
+                    validation_mode,
+                )
+            else:
+                y_pred_state_full, y_state_full, grid_shard_slice_metrics = y_pred_full, y_full, grid_shard_slice
+
+            metrics_next = self.calculate_val_metrics(
+                y_pred_state_full,
+                y_state_full,
+                grid_shard_slice=grid_shard_slice_metrics,
+            )
+
+        return loss, metrics_next, y_pred_full
+
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Add noise to the state."""
         return x + torch.randn_like(x) * sigma
@@ -184,11 +253,11 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
 
         # Use checkpoint for compute_loss_metrics
-        loss, metrics = checkpoint(
+        loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
             y,
-            validation_model=validation_mode,
+            validation_mode=validation_mode,
             weights=noise_weights,
             use_reentrant=False,
         )
@@ -198,71 +267,6 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
 class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     """Graph neural network forecaster for diffusion tendency prediction."""
-
-    def compute_loss_metrics(
-        self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        validation_mode: bool = False,
-        y_pred_state: torch.Tensor = None,
-        y_state: torch.Tensor = None,
-        **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
-        """Compute loss on tendencies and metrics on states.
-
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Predicted tendencies
-        y : torch.Tensor
-            Target tendencies
-        rollout_step : int
-            Current rollout step
-        validation_mode : bool
-            Whether to compute validation metrics
-        y_pred_state : torch.Tensor, optional
-            Predicted states (for validation metrics)
-        y_state : torch.Tensor, optional
-            Target states (for validation metrics)
-        **kwargs
-            Additional arguments (including weights for diffusion)
-
-        Returns
-        -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor]]
-            Loss and metrics dictionary (if validation_mode)
-        """
-        # Prepare tendencies for loss computation
-        tendency_pred_full, tendency_full, grid_shard_slice = self._prepare_tensors_for_loss(
-            y_pred,
-            y,
-            validation_mode,
-        )
-
-        # Compute loss on tendencies
-        loss = self._compute_loss(
-            y_pred=tendency_pred_full,
-            y=tendency_full,
-            grid_shard_slice=grid_shard_slice,
-            **kwargs,
-        )
-
-        # Compute metrics on states if in validation mode
-        metrics_next = {}
-        if validation_mode and y_pred_state is not None and y_state is not None:
-            # Prepare states for metrics computation
-            y_pred_state_full, y_state_full, grid_shard_slice_metrics = self._prepare_tensors_for_loss(
-                y_pred_state,
-                y_state,
-                validation_mode,
-            )
-            metrics_next = self.calculate_val_metrics(
-                y_pred_state_full,
-                y_state_full,
-                grid_shard_slice=grid_shard_slice_metrics,
-            )
-
-        return loss, metrics_next
 
     def _step(
         self,
@@ -327,13 +331,9 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         tendency_target_noised = self._noise_target(tendency_target, sigma)
 
         # prediction, fwd_with_preconditioning
-        tendency_pred = self(
-            x,
-            tendency_target_noised,
-            sigma,
-        )  # shape is (bs, ens, latlon, nvar)
+        tendency_pred = self(x, tendency_target_noised, sigma)  # shape is (bs, ens, latlon, nvar)
 
-        y_pred, y = None, None
+        y_pred = None
         if validation_mode:
             # re-construct predicted state, de-normalised
             y_pred = self.model.model.add_tendency_to_state(
@@ -345,7 +345,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             )
 
         # compute_loss_metrics
-        loss, metrics = checkpoint(
+        loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             tendency_pred,
             tendency_target,
