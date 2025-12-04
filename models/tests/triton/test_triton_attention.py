@@ -43,6 +43,7 @@ TORCH_HAS_FP8 = hasattr(torch, "float8_e5m2")
 
 
 @pytest.mark.gpu
+@pytest.mark.slow
 @pytest.mark.parametrize("Z", [1, 4])
 @pytest.mark.parametrize("H", [2, 48])
 @pytest.mark.parametrize("N_CTX", [128, 1024, (2 if is_hip() else 4) * 1024])
@@ -52,7 +53,7 @@ TORCH_HAS_FP8 = hasattr(torch, "float8_e5m2")
 @pytest.mark.parametrize("window", [0, 512])
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("provider", ["triton-fp16"] + (["triton-fp8"] if TORCH_HAS_FP8 else []))
-def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provider, dtype=torch.float16):
+def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provider, dtype=torch.float16):
     attention = TritonAttention.apply
     if mode == "fwd" and "fp16" in provider:
         pytest.skip("Avoid running the forward computation twice.")
@@ -60,10 +61,11 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provid
         pytest.skip("Backward pass with FP8 is not supported.")
     if window > 0 and causal:
         pytest.skip("Causal and sliding window together not supported")
-    # if window > 0 and mode == "bwd":
-    #    pytest.skip("Sliding window only supported in fwd pass")
     torch.manual_seed(20)
-    DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    try:
+        DEVICE = triton.runtime.driver.active.get_active_torch_device()
+    except RuntimeError:
+        pytest.skip("No GPU detected")
 
     q = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
     k = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
