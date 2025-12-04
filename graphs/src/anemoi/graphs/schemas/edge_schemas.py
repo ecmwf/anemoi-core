@@ -67,9 +67,20 @@ class MultiScaleEdgeSchema(BaseModel):
         "anemoi.graphs.edges.MultiScaleEdges",
         alias="_target_",
     )
-    "Multi-casle edges implementation from anemoi.graphs.edges."
+    "Multi-scale edges implementation from anemoi.graphs.edges."
     x_hops: PositiveInt = Field(example=1)
     "Number of hops (in the refined icosahedron) between two nodes to connect them with an edge. Default to 1."
+    scale_resolutions: PositiveInt | list[PositiveInt] | None = Field(examples=[1, 2, 3, 4, 5])
+    "Specifies the resolution scales for computing the hop neighbourhood."
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to source nodes of the edges. Default to None."
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to target nodes of the edges. Default to None."
+
+
+class HEALPixMultiScaleEdgesSchema(BaseModel):
+    target_: Literal["anemoi.graphs.edges.HEALPixMultiScaleEdges"] = Field(..., alias="_target_")
+    "HEALPix multi-scale edges implementation from anemoi.graphs.edges."
     scale_resolutions: PositiveInt | list[PositiveInt] | None = Field(examples=[1, 2, 3, 4, 5])
     "Specifies the resolution scales for computing the hop neighbourhood."
     source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
@@ -100,6 +111,6 @@ class EdgeAttributeSchema(BaseModel):
 
 
 EdgeBuilderSchemas = Annotated[
-    KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | ICONTopologicalEdgeSchema,
+    KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | HEALPixMultiScaleEdgesSchema | ICONTopologicalEdgeSchema,
     Field(discriminator="target_"),
 ]
