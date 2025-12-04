@@ -18,8 +18,6 @@ import triton
 
 from anemoi.models.triton.attention import TritonAttention
 
-DEVICE = triton.runtime.driver.active.get_active_torch_device()
-
 
 def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
@@ -44,6 +42,7 @@ def is_hopper():
 TORCH_HAS_FP8 = hasattr(torch, "float8_e5m2")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("Z", [1, 4])
 @pytest.mark.parametrize("H", [2, 48])
 @pytest.mark.parametrize("N_CTX", [128, 1024, (2 if is_hip() else 4) * 1024])
@@ -64,6 +63,8 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, warp_specialize, window, mode, provid
     # if window > 0 and mode == "bwd":
     #    pytest.skip("Sliding window only supported in fwd pass")
     torch.manual_seed(20)
+    DEVICE = triton.runtime.driver.active.get_active_torch_device()
+
     q = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
     k = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
     v = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
