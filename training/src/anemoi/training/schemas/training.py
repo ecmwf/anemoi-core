@@ -280,8 +280,6 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
     combined = "anemoi.training.losses.combined.CombinedLoss"
-    fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
-    lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
 
 
 class BaseLossSchema(BaseModel):
@@ -342,7 +340,7 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
+    losses: list[BaseLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
