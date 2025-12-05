@@ -121,12 +121,14 @@ class SparseProjector(torch.nn.Module):
         # This has to be called in the forward because sparse tensors cannot be registered as buffers,
         # as they can't be broadcast correctly when using DDP.
         self.projection_matrix = self.projection_matrix.to(x.device)
+        dtype = x.dtype
+        x = x.to(self.projection_matrix.dtype)
 
         out = []
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
             for i in range(x.shape[0]):
                 out.append(torch.sparse.mm(self.projection_matrix, x[i, ...]))
-        return torch.stack(out)
+        return torch.stack(out).to(dtype=dtype)
 
 
 def build_sparse_projector(
