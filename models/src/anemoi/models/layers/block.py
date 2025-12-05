@@ -34,6 +34,8 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.triton.gt import GraphTransformerFunction
+from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -444,6 +446,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         update_src_nodes: bool = False,
         edge_pre_mlp: bool = True,
         layer_kernels: DotDict,
+        graph_attention_backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -467,6 +470,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
         super().__init__(**kwargs)
 
@@ -508,6 +513,19 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             layer_kernels.Activation(),
             Linear(hidden_dim, out_channels),
         )
+
+        self.graph_attention_backend = graph_attention_backend
+        assert self.graph_attention_backend in [
+            "triton",
+            "pyg",
+        ], f"Backend {self.graph_attention_backend} not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
+
+        if self.graph_attention_backend == "triton":
+            LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
+            self.conv = GraphTransformerFunction.apply
+        else:
+            LOGGER.warning(f"{self.__class__.__name__} using pyg graph attention backend, consider using 'triton'.")
+            self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
@@ -565,6 +583,27 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         return query, key, value, edges
 
+    def apply_gt(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        size: Union[int, tuple[int, int]],
+    ) -> Tensor:
+        # self.conv requires size to be a tuple
+        conv_size = (size, size) if isinstance(size, int) else size
+
+        if self.graph_attention_backend == "triton":
+            csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
+            edges_csc = edges.index_select(0, perm)
+            args_conv = (edges_csc, csc, reverse)
+        else:
+            args_conv = (edges, edge_index, conv_size)
+
+        return self.conv(query, key, value, *args_conv)
+
     def attention_block(
         self,
         query: Tensor,
@@ -575,27 +614,19 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         size: Union[int, tuple[int, int]],
         num_chunks: int,
     ) -> Tensor:
-        # self.conv requires size to be a tuple
-        conv_size = (size, size) if isinstance(size, int) else size
-
+        # split 1-hop edges into chunks, compute self.conv chunk-wise
         if num_chunks > 1:
-            # split 1-hop edges into chunks, compute self.conv chunk-wise
             edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
                 num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
             )
             # shape: (num_nodes, num_heads, out_channels_conv)
             out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
             for i in range(num_chunks):
-                out += self.conv(
-                    query=query,
-                    key=key,
-                    value=value,
-                    edge_attr=edge_attr_list[i],
-                    edge_index=edge_index_list[i],
-                    size=conv_size,
+                out += self.apply_gt(
+                    query=query, key=key, value=value, edges=edge_attr_list[i], edge_index=edge_index_list[i], size=size
                 )
         else:
-            out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=conv_size)
+            out = self.apply_gt(query=query, key=key, value=value, edges=edges, edge_index=edge_index, size=size)
 
         return out
 
@@ -645,6 +676,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
+        graph_attention_backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -672,6 +704,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Defined in config/models/<model>.yaml
         shard_strategy: str, by default "edges"
             Strategy to shard tensors
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
 
         super().__init__(
@@ -684,6 +718,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             bias=bias,
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
+            graph_attention_backend=graph_attention_backend,
             **kwargs,
         )
 
@@ -801,6 +836,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         qk_norm: bool = False,
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
+        graph_attention_backend: str = "triton",
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -824,6 +860,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
         """
 
         super().__init__(
@@ -836,6 +874,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             bias=bias,
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
+            graph_attention_backend=graph_attention_backend,
             **kwargs,
         )
 

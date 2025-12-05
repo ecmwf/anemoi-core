@@ -29,7 +29,7 @@ class MemorySnapshotRecorder(Callback):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.dirpath = Path(self.config.hardware.paths.profiler)
+        self.dirpath = Path(self.config.system.output.profiler)
 
         self.warmup = self.config.diagnostics.benchmark_profiler.snapshot.warmup
         if not self.warmup:
