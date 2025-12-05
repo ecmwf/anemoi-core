@@ -32,13 +32,13 @@ class SpectralTransform:
         ----------
         data : torch.Tensor
             Input data in the spatial domain of expected shape
-            `[batch, time, ensemble, points, variables]`.
+            `[batch, ensemble, points, variables]`.
 
         Returns
         -------
         torch.Tensor
             Data transformed to the spectral domain, of shape
-            `[batch, time, ensemble, y_freq, x_freq, variables]`.
+            `[batch, ensemble, y_freq, x_freq, variables]`.
         """
 
 
@@ -49,7 +49,7 @@ class FFT2D(SpectralTransform):
         self,
         x_dim: int,
         y_dim: int,
-        nodes_slice: slice = slice(None),  # TODO: generic indexing class
+        nodes_slice: tuple[int, int] = (0, None),
     ) -> None:
         """2D FFT Transform.
 
@@ -62,23 +62,26 @@ class FFT2D(SpectralTransform):
         """
         self.x_dim = x_dim
         self.y_dim = y_dim
-        self.nodes_slice = nodes_slice
+        self.nodes_slice = slice(*nodes_slice)
 
     def __call__(
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = data[:, :, :, self.nodes_slice, :]
-        batch_size, time, ens, _, var = data.shape
-        # [batch, time, ens, y*x, variables] -> [batch*time*ens*variables, y, x]
-        data = einops.rearrange(data, "b t e (y x) v -> (b t e v) y x", x=self.x_dim, y=self.y_dim)
+        data = data[:, :, self.nodes_slice, :]
+        batch_size, ens, _, var = data.shape
+        # [batch, ens, y*x, variables] -> [batch*ens*variables, y, x]
+        data = einops.rearrange(data, "b e (y x) v -> (b e v) y x", x=self.x_dim, y=self.y_dim)
         fft_data = torch.fft.fft2(data)
-        # [batch*time*ens*variables, y, x] -> [batch, time, ens y, x, variables]
-        return einops.rearrange(fft_data, "(b t e v) y x -> b t e y x v", b=batch_size, t=time, e=ens, v=var)
+        # [batch**ens*variables, y, x] -> [batch, ens y, x, variables]
+        return einops.rearrange(fft_data, "(b e v) y x -> b e y x v", b=batch_size, e=ens, v=var)
 
 
 class SHT(SpectralTransform):
     """Placeholder for Spherical Harmonics Transform."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__()
 
     def __call__(
         self,

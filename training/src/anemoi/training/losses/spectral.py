@@ -11,6 +11,7 @@
 import logging
 from typing import Literal
 
+import einops
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -19,6 +20,7 @@ from anemoi.models.layers.spectral_transforms import SHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ class SpectralLoss(BaseLoss):
         kwargs : dict
             additional arguments for the spectral transform
         """
-        super().__init__(ignore_nans, **kwargs)
+        super().__init__(ignore_nans)
         if transform == "fft2d":
             self.transform = FFT2D(**kwargs)
         elif transform == "sht":
@@ -104,15 +106,24 @@ class LogSpectralDistance(SpectralLoss):
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = -2,
+        without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
 
+        is_sharded = grid_shard_slice is not None
+        group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
-        pred_spectral = self.transform(pred)
-        target_spectral = self.transform(target)
+        # temporary fix for https://github.com/ecmwf/anemoi-core/issues/725
+        if without_scalers is not None and 2 not in without_scalers and not isinstance(without_scalers[0], str):
+            without_scalers.append(2)
+        elif without_scalers is None:
+            without_scalers = [2]
+
+        # transform to spectral domain (NOTE: LSD is pointwise in spectral space so we can flatten)
+        pred_spectral = einops.rearrange(self.transform(pred), " b e y x v -> b e (y x) v")
+        target_spectral = einops.rearrange(self.transform(target), " b e y x v -> b e (y x) v")
 
         power_spectra_real = torch.abs(pred_spectral) ** 2
         power_spectra_pred = torch.abs(target_spectral) ** 2
@@ -153,16 +164,24 @@ class FourierCorrelationLoss(SpectralLoss):
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = -2,
+        without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
 
+        is_sharded = grid_shard_slice is not None
+        group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
-        # transform to spectral domain
-        pred_spectral = self.transform(pred)
-        target_spectral = self.transform(target)
+        # temporary fix for https://github.com/ecmwf/anemoi-core/issues/725
+        if without_scalers is not None and 2 not in without_scalers and not isinstance(without_scalers[0], str):
+            without_scalers.append(2)
+        elif without_scalers is None:
+            without_scalers = [2]
+
+        # transform to spectral domain (NOTE: FCL is pointwise in spectral space so we can flatten)
+        pred_spectral = einops.rearrange(self.transform(pred), " b e y x v -> b e (y x) v")
+        target_spectral = einops.rearrange(self.transform(target), " b e y x v -> b e (y x) v")
 
         # compute the cross power spectrum and numerator
         cross_power_spectrum = torch.real(pred_spectral * torch.conj(target_spectral))
@@ -172,13 +191,13 @@ class FourierCorrelationLoss(SpectralLoss):
             without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
-        numerator = self.reduce(cross_power_spectrum, squash=squash, group=group)
+        numerator = 0.5 * torch.sum(cross_power_spectrum, dim=TensorDim.GRID.value, keepdim=True)
 
         # compute the normalization using the amplitudes
         denominator = torch.sqrt(
-            self.reduce(torch.abs(pred_spectral) ** 2, squash=squash, group=group)
-            * self.reduce(torch.abs(target_spectral) ** 2, squash=squash, group=group)
+            torch.sum(torch.abs(pred_spectral) ** 2, dim=TensorDim.GRID.value, keepdim=True)
+            * torch.sum(torch.abs(target_spectral) ** 2, dim=TensorDim.GRID.value, keepdim=True)
             + eps,
         )
 
-        return 1 - numerator / denominator
+        return self.reduce(1 - numerator / denominator, squash=squash, group=group)
