@@ -14,7 +14,10 @@ noise_injector:
   noise_std: 1
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
-  inject_noise: True
+  noise_matrix: null
+  transpose_noise_matrix: false
+  row_normalize_noise_matrix: false
+  autocast: false
   layer_kernels:
     Activation:
       _target_: torch.nn.GELU
