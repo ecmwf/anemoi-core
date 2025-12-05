@@ -27,7 +27,7 @@ Example
 >>>
 >>> # List dynamically discovered components
 >>> print(ComponentCatalog.list_sources())
->>> ['local', 's3', 'http', 'gcs', 'azure']
+>>> ['http', 'local', 's3']
 >>>
 >>> # Get component target path
 >>> target = ComponentCatalog.get_source_target('s3')
@@ -89,6 +89,20 @@ class ComponentCatalog:
     ...     'bucket': 'my-bucket'
     ... }
     >>> source = instantiate(config)
+
+    See Also
+    --------
+    anemoi.utils.registry : Generic registry pattern in anemoi-utils.
+        The ComponentCatalog provides checkpoint-specific discovery that
+        complements the general registry. Future versions may consolidate
+        these patterns into a shared utility.
+
+    Notes
+    -----
+    This catalog is checkpoint-pipeline-specific and uses reflection to
+    discover components without manual registration. It differs from
+    anemoi.utils.registry which requires explicit registration but
+    provides cross-package component sharing.
     """
 
     # Cached registries (populated on first access)
@@ -253,7 +267,7 @@ class ComponentCatalog:
     def _get_expected_component_count(cls, component_type: str) -> int:
         """Get expected number of components for smart warnings."""
         expectations = {
-            "sources": 5,  # local, s3, http, gcs, azure
+            "sources": 3,  # local, s3, http
             "loaders": 4,  # weights_only, transfer_learning, warm_start, cold_start
             "modifiers": 3,  # freeze, lora, quantize (initially)
         }
@@ -296,7 +310,7 @@ class ComponentCatalog:
         --------
         >>> sources = ComponentCatalog.list_sources()
         >>> print(sources)
-        ['local', 's3', 'http', 'gcs', 'azure']
+        ['http', 'local', 's3']
         """
         return sorted(cls._get_sources().keys())
 

@@ -84,6 +84,7 @@ def detect_checkpoint_format(
             # If it's just a dict of tensors, it's a state dict
             if checkpoint and all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
                 return "state_dict"
+
             # Default to pytorch for structured checkpoints
             return "pytorch"
 

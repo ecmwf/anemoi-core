@@ -63,7 +63,7 @@ dependencies = [
   "zarr>=2.14.2",
 ]
 
-optional-dependencies.all = [  ]
+optional-dependencies.all = [ "anemoi-training[remote]" ]
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
@@ -88,9 +88,13 @@ optional-dependencies.profile = [
   "rich>=13.6",
   "tabulate>=0.9",
 ]
+optional-dependencies.remote = [
+  "aiohttp>=3.8",
+]
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",      # required to load the gnn checkpoint as part of the tests
   "anemoi-training[azure]",  # required to test the AzureMlflowLogger
+  "anemoi-training[remote]", # required to test remote checkpoint downloads
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",
