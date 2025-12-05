@@ -256,6 +256,14 @@ class NoiseConditioningSchema(BaseModel):
     "Hidden dimension of the MLP used to process the noise."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+    noise_matrix: Optional[str] = Field(default=None)
+    "Path to the noise projection matrix file (.npz). If None, no projection is applied."
+    transpose_noise_matrix: bool = Field(default=False)
+    "Whether to transpose the noise projection matrix."
+    row_normalize_noise_matrix: bool = Field(default=False)
+    "Whether to row-normalize the noise projection matrix weights."
+    autocast: bool = Field(default=False)
+    "Whether to use autocast for the noise projection matrix operations."
 
 
 class NoiseInjectorSchema(BaseModel):
