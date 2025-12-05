@@ -89,17 +89,29 @@ def create_stretched_tri_nodes(
         Order of the node coordinates to be sorted by latitude and longitude.
     """
     assert area_mask_builder is not None, "AOI mask builder must be provided to build refined grid."
-    # Get the low resolution nodes outside the AOI
+    # Get the low resolution nodes
     base_coords_rad = get_latlon_coords_icosphere(base_resolution)
+
+    # Define the low resolution outside AOI mask
     base_area_mask = ~area_mask_builder.get_mask(base_coords_rad)
 
-    # Get the high resolution nodes inside the AOI
-    lam_coords_rad = get_latlon_coords_icosphere(lam_resolution)
-    lam_area_mask = area_mask_builder.get_mask(lam_coords_rad)
+    # Get the high resolution nodes
+    coords_rad = get_latlon_coords_icosphere(lam_resolution)
 
-    coords_rad = np.concatenate([base_coords_rad[base_area_mask], lam_coords_rad[lam_area_mask]])
-
+    # Get the node ordering for all high resolution nodes
     node_ordering = get_coordinates_ordering(coords_rad)
+
+    # Define the high resolution inside AOI mask
+    lam_area_mask = area_mask_builder.get_mask(coords_rad)
+
+    # Pad the low resolution ~(AOI mask) to match the high resolution AOI mask
+    base_area_mask_padded = np.pad(base_area_mask, (0, len(lam_area_mask) - len(base_area_mask)), mode="constant")
+
+    # Define the final mask (low resolution outside AOI | high resolution inside AOI )
+    area_mask = np.logical_or(base_area_mask_padded, lam_area_mask)
+
+    # Redefine the node ordering to include final node selection
+    node_ordering = node_ordering[area_mask[node_ordering]]
 
     # Creates the graph, with the nodes sorted by latitude and longitude.
     nx_graph = create_nx_graph_from_tri_coords(coords_rad, node_ordering)
