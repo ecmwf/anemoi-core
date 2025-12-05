@@ -107,8 +107,6 @@ class RolloutEval(Callback):
     ) -> None:
         del outputs  # outputs are not used
         if batch_idx % self.every_n_batches == 0:
-            batch = pl_module.allgather_batch(batch)
-
             precision_mapping = {
                 "16-mixed": torch.float16,
                 "bf16-mixed": torch.bfloat16,
