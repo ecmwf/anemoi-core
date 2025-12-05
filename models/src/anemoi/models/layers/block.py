@@ -724,7 +724,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
-            edge_pre_mlp=edge_pre_mlp**kwargs,
+            edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         Linear = layer_kernels.Linear

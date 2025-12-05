@@ -32,6 +32,7 @@ def init_proc():
     layer_kernels = load_layer_kernels()
     qk_norm = True
     graph_attention_backend = "pyg"
+    edge_pre_mlp = False
     return (
         in_channels,
         hidden_dim,
@@ -42,6 +43,7 @@ def init_proc():
         num_heads,
         qk_norm,
         graph_attention_backend,
+        edge_pre_mlp,
     )
 
 
@@ -57,6 +59,7 @@ def block(init_proc):
         num_heads,
         qk_norm,
         graph_attention_backend,
+        edge_pre_mlp,
     ) = init_proc
     return GraphTransformerProcessorBlock(
         in_channels=in_channels,
@@ -69,6 +72,7 @@ def block(init_proc):
         update_src_nodes=False,
         qk_norm=qk_norm,
         graph_attention_backend=graph_attention_backend,
+        edge_pre_mlp=edge_pre_mlp,
     )
 
 
@@ -83,6 +87,7 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
         num_heads,
         _qk_norm,
         _backend,
+        _edge_pre_mlp,
     ) = init_proc
     assert isinstance(
         block, GraphTransformerProcessorBlock
@@ -103,6 +108,9 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
     ), "block.node_dst_mlp is not an instance of torch.nn.Sequential"
     assert block.q_norm.bias is None
     assert block.k_norm.bias is None
+    assert isinstance(
+        block.edge_pre_mlp, torch.nn.Identity
+    ), "block.edge_pre_mlp is not an instance of torch.nn.Identity"
 
 
 def test_GraphTransformerProcessorBlock_shard_qkve_heads(init_proc, block):
@@ -116,6 +124,7 @@ def test_GraphTransformerProcessorBlock_shard_qkve_heads(init_proc, block):
         num_heads,
         _qk_norm,
         _backend,
+        _edge_pre_mlp,
     ) = init_proc
     query = torch.randn(in_channels, num_heads * block.out_channels_conv)
     key = torch.randn(in_channels, num_heads * block.out_channels_conv)
@@ -141,6 +150,7 @@ def test_GraphTransformerProcessorBlock_shard_output_seq(init_proc, block):
         num_heads,
         _qk_norm,
         _backend,
+        _edge_pre_mlp,
     ) = init_proc
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
     shapes = (10, 10, 10)
@@ -161,6 +171,7 @@ def test_GraphTransformerProcessorBlock_forward_backward(init_proc, block):
         _num_heads,
         _qk_norm,
         _backend,
+        _edge_pre_mlp,
     ) = init_proc
 
     # Generate random input tensor
@@ -207,6 +218,7 @@ def test_GraphTransformerProcessorBlock_chunking(init_proc, block, monkeypatch):
         _num_heads,
         _num_chunks,
         _backend,
+        _edge_pre_mlp,
     ) = init_proc
     # Initialize GraphTransformerProcessorBlock
     block = block
@@ -247,6 +259,7 @@ def init_mapper():
     layer_kernels = load_layer_kernels()
     qk_norm = True
     graph_attention_backend = "pyg"
+    edge_pre_mlp = False
     return (
         in_channels,
         hidden_dim,
@@ -257,6 +270,7 @@ def init_mapper():
         num_heads,
         qk_norm,
         graph_attention_backend,
+        edge_pre_mlp,
     )
 
 
@@ -272,6 +286,7 @@ def mapper_block(init_mapper):
         num_heads,
         qk_norm,
         graph_attention_backend,
+        edge_pre_mlp,
     ) = init_mapper
     return GraphTransformerMapperBlock(
         in_channels=in_channels,
@@ -284,6 +299,7 @@ def mapper_block(init_mapper):
         update_src_nodes=False,
         qk_norm=qk_norm,
         graph_attention_backend=graph_attention_backend,
+        edge_pre_mlp=edge_pre_mlp,
     )
 
 
@@ -315,6 +331,9 @@ def test_GraphTransformerMapperBlock_init(init_mapper, mapper_block):
     assert isinstance(
         block.node_dst_mlp, torch.nn.Sequential
     ), "block.node_dst_mlp is not an instance of torch.nn.Sequential"
+    assert isinstance(
+        block.edge_pre_mlp, torch.nn.Identity
+    ), "block.edge_pre_mlp is not an instance of torch.nn.Identity"
 
 
 def test_GraphTransformerMapperBlock_shard_qkve_heads(init_mapper, mapper_block):
