@@ -81,6 +81,17 @@ def _attn_fwd_inner(
         lo = tl.maximum(0, (start_m * BLOCK_M) - WINDOW)
         hi = tl.minimum(N_CTX, (start_m + 1) * BLOCK_M + WINDOW)
 
+        # round up to lowest multiple if not even
+        if lo % BLOCK_N != 0:
+            lo = (lo // BLOCK_N) * BLOCK_N
+        # round up to highest multiple if not even
+        if hi % BLOCK_N != 0:
+            hi = (hi // BLOCK_N) * BLOCK_N + BLOCK_N
+        lo = tl.multiple_of(
+            lo, BLOCK_N
+        )  # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
+        hi = tl.multiple_of(hi, BLOCK_N)
+
     offsetk_y = offset_y + lo
     if dtype == tl.float8e5:
         offsetv_y = offset_y * HEAD_DIM + lo
@@ -745,7 +756,7 @@ def _attn_bwd(
 class TritonAttention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, causal, window, sm_scale, warp_specialize=True):
+    def forward(ctx, q, k, v, causal, window, sm_scale, warp_specialize=False):
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
         # when v is in float8_e5m2 it is transposed.
