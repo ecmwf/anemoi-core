@@ -17,9 +17,6 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import build_sparse_projector
 from anemoi.models.layers.utils import load_layer_kernels
-
-# from anemoi.models.truncation import make_truncation_matrix
-# from anemoi.models.truncation import truncate_fields
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -122,13 +119,8 @@ class NoiseConditioning(BaseNoiseInjector):
             layer_norm=True,
         )
 
-        # self.A_noise = None
         self.noise_projector = None
         if noise_matrix is not None:
-            # interpolation_data = scipy.sparse.load_npz(noise_matrix)
-            # self.A_noise = make_truncation_matrix(interpolation_data)
-            # LOGGER.info("Loaded noise matrix from %s with shape %s", noise_matrix, self.A_noise.shape)
-
             self.noise_projector = build_sparse_projector(
                 file_path=noise_matrix,
                 transpose=False,
@@ -163,8 +155,6 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_shard_shapes_final = change_channels_in_shape(shard_shapes_ref, self.noise_channels)
 
         if self.noise_projector is not None:
-            # self.A_noise = self.A_noise.to(noise.device)
-
             noise_shard_shapes = get_shard_shapes(noise, -1, model_comm_group)
             noise = shard_tensor(noise, -1, noise_shard_shapes, model_comm_group)  # split across channels
 
@@ -172,8 +162,7 @@ class NoiseConditioning(BaseNoiseInjector):
                 noise, "batch ensemble grid vars -> (batch ensemble) grid vars"
             )  # batch and ensemble always 1 when sharded
 
-            # noise = truncate_fields(noise, self.A_noise)  # to shape of hidden grid
-            noise = self.noise_projector(noise)
+            noise = self.noise_projector(noise)  # to shape of hidden grid
 
             noise = einops.rearrange(noise, "bse grid vars -> (bse grid) vars")  # shape of x
             noise = gather_channels(
