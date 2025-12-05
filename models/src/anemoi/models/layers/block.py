@@ -446,6 +446,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -471,6 +472,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Defined in config/models/<model>.yaml
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(**kwargs)
 
@@ -487,6 +490,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_value = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
+
+        # Optional edge preprocessing MLP
+        if edge_pre_mlp:
+            self.edge_pre_mlp = nn.Sequential(
+                Linear(edge_dim, edge_dim),
+                layer_kernels.Activation(),
+            )
+        else:
+            self.edge_pre_mlp = nn.Identity()
 
         self.projection = Linear(out_channels, out_channels)
 
@@ -528,7 +540,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         query = self.lin_query(x_dst)
         key = self.lin_key(x_src)
         value = self.lin_value(x_src)
-        edges = self.lin_edge(edge_attr)
+        edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
 
         return query, key, value, edges
 
@@ -665,6 +677,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -694,6 +707,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Strategy to shard tensors
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
 
         super().__init__(
@@ -707,6 +722,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
 
@@ -825,6 +841,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -850,6 +867,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             Defined in config/models/<model>.yaml
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
 
         super().__init__(
@@ -863,6 +882,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             qk_norm=qk_norm,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
 
