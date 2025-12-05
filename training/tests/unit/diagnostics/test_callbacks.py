@@ -29,7 +29,7 @@ NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigra
 
 default_config = """
 training:
-    model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  model_task: anemoi.training.train.tasks.GraphEnsForecaster
 
 diagnostics:
   callbacks: []
@@ -102,16 +102,15 @@ def test_ensemble_plot_mixin_handle_batch_and_output():
     # Mock ensemble output
     loss = torch.tensor(0.5)
     y_preds = [torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)]
-    ens_ic = torch.randn(2, 3)
-    output = [loss, y_preds, ens_ic]
+    output = [loss, y_preds]
 
     # Mock batch
-    batch = [torch.randn(2, 10, 4, 5), torch.randn(2, 10, 4, 5)]
+    batch = torch.randn(2, 10, 4, 5)
 
     processed_batch, processed_output = mixin._handle_ensemble_batch_and_output(pl_module, output, batch)
 
-    # Check that batch[0] is returned
-    assert torch.equal(processed_batch, batch[0])
+    # Check that batch is returned
+    assert torch.equal(processed_batch, batch)
     # Check that output is restructured as [loss, y_preds]
     assert len(processed_output) == 2
     assert torch.equal(processed_output[0], loss)
@@ -131,6 +130,8 @@ def test_ensemble_plot_mixin_process():
     pl_module.data_indices.data.output.full = slice(None)
     pl_module.latlons_data = torch.randn(100, 2)
 
+    # Mock config
+    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     # Create test tensors
     # batch: bs, input_steps + forecast_steps, latlon, nvar
     batch = torch.randn(2, 6, 100, 5)
@@ -158,7 +159,12 @@ def test_ensemble_plot_mixin_process():
     # Set post_processors on the mixin instance
     mixin.post_processors = mock_post_processors
 
-    data, result_output_tensor = mixin.process(pl_module, outputs, batch, members=0)
+    if config["training"]["model_task"] == "anemoi.training.train.tasks.GraphInterpolator":
+        output_times = (len(config.training.explicit_times.target), "time_interp")
+    else:
+        output_times = (getattr(pl_module, "rollout", 0), "forecast")
+
+    data, result_output_tensor = mixin.process(pl_module, outputs, batch, output_times=output_times, members=0)
 
     # Check instantiation
     assert data is not None
@@ -182,7 +188,7 @@ def test_rollout_eval_ens_eval():
     pl_module = MagicMock()
     pl_module.device = torch.device("cpu")
     pl_module.multi_step = 1
-    pl_module.rollout_step.return_value = [
+    pl_module._rollout_step.return_value = [
         (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None, None),
         (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None, None),
     ]
@@ -214,7 +220,9 @@ def test_ensemble_plot_callbacks_instantiation():
                 },
             },
             "data": {"diagnostic": None},
-            "hardware": {"paths": {"plots": "path_to_plots"}},
+            "system": {
+                "output": {"root": "path_to_output", "plots": "plot"},
+            },
             "dataloader": {"read_group_size": 1},
         },
     )
