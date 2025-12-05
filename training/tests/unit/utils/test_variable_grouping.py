@@ -41,6 +41,7 @@ def mocked_variable_metadata() -> dict[str, Variable]:
         "q_100": MockedVariable("q", "pl", "100"),
         "q_200": MockedVariable("q", "pl", "200"),
         "q_500": MockedVariable("q", "pl", "500"),
+        "q": MockedVariable("q", "sfc", None),
         "z_500": MockedVariable("z", "pl", "500"),
         "z_ml_500": MockedVariable("z", "ml", "500"),
         "t_500": MockedVariable("t", "pl", "500"),
@@ -62,7 +63,7 @@ LARGE_GROUPS = {
 }
 COMPLEX_METADATA_LESS_GROUPS = {
     "default": "default",
-    "pl": {"param": ["q", "z"]},
+    "pl": {"param": ["q", "z"], "is_surface_level": True},
 }
 
 
@@ -96,6 +97,7 @@ FILTERED_GROUPS = {
         # Complex metadata-less groups
         (COMPLEX_METADATA_LESS_GROUPS, "q_100", "pl"),
         (COMPLEX_METADATA_LESS_GROUPS, "q_500", "pl"),
+        (COMPLEX_METADATA_LESS_GROUPS, "q", "sfc"),
         (COMPLEX_METADATA_LESS_GROUPS, "z_500", "pl"),
         (COMPLEX_METADATA_LESS_GROUPS, "z_123", "pl"),
         (COMPLEX_METADATA_LESS_GROUPS, "2t", "default"),
@@ -112,6 +114,15 @@ def test_group_matching(
 
     assert ExtractVariableGroupAndLevel(groups, variable_metadata).get_group(variable) == expected_group
 
+
+@pytest.mark.parametrize("variable_name", ["non_existing", "asjndbf", "q_123", "z"])
+def test_group_variable_not_found(variable_name: str) -> None:
+    """Test that a ValueError is raised when the variable is not found in any group.
+
+    'z' is used in the group specification to group all z_{pl}, but it is not a variable itself.
+    """
+    with pytest.raises(ValueError):
+        ExtractVariableGroupAndLevel(COMPLEX_METADATA_LESS_GROUPS, {}).get_group(variable_name)
 
 @pytest.fixture
 def mocked_variable_lacking_metadata() -> dict[str, Variable]:
