@@ -44,7 +44,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
-    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path)
+    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
     model = module.model
 
     metadata = dict(**model.metadata)
