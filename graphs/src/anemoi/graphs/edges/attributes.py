@@ -96,7 +96,7 @@ class EdgeDirection(BasePositionalBuilder):
     """Computes edge direction for bipartite graphs."""
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
+        edge_dirs = compute_directions(x_i, x_j)
         return edge_dirs
 
 
@@ -125,7 +125,7 @@ class DirectionalHarmonics(EdgeDirection):
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get the 2D direction vectors [dx, dy]
-        edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
+        edge_dirs = compute_directions(x_i, x_j)
 
         # Compute the angle ψ from the direction vectors
         psi = torch.atan2(edge_dirs[:, 1], edge_dirs[:, 0])  # atan2(dy, dx)

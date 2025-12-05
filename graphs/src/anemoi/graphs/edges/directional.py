@@ -7,16 +7,29 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from __future__ import annotations
 
 import torch
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
-NORTH_POLE = [0.0, 0.0, 1.0]  # North pole in 3D coordinates
+NORTH_POLE = [0, 0, 1]  # North pole in 3D coordinates
 
 
-def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor, eps=1e-8) -> torch.Tensor:
+def direction_vec(points: torch.Tensor, reference: torch.Tensor, epsilon: float = 1e-12) -> torch.Tensor:
+    """Compute the unit direction vector from b to a in torch."""
+    v = torch.cross(points, reference, dim=-1)
+    vnorm1 = torch.pow(v, 2).sum(dim=-1)
+    redo_idx = torch.nonzero(vnorm1 < epsilon, as_tuple=False).squeeze()
+
+    if redo_idx.numel() > 0:
+        points[redo_idx] += epsilon
+        v = torch.cross(points, reference, dim=-1)
+        vnorm1 = torch.pow(v, 2).sum(dim=-1)
+
+    return v / torch.sqrt(vnorm1).unsqueeze(-1)  # normalize across last dimension
+
+
+def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
     """Rotate points v around axis by the angle using Rodrigues' rotation formula in torch.
 
     Parameters
@@ -37,9 +50,7 @@ def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor, eps
     -----
     - https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
     """
-    axis_norm = torch.norm(axis, dim=-1, keepdim=True)  # Ensure the axis is a unit vector
-    axis = axis / torch.clamp(axis_norm, min=eps)
-
+    axis = axis / torch.norm(axis, dim=-1, keepdim=True)  # Ensure the axis is a unit vector
     cos_theta = torch.cos(angle).unsqueeze(-1)
     sin_theta = torch.sin(angle).unsqueeze(-1)
 
@@ -52,72 +63,36 @@ def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor, eps
 
 
 def compute_directions(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
-    """Compute the direction of the edge on the tangent plane.
-
-    1. Rotate coordinate system so target_coords is at north pole (0, 0, 1)
-    2. Rotate source_coords by the same rotation
-    3. Project rotated source onto tangent plane at north pole (xy-plane)
-    4. Direction = (x, y) components pointing toward rotated source
+    """Compute the direction of the edge.
 
     Parameters
     ----------
-    source_coords : torch.Tensor
-        Source coordinates in lat/lon (radians), shape (N, 2)
-    target_coords : torch.Tensor
-        Target coordinates in lat/lon (radians), shape (N, 2)
+    source_coords : torch.Tensor of shape (N, 2)
+        A tensor of shape (N, 2) representing the lat-lon location of the N head nodes.
+    target_coords : torch.Tensor of shape (N, 2)
+        A tensor of shape (N, 2) representing the lat-lon location of the N tail nodes.
 
     Returns
     -------
-    torch.Tensor
-        Unit direction vectors on tangent plane, shape (N, 2)
+    torch.Tensor of shape (N, 2)
+        The direction of the edge.
     """
-    epsilon = 1e-8
-
+    north_pole = torch.tensor([NORTH_POLE], dtype=source_coords.dtype).to(device=source_coords.device)
     source_coords_xyz = latlon_rad_to_cartesian(source_coords, 1.0)
     target_coords_xyz = latlon_rad_to_cartesian(target_coords, 1.0)
-    north_pole = torch.tensor([NORTH_POLE], dtype=source_coords.dtype, device=source_coords.device)
 
-    # Compute dot product with north pole -> pole cases
-    dot = (target_coords_xyz * north_pole).sum(dim=1, keepdim=True)
+    # Compute the unit direction vector & the angle theta between target coords and the north pole.
+    v_unit = direction_vec(target_coords_xyz, north_pole)
+    theta = torch.acos(
+        torch.clamp(torch.sum(target_coords_xyz * north_pole, dim=1), -1.0, 1.0)
+    )  # Clamp for numerical stability
 
-    # masks
-    at_north = (dot > 1.0 - epsilon).squeeze(1)
-    at_south = (dot < -1.0 + epsilon).squeeze(1)
-    normal = ~(at_north | at_south)
+    # Rotate source coords by angle theta around v_unit axis.
+    rotated_source_coords_xyz = rotate_vectors(source_coords_xyz, v_unit, theta)
 
-    # init output
-    direction = torch.zeros(
-        (source_coords_xyz.shape[0], 2), dtype=source_coords_xyz.dtype, device=source_coords_xyz.device
-    )
+    # Compute the direction from the rotated vector to the north pole.
+    direction = direction_vec(rotated_source_coords_xyz, north_pole)
 
-    # target at north pole - no rotation needed
-    if at_north.any():
-        xy = source_coords_xyz[at_north, :2]
-        direction[at_north] = xy / torch.clamp(torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon)
-
-    # target at south pole - rotate 180° around x-axis
-    if at_south.any():
-        rotated_south = source_coords_xyz[at_south].clone()
-        # flip y and z
-        rotated_south[:, 1] *= -1
-        rotated_south[:, 2] *= -1
-        xy = rotated_south[:, :2]
-        direction[at_south] = xy / torch.clamp(torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon)
-
-    # rotation via cross product
-    if normal.any():
-        target_normal = target_coords_xyz[normal]
-        source_normal = source_coords_xyz[normal]
-
-        axis = torch.cross(target_normal, north_pole.expand_as(target_normal), dim=1)
-        sin_theta = torch.linalg.norm(axis, dim=1, keepdim=True)  # ||target x north_pole||
-        cos_theta = torch.clamp((target_normal * north_pole).sum(dim=1, keepdim=True), -1.0, 1.0)
-        theta = torch.atan2(sin_theta, cos_theta).squeeze(1)
-
-        axis_unit = axis / torch.clamp(sin_theta, min=epsilon)
-
-        rotated_normal = rotate_vectors(source_normal, axis_unit, theta)
-        xy = rotated_normal[:, :2]
-        direction[normal] = xy / torch.clamp(torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon)
-
-    return direction
+    # All 3rd components should be 0s
+    assert torch.all(direction[:, 2] == 0), "Rotation should be aligned with the north pole"
+    return direction[:, :2]
