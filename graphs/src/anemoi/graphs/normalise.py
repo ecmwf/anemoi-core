@@ -122,7 +122,11 @@ class NormaliserMixin:
             "unit-std",
             "unit-max",
             "unit-range",
-        }, f"Attribute normalisation '{self.norm}' is not valid. Options are: 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std'."
+            "log1p",
+        }, f"Attribute normalisation '{self.norm}' is not valid. Options are: 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std', 'log1p'."
+
+        if self.norm == "log1p":
+            return torch.log1p(values)
 
         if self.norm is None:
             LOGGER.debug(f"{self.__class__.__name__} values are not normalised.")
