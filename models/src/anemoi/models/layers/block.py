@@ -500,8 +500,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         else:
             self.edge_pre_mlp = nn.Identity()
 
-        self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
-
         self.projection = Linear(out_channels, out_channels)
 
         if self.qk_norm:
