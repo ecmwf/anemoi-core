@@ -48,6 +48,42 @@ Example
 >>> # Execute pipeline
 >>> context = CheckpointContext(model=my_model)
 >>> result = await pipeline.execute(context)
+
+Execution Patterns
+------------------
+The pipeline supports two execution patterns:
+
+**Pattern 1: Standalone Execution (Recommended)**
+
+Execute during model initialization, before ``trainer.fit()``. This is the
+recommended approach as checkpoint loading happens once at startup::
+
+    # In your training script or AnemoiTrainer.model property
+    pipeline = CheckpointPipeline.from_config(config.checkpoint_pipeline)
+    context = CheckpointContext(model=model)
+
+    # Async execution (recommended for remote sources)
+    result = await pipeline.execute(context)
+    # Or sync execution
+    result = asyncio.run(pipeline.execute(context))
+
+    model = result.model
+
+**Pattern 2: PyTorch Lightning Callback Integration**
+
+For use cases requiring Lightning callback lifecycle integration, the
+pipeline can be wrapped in a callback. This is useful when checkpoint
+loading needs to coordinate with other Lightning callbacks::
+
+    # See anemoi.training.diagnostics.callbacks.checkpoint for examples
+    # of integrating checkpoint operations with the Lightning lifecycle
+
+The standalone pattern is preferred because:
+
+- Checkpoint loading happens once at initialization
+- No async complexity during training loop
+- Clear separation of concerns between loading and training
+- Easier to debug and test
 """
 
 from __future__ import annotations

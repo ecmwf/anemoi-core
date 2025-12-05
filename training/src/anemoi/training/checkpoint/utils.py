@@ -14,10 +14,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - Path used at runtime
 from typing import Any
 
-import aiohttp
+# Optional import for async HTTP operations (remote checkpoint downloads)
+try:
+    import aiohttp
+
+    HAS_AIOHTTP = True
+except ImportError:
+    aiohttp = None  # type: ignore[assignment]
+    HAS_AIOHTTP = False
+
 import torch
 
 from .exceptions import CheckpointLoadError
@@ -76,6 +84,10 @@ async def download_with_retry(
     ...     return path
     >>> asyncio.run(download())
     """
+    if not HAS_AIOHTTP:
+        msg = "aiohttp is required for remote checkpoint downloads. Install with: pip install anemoi-training[remote]"
+        raise ImportError(msg)
+
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     for attempt in range(max_retries):
