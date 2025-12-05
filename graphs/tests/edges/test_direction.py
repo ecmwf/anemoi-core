@@ -133,40 +133,41 @@ def test_compute_directions_consistency():
 def test_compute_directions_known_values():
     """Test against known geometric cases with expected directions.
 
-    These test cases are designed so we can geometrically determine what
-    the tangent plane direction should be after rotation.
+    The function rotates the coordinate system so target is at north pole (0,0,1),
+    applies the same rotation to source, then returns the normalized (x,y) components
+    of the rotated source on the tangent plane.
     """
-    # Case 1: source=equator, target=north pole
-    # After rotating target to north pole, source projects to (1,0,0)
-    # Direction on tangent plane at target points toward source: (0, -1)
+    # Case 1: source=equator (1,0,0), target=north pole (0,0,1)
+    # Target already at north pole, no rotation needed
+    # Source stays at (1,0,0), so (x,y) = (1,0)
     source = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
     target = torch.tensor([[np.pi / 2, 0.0]], dtype=torch.float32)
 
     directions = compute_directions(source, target)
-    # Direction at target (north pole) pointing toward source
-    expected = torch.tensor([[0.0, -1.0]], dtype=torch.float32)
+    expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
     assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
-    # Case 2: source=equator, target=30°N (same meridian)
-    # Direction at target pointing toward source
+    # Case 2: source=equator (1,0,0), target=30°N on prime meridian
+    # Target at (cos30°, 0, sin30°) = (0.866, 0, 0.5)
+    # Rotation around y-axis by 60° to move target to north pole
+    # Source (1,0,0) rotated -> (0.5, 0, 0.866), normalized xy = (1, 0)
     source = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
     target = torch.tensor([[np.pi / 6, 0.0]], dtype=torch.float32)  # 30°N
 
     directions = compute_directions(source, target)
-    # Direction at target pointing toward source (which is south)
-    expected = torch.tensor([[0.0, -1.0]], dtype=torch.float32)
+    expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
     assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
-    # Case 3: source=north pole, target=equator
-    # Direction at target (equator) pointing toward source (north pole)
+    # Case 3: source=north pole (0,0,1), target=equator (1,0,0)
+    # Rotation around y-axis by 90° to move target to north pole
+    # Source (0,0,1) rotates to (-1,0,0), so (x,y) = (-1, 0)
     source = torch.tensor([[np.pi / 2, 0.0]], dtype=torch.float32)
     target = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
 
     directions = compute_directions(source, target)
-    # Direction at target pointing toward source (which is north)
-    expected = torch.tensor([[0.0, 1.0]], dtype=torch.float32)
+    expected = torch.tensor([[-1.0, 0.0]], dtype=torch.float32)
 
     assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
@@ -175,20 +176,19 @@ def test_compute_directions_equator_90_degrees():
     """Test direction between points on equator 90° apart in longitude.
 
     For two points on the equator separated by 90° in longitude, after
-    rotating the target to the north pole, the source should lie on
-    the xy-plane with a specific orientation.
+    rotating the target to the north pole, the source position is determined
+    by the rotation.
     """
     # Two points on equator, 90° apart in longitude
-    source = torch.tensor([[0.0, 0.0]], dtype=torch.float32)  # (0°, 0°)
-    target = torch.tensor([[0.0, np.pi / 2]], dtype=torch.float32)  # (0°, 90°E)
+    source = torch.tensor([[0.0, 0.0]], dtype=torch.float32)  # (0°, 0°) -> (1, 0, 0) in 3D
+    target = torch.tensor([[0.0, np.pi / 2]], dtype=torch.float32)  # (0°, 90°E) -> (0, 1, 0) in 3D
 
     directions = compute_directions(source, target)
 
-    # For this specific geometry: source at (lat=0, lon=0) and target at (lat=0, lon=90°)
-    # After rotating target (which is at (0, 1, 0) in 3D) to north pole (0, 0, 1),
-    # the source (which is at (1, 0, 0) in 3D) rotates accordingly
-    # Direction at target pointing toward source: (0, -1)
-    expected = torch.tensor([[0.0, -1.0]], dtype=torch.float32)
+    # Rotation around x-axis by 90° to move target (0,1,0) to north pole (0,0,1)
+    # Source (1,0,0) is on the rotation axis, so it stays at (1,0,0)
+    # (x, y) = (1, 0)
+    expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
     assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
@@ -196,8 +196,9 @@ def test_compute_directions_equator_90_degrees():
 def test_compute_directions_small_latitude_steps():
     """Test that small steps in latitude produce consistent directions.
 
-    For small steps along the same meridian, the direction should be
-    approximately constant (pointing north on the tangent plane).
+    For small steps along the same meridian (prime meridian, lon=0),
+    the target is rotated to north pole around the y-axis, and source
+    follows the same rotation. The (x,y) projection should be consistent.
     """
     # Multiple small steps along prime meridian
     latitudes = torch.tensor([0.0, 0.1, 0.2, 0.3], dtype=torch.float32)
@@ -208,9 +209,10 @@ def test_compute_directions_small_latitude_steps():
 
         directions = compute_directions(source, target)
 
-        # For movement north along prime meridian, direction at target pointing toward source
-        # Points toward source (which is south of target), giving (0, -1) after rotation
-        expected = torch.tensor([[0.0, -1.0]], dtype=torch.float32)
+        # For points on prime meridian, rotation is around y-axis
+        # Source (south of target) rotates to have positive x component
+        # Expected direction is approximately (1, 0)
+        expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
         assert torch.allclose(
             directions, expected, atol=0.05

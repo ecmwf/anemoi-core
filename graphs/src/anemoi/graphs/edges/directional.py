@@ -16,7 +16,7 @@ from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 NORTH_POLE = [0.0, 0.0, 1.0]  # North pole in 3D coordinates
 
 
-def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
+def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor, eps=1e-8) -> torch.Tensor:
     """Rotate points v around axis by the angle using Rodrigues' rotation formula in torch.
 
     Parameters
@@ -37,7 +37,9 @@ def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor) -> 
     -----
     - https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
     """
-    axis = axis / torch.norm(axis, dim=-1, keepdim=True)  # Ensure the axis is a unit vector
+    axis_norm = torch.norm(axis, dim=-1, keepdim=True)  # Ensure the axis is a unit vector
+    axis = axis / torch.clamp(axis_norm, min=eps)
+
     cos_theta = torch.cos(angle).unsqueeze(-1)
     sin_theta = torch.sin(angle).unsqueeze(-1)
 
