@@ -92,18 +92,6 @@ class EdgeLength(BasePositionalBuilder):
         return edge_length
 
 
-class EdgeLengthLog1p(BasePositionalBuilder):
-    """Computes log1p-transformed edge length for bipartite graphs.
-
-    Returns log(1 + r) where r is the haversine distance.
-    This transformation compresses large distances while preserving relative ordering.
-    """
-
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        edge_length = haversine_distance(x_i, x_j)
-        return torch.log1p(edge_length)
-
-
 class EdgeDirection(BasePositionalBuilder):
     """Computes edge direction for bipartite graphs."""
 
