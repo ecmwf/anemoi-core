@@ -45,16 +45,6 @@ latitude and longitude coordinates of the source and target nodes.
          edge_length:
             _target_: anemoi.graphs.edges.attributes.EdgeDirection
 
-.. warning::
-
-   The result of this class, `EdgeDirection` is fixed with
-   `anemoi-graphs=0.8`. If you train a model on a graph using a version
-   before 0.8 and then run inference or finetuning with `anemoi-graphs`
-   version 0.8 or later, results may be inconsistent or incorrect.
-   Previously edge directions were wrong by 90 degrees. Ensure that the
-   same version of `anemoi-graphs` is used for both training and
-   inference/finetuning to avoid compatibility issues.
-
 ***********************
  Directional Harmonics
 ***********************

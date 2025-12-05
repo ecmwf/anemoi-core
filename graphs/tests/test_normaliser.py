@@ -13,7 +13,7 @@ import torch
 from anemoi.graphs.normalise import NormaliserMixin
 
 
-@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std", "log1p"])
+@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std"])
 def test_normaliser(norm: str):
     """Test NormaliserMixin normalise method."""
 
@@ -32,7 +32,7 @@ def test_normaliser(norm: str):
     assert normalised_data.shape == data.shape
 
 
-@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std", "log1p"])
+@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std"])
 def test_grouped_normaliser(norm: str):
     """Test NormaliserMixin normalise method."""
 
