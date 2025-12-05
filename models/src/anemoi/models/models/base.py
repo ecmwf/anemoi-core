@@ -304,23 +304,7 @@ class BaseGraphModel(nn.Module):
 
         return y_hat
 
+    @abstractmethod
     def fill_metadata(self, md_dict) -> None:
-        shapes = {}
-        for dataset in self.input_dim.keys():
-            shapes[dataset] = {
-                "variables": self.input_dim[dataset],
-                "timesteps": self.multi_step,
-                "ensemble": 1,  # TODO update this in ens and diffusion subclasses
-                "grid": None,  # grid size is dynamic
-            }
-
-        md_dict["shapes"] = shapes
-
-        # The information about relative date indices from the datamodule contains both input and output time steps
-        # We can add info about which time steps are used for input and output based on task and config info
-        md_dict["time_steps"]["input_relative_date_indices"] = md_dict["time_steps"]["relative_date_indices_training"][
-            :-1
-        ]
-        md_dict["time_steps"]["output_relative_date_indices"] = md_dict["time_steps"]["relative_date_indices_training"][
-            -1
-        ]
+        """To be implemented in subclasses to fill model-specific metadata."""
+        pass

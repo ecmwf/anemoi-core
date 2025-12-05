@@ -181,9 +181,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Add information for inference to the model metadata
         model_metadata = metadata.copy()
-        model_metadata["task"] = str(
-            config.training.model_task,
-        )  # adding this from the config for now, since we need to pass the metadata to the model interface at init time
+        model_metadata["metadata_inference"]["task"] = str(config.training.model_task).split(".")[-1]
+        # reading the task from the config for now
+        # since we need to pass the metadata to the model interface at init time
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
