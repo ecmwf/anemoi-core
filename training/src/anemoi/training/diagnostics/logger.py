@@ -34,7 +34,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
         "_target_",
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
-    logger_config["save_dir"] = logger_config.get("save_dir", str(config.hardware.paths.logs.mlflow))
+    logger_config["save_dir"] = logger_config.get("save_dir", str(config.system.output.logs.mlflow))
 
     logger = instantiate(
         logger_config,
@@ -43,7 +43,7 @@ def get_mlflow_logger(config: BaseSchema) -> None:
     )
 
     if logger.log_terminal:
-        logger.log_terminal_output(artifact_save_dir=config.hardware.paths.plots)
+        logger.log_terminal_output(artifact_save_dir=config.system.output.plots)
     if logger.log_system:
         logger.log_system_metrics()
 
@@ -71,7 +71,7 @@ def get_tensorboard_logger(config: DictConfig) -> pl.loggers.TensorBoardLogger |
     from pytorch_lightning.loggers import TensorBoardLogger
 
     return TensorBoardLogger(
-        save_dir=config.hardware.paths.logs.tensorboard,
+        save_dir=config.system.output.logs.tensorboard,
         log_graph=False,
     )
 
@@ -111,7 +111,7 @@ def get_wandb_logger(config: DictConfig, model: pl.LightningModule) -> pl.logger
         project=config.diagnostics.log.wandb.project,
         entity=config.diagnostics.log.wandb.entity,
         id=config.training.run_id,
-        save_dir=config.hardware.paths.logs.wandb,
+        save_dir=config.system.output.logs.wandb,
         offline=config.diagnostics.log.wandb.offline,
         log_model=config.diagnostics.log.wandb.log_model,
         resume=config.training.run_id is not None,
