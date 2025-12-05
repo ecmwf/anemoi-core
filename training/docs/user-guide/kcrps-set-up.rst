@@ -102,7 +102,7 @@ A different model class is used for CRPS training.
       inject_noise: True
 
 Each ensemble member samples random noise at every time step. The noise
-is embedded and added to the latent space of the processor using a
+is embedded and injected into the latent space of the processor using a
 conditional layer norm.
 
 Optionally, noise can be generated on a coarser grid and projected to

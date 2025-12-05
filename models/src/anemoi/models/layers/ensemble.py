@@ -47,13 +47,13 @@ class BaseNoiseInjector(nn.Module, ABC):
             batch_size: Batch size
             ensemble_size: Ensemble size
             grid_size: Grid size
-            shard_shapes_ref: Shard shapes for distributed processing
+            shard_shapes_ref: Shard shapes when sharded
             noise_dtype: Data type for noise tensor
-            model_comm_group: Process group for model communication
+            model_comm_group: Model communication group
 
         Returns:
             Tuple of (output_tensor, noise_tensor_or_none):
-                - output_tensor: The (potentially modified) input tensor
+                - output_tensor: The (potentially) modified input tensor
                 - noise_tensor_or_none: The noise tensor for conditioning,
                   or None if noise is injected directly into output_tensor
         """
@@ -63,11 +63,11 @@ class BaseNoiseInjector(nn.Module, ABC):
 class NoOpNoiseInjector(BaseNoiseInjector):
     """No-op noise injector that passes through input unchanged.
 
-    Use this when noise injection is disabled (inject_noise=False equivalent).
+    Use this when noise injection is disabled.
     """
 
     def __init__(self, **kwargs) -> None:
-        """Initialize NoOpNoiseInjector. Accepts and ignores all kwargs."""
+        """Initialize NoOpNoiseInjector."""
         super().__init__()
 
     def forward(
@@ -188,7 +188,6 @@ class NoiseInjector(BaseNoiseInjector):
 
     Generates noise and projects it directly into the input tensor,
     returning None for the noise (since it's already incorporated).
-    Uses composition with NoiseConditioning internally.
     """
 
     def __init__(
@@ -240,9 +239,9 @@ class NoiseInjector(BaseNoiseInjector):
             batch_size: Batch size
             ensemble_size: Ensemble size
             grid_size: Grid size
-            shard_shapes_ref: Shard shapes for distributed processing
+            shard_shapes_ref: Shard shapes when sharded
             noise_dtype: Data type for noise tensor
-            model_comm_group: Process group for model communication
+            model_comm_group: Model communication group
 
         Returns:
             Tuple of (modified_x, None): Modified tensor with noise injected
