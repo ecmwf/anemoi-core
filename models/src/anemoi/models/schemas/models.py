@@ -236,24 +236,52 @@ class BaseModelSchema(PydanticBaseModel):
     "Modules to be compiled"
 
 
-class NoiseInjectorSchema(BaseModel):
+class NoOpNoiseInjectorSchema(BaseModel):
+    """Schema for NoOpNoiseInjector - passes input through unchanged."""
+
+    target_: Literal["anemoi.models.layers.ensemble.NoOpNoiseInjector"] = Field(..., alias="_target_")
+    "No-op noise injector class"
+
+
+class NoiseConditioningSchema(BaseModel):
+    """Schema for NoiseConditioning - generates noise for conditioning."""
+
     target_: Literal["anemoi.models.layers.ensemble.NoiseConditioning"] = Field(..., alias="_target_")
-    "Noise injection layer class"
+    "Noise conditioning layer class"
     noise_std: NonNegativeInt = Field(example=1)
     "Standard deviation of the noise to be injected."
     noise_channels_dim: NonNegativeInt = Field(example=4)
     "Number of channels in the noise tensor."
     noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
     "Hidden dimension of the MLP used to process the noise."
-    inject_noise: bool = Field(default=True)
-    "Whether to inject noise or not."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
-class EnsModelSchema(BaseModelSchema):
-    noise_injector: NoiseInjectorSchema = Field(default_factory=list)
+class NoiseInjectorSchema(BaseModel):
+    """Schema for NoiseInjector - injects noise directly into input tensor."""
+
+    target_: Literal["anemoi.models.layers.ensemble.NoiseInjector"] = Field(..., alias="_target_")
+    "Noise injector layer class"
+    noise_std: NonNegativeInt = Field(example=1)
+    "Standard deviation of the noise to be injected."
+    noise_channels_dim: NonNegativeInt = Field(example=4)
+    "Number of channels in the noise tensor."
+    noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
+    "Hidden dimension of the MLP used to process the noise."
+    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
+
+
+NoiseInjectorUnion = Annotated[
+    Union[NoOpNoiseInjectorSchema, NoiseConditioningSchema, NoiseInjectorSchema],
+    Field(discriminator="target_"),
+]
+
+
+class EnsModelSchema(BaseModelSchema):
+    noise_injector: NoiseInjectorUnion = Field(...)
+    "Noise injection configuration. Use NoOpNoiseInjector to disable, NoiseConditioning for conditioning, or NoiseInjector for direct injection."
     condition_on_residual: bool = Field(default=False)
     "Whether to condition the noise injection on the residual connection."
 

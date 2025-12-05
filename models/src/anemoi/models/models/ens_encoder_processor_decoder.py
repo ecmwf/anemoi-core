@@ -164,8 +164,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         x_latent_proc, latent_noise = self.noise_injector(
             x=x_latent,
-            noise_ref=x_hidden_latent,
-            shard_shapes=shard_shapes_hidden,
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            shard_shapes_ref=shard_shapes_hidden,
             model_comm_group=model_comm_group,
         )
 

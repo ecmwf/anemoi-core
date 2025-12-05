@@ -40,6 +40,7 @@ class SparseProjector(torch.nn.Module):
         src_size: int,
         dst_size: int,
         row_normalize: bool = True,
+        transpose: bool = True,
         autocast: bool = False,
     ) -> None:
         super().__init__()
@@ -47,16 +48,15 @@ class SparseProjector(torch.nn.Module):
 
         weights = _row_normalize_weights(edge_index, weights, dst_size) if row_normalize else weights
 
-        self.projection_matrix = (
-            torch.sparse_coo_tensor(
-                edge_index,
-                weights,
-                (src_size, dst_size),
-                device=edge_index.device,
-            )
-            .coalesce()
-            .T
-        )
+        self.projection_matrix = torch.sparse_coo_tensor(
+            edge_index,
+            weights,
+            (src_size, dst_size),
+            device=edge_index.device,
+        ).coalesce()
+
+        if transpose:
+            self.projection_matrix = self.projection_matrix.T
 
     @classmethod
     def from_graph(
@@ -65,6 +65,7 @@ class SparseProjector(torch.nn.Module):
         edges_name: str,
         edge_weight_attribute: Optional[str] = None,
         src_node_weight_attribute: Optional[str] = None,
+        row_normalize: bool = True,
         **kwargs,
     ) -> "SparseProjector":
         """Build a SparseProjection from a graph.
@@ -97,11 +98,17 @@ class SparseProjector(torch.nn.Module):
             weights=weights,
             src_size=graph[edges_name[0]].num_nodes,
             dst_size=graph[edges_name[2]].num_nodes,
+            row_normalize=row_normalize,
             **kwargs,
         )
 
     @classmethod
-    def from_file(cls, file_path: str | Path, **kwargs) -> "SparseProjector":
+    def from_file(
+        cls,
+        file_path: str | Path,
+        row_normalize: bool = True,
+        **kwargs,
+    ) -> "SparseProjector":
         """Load projection matrix from a file."""
         from scipy.sparse import load_npz
 
@@ -114,6 +121,7 @@ class SparseProjector(torch.nn.Module):
             weights=weights,
             src_size=src_size,
             dst_size=dst_size,
+            row_normalize=row_normalize,
             **kwargs,
         )
 
@@ -135,6 +143,8 @@ def build_sparse_projector(
     graph: Optional[HeteroData] = None,
     edges_name: Optional[tuple[str, str, str]] = None,
     edge_weight_attribute: Optional[str] = None,
+    row_normalize: bool = True,
+    transpose: bool = True,
     **kwargs,
 ) -> SparseProjector:
     """Factory method to build a SparseProjector."""
@@ -143,12 +153,19 @@ def build_sparse_projector(
     ), "Either file_path or graph and edges_name must be provided."
 
     if file_path is not None:
-        return SparseProjector.from_file(file_path=file_path, **kwargs)
+        return SparseProjector.from_file(
+            file_path=file_path,
+            row_normalize=row_normalize,
+            transpose=transpose,
+            **kwargs,
+        )
     else:
         assert edges_name in graph.edge_types, f"The specified edges_name, {edges_name}, is not present in the graph."
         return SparseProjector.from_graph(
             graph=graph,
             edges_name=edges_name,
             edge_weight_attribute=edge_weight_attribute,
+            row_normalize=row_normalize,
+            transpose=transpose,
             **kwargs,
         )
