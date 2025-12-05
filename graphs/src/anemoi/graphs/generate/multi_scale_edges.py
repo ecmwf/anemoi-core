@@ -8,10 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 
 from torch_geometric.data.storage import NodeStorage
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseIcosahedronEdgeStrategy(ABC):
@@ -24,15 +27,30 @@ class BaseIcosahedronEdgeStrategy(ABC):
 class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for TriNodes and LimitedAreaTriNodes."""
 
-    def add_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
+    def add_edges(
+        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int], new_method: bool = False
+    ) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
 
-        nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
-            nodes["_nx_graph"],
-            resolutions=scale_resolutions,
-            x_hops=x_hops,
-            area_mask_builder=nodes.get("_area_mask_builder", None),
-        )
+        if new_method:
+            assert x_hops == 1, "New strategy currently only supports x_hops=1."
+            LOGGER.info("Using new strategy for x_hops=1 multiscale-edge building.")
+            # Compute the multiscale edges directly and store them in the node storage
+            multiscale_edges = tri_icosahedron.add_edges_hop_1(
+                nodes_coords_rad=nodes["x"],
+                resolutions=scale_resolutions,
+                node_ordering=nodes["_node_ordering"],
+                area_mask_builder=nodes.get("_area_mask_builder", None),
+            )
+            nodes["_multiscale_edges"] = multiscale_edges
+        else:
+            LOGGER.info("Using existing strategy for multiscale-edge building.")
+            nodes["_nx_graph"] = tri_icosahedron.add_edges_to_nx_graph(
+                nodes["_nx_graph"],
+                resolutions=scale_resolutions,
+                x_hops=x_hops,
+                area_mask_builder=nodes.get("_area_mask_builder", None),
+            )
         return nodes
 
 
