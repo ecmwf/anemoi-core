@@ -314,6 +314,7 @@ def test_GraphTransformerMapperBlock_init(init_mapper, mapper_block):
         num_heads,
         _qk_norm,
         _backend,
+        _edge_pre_mlp,
     ) = init_mapper
     block = mapper_block
     assert isinstance(block, GraphTransformerMapperBlock), "block is not an instance of GraphTransformerMapperBlock"
@@ -347,6 +348,7 @@ def test_GraphTransformerMapperBlock_shard_qkve_heads(init_mapper, mapper_block)
         num_heads,
         _qk_norm,
         _backend,
+        _edge_pre_mlp,
     ) = init_mapper
     block = mapper_block
     query = torch.randn(in_channels, num_heads * block.out_channels_conv)
@@ -363,9 +365,18 @@ def test_GraphTransformerMapperBlock_shard_qkve_heads(init_mapper, mapper_block)
 
 
 def test_GraphTransformerMapperBlock_shard_output_seq(init_mapper, mapper_block):
-    (in_channels, _hidden_dim, _out_channels, _edge_dim, _layer_kernels, _bias, num_heads, _qk_norm, _backend) = (
-        init_mapper
-    )
+    (
+        in_channels,
+        _hidden_dim,
+        _out_channels,
+        _edge_dim,
+        _layer_kernels,
+        _bias,
+        num_heads,
+        _qk_norm,
+        _backend,
+        _edge_pre_mlp,
+    ) = init_mapper
     block = mapper_block
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
     shapes = (10, 10, 10)
@@ -385,6 +396,7 @@ def test_GraphTransformerMapperBlock_forward_backward(init_mapper, mapper_block)
         _num_heads,
         _qk_norm,
         _backend,
+        _edge_pre_mlp,
     ) = init_mapper
     # Initialize GraphTransformerMapperBlock
     block = mapper_block
