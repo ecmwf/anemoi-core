@@ -64,11 +64,14 @@ class BaseDiffusionForecaster(BaseGraphModule):
         ]  # (bs, multi_step, ens, latlon, nvar)
         msg = f"Batch length not sufficient for requested multi_step length!, {batch.shape[1]} !>= {self.multi_step}"
         assert batch.shape[1] >= self.multi_step, msg
+        LOGGER.debug("SHAPE: x.shape = %s", list(x.shape))
         return x
 
     def get_target(self, batch: torch.Tensor) -> torch.Tensor:
         """Get target tensor shape for diffusion model."""
-        return batch[:, self.multi_step, ..., self.data_indices.data.output.full]
+        y = batch[:, self.multi_step, ..., self.data_indices.data.output.full]
+        LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
+        return y
 
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         return self.model.model.fwd_with_preconditioning(
