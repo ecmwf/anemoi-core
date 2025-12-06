@@ -61,8 +61,8 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
         data_indices: dict,
         metadata: dict,
-        statistics_tendencies: dict = None,
-        supporting_arrays: dict = None,
+        statistics_tendencies: dict | None = None,
+        supporting_arrays: dict | None = None,
     ) -> None:
         super().__init__()
         self.config = config
