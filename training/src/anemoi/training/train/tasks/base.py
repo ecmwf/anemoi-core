@@ -411,12 +411,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        return self.loss(
-            y_pred,
-            y,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-        )
+        return self.loss(y_pred, y, grid_shard_slice=grid_shard_slice, group=self.model_comm_group, kwargs=_kwargs)
 
     def _compute_metrics(
         self,
@@ -630,7 +625,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for metric_name, metric in self.metrics.items():
             if not isinstance(metric, BaseLoss):
                 # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric{suffix}"] = metric(y_pred_postprocessed, y_postprocessed)
+                metrics[f"{metric_name}_metric{suffix}"] = metric(
+                    y_pred_postprocessed,
+                    y_postprocessed,
+                    grid_shard_slice=grid_shard_slice,
+                    group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_shapes=self.grid_shard_shapes,
+                )
                 continue
 
             for mkey, indices in self.val_metric_ranges.items():
@@ -648,6 +651,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scaler_indices=[..., indices],
                     grid_shard_slice=grid_shard_slice,
                     group=self.model_comm_group,
+                    model_comm_group_size=self.model_comm_group_size,
+                    grid_dim=self.grid_dim,
+                    grid_shard_shapes=self.grid_shard_shapes,
                 )
 
         return metrics
@@ -683,7 +689,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         del batch_idx
 
         with torch.no_grad():
-            val_loss, metrics, *args = self._step(batch, validation_mode=True)
+            val_loss, _, metrics, *args = self._step(batch, validation_mode=True)
 
         self.log(
             "val_" + self.loss.name + "_loss",

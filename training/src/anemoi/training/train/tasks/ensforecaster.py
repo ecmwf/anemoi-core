@@ -127,8 +127,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
-        *args,
-        **kwargs,
+        validation_mode: bool = False,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
@@ -136,7 +135,18 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
-        return super().compute_loss_metrics(y_pred_ens, y, *args, **kwargs)
+
+        loss = self.loss(
+            y_pred_ens,
+            y,
+            squash=True,
+            grid_shard_slice=self.grid_shard_slice,
+            model_comm_group=self.model_comm_group,
+            grid_dim=self.grid_dim,
+            grid_shard_shape=self.grid_shard_shapes,
+        )
+
+        return loss, y_pred_ens if validation_mode else None
 
     def _rollout_step(
         self,
@@ -199,7 +209,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             LOGGER.debug("SHAPE: y.shape = %s", list(y.shape))
             # y includes the auxiliary variables, so we must leave those out when computing the loss
 
-            loss, metrics_next, y_pred_ens_group = checkpoint(
+            loss, y_pred_ens_group = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
@@ -210,4 +220,61 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
             x = self._advance_input(x, y_pred, batch, rollout_step)
 
-            yield loss, metrics_next, y_pred_ens_group
+            metrics_next = {}
+            if validation_mode:
+                metrics_next = self.calculate_val_metrics(
+                    y_pred_ens_group,
+                    y,
+                    rollout_step,
+                    self.grid_shard_slice,
+                )
+            mloss = self.loss.mloss if hasattr(self.loss, "mloss") else None
+
+            yield loss, mloss, metrics_next, y_pred_ens_group if validation_mode else [], (
+                x if validation_mode else None
+            )
+
+    def _step(
+        self,
+        batch: tuple[torch.Tensor, ...],
+        validation_mode: bool = False,
+    ) -> tuple:
+        """Training / validation step."""
+        LOGGER.debug("SHAPES: batch.shape = %s", list(batch.shape))
+
+        loss = torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+
+        if self.loss.name == "MultiscaleLossWrapper":
+
+            LOGGER.debug("Using multiscale loss with %d scales", self.loss.num_scales)
+
+            mloss = [
+                torch.zeros(1, dtype=batch[0].dtype, device=self.device, requires_grad=False)
+                for _ in range(self.loss.num_scales)
+            ]
+        else:
+            mloss = None
+
+        metrics = {}
+        y_preds = []
+
+        for loss_next, mloss_next, metrics_next, y_preds_next, _ens_ic in self._rollout_step(
+            batch,
+            rollout=self.rollout,
+            validation_mode=validation_mode,
+        ):
+            loss += loss_next
+            metrics.update(metrics_next)
+            y_preds.append(y_preds_next)
+
+            if mloss is not None:
+                for i in range(len(mloss)):
+                    mloss[i] += mloss_next[i]
+
+        if mloss is not None:
+            for i in range(len(mloss)):
+                mloss[i] *= 1.0 / self.rollout
+
+        loss *= 1.0 / self.rollout
+
+        return loss, mloss, metrics, y_preds, _ens_ic
