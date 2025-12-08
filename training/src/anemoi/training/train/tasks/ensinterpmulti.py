@@ -214,9 +214,8 @@ class GraphEnsInterpMulti(BaseGraphModule):
         y_preds = []
 
         # New code for ensemble interpolator: (no rollout loop, instead loops through interp targets)
-
         batch = self.model.pre_processors(batch[0], in_place=not validation_mode)  # don't use EDA for interpolator
-        x = self.ensemble_ic_generator(batch, None)  # no EDA for interpolator
+        x = torch.cat([batch] * self.nens_per_device, dim=2) 
 
         # Scalers which are delayed need to be initialized after the pre-processors
         if self.is_first_step:
@@ -224,7 +223,7 @@ class GraphEnsInterpMulti(BaseGraphModule):
             self.is_first_step = False
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
 
-        x_bound = batch[:, itemgetter(*self.boundary_times)(self.imap)][
+        x_bound = x[:, itemgetter(*self.boundary_times)(self.imap)][
             ...,
             self.data_indices.data.input.full,
         ]  # (bs, time, ens, latlon, nvar)
@@ -232,7 +231,6 @@ class GraphEnsInterpMulti(BaseGraphModule):
 
         y_pred = self(x_bound) # has shape (bs, time, ens, latlon, nvar)
         y = batch[:, itemgetter(*self.interp_times)(self.imap)][:,:, 0, :, self.data_indices.data.output.full]
-
         for interp_step in self.interp_times:
             y_pred_step = y_pred[:, interp_step - 1, ...]  # (bs, ens, latlon, nvar)
             y_step = y[:, interp_step - 1, ...]  # (bs, latlon, nvar)
