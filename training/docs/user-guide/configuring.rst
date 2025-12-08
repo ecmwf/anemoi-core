@@ -71,8 +71,9 @@ You can also change the GPU count to whatever you have available:
 
 .. code:: yaml
 
-   hardware:
-       num_gpus_per_node: 1
+   system:
+      hardware:
+         num_gpus_per_node: 1
 
 This matches the interface of the underlying defaults in Anemoi
 training.
@@ -334,7 +335,7 @@ let's say we have a config with a union of schemas like the following:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
    - training: default
