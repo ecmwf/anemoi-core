@@ -271,7 +271,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         if validation_mode:
             # re-construct predicted state, de-normalised
             y_pred = self.model.model.add_tendency_to_state(
-                x_ref[..., self.data_indices.data.input.full],
+                x_ref,
                 tendency_pred,
                 self.model.post_processors,
                 self.model.post_processors_tendencies,
