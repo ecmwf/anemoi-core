@@ -74,13 +74,21 @@ class SparseProjector(torch.nn.Module):
         ----------
         graph : HeteroData
             The input graph.
-        edge_name : str
+        edges_name : str
             The name/identifier for the edge set to use.
-        edge_weight_attribute : str
+        edge_weight_attribute : str, optional
             Attribute name for edge weights.
-        src_node_weight_attribute : str
+        src_node_weight_attribute : str, optional
             Attribute name for source node weights.
+        row_normalize : bool, optional
+            Whether to normalize weights per destination node.
+        **kwargs
+            Additional keyword arguments passed to the constructor.
 
+        Returns
+        -------
+        SparseProjector
+            A new SparseProjector instance built from the graph.
         """
         sub_graph = graph[edges_name]
 
@@ -109,7 +117,22 @@ class SparseProjector(torch.nn.Module):
         row_normalize: bool = True,
         **kwargs,
     ) -> "SparseProjector":
-        """Load projection matrix from a file."""
+        """Load projection matrix from a file.
+
+        Parameters
+        ----------
+        file_path : str or Path
+            Path to the .npz file containing the sparse projection matrix.
+        row_normalize : bool, optional
+            Whether to normalize weights per destination node.
+        **kwargs
+            Additional keyword arguments passed to the constructor.
+
+        Returns
+        -------
+        SparseProjector
+            A new SparseProjector instance loaded from the file.
+        """
         from scipy.sparse import load_npz
 
         truncation_data = load_npz(file_path)
@@ -147,7 +170,30 @@ def build_sparse_projector(
     transpose: bool = True,
     **kwargs,
 ) -> SparseProjector:
-    """Factory method to build a SparseProjector."""
+    """Factory method to build a SparseProjector.
+
+    Parameters
+    ----------
+    file_path : str or Path, optional
+        Path to .npz file containing the projection matrix.
+    graph : HeteroData, optional
+        Graph data to build the projector from.
+    edges_name : tuple[str, str, str], optional
+        Name/identifier for the edge set to use from the graph.
+    edge_weight_attribute : str, optional
+        Attribute name for edge weights.
+    row_normalize : bool, optional
+        Whether to normalize weights per destination node.
+    transpose : bool, optional
+        Whether to transpose the projection matrix.
+    **kwargs
+        Additional keyword arguments passed to the constructor.
+
+    Returns
+    -------
+    SparseProjector
+        A new SparseProjector instance.
+    """
     assert (file_path is not None) ^ (
         graph is not None and edges_name is not None
     ), "Either file_path or graph and edges_name must be provided."

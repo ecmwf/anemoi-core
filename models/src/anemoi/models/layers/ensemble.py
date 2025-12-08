@@ -42,16 +42,26 @@ class BaseNoiseInjector(nn.Module, ABC):
     ) -> tuple[Tensor, Optional[Tensor]]:
         """Forward pass for noise injection.
 
-        Args:
-            x: Input tensor to potentially modify
-            batch_size: Batch size
-            ensemble_size: Ensemble size
-            grid_size: Grid size
-            shard_shapes_ref: Shard shapes when sharded
-            noise_dtype: Data type for noise tensor
-            model_comm_group: Model communication group
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor to potentially modify
+        batch_size : int
+            Batch size
+        ensemble_size : int
+            Ensemble size
+        grid_size : int
+            Grid size
+        shard_shapes_ref : tuple[tuple[int], tuple[int]]
+            Shard shapes when sharded
+        noise_dtype : torch.dtype, optional
+            Data type for noise tensor
+        model_comm_group : ProcessGroup, optional
+            Model communication group
 
-        Returns:
+        Returns
+        -------
+        tuple[Tensor, Optional[Tensor]]
             Tuple of (output_tensor, noise_tensor_or_none):
                 - output_tensor: The (potentially) modified input tensor
                 - noise_tensor_or_none: The noise tensor for conditioning,
@@ -202,13 +212,20 @@ class NoiseInjector(BaseNoiseInjector):
     ) -> None:
         """Initialize NoiseInjector.
 
-        Args:
-            noise_std: Standard deviation for noise generation
-            noise_channels_dim: Number of noise channels
-            noise_mlp_hidden_dim: Hidden dimension of noise MLP
-            num_channels: Number of model channels for projection
-            layer_kernels: Layer kernel configurations
-            noise_matrix: Optional path to noise truncation matrix
+        Parameters
+        ----------
+        noise_std : int
+            Standard deviation for noise generation
+        noise_channels_dim : int
+            Number of noise channels
+        noise_mlp_hidden_dim : int
+            Hidden dimension of noise MLP
+        num_channels : int
+            Number of model channels for projection
+        layer_kernels : DotDict
+            Layer kernel configurations
+        noise_matrix : str, optional
+            Optional path to noise truncation matrix
         """
         super().__init__()
 
@@ -234,16 +251,26 @@ class NoiseInjector(BaseNoiseInjector):
     ) -> tuple[Tensor, None]:
         """Generate noise and inject it into the input tensor.
 
-        Args:
-            x: Input tensor to modify
-            batch_size: Batch size
-            ensemble_size: Ensemble size
-            grid_size: Grid size
-            shard_shapes_ref: Shard shapes when sharded
-            noise_dtype: Data type for noise tensor
-            model_comm_group: Model communication group
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor to modify
+        batch_size : int
+            Batch size
+        ensemble_size : int
+            Ensemble size
+        grid_size : int
+            Grid size
+        shard_shapes_ref : tuple[tuple[int], tuple[int]]
+            Shard shapes when sharded
+        noise_dtype : torch.dtype, optional
+            Data type for noise tensor
+        model_comm_group : ProcessGroup, optional
+            Model communication group
 
-        Returns:
+        Returns
+        -------
+        tuple[Tensor, None]
             Tuple of (modified_x, None): Modified tensor with noise injected
         """
         x, noise = self._noise_conditioning(

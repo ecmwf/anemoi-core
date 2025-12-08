@@ -125,18 +125,22 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     ) -> torch.Tensor:
         """Forward operator.
 
-        Args:
-            x: torch.Tensor
-                Input tensor, shape (bs, m, e, n, f)
-            fcstep: int
-                Forecast step
-            model_comm_group: Optional[ProcessGroup], optional
-                Model communication group
-            grid_shard_shapes : list, optional
-                Shard shapes of the grid, by default None
-            **kwargs: Additional keyword arguments
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor, shape (bs, m, e, n, f)
+        fcstep : int
+            Forecast step
+        model_comm_group : ProcessGroup, optional
+            Model communication group
+        grid_shard_shapes : list, optional
+            Shard shapes of the grid, by default None
+        **kwargs
+            Additional keyword arguments
 
-        Returns:
+        Returns
+        -------
+        torch.Tensor
             Output tensor
         """
         batch_size, ensemble_size = x.shape[0], x.shape[2]
